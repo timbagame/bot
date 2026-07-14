@@ -15,7 +15,7 @@ describe("evaluateTradeAmount boundary buffers", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports: buffer,
         userSolBufferLamports: buffer,
-      })
+      }),
     ).toThrow(/keep ~?/);
   });
 });

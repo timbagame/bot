@@ -34,22 +34,41 @@ describe("GameManager participants error handling in message", () => {
     const gm = GameManager.getInstance(programStub(baseAcc), walletStub(), {
       getGameParticipants: (_: string) => ["123456"],
     } as any);
-    (gm as any).getUsernameFromTelegramId = async () => { throw new Error("boom"); };
+    (gm as any).getUsernameFromTelegramId = async () => {
+      throw new Error("boom");
+    };
     const ctx = { chat: { id: 1, type: "private" }, api: {} } as any;
     const pda = new PublicKey("BPFLoader1111111111111111111111111111111111");
-    const { messageText } = await gm.formatGameMessage(ctx, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    const { messageText } = await gm.formatGameMessage(
+      ctx,
+      pda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
     expect(messageText).toContain("Player 123456...");
   });
 
   test("continues gracefully when getGamePlayers throws", async () => {
     resetGM();
     const gm = GameManager.getInstance(programStub(baseAcc), walletStub(), {
-      getGameParticipants: (_: string) => { throw new Error("db fail"); },
+      getGameParticipants: (_: string) => {
+        throw new Error("db fail");
+      },
     } as any);
     const ctx = { chat: { id: 1, type: "private" }, api: {} } as any;
     const pda = new PublicKey("BPFLoader2111111111111111111111111111111111");
-    const res = await gm.formatGameMessage(ctx, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    const res = await gm.formatGameMessage(
+      ctx,
+      pda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
     expect(typeof res.messageText).toBe("string");
   });
 });
-

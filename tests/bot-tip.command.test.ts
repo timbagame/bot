@@ -13,10 +13,8 @@ beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
   process.env.MNEMONIC =
-    process.env.MNEMONIC ||
-    "test test test test test test test test test test test junk";
-  process.env.SOLANA_NETWORK =
-    process.env.SOLANA_NETWORK || "http://localhost:8899";
+    process.env.MNEMONIC || "test test test test test test test test test test test junk";
+  process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
 
   botModule = await import("../src/bot");
 });
@@ -58,7 +56,7 @@ beforeEach(() => {
 
   if (!originalTokenManager) {
     createdTokenManagerStub = {
-      parseAmount: async () => ({ success: false, error: "invalid_amount" } as const),
+      parseAmount: async () => ({ success: false, error: "invalid_amount" }) as const,
     };
     botModule.__test_setTokenManager(createdTokenManagerStub);
   } else {
@@ -91,7 +89,7 @@ test("handleTipCommand resolves username mentions via game manager lookup", asyn
     args: string[],
     index: number,
     _chatId: number | undefined,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ) => {
     parseCalls.push({ args, index, context });
     return { success: false, error: "invalid_amount" } as const;
@@ -150,7 +148,7 @@ test("handleTipCommand positions amount after multi-word text mention", async ()
     args: string[],
     index: number,
     _chatId: number | undefined,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ) => {
     parseCalls.push({ args, index, context });
     return { success: false, error: "invalid_amount" } as const;
@@ -209,14 +207,15 @@ test("handleTipCommand allows mentions after the amount", async () => {
     args: string[],
     index: number,
     _chatId: number | undefined,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ) => {
     parseCalls.push({ args, index, context });
     return { success: false, error: "invalid_amount" } as const;
   };
 
   botModule.__test_setGameManager({
-    findTelegramIdByUsername: (username: string) => (username === "@TargetUser" ? "987654321" : null),
+    findTelegramIdByUsername: (username: string) =>
+      username === "@TargetUser" ? "987654321" : null,
     primeUsernameCache: () => {},
   } as any);
 
@@ -263,7 +262,7 @@ test("handleTipCommand keeps token hints when mention is last", async () => {
     args: string[],
     index: number,
     _chatId: number | undefined,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ) => {
     parseCalls.push({ args, index, context });
     return { success: false, error: "invalid_amount" } as const;
@@ -311,8 +310,8 @@ test("handleTipCommand surfaces overflow message when amount is too large", asyn
     _args: string[],
     _index: number,
     _chatId: number | undefined,
-    _context: "game" | "tip" = "game"
-  ) => ({ success: false, error: "amount_too_large" } as const);
+    _context: "game" | "tip" = "game",
+  ) => ({ success: false, error: "amount_too_large" }) as const;
 
   botModule.__test_setGameManager({
     findTelegramIdByUsername: () => ({ telegram_id: 5678n, username: "target" }),
@@ -351,7 +350,7 @@ test("handleTipCommand reports shortage using the specified token ticker", async
     _args: string[],
     _index: number,
     _chatId: number | undefined,
-    _context: "game" | "tip" = "game"
+    _context: "game" | "tip" = "game",
   ) => {
     return {
       success: true,
@@ -410,7 +409,7 @@ test("handleTipCommand reports shortage for SOL when tipping SOL", async () => {
     _args: string[],
     _index: number,
     _chatId: number | undefined,
-    _context: "game" | "tip" = "game"
+    _context: "game" | "tip" = "game",
   ) => {
     return {
       success: true,

@@ -10,15 +10,12 @@ export async function handleTransactionError(
   ctx: Context,
   error: unknown,
   processingMessageId: number,
-  wallet: WalletManager
+  wallet: WalletManager,
 ): Promise<void> {
   const userFriendlyError = await formatUserFriendlyError(error, wallet);
-  await ctx.api.editMessageText(
-    ctx.chat!.id,
-    processingMessageId,
-    userFriendlyError,
-    { parse_mode: "HTML" }
-  );
+  await ctx.api.editMessageText(ctx.chat!.id, processingMessageId, userFriendlyError, {
+    parse_mode: "HTML",
+  });
   if (error && typeof error === "object") {
     (error as any).__alreadyNotified = true;
   }
@@ -32,7 +29,7 @@ export async function handleCommandError(
   ctx: Context,
   error: unknown,
   commandName: string,
-  wallet: WalletManager
+  wallet: WalletManager,
 ): Promise<void> {
   console.error(`Error in ${commandName} command:`, error);
   if (error && typeof error === "object" && (error as any).__alreadyNotified) {

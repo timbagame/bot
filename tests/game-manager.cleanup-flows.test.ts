@@ -1,12 +1,10 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
-import {
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
-  WSOL_MINT,
-} from "../src/utils/constants";
+import { MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS, WSOL_MINT } from "../src/utils/constants";
 
-function resetGM() { // reset singleton
+function resetGM() {
+  // reset singleton
   // @ts-ignore
   GameManager["instance"] = undefined;
 }
@@ -40,16 +38,22 @@ describe("GameManager cleanup flows", () => {
     (gm as any).swapManager = { performJustInTimeSolSwap: async () => ({ swapped: true }) };
     (gm as any).ensureUnjoinFeePayerBalance = async () => ({ success: true });
     const players = [
-      { telegramId: "1", pubkey: new PublicKey("BPFLoader2111111111111111111111111111111111"), isCreator: false },
-      { telegramId: "2", pubkey: new PublicKey("BPFLoader3111111111111111111111111111111111"), isCreator: true },
+      {
+        telegramId: "1",
+        pubkey: new PublicKey("BPFLoader2111111111111111111111111111111111"),
+        isCreator: false,
+      },
+      {
+        telegramId: "2",
+        pubkey: new PublicKey("BPFLoader3111111111111111111111111111111111"),
+        isCreator: true,
+      },
     ];
     let calls = 0;
-    (gm as any).unjoinPlayerFromGame = async () => { calls++; };
-    const n = await (gm as any).unjoinPlayers(
-      gamePda,
-      { tokenMint: WSOL_MINT },
-      players
-    );
+    (gm as any).unjoinPlayerFromGame = async () => {
+      calls++;
+    };
+    const n = await (gm as any).unjoinPlayers(gamePda, { tokenMint: WSOL_MINT }, players);
     expect(n).toBe(2);
     expect(calls).toBe(2);
   });
@@ -59,15 +63,15 @@ describe("GameManager cleanup flows", () => {
     const gm = GameManager.getInstance(
       programStub,
       createWalletStub() as any,
-      createGameDbStub() as any
+      createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async (_p: any, _ga: any, list: any[]) => list.length;
     (gm as any).cancelGameWithCreator = async () => true;
     const ok = await (gm as any).executeCompleteCleanup(
       gamePda,
       { tokenMint: WSOL_MINT },
-      { available: [1,2], creator: { telegramId: "777" } },
-      "ADDR"
+      { available: [1, 2], creator: { telegramId: "777" } },
+      "ADDR",
     );
     expect(ok).toBe(true);
   });
@@ -77,14 +81,14 @@ describe("GameManager cleanup flows", () => {
     const gm = GameManager.getInstance(
       programStub,
       createWalletStub() as any,
-      createGameDbStub() as any
+      createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async () => 1;
     const ok = await (gm as any).executeCompleteCleanup(
       gamePda,
       { tokenMint: WSOL_MINT },
-      { available: [1,2], creator: { telegramId: "777" } },
-      "ADDR"
+      { available: [1, 2], creator: { telegramId: "777" } },
+      "ADDR",
     );
     expect(ok).toBe(false);
   });
@@ -94,21 +98,21 @@ describe("GameManager cleanup flows", () => {
     const gm = GameManager.getInstance(
       programStub,
       createWalletStub() as any,
-      createGameDbStub() as any
+      createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async () => 0;
     const a = await (gm as any).executePartialCleanup(
       gamePda,
       { tokenMint: WSOL_MINT },
-      { available: [1,2] },
-      "ADDR"
+      { available: [1, 2] },
+      "ADDR",
     );
     (gm as any).unjoinPlayers = async () => 1;
     const b = await (gm as any).executePartialCleanup(
       gamePda,
       { tokenMint: WSOL_MINT },
-      { available: [1,2] },
-      "ADDR"
+      { available: [1, 2] },
+      "ADDR",
     );
     expect(a).toBe(false);
     expect(b).toBe(true);
@@ -129,11 +133,7 @@ describe("GameManager cleanup flows", () => {
       getTokenMetadata: async () => ({ decimals: 6 }),
     });
 
-    const gm = GameManager.getInstance(
-      programStub,
-      walletStub as any,
-      createGameDbStub() as any
-    );
+    const gm = GameManager.getInstance(programStub, walletStub as any, createGameDbStub() as any);
     (gm as any).swapManager = { performJustInTimeSolSwap: async () => ({ swapped: true }) };
     (gm as any).ensureUnjoinFeePayerBalance = async ({ telegramId }: { telegramId: string }) => {
       if (telegramId === "404") {
@@ -146,7 +146,7 @@ describe("GameManager cleanup flows", () => {
     (gm as any).unjoinPlayerFromGame = async (
       _pda: PublicKey,
       authority: Keypair,
-      target: PublicKey
+      target: PublicKey,
     ) => {
       expect(target.equals(playerPubkey)).toBe(true);
       expect(authority).toBe(creatorKp);
@@ -163,7 +163,7 @@ describe("GameManager cleanup flows", () => {
           isCreator: false,
         },
       ],
-      "1"
+      "1",
     );
 
     expect(count).toBe(1);
@@ -176,11 +176,7 @@ describe("GameManager cleanup flows", () => {
       getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
       getTokenBalance: async () => 0,
     });
-    const gm = GameManager.getInstance(
-      programStub,
-      wallet as any,
-      createGameDbStub() as any
-    );
+    const gm = GameManager.getInstance(programStub, wallet as any, createGameDbStub() as any);
     let swapCalls = 0;
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => {
@@ -208,11 +204,7 @@ describe("GameManager cleanup flows", () => {
       getBalance: async () => 0,
       getTokenBalance: async () => 0,
     });
-    const gm = GameManager.getInstance(
-      programStub,
-      wallet as any,
-      createGameDbStub() as any
-    );
+    const gm = GameManager.getInstance(programStub, wallet as any, createGameDbStub() as any);
     let swapCalls = 0;
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => {
@@ -245,11 +237,7 @@ describe("GameManager cleanup flows", () => {
       },
       getTokenBalance: async () => 5_000_000,
     });
-    const gm = GameManager.getInstance(
-      programStub,
-      wallet as any,
-      createGameDbStub() as any
-    );
+    const gm = GameManager.getInstance(programStub, wallet as any, createGameDbStub() as any);
     let swapCalls = 0;
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => {
@@ -281,11 +269,7 @@ describe("GameManager cleanup flows", () => {
       },
       getTokenBalance: async () => 5_000_000,
     });
-    const gm = GameManager.getInstance(
-      programStub,
-      wallet as any,
-      createGameDbStub() as any
-    );
+    const gm = GameManager.getInstance(programStub, wallet as any, createGameDbStub() as any);
     let swapCalls = 0;
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => {

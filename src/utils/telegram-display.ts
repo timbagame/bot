@@ -8,7 +8,7 @@ type SanitizeOptions = {
 export const sanitizeTelegramDisplayName = (
   value: string | null | undefined,
   fallback: string = DEFAULT_FALLBACK_NAME,
-  options?: SanitizeOptions
+  options?: SanitizeOptions,
 ): string => {
   const trimmed = typeof value === "string" ? value.trim() : "";
   const normalized = trimmed.length > 0 ? trimmed : fallback;
@@ -22,5 +22,5 @@ export const sanitizeTelegramDisplayName = (
 
 export const sanitizeTelegramDisplayNameWithoutMention = (
   value: string | null | undefined,
-  fallback: string = DEFAULT_FALLBACK_NAME
+  fallback: string = DEFAULT_FALLBACK_NAME,
 ): string => sanitizeTelegramDisplayName(value, fallback, { preventMention: true });

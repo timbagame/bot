@@ -35,15 +35,12 @@ export interface IntegratorFeeContext {
 
 const getReferralTargetForPair = (
   inputMint: string,
-  outputMint: string
+  outputMint: string,
 ): ReferralTokenConfigEntry | undefined => {
-  return (
-    getReferralConfigForMint(inputMint) || getReferralConfigForMint(outputMint)
-  );
+  return getReferralConfigForMint(inputMint) || getReferralConfigForMint(outputMint);
 };
 
-const isSolMint = (mint: string): boolean =>
-  mint === WSOL_MINT || mint === "SOL";
+const isSolMint = (mint: string): boolean => mint === WSOL_MINT || mint === "SOL";
 
 const toDecimalAmount = (raw: number, decimals: number): number => {
   if (!Number.isFinite(raw)) return 0;
@@ -54,7 +51,7 @@ const estimateTradeUsdValue = async (
   amountRaw: number,
   decimals: number,
   mint: string,
-  isSol: boolean
+  isSol: boolean,
 ): Promise<number> => {
   const amountDecimal = toDecimalAmount(amountRaw, decimals);
   if (amountDecimal <= 0) return 0;
@@ -108,9 +105,7 @@ export interface DynamicFeeContext {
  *
  * @returns The calculated referral fee in bps, clamped to 50-255 range
  */
-export async function calculateDynamicReferralFee(
-  context: DynamicFeeContext
-): Promise<number> {
+export async function calculateDynamicReferralFee(context: DynamicFeeContext): Promise<number> {
   const {
     inputMint,
     inputDecimals,
@@ -133,14 +128,14 @@ export async function calculateDynamicReferralFee(
       inputAmountRaw,
       inputDecimals,
       inputMint,
-      isSolMint(inputMint)
+      isSolMint(inputMint),
     );
     const deficitUsd = await estimateSolUsdValue(shortfallLamports);
 
     if (tradeUsd <= 0 || deficitUsd <= 0) {
       if (throwOnPriceFailure) {
         throw new Error(
-          "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade."
+          "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade.",
         );
       }
       return clampedBaseFee;
@@ -151,12 +146,12 @@ export async function calculateDynamicReferralFee(
     const referralFeeBps = clampReferralFeeBps(
       clampedBaseFee + actualExtraBps,
       50,
-      MAX_REFERRAL_FEE_BPS
+      MAX_REFERRAL_FEE_BPS,
     );
 
     console.log(
       `💰 Dynamic fee: base=${clampedBaseFee}bps + extra=${actualExtraBps}bps = ${referralFeeBps}bps ` +
-      `(trade=$${tradeUsd.toFixed(2)}, deficit=$${deficitUsd.toFixed(4)})`
+        `(trade=$${tradeUsd.toFixed(2)}, deficit=$${deficitUsd.toFixed(4)})`,
     );
 
     return referralFeeBps;
@@ -170,7 +165,7 @@ export async function calculateDynamicReferralFee(
 }
 
 export const resolveIntegratorSwapParams = async (
-  context: IntegratorFeeContext
+  context: IntegratorFeeContext,
 ): Promise<IntegratorSwapParams | null> => {
   const {
     inputMint,
@@ -192,23 +187,19 @@ export const resolveIntegratorSwapParams = async (
   }
 
   const requiresAdminPayer =
-    Boolean(referralConfig.adminPayer) &&
-    Boolean(referralConfig.adminCloseAuthority);
+    Boolean(referralConfig.adminPayer) && Boolean(referralConfig.adminCloseAuthority);
 
   const effectiveSolFeeBufferLamports = requiresAdminPayer
     ? Math.max(solFeeBufferLamports ?? 0, JUPITER_MIN_SOL_BALANCE_LAMPORTS)
-    : solFeeBufferLamports ?? 0;
+    : (solFeeBufferLamports ?? 0);
 
   const baseFeeBps = clampReferralFeeBps(
     referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
     50,
-    MAX_REFERRAL_FEE_BPS
+    MAX_REFERRAL_FEE_BPS,
   );
 
-  if (
-    availableForFeesLamports >= effectiveSolFeeBufferLamports ||
-    !requiresAdminPayer
-  ) {
+  if (availableForFeesLamports >= effectiveSolFeeBufferLamports || !requiresAdminPayer) {
     return {
       referralAccount: referralConfig.referralAccount,
       referralFee: baseFeeBps,
@@ -218,10 +209,7 @@ export const resolveIntegratorSwapParams = async (
     };
   }
 
-  const shortfallLamports = Math.max(
-    0,
-    effectiveSolFeeBufferLamports - availableForFeesLamports
-  );
+  const shortfallLamports = Math.max(0, effectiveSolFeeBufferLamports - availableForFeesLamports);
   if (shortfallLamports <= 0) {
     return {
       referralAccount: referralConfig.referralAccount,
@@ -252,13 +240,13 @@ export const resolveIntegratorSwapParams = async (
           inputAmountRaw,
           inputDecimals,
           inputMint,
-          isSolMint(inputMint)
+          isSolMint(inputMint),
         );
         const deficitUsd = await estimateSolUsdValue(shortfallLamports);
 
         if (tradeUsd <= 0 || deficitUsd <= 0) {
           throw new Error(
-            "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade."
+            "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade.",
           );
         }
 

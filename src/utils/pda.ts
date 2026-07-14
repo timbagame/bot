@@ -15,10 +15,7 @@ export class PDAManager {
   /**
    * Internal helper to find PDA from seeds and program ID
    */
-  private static findPDA(
-    seeds: (string | Buffer | PublicKey)[],
-    programId: PublicKey
-  ): PublicKey {
+  private static findPDA(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): PublicKey {
     const bufferSeeds = seeds.map((s) => {
       if (s instanceof PublicKey) return s.toBuffer();
       if (s instanceof Buffer) return s;
@@ -52,10 +49,7 @@ export class PDAManager {
   /**
    * Get Game Token PDA - Used for game token configuration
    */
-  static getGameTokenPDA(
-    tokenMint: PublicKey,
-    programId: PublicKey
-  ): PublicKey {
+  static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
     return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
   }
 
@@ -65,11 +59,8 @@ export class PDAManager {
   static getPlayerParticipationPDA(
     gameAddress: PublicKey,
     playerPubkey: PublicKey,
-    programId: PublicKey
+    programId: PublicKey,
   ): PublicKey {
-    return this.findPDA(
-      [this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey],
-      programId
-    );
+    return this.findPDA([this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey], programId);
   }
 }

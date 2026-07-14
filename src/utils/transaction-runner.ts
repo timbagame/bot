@@ -54,16 +54,15 @@ type SignatureStatusLike = {
 type SignatureStatusConnectionLike = {
   getSignatureStatuses?: (
     signatures: string[],
-    config?: { searchTransactionHistory?: boolean }
+    config?: { searchTransactionHistory?: boolean },
   ) => Promise<{ value?: Array<SignatureStatusLike | null> } | null | undefined>;
 };
 
 const isSignatureConfirmedFromHistory = async (
   wallet: WalletManager,
-  signature: string
+  signature: string,
 ): Promise<boolean> => {
-  const connection =
-    wallet.getConnection() as unknown as SignatureStatusConnectionLike;
+  const connection = wallet.getConnection() as unknown as SignatureStatusConnectionLike;
   const getSignatureStatuses = connection.getSignatureStatuses?.bind(connection);
 
   if (typeof getSignatureStatuses !== "function") {
@@ -80,18 +79,13 @@ const isSignatureConfirmedFromHistory = async (
   }
 
   if (status.err) {
-    const error = new Error(
-      `Transaction ${signature} failed: ${JSON.stringify(status.err)}`
-    );
+    const error = new Error(`Transaction ${signature} failed: ${JSON.stringify(status.err)}`);
     const errorWithCause = error as ErrorWithCause;
     errorWithCause.cause = status.err;
     throw errorWithCause;
   }
 
-  if (
-    status.confirmationStatus === "confirmed" ||
-    status.confirmationStatus === "finalized"
-  ) {
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {
     return true;
   }
 
@@ -103,7 +97,7 @@ const isSignatureConfirmedFromHistory = async (
 };
 
 export const confirmTransactionWithRecovery = async (
-  options: ConfirmTransactionWithRecoveryOptions
+  options: ConfirmTransactionWithRecoveryOptions,
 ): Promise<string> => {
   const {
     wallet,
@@ -129,7 +123,7 @@ export const confirmTransactionWithRecovery = async (
     return currentSignature;
   } catch (confirmError: any) {
     console.warn(
-      `⚠️ ${operationLabel} confirmation failed: ${confirmError?.message ?? confirmError}`
+      `⚠️ ${operationLabel} confirmation failed: ${confirmError?.message ?? confirmError}`,
     );
 
     const normalizedMessage = confirmError?.message?.toLowerCase?.() ?? "";
@@ -144,34 +138,26 @@ export const confirmTransactionWithRecovery = async (
     let lastRecoveryError: Error | undefined;
 
     if ((isTimeout || isExpiration) && resubmit) {
-      for (
-        let attempt = 0;
-        attempt < TRANSACTION_RESUBMIT_ATTEMPTS;
-        attempt++
-      ) {
+      for (let attempt = 0; attempt < TRANSACTION_RESUBMIT_ATTEMPTS; attempt++) {
         const attemptLabel = `${attempt + 1}/${TRANSACTION_RESUBMIT_ATTEMPTS}`;
         try {
           logDebug(
-            `🔄 ${operationLabel} resubmission attempt ${attemptLabel} after failure for ${currentSignature}`
+            `🔄 ${operationLabel} resubmission attempt ${attemptLabel} after failure for ${currentSignature}`,
           );
           const resubmittedSignature = await resubmit(attempt, currentSignature);
 
           if (!resubmittedSignature || typeof resubmittedSignature !== "string") {
-            throw new Error(
-              "Resubmission callback did not return a transaction signature"
-            );
+            throw new Error("Resubmission callback did not return a transaction signature");
           }
 
           currentSignature = resubmittedSignature;
           logDebug(
-            `✅ ${operationLabel} transaction resubmitted successfully ${attemptLabel}, obtained signature: ${currentSignature}`
+            `✅ ${operationLabel} transaction resubmitted successfully ${attemptLabel}, obtained signature: ${currentSignature}`,
           );
           return currentSignature;
         } catch (resubmitError) {
           const normalizedError =
-            resubmitError instanceof Error
-              ? resubmitError
-              : new Error(String(resubmitError));
+            resubmitError instanceof Error ? resubmitError : new Error(String(resubmitError));
           const latestSignature = hasLastSignature(normalizedError)
             ? normalizedError.lastSignature
             : undefined;
@@ -182,7 +168,7 @@ export const confirmTransactionWithRecovery = async (
           lastRecoveryError = normalizedError;
           console.error(
             `❌ ${operationLabel} resubmission ${attemptLabel} failed`,
-            normalizedError
+            normalizedError,
           );
         }
       }
@@ -190,16 +176,12 @@ export const confirmTransactionWithRecovery = async (
 
     if (isTimeout || isExpiration) {
       const retryPlan = retryDelays.length > 0 ? retryDelays : [];
-      const recoveryErrors: Error[] = lastRecoveryError
-        ? [lastRecoveryError]
-        : [];
+      const recoveryErrors: Error[] = lastRecoveryError ? [lastRecoveryError] : [];
 
       for (let attempt = 0; attempt < retryPlan.length; attempt++) {
         const delay = retryPlan[attempt] ?? 0;
         const attemptLabel = `${attempt + 1}/${retryPlan.length}`;
-        logDebug(
-          `🔄 ${operationLabel} confirmation retry ${attemptLabel} after ${delay}ms`
-        );
+        logDebug(`🔄 ${operationLabel} confirmation retry ${attemptLabel} after ${delay}ms`);
         await sleep(delay);
 
         if (probes.length > 0) {
@@ -208,18 +190,16 @@ export const confirmTransactionWithRecovery = async (
               const ok = await probe.check();
               if (ok) {
                 logDebug(
-                  `✅ ${operationLabel} transaction confirmed via probe "${probe.label}" on retry ${attemptLabel}`
+                  `✅ ${operationLabel} transaction confirmed via probe "${probe.label}" on retry ${attemptLabel}`,
                 );
                 return currentSignature;
               }
             } catch (probeError) {
               const normalizedProbeError =
-                probeError instanceof Error
-                  ? probeError
-                  : new Error(String(probeError));
+                probeError instanceof Error ? probeError : new Error(String(probeError));
               console.error(
                 `❌ Probe "${probe.label}" failed during ${operationLabel} retry ${attemptLabel}`,
-                normalizedProbeError
+                normalizedProbeError,
               );
               throw normalizedProbeError;
             }
@@ -229,17 +209,17 @@ export const confirmTransactionWithRecovery = async (
         try {
           const signatureConfirmed = await isSignatureConfirmedFromHistory(
             wallet,
-            currentSignature
+            currentSignature,
           );
           if (signatureConfirmed) {
             logDebug(
-              `✅ ${operationLabel} transaction confirmed via signature status on retry ${attemptLabel}: ${currentSignature}`
+              `✅ ${operationLabel} transaction confirmed via signature status on retry ${attemptLabel}: ${currentSignature}`,
             );
             return currentSignature;
           }
 
           const statusError = new Error(
-            `Transaction ${currentSignature} still pending after retry ${attempt + 1}`
+            `Transaction ${currentSignature} still pending after retry ${attempt + 1}`,
           );
           recoveryErrors.push(statusError);
           lastRecoveryError = statusError;
@@ -251,16 +231,14 @@ export const confirmTransactionWithRecovery = async (
           recoveryErrors.push(normalizedError);
           console.error(
             `❌ Failed to verify transaction status during ${operationLabel} retry ${attemptLabel}`,
-            normalizedError
+            normalizedError,
           );
           throw normalizedError;
         }
       }
 
       const timeoutError: TimeoutErrorWithRecovery =
-        confirmError instanceof Error
-          ? confirmError
-          : new Error(String(confirmError));
+        confirmError instanceof Error ? confirmError : new Error(String(confirmError));
       if (recoveryErrors.length > 0) {
         timeoutError.recoveryErrors = recoveryErrors;
       }
@@ -271,7 +249,7 @@ export const confirmTransactionWithRecovery = async (
       }
 
       console.warn(
-        `⚠️ ${operationLabel} confirmation timed out after ${retryPlan.length} retries for ${currentSignature}`
+        `⚠️ ${operationLabel} confirmation timed out after ${retryPlan.length} retries for ${currentSignature}`,
       );
       throw timeoutError;
     }

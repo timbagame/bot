@@ -5,7 +5,7 @@ export interface SingletonHandle<T, A extends unknown[] = []> {
 }
 
 export function createSingleton<T, A extends unknown[]>(
-  factory: (...args: A) => T
+  factory: (...args: A) => T,
 ): SingletonHandle<T, A> {
   let instance: T | undefined;
 

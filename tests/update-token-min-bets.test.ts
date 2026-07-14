@@ -29,7 +29,7 @@ describe("update-token-min-bets script safeguards", () => {
     const resolvePrice = vi.fn(async () => 0);
 
     await expect(resolveRequiredSolPriceUSD(resolvePrice)).rejects.toThrow(
-      `Failed to fetch SOL price for ${WSOL_MINT}`
+      `Failed to fetch SOL price for ${WSOL_MINT}`,
     );
     expect(resolvePrice).toHaveBeenCalledTimes(1);
     expect(resolvePrice).toHaveBeenCalledWith(WSOL_MINT);

@@ -19,9 +19,7 @@ export interface ActiveEndpointChange {
   previousIndex: number;
 }
 
-type ActiveEndpointChangeListener = (
-  change: ActiveEndpointChange
-) => void | Promise<void>;
+type ActiveEndpointChangeListener = (change: ActiveEndpointChange) => void | Promise<void>;
 
 export const DEFAULT_MAINNET_ENDPOINT = "https://api.mainnet-beta.solana.com";
 const DEFAULT_COMMITMENT: Commitment = "confirmed";
@@ -82,7 +80,7 @@ export class RpcEndpointManager {
     }
 
     this.endpoints = Array.from(new Set(endpoints.map((url) => url.trim()))).filter(
-      (url) => url.length > 0
+      (url) => url.length > 0,
     );
 
     if (this.endpoints.length === 0) {
@@ -109,9 +107,7 @@ export class RpcEndpointManager {
     return this.endpoints;
   }
 
-  public onActiveEndpointChange(
-    listener: ActiveEndpointChangeListener
-  ): () => void {
+  public onActiveEndpointChange(listener: ActiveEndpointChangeListener): () => void {
     this.endpointChangeListeners.add(listener);
     return () => {
       this.endpointChangeListeners.delete(listener);
@@ -152,7 +148,7 @@ export class RpcEndpointManager {
     this.activeIndex = index;
     const nextEndpoint = this.endpoints[index] ?? this.endpoints[0]!;
     this.logger?.info?.(
-      `Switched Solana RPC endpoint to ${nextEndpoint} (commitment=${this.commitment})`
+      `Switched Solana RPC endpoint to ${nextEndpoint} (commitment=${this.commitment})`,
     );
     this.notifyEndpointChange({
       endpoint: nextEndpoint,
@@ -224,13 +220,13 @@ export class RpcEndpointManager {
         if (!isRetryableRpcError(error) || total === 1 || offset === total - 1) {
           this.logger?.error?.(
             `RPC call ${methodName} failed on ${endpoint} without fallback:`,
-            error
+            error,
           );
           throw error;
         }
 
         this.logger?.warn?.(
-          `RPC call ${methodName} failed on ${endpoint}; trying next endpoint (${offset + 1}/${total}).`
+          `RPC call ${methodName} failed on ${endpoint}; trying next endpoint (${offset + 1}/${total}).`,
         );
       }
     }
@@ -241,7 +237,7 @@ export class RpcEndpointManager {
 
 export function parseRpcEndpointList(
   value: string | undefined,
-  options: { fallback?: string | string[] } = {}
+  options: { fallback?: string | string[] } = {},
 ): string[] {
   const { fallback } = options;
   const fallbackList =
@@ -306,7 +302,7 @@ export function parseRpcEndpointList(
 
 export function resolvePrimaryRpcEndpoint(
   value: string | undefined,
-  fallback: string | string[] = DEFAULT_MAINNET_ENDPOINT
+  fallback: string | string[] = DEFAULT_MAINNET_ENDPOINT,
 ): string {
   const endpoints = parseRpcEndpointList(value, { fallback });
   return endpoints[0]!;

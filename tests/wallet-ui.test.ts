@@ -20,13 +20,9 @@ type CreateMockContextOptions = {
   replyChatId?: number;
 };
 
-const createMockContext = (
-  edits: EditCall[],
-  options: CreateMockContextOptions = {}
-) => {
+const createMockContext = (edits: EditCall[], options: CreateMockContextOptions = {}) => {
   const { overrides = {}, replyCalls, editError, replyChatId } = options;
-  const { callbackQuery: overrideCallbackQuery, chat: overrideChat, ...restOverrides } =
-    overrides;
+  const { callbackQuery: overrideCallbackQuery, chat: overrideChat, ...restOverrides } = overrides;
 
   let nextMessageId = 10_000;
 
@@ -41,9 +37,7 @@ const createMockContext = (
     },
     reply: async (text: string, options: any) => {
       const message_id = nextMessageId++;
-      const chatId =
-        replyChatId ??
-        (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+      const chatId = replyChatId ?? (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
       const message = {
         message_id,
         chat: typeof chatId === "number" ? { id: chatId } : undefined,
@@ -84,7 +78,7 @@ test("buildWalletCaption formats address and token lines", () => {
       { ticker: "USDC", amount: "10.00", usdValue: "10" },
     ]);
 
-    expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/AbCdEf\">🅴</a>");
+    expect(caption).toContain('Solana Address · <a href="https://solscan.io/account/AbCdEf">🅴</a>');
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: 1.234567 SOL ($123.46)");
     expect(caption).toContain("TIMBA: 123 ($6,150)");
@@ -104,10 +98,12 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
 
   try {
     const caption = buildWalletCaption('ADDR<&"', [
-      { ticker: 'BAD<&"', amount: '5 & rising', usdValue: '12.34' },
+      { ticker: 'BAD<&"', amount: "5 & rising", usdValue: "12.34" },
     ]);
 
-    expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/ADDR%3C%26%22\">🅴</a>");
+    expect(caption).toContain(
+      'Solana Address · <a href="https://solscan.io/account/ADDR%3C%26%22">🅴</a>',
+    );
     expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
     expect(caption).toContain("BAD&lt;&amp;&quot;: 5 &amp; rising ($12.34)");
   } finally {
@@ -134,8 +130,7 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
       },
     ],
     formatSolBalance: (lamports) => `${lamports / LAMPORTS_PER_SOL} SOL`,
-    formatTokenBalance: (balance, decimals) =>
-      (balance / Math.pow(10, decimals)).toFixed(2),
+    formatTokenBalance: (balance, decimals) => (balance / Math.pow(10, decimals)).toFixed(2),
     fetchPricesUSD: async (references) => {
       const record: Record<string, number> = {};
       for (const reference of references) {
@@ -158,11 +153,7 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     },
   });
 
-  expect(calls).toEqual([
-    WSOL_MINT,
-    "mint-1",
-    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  ]);
+  expect(calls).toEqual([WSOL_MINT, "mint-1", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]);
   expect(lines).toHaveLength(4);
   expect(lines[0]).toEqual({
     ticker: "SOL",
@@ -198,9 +189,7 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
   expect(text).toContain("<b>Examples:</b>");
   expect(text).toContain("• <code>0.5</code>");
   expect(text).toContain(INPUT_TIMEOUT_HINT);
-  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "send_select_SOL"
-  );
+  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe("send_select_SOL");
 
   const session = getInputSession("654_321");
   expect(session?.type).toBe("send_custom_amount");
@@ -222,9 +211,7 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
     ctx,
     userId: "sender",
     title: "📤 <b>Send TIMBA - Custom Amount</b>",
-    instructions: [
-      "Please send a message with the amount of TIMBA you want to send.",
-    ],
+    instructions: ["Please send a message with the amount of TIMBA you want to send."],
     examples: [
       "• <code>100</code> (send 100 TIMBA)",
       "• <code>50%</code> (send 50% of balance)",
@@ -238,9 +225,7 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
   expect(text).toContain("📤 <b>Send TIMBA - Custom Amount</b>");
   expect(text).toContain("amount of TIMBA you want to send.");
   expect(text).toContain("• <code>100</code> (send 100 TIMBA)");
-  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "cmd_withdraw"
-  );
+  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe("cmd_withdraw");
 
   const session = getInputSession("222_111");
   expect(session?.type).toBe("send_custom_amount");
@@ -262,13 +247,8 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
     ctx,
     userId: "buy-user",
     title: "💱 <b>Swap TIMBA - Custom Amount</b>",
-    tokenLines: [
-      "<b>From:</b> USDC",
-      "<b>To:</b> TIMBA",
-    ],
-    instructions: [
-      "Please send a message with the amount of USDC you want to spend.",
-    ],
+    tokenLines: ["<b>From:</b> USDC", "<b>To:</b> TIMBA"],
+    instructions: ["Please send a message with the amount of USDC you want to spend."],
     examples: [
       "• <code>0.1</code> (spend 0.1 USDC)",
       "• <code>5</code> (spend 5 USDC)",
@@ -288,9 +268,7 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   expect(text).toContain("<b>From:</b> USDC");
   expect(text).toContain("Please send a message with the amount of USDC you want to spend.");
   expect(text).toContain("• <code>max</code> (spend all available USDC)");
-  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "cmd_swap"
-  );
+  expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe("cmd_swap");
 
   const session = getInputSession("888_777");
   expect(session?.type).toBe("swap_custom_amount");
@@ -329,15 +307,13 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
   expect(reply).toBeDefined();
   expect(reply?.text).toContain("✏️ <b>Custom Amount - SOL</b>");
   expect(reply?.options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "send_select_SOL"
+    "send_select_SOL",
   );
 
   const replyMessageId = reply?.message_id;
   expect(replyMessageId).toBeDefined();
 
-  const sessionKey = replyMessageId
-    ? `9001_${replyMessageId}`
-    : undefined;
+  const sessionKey = replyMessageId ? `9001_${replyMessageId}` : undefined;
   const session = sessionKey ? getInputSession(sessionKey) : undefined;
 
   expect(session?.type).toBe("send_custom_amount");
@@ -417,9 +393,7 @@ test("buildWalletActionMenuForUser assembles menu using shared dependencies", as
       balancesCalls.push(telegramId);
       return {
         solBalance: 2_500_000_000,
-        tokenBalances: [
-          { mint: "mint-aaa", ticker: "AAA", balance: 500_000_000, decimals: 9 },
-        ],
+        tokenBalances: [{ mint: "mint-aaa", ticker: "AAA", balance: 500_000_000, decimals: 9 }],
       };
     },
     formatSolBalance: (lamports: number) => `${lamports / 1_000_000_000} SOL`,
@@ -427,13 +401,15 @@ test("buildWalletActionMenuForUser assembles menu using shared dependencies", as
       (balance / Math.pow(10, decimals)).toString(),
   } as const;
 
-  const { menu, walletAddress, solBalance, tokenBalances } =
-    await buildWalletActionMenuForUser(deps, {
+  const { menu, walletAddress, solBalance, tokenBalances } = await buildWalletActionMenuForUser(
+    deps,
+    {
       ctx: {} as Context,
       title: "💸 <b>Withdraw</b>",
       bodyLines: ["<b>Balances:</b>", "AAA tokens available"],
       quickActions: { type: "prebuilt", keyboard },
-    });
+    },
+  );
 
   expect(walletAddress).toBe("WALLET111111111111111111111111111111111111");
   expect(solBalance).toBe(2_500_000_000);
@@ -445,11 +421,9 @@ test("buildWalletActionMenuForUser assembles menu using shared dependencies", as
   const lastRow = rows[rows.length - 1];
   const lastButton = lastRow?.[0];
   expect(lastButton?.text).toBe("← Back to Wallet");
-  expect(
-    lastButton && "callback_data" in lastButton
-      ? lastButton.callback_data
-      : undefined
-  ).toBe("main_wallet");
+  expect(lastButton && "callback_data" in lastButton ? lastButton.callback_data : undefined).toBe(
+    "main_wallet",
+  );
 });
 
 test("buildWalletActionMenuForUser applies prepareBalances overrides", async () => {

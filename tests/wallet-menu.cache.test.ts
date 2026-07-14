@@ -18,7 +18,7 @@ const createStubWallet = (
   options: Partial<WalletState> & {
     endpoint?: string;
     beforeBalance?: () => void;
-  } = {}
+  } = {},
 ) => {
   const state: WalletState = {
     balanceCalls: 0,
@@ -57,9 +57,7 @@ const createStubWallet = (
         listener(telegramId);
       }
     },
-    onWalletCacheCleared: (
-      listener: (telegramId: bigint | number | string) => void,
-    ) => {
+    onWalletCacheCleared: (listener: (telegramId: bigint | number | string) => void) => {
       listeners.push(listener);
       return () => {
         const index = listeners.indexOf(listener);
@@ -147,10 +145,7 @@ describe("wallet menu cache guards", () => {
     wallet.connection.rpcEndpoint = "bar";
     await module.getCachedWalletData(7n);
 
-    expect(module.__test_getWalletSnapshotCacheKeys()).toEqual([
-      "7:foo",
-      "7:bar",
-    ]);
+    expect(module.__test_getWalletSnapshotCacheKeys()).toEqual(["7:foo", "7:bar"]);
     ensureBalanceCalled(state, 2);
   });
 

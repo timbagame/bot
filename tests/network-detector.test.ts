@@ -2,16 +2,12 @@ import { expect, test } from "bun:test";
 import { NetworkDetector } from "../src/utils/network-detector";
 
 test("detectNetwork identifies devnet", () => {
-  const network = NetworkDetector.detectNetwork(
-    "https://api.devnet.solana.com"
-  );
+  const network = NetworkDetector.detectNetwork("https://api.devnet.solana.com");
   expect(network).toBe("devnet");
 });
 
 test("detectNetwork identifies testnet", () => {
-  const network = NetworkDetector.detectNetwork(
-    "https://api.testnet.solana.com"
-  );
+  const network = NetworkDetector.detectNetwork("https://api.testnet.solana.com");
   expect(network).toBe("testnet");
 });
 
@@ -21,9 +17,7 @@ test("detectNetwork identifies localnet", () => {
 });
 
 test("detectNetwork defaults to mainnet", () => {
-  const network = NetworkDetector.detectNetwork(
-    "https://api.mainnet-beta.solana.com"
-  );
+  const network = NetworkDetector.detectNetwork("https://api.mainnet-beta.solana.com");
   expect(network).toBe("mainnet");
 });
 
@@ -70,35 +64,28 @@ test("getDisplayNameFromRpc falls back to current network when rpc missing", () 
 test("buildSolscanTxUrl builds mainnet URL", () => {
   const original = process.env.SOLANA_NETWORK;
   process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
-  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
-    "https://solscan.io/tx/sig"
-  );
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe("https://solscan.io/tx/sig");
   process.env.SOLANA_NETWORK = original;
 });
 
 test("buildSolscanTxUrl appends cluster for devnet/testnet", () => {
   const original = process.env.SOLANA_NETWORK;
   process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
-  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
-    "https://solscan.io/tx/sig?cluster=devnet"
-  );
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe("https://solscan.io/tx/sig?cluster=devnet");
   process.env.SOLANA_NETWORK = "https://api.testnet.solana.com";
   expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
-    "https://solscan.io/tx/sig?cluster=testnet"
+    "https://solscan.io/tx/sig?cluster=testnet",
   );
   process.env.SOLANA_NETWORK = original;
 });
 
 test("buildSolscanTxUrl respects explicit network overrides", () => {
   expect(NetworkDetector.buildSolscanTxUrl("sig", "devnet")).toBe(
-    "https://solscan.io/tx/sig?cluster=devnet"
+    "https://solscan.io/tx/sig?cluster=devnet",
   );
-  expect(
-    NetworkDetector.buildSolscanTxUrl(
-      "sig",
-      "https://api.testnet.solana.com"
-    )
-  ).toBe("https://solscan.io/tx/sig?cluster=testnet");
+  expect(NetworkDetector.buildSolscanTxUrl("sig", "https://api.testnet.solana.com")).toBe(
+    "https://solscan.io/tx/sig?cluster=testnet",
+  );
 });
 
 test("buildSolscanTxUrl returns null for localnet", () => {
@@ -115,41 +102,32 @@ test("buildSolscanTxUrl returns null for missing signatures", () => {
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     expect(NetworkDetector.buildSolscanTxUrl(undefined)).toBeNull();
     expect(NetworkDetector.buildSolscanTxUrl(null)).toBeNull();
-    expect(NetworkDetector.buildSolscanTxUrl(""))
-      .toBeNull();
+    expect(NetworkDetector.buildSolscanTxUrl("")).toBeNull();
   } finally {
     process.env.SOLANA_NETWORK = original;
   }
 });
 
 test("getDisplayNameFromRpc returns friendly network labels", () => {
-  expect(
-    NetworkDetector.getDisplayNameFromRpc("https://api.devnet.solana.com")
-  ).toBe("Devnet");
-  expect(
-    NetworkDetector.getDisplayNameFromRpc("https://api.testnet.solana.com")
-  ).toBe("Testnet");
-  expect(
-    NetworkDetector.getDisplayNameFromRpc("https://api.mainnet-beta.solana.com")
-  ).toBe("Mainnet");
-  expect(
-    NetworkDetector.getDisplayNameFromRpc("http://localhost:8899")
-  ).toBe("Localnet");
-  expect(
-    NetworkDetector.getDisplayNameFromRpc("http://custom.rpc:8899")
-  ).toBe("Custom Network");
+  expect(NetworkDetector.getDisplayNameFromRpc("https://api.devnet.solana.com")).toBe("Devnet");
+  expect(NetworkDetector.getDisplayNameFromRpc("https://api.testnet.solana.com")).toBe("Testnet");
+  expect(NetworkDetector.getDisplayNameFromRpc("https://api.mainnet-beta.solana.com")).toBe(
+    "Mainnet",
+  );
+  expect(NetworkDetector.getDisplayNameFromRpc("http://localhost:8899")).toBe("Localnet");
+  expect(NetworkDetector.getDisplayNameFromRpc("http://custom.rpc:8899")).toBe("Custom Network");
 });
 
 test("buildSolscanAccountUrl encodes address and uses overrides", () => {
   const original = process.env.SOLANA_NETWORK;
   process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
-  expect(
-    NetworkDetector.buildSolscanAccountUrl('ADDR<&"')
-  ).toBe("https://solscan.io/account/ADDR%3C%26%22");
+  expect(NetworkDetector.buildSolscanAccountUrl('ADDR<&"')).toBe(
+    "https://solscan.io/account/ADDR%3C%26%22",
+  );
 
-  expect(
-    NetworkDetector.buildSolscanAccountUrl("ADDR123", "testnet")
-  ).toBe("https://solscan.io/account/ADDR123?cluster=testnet");
+  expect(NetworkDetector.buildSolscanAccountUrl("ADDR123", "testnet")).toBe(
+    "https://solscan.io/account/ADDR123?cluster=testnet",
+  );
   process.env.SOLANA_NETWORK = original;
 });
 
@@ -159,7 +137,7 @@ test("buildSolscanTokenUrl returns null on localnet", () => {
   expect(NetworkDetector.buildSolscanTokenUrl("mint")).toBeNull();
   process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
   expect(NetworkDetector.buildSolscanTokenUrl("mint", "devnet")).toBe(
-    "https://solscan.io/token/mint?cluster=devnet"
+    "https://solscan.io/token/mint?cluster=devnet",
   );
   process.env.SOLANA_NETWORK = original;
 });

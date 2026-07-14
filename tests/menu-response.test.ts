@@ -20,7 +20,7 @@ const makeCtx = (options: MakeCtxOptions = {}) => {
       chat: { id: 42 },
       message_id: 99,
     },
-    options.message ?? {}
+    options.message ?? {},
   );
 
   const defaultReply = {
@@ -39,7 +39,7 @@ const makeCtx = (options: MakeCtxOptions = {}) => {
           return { ok: true };
         },
       },
-      options.api ?? {}
+      options.api ?? {},
     ),
     editMessageCaption: async (opts: any) => {
       calls.push({ type: "caption", args: [opts] });
@@ -205,7 +205,7 @@ describe("respondWithMenu", () => {
     }) as any;
 
     let attempts = 0;
-    let replyResult: any = { message_id: 777, chat: { id: 501 } };
+    const replyResult: any = { message_id: 777, chat: { id: 501 } };
     ctx.reply = async (text: string, opts: any) => {
       attempts += 1;
       if (attempts === 1) {

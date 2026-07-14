@@ -7,9 +7,7 @@ import {
 } from "./constants";
 import type { ChatGameSettings } from "../types";
 
-export const clampGameTimeout = (
-  candidate?: number | null
-): number => {
+export const clampGameTimeout = (candidate?: number | null): number => {
   if (!Number.isFinite(candidate ?? NaN)) {
     return DEFAULT_GAME_TIMEOUT;
   }
@@ -21,15 +19,14 @@ export const clampGameTimeout = (
 export const clampChatPlayers = (
   candidate: number | null | undefined,
   gameType: "coinflip" | "giveaway",
-  maxLimit: number
+  maxLimit: number,
 ): number | null => {
   if (!Number.isFinite(candidate ?? NaN)) {
     return null;
   }
 
   const rounded = Math.round(candidate!);
-  const minPlayers =
-    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const minPlayers = gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
   const ceiling = Math.max(minPlayers, maxLimit);
   return Math.min(Math.max(rounded, minPlayers), ceiling);
 };
@@ -38,14 +35,12 @@ export const resolveChatDefaultPlayers = (
   settings: ChatGameSettings | null,
   gameType: "coinflip" | "giveaway",
   fallback: number,
-  maxLimit: number
+  maxLimit: number,
 ): number => {
   const chatValue = clampChatPlayers(
-    gameType === "coinflip"
-      ? settings?.coinflip_max_players
-      : settings?.giveaway_max_players,
+    gameType === "coinflip" ? settings?.coinflip_max_players : settings?.giveaway_max_players,
     gameType,
-    maxLimit
+    maxLimit,
   );
 
   if (chatValue === null) {
@@ -56,10 +51,7 @@ export const resolveChatDefaultPlayers = (
   return chatValue;
 };
 
-export const resolveChatTimeout = (
-  settings: ChatGameSettings | null,
-  fallback: number
-): number => {
+export const resolveChatTimeout = (settings: ChatGameSettings | null, fallback: number): number => {
   if (settings?.timeout_seconds == null) {
     return clampGameTimeout(fallback);
   }

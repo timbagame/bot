@@ -11,21 +11,16 @@ const DEFAULT_TTL_MS = 5_000;
 
 export class SwapQuoteCache {
   private readonly ttlMs: number;
-  private readonly jupiterCache =
-    createExpiringCache<JupiterQuoteResponse>(DEFAULT_TTL_MS);
-  private readonly pendingJupiter = new Map<
-    string,
-    Promise<JupiterQuoteResponse>
-  >();
+  private readonly jupiterCache = createExpiringCache<JupiterQuoteResponse>(DEFAULT_TTL_MS);
+  private readonly pendingJupiter = new Map<string, Promise<JupiterQuoteResponse>>();
 
   constructor(options: QuoteCacheOptions = {}) {
-    this.ttlMs =
-      options.ttlMs && options.ttlMs > 0 ? options.ttlMs : DEFAULT_TTL_MS;
+    this.ttlMs = options.ttlMs && options.ttlMs > 0 ? options.ttlMs : DEFAULT_TTL_MS;
   }
 
   async getJupiterQuote(
     params: JupiterQuoteRequest,
-    loader: QuoteLoader<JupiterQuoteResponse>
+    loader: QuoteLoader<JupiterQuoteResponse>,
   ): Promise<JupiterQuoteResponse> {
     const key = this.serializeJupiterParams(params);
     const cached = this.jupiterCache.get(key);

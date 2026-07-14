@@ -17,11 +17,7 @@ function createSpyFetch(delayMs = 0): { fetch: typeof fetch; calls: CallRecord[]
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     calls.push({
       input: url,
@@ -87,17 +83,14 @@ describe("createRebateAwareFetch", () => {
       method: "sendTransaction",
       params: ["payload"],
     });
-    const originalRequest = new Request(
-      "https://mainnet.helius-rpc.com/?api-key=badge",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Original": "yes",
-        },
-        body: originalBody,
+    const originalRequest = new Request("https://mainnet.helius-rpc.com/?api-key=badge", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Original": "yes",
       },
-    );
+      body: originalBody,
+    });
 
     await rebateFetch(originalRequest);
 
@@ -108,9 +101,7 @@ describe("createRebateAwareFetch", () => {
     const forwardedRequest = call.request!;
     expect(forwardedRequest.method).toBe("POST");
     expect(await forwardedRequest.clone().text()).toBe(originalBody);
-    expect(forwardedRequest.headers.get("Content-Type")).toBe(
-      "application/json",
-    );
+    expect(forwardedRequest.headers.get("Content-Type")).toBe("application/json");
     expect(forwardedRequest.headers.get("X-Original")).toBe("yes");
   });
   test("concurrent sendTransaction calls keep rebate parameter per request", async () => {

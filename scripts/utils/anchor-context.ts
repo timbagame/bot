@@ -1,10 +1,5 @@
 import * as anchor from "@anchor-lang/core";
-import type {
-  Commitment,
-  Connection,
-  ConnectionConfig,
-  Keypair,
-} from "@solana/web3.js";
+import type { Commitment, Connection, ConnectionConfig, Keypair } from "@solana/web3.js";
 import { clusterApiUrl } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
 import idl from "../../idl/idl.json";
@@ -12,14 +7,9 @@ import { WalletManager } from "../../src/utils/wallet";
 import { loadWalletMnemonic } from "../../src/utils/secrets";
 import { resolvePrimaryRpcEndpoint } from "../../src/utils/rpc-endpoints";
 
-type WalletOverride =
-  | anchor.Wallet
-  | Keypair
-  | anchor.web3.Keypair;
+type WalletOverride = anchor.Wallet | Keypair | anchor.web3.Keypair;
 
-type ProviderOptions = NonNullable<
-  ConstructorParameters<typeof anchor.AnchorProvider>[2]
->;
+type ProviderOptions = NonNullable<ConstructorParameters<typeof anchor.AnchorProvider>[2]>;
 
 export interface AnchorContextOverrides {
   /**
@@ -62,10 +52,7 @@ export interface AnchorContextResult {
   program: anchor.Program<Timba>;
 }
 
-export type ProgramContextLoadOptions = Omit<
-  AnchorContextOverrides,
-  "wallet"
-> & {
+export type ProgramContextLoadOptions = Omit<AnchorContextOverrides, "wallet"> & {
   mnemonic?: string;
   wallet?: WalletManager;
 };
@@ -79,10 +66,7 @@ export interface LoadedProgramContext extends AnchorContextResult {
 const toAnchorKeypair = (keypair: Keypair | anchor.web3.Keypair) =>
   anchor.web3.Keypair.fromSecretKey(keypair.secretKey);
 
-const resolveWallet = (
-  adminKeypair: Keypair,
-  override?: WalletOverride
-): anchor.Wallet => {
+const resolveWallet = (adminKeypair: Keypair, override?: WalletOverride): anchor.Wallet => {
   if (!override) {
     return new anchor.Wallet(toAnchorKeypair(adminKeypair));
   }
@@ -97,14 +81,14 @@ const resolveWallet = (
 const resolveConnection = (
   rpcUrl: string,
   commitment: Commitment,
-  connectionConfig?: ConnectionConfig
+  connectionConfig?: ConnectionConfig,
 ): anchor.web3.Connection =>
   connectionConfig
     ? new anchor.web3.Connection(rpcUrl, connectionConfig)
     : new anchor.web3.Connection(rpcUrl, commitment);
 
 const toAnchorConnection = (
-  connection: Connection | anchor.web3.Connection
+  connection: Connection | anchor.web3.Connection,
 ): anchor.web3.Connection => {
   if (connection instanceof anchor.web3.Connection) {
     return connection;
@@ -114,17 +98,16 @@ const toAnchorConnection = (
 
   return new anchor.web3.Connection(
     web3Connection.rpcEndpoint,
-    web3Connection.commitment ?? "confirmed"
+    web3Connection.commitment ?? "confirmed",
   );
 };
 
 export const createAnchorContext = (
   adminKeypair: Keypair,
-  overrides: AnchorContextOverrides = {}
+  overrides: AnchorContextOverrides = {},
 ): AnchorContextResult => {
   const commitment = overrides.commitment ?? "confirmed";
-  const preflightCommitment =
-    overrides.preflightCommitment ?? overrides.commitment ?? commitment;
+  const preflightCommitment = overrides.preflightCommitment ?? overrides.commitment ?? commitment;
 
   const providerOptions = {
     commitment,
@@ -134,7 +117,7 @@ export const createAnchorContext = (
 
   const resolvedRpcUrl = resolvePrimaryRpcEndpoint(
     overrides.rpcUrl ?? process.env.SOLANA_NETWORK,
-    clusterApiUrl("mainnet-beta")
+    clusterApiUrl("mainnet-beta"),
   );
 
   const connection = overrides.connection
@@ -146,22 +129,18 @@ export const createAnchorContext = (
   const provider = new anchor.AnchorProvider(connection, wallet, providerOptions);
   anchor.setProvider(provider);
 
-  const program = new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
+  const program = new anchor.Program(idl as Timba, provider) as anchor.Program<Timba>;
 
   return { provider, program };
 };
 
 export const loadProgramContext = (
-  options: ProgramContextLoadOptions = {}
+  options: ProgramContextLoadOptions = {},
 ): LoadedProgramContext => {
   const { mnemonic, wallet: walletOverride, ...anchorOverrides } = options;
   const resolvedMnemonic = mnemonic?.trim() || loadWalletMnemonic();
 
-  const wallet =
-    walletOverride ?? WalletManager.getInstance(resolvedMnemonic);
+  const wallet = walletOverride ?? WalletManager.getInstance(resolvedMnemonic);
   const adminKeypair = wallet.getAdminKeypair();
 
   const context = createAnchorContext(adminKeypair, {

@@ -20,7 +20,7 @@ const makeGameManager = () => {
     gameDb,
     oracleClient,
     swapManager,
-    feeBudget
+    feeBudget,
   ) as GameManager;
   const managerAny = manager as any;
 
@@ -47,7 +47,7 @@ describe("GameManager.updateGameMessage", () => {
     const chatId = 1010;
     managerAny.activeGameMessages.set(
       gameAddress,
-      new Map([[chatId, { messageId: 1, chatId, usesVideo: true }]])
+      new Map([[chatId, { messageId: 1, chatId, usesVideo: true }]]),
     );
 
     const ctx = {
@@ -59,21 +59,13 @@ describe("GameManager.updateGameMessage", () => {
       },
     } as unknown as Context;
 
-    await manager.updateGameMessage(
-      ctx,
-      gameAddress,
-      "Coinflip",
-      10,
-      "@creator",
-      "Active",
-      "TOK"
-    );
+    await manager.updateGameMessage(ctx, gameAddress, "Coinflip", 10, "@creator", "Active", "TOK");
 
     expect(managerAny.recreateMissingGameMessage).toHaveBeenCalledTimes(1);
     expect(managerAny.recreateMissingGameMessage).toHaveBeenCalledWith(
       ctx,
       gameAddress,
-      expect.objectContaining({ chatId })
+      expect.objectContaining({ chatId }),
     );
   });
 });

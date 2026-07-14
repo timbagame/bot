@@ -22,9 +22,7 @@ const parseRetryAfterSeconds = (error: any): number => {
     (parameters && typeof parameters.retry_after === "number"
       ? parameters.retry_after
       : undefined) ??
-    (typeof (error as any).retry_after === "number"
-      ? (error as any).retry_after
-      : undefined);
+    (typeof (error as any).retry_after === "number" ? (error as any).retry_after : undefined);
 
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
     return Math.max(0, retryAfter);
@@ -45,8 +43,7 @@ const parseRetryAfterSeconds = (error: any): number => {
   return 1;
 };
 
-const sleep = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 type QueuedEditResult<T> = {
   result: T | null;
@@ -66,10 +63,7 @@ type QueuedEditState = {
 
 const messageMediaEditQueue = new Map<string, QueuedEditState>();
 
-const runQueuedMediaEdit = async <T>(
-  key: string,
-  task: QueuedEditTask<T>
-): Promise<void> => {
+const runQueuedMediaEdit = async <T>(key: string, task: QueuedEditTask<T>): Promise<void> => {
   try {
     const result = await task.run();
     task.resolve({ result, skipped: false });
@@ -95,7 +89,7 @@ const runQueuedMediaEdit = async <T>(
 
 export const enqueueMessageMediaEdit = <T>(
   key: string,
-  run: () => Promise<T>
+  run: () => Promise<T>,
 ): Promise<QueuedEditResult<T>> => {
   const state = messageMediaEditQueue.get(key);
   if (!state) {
@@ -119,7 +113,7 @@ export const enqueueMessageMediaEdit = <T>(
 
 export const awaitTelegramRetry = async <T>(
   operation: () => Promise<T>,
-  options: { maxAttempts?: number } = {}
+  options: { maxAttempts?: number } = {},
 ): Promise<T> => {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   let attempt = 0;
@@ -170,7 +164,7 @@ export type MediaSendResult<Primary, Fallback = Primary> = {
 export async function trySendVideoWithFallback<Primary, Fallback = Primary>(
   sendVideo: () => Promise<Primary>,
   fallbackToText: () => Promise<Fallback>,
-  options: { logLabel?: string } = {}
+  options: { logLabel?: string } = {},
 ): Promise<MediaSendResult<Primary, Fallback>> {
   const { logLabel = "video send" } = options;
   try {
@@ -245,7 +239,7 @@ export type SendMediaWithFallbackResult<Primary, Fallback = Primary> = {
 
 const buildSendMediaResult = <Primary, Fallback>(
   result: Primary | Fallback | null,
-  options: { usedVideo: boolean; usedFallback: boolean; skippedEdit: boolean }
+  options: { usedVideo: boolean; usedFallback: boolean; skippedEdit: boolean },
 ): SendMediaWithFallbackResult<Primary, Fallback> => ({
   result,
   usedVideo: options.usedVideo,
@@ -286,7 +280,7 @@ export async function sendMediaWithFallback<Primary, Fallback = Primary>({
             usedVideo: false,
             usedFallback: editResult.usedFallback,
             skippedEdit: true,
-          }
+          },
         );
       }
 
@@ -296,7 +290,7 @@ export async function sendMediaWithFallback<Primary, Fallback = Primary>({
           usedVideo: !editResult.usedFallback,
           usedFallback: editResult.usedFallback,
           skippedEdit: false,
-        }
+        },
       );
     } catch (error) {
       console.warn(`${logLabel} edit failed, attempting send`, error);
@@ -315,7 +309,7 @@ export async function sendMediaWithFallback<Primary, Fallback = Primary>({
   const { result, usedFallback } = await trySendVideoWithFallback<Primary, Fallback>(
     () => sendVideo(),
     () => sendText(),
-    { logLabel: `${logLabel} send` }
+    { logLabel: `${logLabel} send` },
   );
 
   return buildSendMediaResult<Primary, Fallback>(result as Primary | Fallback | null, {

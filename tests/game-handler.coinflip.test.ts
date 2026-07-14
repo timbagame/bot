@@ -59,18 +59,10 @@ describe("game handler: coinflip command", () => {
 
     const deps: any = {
       isGroupChat: () => true,
-      showInteractiveSetup: async (
-        forwardedCtx: any,
-        telegramId: bigint,
-        override?: any
-      ) => {
+      showInteractiveSetup: async (forwardedCtx: any, telegramId: bigint, override?: any) => {
         interactiveCalls.push({ forwardedCtx, telegramId, override });
       },
-      createGameViaCommand: async (
-        forwardedCtx: any,
-        args: string[],
-        telegramId: bigint
-      ) => {
+      createGameViaCommand: async (forwardedCtx: any, args: string[], telegramId: bigint) => {
         commandCalls.push({ forwardedCtx, args, telegramId });
       },
       resolveTokenOverride: async () => null,
@@ -92,11 +84,7 @@ describe("game handler: coinflip command", () => {
 
     const deps: any = {
       isGroupChat: () => true,
-      showInteractiveSetup: async (
-        forwardedCtx: any,
-        telegramId: bigint,
-        override?: any
-      ) => {
+      showInteractiveSetup: async (forwardedCtx: any, telegramId: bigint, override?: any) => {
         interactiveCalls.push({ forwardedCtx, telegramId, override });
       },
       createGameViaCommand: async () => {

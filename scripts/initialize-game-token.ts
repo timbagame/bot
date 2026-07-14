@@ -21,20 +21,10 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
-import {
-  getReferralTokenEntries,
-  getSupportedTokens,
-} from "../src/utils/token-registry";
-import {
-  NetworkDetector,
-  type SolanaNetwork,
-} from "../src/utils/network-detector";
+import { getReferralTokenEntries, getSupportedTokens } from "../src/utils/token-registry";
+import { NetworkDetector, type SolanaNetwork } from "../src/utils/network-detector";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
-import {
-  loadKeypairFromPath,
-  resolveOracleOperatorKeypair,
-  uniqueSigners,
-} from "./utils/keypairs";
+import { loadKeypairFromPath, resolveOracleOperatorKeypair, uniqueSigners } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { Buffer } from "buffer";
@@ -54,20 +44,15 @@ const resolveEnvPath = (envVar?: string, fallback?: string): string => {
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
-const NETWORK_OVERRIDE =
-  NetworkDetector.resolveNetworkInput(process.env["SOLANA_CLUSTER"]) ?? null;
-const NETWORK: SolanaNetwork =
-  NETWORK_OVERRIDE ?? NetworkDetector.detectNetwork(RPC_URL);
+const NETWORK_OVERRIDE = NetworkDetector.resolveNetworkInput(process.env["SOLANA_CLUSTER"]) ?? null;
+const NETWORK: SolanaNetwork = NETWORK_OVERRIDE ?? NetworkDetector.detectNetwork(RPC_URL);
 const NETWORK_DISPLAY_NAME = NetworkDetector.getNetworkDisplayName(NETWORK);
 
 const CONFIG = {
   RPC_URL,
   NETWORK,
   NETWORK_DISPLAY_NAME,
-  ADMIN_KEYPAIR_PATH: resolveEnvPath(
-    process.env["ADMIN_KEYPAIR_PATH"],
-    "./admin-keypair.json"
-  ),
+  ADMIN_KEYPAIR_PATH: resolveEnvPath(process.env["ADMIN_KEYPAIR_PATH"], "./admin-keypair.json"),
 } as const;
 
 type TokenInitTarget = {
@@ -124,10 +109,7 @@ type InitializationCostEstimate = {
 
 type FeeResponse = Awaited<ReturnType<Connection["getFeeForMessage"]>>;
 
-const buildExplorerUrl = (
-  resource: "tx" | "token" | "account",
-  value: string
-) => {
+const buildExplorerUrl = (resource: "tx" | "token" | "account", value: string) => {
   const resolver = {
     tx: NetworkDetector.buildSolscanTxUrl,
     token: NetworkDetector.buildSolscanTokenUrl,
@@ -160,26 +142,19 @@ type NewTokenInitializationResult = BaseTokenInitializationResult & {
   transaction: string;
 };
 
-type TokenInitializationResult =
-  | ExistingTokenInitializationResult
-  | NewTokenInitializationResult;
+type TokenInitializationResult = ExistingTokenInitializationResult | NewTokenInitializationResult;
 
 const buildReferralProvider = (connection: Connection): ReferralProvider =>
   new ReferralProvider(connection);
 
-const ensureReferralTokenAccounts = async (
-  connection: Connection,
-  adminKeypair: Keypair
-) => {
+const ensureReferralTokenAccounts = async (connection: Connection, adminKeypair: Keypair) => {
   if (REFERRAL_TOKEN_ENTRIES.length === 0) {
     console.log("🧾 No referral token entries configured.");
     return;
   }
 
   const provider = buildReferralProvider(connection);
-  console.log(
-    `🧾 Ensuring ${REFERRAL_TOKEN_ENTRIES.length} referral token account(s)`
-  );
+  console.log(`🧾 Ensuring ${REFERRAL_TOKEN_ENTRIES.length} referral token account(s)`);
 
   for (const entry of REFERRAL_TOKEN_ENTRIES) {
     try {
@@ -191,32 +166,23 @@ const ensureReferralTokenAccounts = async (
         mint,
       });
 
-      const accountInfo = await connection.getAccountInfo(
-        transaction.tokenAccount
-      );
+      const accountInfo = await connection.getAccountInfo(transaction.tokenAccount);
       if (accountInfo) {
         console.log(
-          `✨ Referral token account already exists for ${entry.mint}: ${transaction.tokenAccount.toBase58()}`
+          `✨ Referral token account already exists for ${entry.mint}: ${transaction.tokenAccount.toBase58()}`,
         );
         continue;
       }
 
-      const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction.tx,
-        [adminKeypair]
-      );
+      const signature = await sendAndConfirmTransaction(connection, transaction.tx, [adminKeypair]);
       console.log(
-        `✅ Created referral token account for ${entry.mint}: ${transaction.tokenAccount.toBase58()} (tx: ${signature})`
+        `✅ Created referral token account for ${entry.mint}: ${transaction.tokenAccount.toBase58()} (tx: ${signature})`,
       );
     } catch (error: any) {
       if (typeof error.message === "string" && error.message.includes("already in use")) {
         continue;
       }
-      console.warn(
-        `⚠️ Failed to initialize referral token account for ${entry.mint}:`,
-        error
-      );
+      console.warn(`⚠️ Failed to initialize referral token account for ${entry.mint}:`, error);
     }
   }
 };
@@ -252,7 +218,7 @@ const prepareGameVaultAtaPlan = async ({
     gameVaultPda,
     true,
     mintProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 
   const existingAccount = await connection.getAccountInfo(address);
@@ -267,9 +233,7 @@ const prepareGameVaultAtaPlan = async ({
 
   const mintState = unpackMint(mint, mintAccount, mintProgramId);
   const ataSpace = getAccountLenForMint(mintState);
-  const rentLamports = BigInt(
-    await connection.getMinimumBalanceForRentExemption(ataSpace)
-  );
+  const rentLamports = BigInt(await connection.getMinimumBalanceForRentExemption(ataSpace));
 
   const instruction = createAssociatedTokenAccountInstruction(
     adminKeypair.publicKey,
@@ -277,7 +241,7 @@ const prepareGameVaultAtaPlan = async ({
     gameVaultPda,
     mint,
     mintProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 
   return {
@@ -288,11 +252,9 @@ const prepareGameVaultAtaPlan = async ({
   };
 };
 
-const lamportsToSol = (lamports: bigint): number =>
-  Number(lamports) / LAMPORTS_PER_SOL;
+const lamportsToSol = (lamports: bigint): number => Number(lamports) / LAMPORTS_PER_SOL;
 
-const formatLamports = (lamports: bigint): string =>
-  lamportsToSol(lamports).toFixed(6);
+const formatLamports = (lamports: bigint): string => lamportsToSol(lamports).toFixed(6);
 
 const toLamportsBigInt = (value: number | null | undefined): bigint => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -313,26 +275,21 @@ const estimateInitializationCosts = async (
   program: anchor.Program<Timba>,
   adminKeypair: Keypair,
   oracleOperatorKeypair: Keypair,
-  tokens: TokenInitTarget[]
+  tokens: TokenInitTarget[],
 ): Promise<InitializationCostEstimate> => {
   const breakdown: TokenCostBreakdown[] = [];
   let requiredLamports = 0n;
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  const [oraclePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("oracle")],
-    program.programId
-  );
+  const [oraclePda] = PublicKey.findProgramAddressSync([Buffer.from("oracle")], program.programId);
 
   for (const { tokenMint, tokenTicker, defaultMinAmount } of tokens) {
     const mint = new PublicKey(tokenMint);
 
     const [gameTokenPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("game_token"), mint.toBuffer()],
-      program.programId
+      program.programId,
     );
-    const existingGameToken = await program.account.gameToken.fetchNullable(
-      gameTokenPda
-    );
+    const existingGameToken = await program.account.gameToken.fetchNullable(gameTokenPda);
 
     if (existingGameToken) {
       breakdown.push({
@@ -347,29 +304,26 @@ const estimateInitializationCosts = async (
 
     const rawGameTokenAccount = await connection.getAccountInfo(gameTokenPda);
     if (rawGameTokenAccount) {
-      throw new Error(
-        `${tokenTicker} GameToken account exists with incompatible structure`
-      );
+      throw new Error(`${tokenTicker} GameToken account exists with incompatible structure`);
     }
 
     const mintAccount = await connection.getAccountInfo(mint);
     if (!mintAccount) {
       throw new Error(
-        `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`
+        `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`,
       );
     }
 
     const rentLamportsParts: bigint[] = [];
     const feeLamportsParts: bigint[] = [];
 
-    const gameTokenRent = await connection.getMinimumBalanceForRentExemption(
-      GAME_TOKEN_ACCOUNT_SIZE
-    );
+    const gameTokenRent =
+      await connection.getMinimumBalanceForRentExemption(GAME_TOKEN_ACCOUNT_SIZE);
     rentLamportsParts.push(BigInt(gameTokenRent));
 
     const [gameVaultPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("game_vault"), mint.toBuffer()],
-      program.programId
+      program.programId,
     );
     const mintProgramId = mintAccount.owner;
 
@@ -391,9 +345,7 @@ const estimateInitializationCosts = async (
         feePayer: adminKeypair.publicKey,
         recentBlockhash: blockhash,
       }).add(...ataPlan.instructions);
-      const ataFeeResponse = await connection.getFeeForMessage(
-        createAtaTx.compileMessage()
-      );
+      const ataFeeResponse = await connection.getFeeForMessage(createAtaTx.compileMessage());
       feeLamportsParts.push(toLamportsBigInt(extractFeeValue(ataFeeResponse)));
     }
 
@@ -429,21 +381,11 @@ const estimateInitializationCosts = async (
       feePayer: adminKeypair.publicKey,
       recentBlockhash: blockhash,
     }).add(tokenInstruction);
-    const initializeFeeResponse = await connection.getFeeForMessage(
-      initializeTx.compileMessage()
-    );
-    feeLamportsParts.push(
-      toLamportsBigInt(extractFeeValue(initializeFeeResponse))
-    );
+    const initializeFeeResponse = await connection.getFeeForMessage(initializeTx.compileMessage());
+    feeLamportsParts.push(toLamportsBigInt(extractFeeValue(initializeFeeResponse)));
 
-    const rentLamports = rentLamportsParts.reduce(
-      (acc, value) => acc + value,
-      0n
-    );
-    const feeLamports = feeLamportsParts.reduce(
-      (acc, value) => acc + value,
-      0n
-    );
+    const rentLamports = rentLamportsParts.reduce((acc, value) => acc + value, 0n);
+    const feeLamports = feeLamportsParts.reduce((acc, value) => acc + value, 0n);
 
     requiredLamports += rentLamports + feeLamports;
     breakdown.push({
@@ -455,9 +397,7 @@ const estimateInitializationCosts = async (
     });
   }
 
-  const requiresInitialization = breakdown.some(
-    (entry) => entry.status === "needs-initialization"
-  );
+  const requiresInitialization = breakdown.some((entry) => entry.status === "needs-initialization");
   const bufferLamports = requiresInitialization
     ? BigInt(Math.ceil(BALANCE_BUFFER_SOL * LAMPORTS_PER_SOL))
     : 0n;
@@ -472,11 +412,9 @@ const estimateInitializationCosts = async (
 const ensureSufficientBalance = async (
   connection: Connection,
   keypair: Keypair,
-  requiredLamports: bigint
+  requiredLamports: bigint,
 ): Promise<void> => {
-  const balanceLamports = BigInt(
-    await connection.getBalance(keypair.publicKey)
-  );
+  const balanceLamports = BigInt(await connection.getBalance(keypair.publicKey));
   const solBalance = lamportsToSol(balanceLamports);
   console.log(`💰 Admin balance: ${solBalance.toFixed(6)} SOL`);
 
@@ -488,10 +426,8 @@ const ensureSufficientBalance = async (
     const shortfall = requiredLamports - balanceLamports;
     throw new Error(
       `❌ Insufficient balance. Need at least ${formatLamports(
-        requiredLamports
-      )} SOL (shortfall ${formatLamports(
-        shortfall
-      )} SOL) to initialize pending tokens.`
+        requiredLamports,
+      )} SOL (shortfall ${formatLamports(shortfall)} SOL) to initialize pending tokens.`,
     );
   }
 };
@@ -508,7 +444,7 @@ async function initializeToken(
   oracleOperatorKeypair: Keypair,
   tokenMint: string,
   tokenTicker: string,
-  defaultMinAmount: bigint
+  defaultMinAmount: bigint,
 ): Promise<TokenInitializationResult> {
   console.log(`\n🔄 Initializing ${tokenTicker} Game Token...`);
 
@@ -519,9 +455,7 @@ async function initializeToken(
   // Check if token mint exists
   const mintAccount = await connection.getAccountInfo(mint);
   if (!mintAccount) {
-    throw new Error(
-      `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`
-    );
+    throw new Error(`❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`);
   }
   console.log(`✅ ${tokenTicker} mint verified`);
   const mintProgramId = mintAccount.owner;
@@ -529,27 +463,22 @@ async function initializeToken(
   // Derive game token PDA
   const [gameTokenPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
   console.log(`🎯 ${tokenTicker} Game Token PDA: ${gameTokenPda.toBase58()}`);
 
   // Derive game vault PDA
   const [gameVaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_vault"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
   console.log(`🏦 ${tokenTicker} Game Vault PDA: ${gameVaultPda.toBase58()}`);
 
-  const [oraclePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("oracle")],
-    program.programId
-  );
+  const [oraclePda] = PublicKey.findProgramAddressSync([Buffer.from("oracle")], program.programId);
 
   // Check if game token already exists
   try {
-    const existingGameToken = await program.account.gameToken.fetch(
-      gameTokenPda
-    );
+    const existingGameToken = await program.account.gameToken.fetch(gameTokenPda);
     console.log(`⚠️  ${tokenTicker} game token already exists!`);
     console.log(`   Min Amount: ${existingGameToken.minAmount.toString()}`);
     console.log(`   Fee Amount: ${existingGameToken.feeAmount.toString()}`);
@@ -565,24 +494,16 @@ async function initializeToken(
     // Check if account exists but has incompatible structure
     const accountInfo = await connection.getAccountInfo(gameTokenPda);
     if (accountInfo) {
-      console.log(
-        `⚠️  ${tokenTicker} GameToken account exists but has incompatible structure`
-      );
+      console.log(`⚠️  ${tokenTicker} GameToken account exists but has incompatible structure`);
       console.log(`   Account Owner: ${accountInfo.owner.toBase58()}`);
       console.log(`   Account Data Length: ${accountInfo.data.length} bytes`);
       console.log(`   Account Lamports: ${accountInfo.lamports}`);
-      console.log(
-        `\n❌ Cannot initialize new ${tokenTicker} GameToken over existing account.`
-      );
-      throw new Error(
-        `${tokenTicker} GameToken account exists with incompatible structure`
-      );
+      console.log(`\n❌ Cannot initialize new ${tokenTicker} GameToken over existing account.`);
+      throw new Error(`${tokenTicker} GameToken account exists with incompatible structure`);
     }
 
     // Game token doesn't exist, proceed with initialization
-    console.log(
-      `📝 ${tokenTicker} game token not found, proceeding with initialization...`
-    );
+    console.log(`📝 ${tokenTicker} game token not found, proceeding with initialization...`);
   }
 
   // Create Associated Token Account for game vault
@@ -595,23 +516,17 @@ async function initializeToken(
     adminKeypair,
   });
   const gameTokenAccount = ataPlan.address;
-  console.log(
-    `🏪 ${tokenTicker} Game Token Account (ATA): ${gameTokenAccount.toBase58()}`
-  );
+  console.log(`🏪 ${tokenTicker} Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
 
   if (ataPlan.needsCreation) {
-    console.log(
-      `🔧 Creating Associated Token Account for ${tokenTicker} game vault...`
-    );
+    console.log(`🔧 Creating Associated Token Account for ${tokenTicker} game vault...`);
 
     const createAtaTxSignature = await wallet.sendAndConfirmWithResubmits(
       ataPlan.instructions,
       [adminKeypair],
-      { operationLabel: `Create ${tokenTicker} vault ATA` }
+      { operationLabel: `Create ${tokenTicker} vault ATA` },
     );
-    console.log(
-      `✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`
-    );
+    console.log(`✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`);
   } else {
     console.log(`✅ ${tokenTicker} ATA already exists`);
   }
@@ -649,7 +564,7 @@ async function initializeToken(
   const tx = await wallet.sendAndConfirmWithResubmits(
     [tokenInstruction],
     uniqueSigners(adminKeypair, oracleOperatorKeypair),
-    { operationLabel: `Initialize ${tokenTicker} token` }
+    { operationLabel: `Initialize ${tokenTicker} token` },
   );
   console.log(`✅ ${tokenTicker} game token initialized successfully!`);
 
@@ -669,15 +584,13 @@ async function initializeToken(
     } catch (error: any) {
       retries++;
       if (retries === maxRetries) {
-        console.error(
-          `❌ Failed to verify ${tokenTicker} account after ${maxRetries} attempts`
-        );
+        console.error(`❌ Failed to verify ${tokenTicker} account after ${maxRetries} attempts`);
         throw error;
       }
       console.log(
         `⏳ Attempt ${retries}/${maxRetries} - ${tokenTicker} account not found, retrying in ${
           retries * 2
-        } seconds...`
+        } seconds...`,
       );
       await new Promise((resolve) => setTimeout(resolve, retries * 2000));
     }
@@ -685,7 +598,7 @@ async function initializeToken(
 
   if (!gameTokenData) {
     throw new Error(
-      `Failed to fetch ${tokenTicker} game token data after successful initialization`
+      `Failed to fetch ${tokenTicker} game token data after successful initialization`,
     );
   }
 
@@ -708,16 +621,12 @@ async function initializeToken(
 // ================================
 
 async function initializeGameToken() {
-  const tokenSummary = TOKEN_CONFIGS.map((token) => token.tokenTicker).join(
-    ", "
-  );
+  const tokenSummary = TOKEN_CONFIGS.map((token) => token.tokenTicker).join(", ");
   console.log(`🚀 Initializing Game Tokens (${tokenSummary})...\n`);
 
   // Connect to network
   const connection = new Connection(CONFIG.RPC_URL, "confirmed");
-  console.log(
-    `✅ Connected to ${CONFIG.NETWORK_DISPLAY_NAME} (${CONFIG.NETWORK})`
-  );
+  console.log(`✅ Connected to ${CONFIG.NETWORK_DISPLAY_NAME} (${CONFIG.NETWORK})`);
 
   // Load admin keypair
   const adminKeypair = loadKeypairFromPath(CONFIG.ADMIN_KEYPAIR_PATH);
@@ -739,50 +648,40 @@ async function initializeGameToken() {
     program,
     adminKeypair,
     oracleOperatorKeypair,
-    tokensToInitialize
+    tokensToInitialize,
   );
 
   const needsInitialization = costEstimate.breakdown.filter(
-    (entry) => entry.status === "needs-initialization"
+    (entry) => entry.status === "needs-initialization",
   );
 
   if (needsInitialization.length > 0) {
     console.log("\n🧮 Estimated costs for pending token initialization:");
     for (const entry of costEstimate.breakdown) {
       if (entry.status === "already-initialized") {
-        console.log(
-          `   • ${entry.tokenTicker}: already initialized, no additional SOL required`
-        );
+        console.log(`   • ${entry.tokenTicker}: already initialized, no additional SOL required`);
         continue;
       }
       console.log(
         `   • ${entry.tokenTicker}: rent ${formatLamports(
-          entry.rentLamports
+          entry.rentLamports,
         )} SOL, fees ${formatLamports(entry.feeLamports)} SOL${
           entry.needsVaultAta ? " (includes ATA creation)" : ""
-        }`
+        }`,
       );
     }
     if (costEstimate.bufferLamports > 0n) {
       console.log(
-        `   • Buffer: ${formatLamports(
-          costEstimate.bufferLamports
-        )} SOL to cover fee variance`
+        `   • Buffer: ${formatLamports(costEstimate.bufferLamports)} SOL to cover fee variance`,
       );
     }
-    console.log(
-      `   → Total required: ${formatLamports(costEstimate.totalLamports)} SOL\n`
-    );
+    console.log(`   → Total required: ${formatLamports(costEstimate.totalLamports)} SOL\n`);
   } else {
     console.log("✅ All configured tokens are already initialized.");
   }
 
   // Ensure admin wallet has enough SOL before proceeding
-  await ensureSufficientBalance(
-    connection,
-    adminKeypair,
-    costEstimate.totalLamports
-  );
+  await ensureSufficientBalance(connection, adminKeypair, costEstimate.totalLamports);
 
   // Create wallet manager for transaction sending
   const { loadWalletMnemonic } = await import("../src/utils/secrets");
@@ -810,7 +709,7 @@ async function initializeGameToken() {
         oracleOperatorKeypair,
         tokenConfig.tokenMint,
         tokenConfig.tokenTicker,
-        tokenConfig.defaultMinAmount
+        tokenConfig.defaultMinAmount,
       );
       results.push(result);
     }
@@ -821,9 +720,7 @@ async function initializeGameToken() {
     console.log("=".repeat(60));
 
     results.forEach((result, index) => {
-      const status = result.alreadyExists
-        ? "Already Existed"
-        : "Newly Initialized";
+      const status = result.alreadyExists ? "Already Existed" : "Newly Initialized";
       console.log(`\n${index + 1}. ${result.tokenTicker} Token [${status}]:`);
       console.log(`   • Mint: ${result.tokenMint}`);
       console.log(`   • Game Token PDA: ${result.gameTokenPda}`);
@@ -843,23 +740,11 @@ async function initializeGameToken() {
     results.forEach((result) => {
       if (!result.alreadyExists) {
         console.log(`\n${result.tokenTicker}:`);
+        console.log(`• Transaction: ${buildExplorerUrl("tx", result.transaction)}`);
+        console.log(`• Token Mint: ${buildExplorerUrl("token", result.tokenMint)}`);
+        console.log(`• Game Token PDA: ${buildExplorerUrl("account", result.gameTokenPda)}`);
         console.log(
-          `• Transaction: ${buildExplorerUrl("tx", result.transaction)}`
-        );
-        console.log(
-          `• Token Mint: ${buildExplorerUrl("token", result.tokenMint)}`
-        );
-        console.log(
-          `• Game Token PDA: ${buildExplorerUrl(
-            "account",
-            result.gameTokenPda
-          )}`
-        );
-        console.log(
-          `• Game Token Account: ${buildExplorerUrl(
-            "account",
-            result.gameTokenAccount
-          )}`
+          `• Game Token Account: ${buildExplorerUrl("account", result.gameTokenAccount)}`,
         );
       }
     });
@@ -895,15 +780,11 @@ async function initializeGameToken() {
     console.error("\n❌ Error initializing game tokens:", error);
 
     if (error.message?.includes("already in use")) {
-      console.log(
-        "💡 One or more game tokens may already be initialized. Check the output above."
-      );
+      console.log("💡 One or more game tokens may already be initialized. Check the output above.");
     } else if (error.message?.includes("insufficient")) {
       console.log("💡 Make sure you have enough SOL for transaction fees.");
     } else if (error.message?.includes("signature verification failed")) {
-      console.log(
-        "💡 Make sure the admin keypair has the correct permissions."
-      );
+      console.log("💡 Make sure the admin keypair has the correct permissions.");
     }
 
     throw error;

@@ -6,8 +6,7 @@ import { join } from "node:path";
 import type { GameData } from "../src/types";
 
 process.env["NODE_ENV"] = "test";
-process.env["MNEMONIC"] ??=
-  "test test test test test test test test test test test junk";
+process.env["MNEMONIC"] ??= "test test test test test test test test test test test junk";
 process.env["TELEGRAM_TOKEN"] ??= "TEST_TELEGRAM_TOKEN";
 process.env["SOLANA_NETWORK"] ??= "http://localhost:8899";
 process.env["BOT_DB_DIR"] ??= mkdtempSync(join(tmpdir(), "timba-bot-tests-"));
@@ -18,7 +17,7 @@ const createTestGameAddress = () => Keypair.generate().publicKey.toBase58();
 
 const createCompletionEvent = (
   gameAddress: string,
-  overrides: Partial<Record<string, unknown>> = {}
+  overrides: Partial<Record<string, unknown>> = {},
 ) => ({
   name: "GameCompleted",
   data: {
@@ -68,7 +67,7 @@ describe("Game completion recovery", () => {
     const parsed = botModule.__test_parseCompletionEventFromLogs(
       ["Program log"],
       fakeParser,
-      gameAddress
+      gameAddress,
     );
 
     expect(parsed).toEqual({
@@ -92,22 +91,21 @@ describe("Game completion recovery", () => {
       }),
     };
 
-    const originalGetConnection = botModule.wallet.getConnection.bind(
-      botModule.wallet
-    );
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
 
     botModule.wallet.getConnection = () => connectionStub as any;
 
-    botModule.__test_setCompletionEventParserFactory(() => ({
-      *parseLogs(_logs: string[]) {
-        yield createCompletionEvent(gameAddress);
-      },
-    } as any));
+    botModule.__test_setCompletionEventParserFactory(
+      () =>
+        ({
+          *parseLogs(_logs: string[]) {
+            yield createCompletionEvent(gameAddress);
+          },
+        }) as any,
+    );
 
     try {
-      const details = await botModule.__test_fetchCompletionDetailsFromHistory(
-        gameAddress
-      );
+      const details = await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress);
 
       expect(details).toEqual({
         winnerAddress: "WinnerPubkey",
@@ -125,19 +123,18 @@ describe("Game completion recovery", () => {
       signature: `completion-${index}`,
     }));
 
-    const transactionResponses: Array<{ meta: { logMessages: string[] } } | null> =
-      [
-        null,
-        null,
-        null,
-        null,
-        {
-          meta: {
-            logMessages: ["Program log for completion-4"],
-          },
+    const transactionResponses: Array<{ meta: { logMessages: string[] } } | null> = [
+      null,
+      null,
+      null,
+      null,
+      {
+        meta: {
+          logMessages: ["Program log for completion-4"],
         },
-        null,
-      ];
+      },
+      null,
+    ];
 
     let txCallCount = 0;
 
@@ -150,24 +147,23 @@ describe("Game completion recovery", () => {
       },
     };
 
-    const originalGetConnection = botModule.wallet.getConnection.bind(
-      botModule.wallet
-    );
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
 
     botModule.wallet.getConnection = () => connectionStub as any;
 
-    botModule.__test_setCompletionEventParserFactory(() => ({
-      *parseLogs(logs: string[] = []) {
-        if (logs.some((message) => message.includes("completion-4"))) {
-          yield createCompletionEvent(gameAddress);
-        }
-      },
-    } as any));
+    botModule.__test_setCompletionEventParserFactory(
+      () =>
+        ({
+          *parseLogs(logs: string[] = []) {
+            if (logs.some((message) => message.includes("completion-4"))) {
+              yield createCompletionEvent(gameAddress);
+            }
+          },
+        }) as any,
+    );
 
     try {
-      const details = await botModule.__test_fetchCompletionDetailsFromHistory(
-        gameAddress
-      );
+      const details = await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress);
 
       expect(details).toEqual({
         winnerAddress: "WinnerPubkey",
@@ -193,11 +189,11 @@ describe("Game completion recovery", () => {
       creator_telegram_id: "creator",
       amount: 12_000,
       created_at: Date.now(),
-  status: "active",
-  winner_address: undefined,
-  completed_at: undefined,
-  message_id: undefined,
-  chat_id: undefined,
+      status: "active",
+      winner_address: undefined,
+      completed_at: undefined,
+      message_id: undefined,
+      chat_id: undefined,
       game_type: "coinflip",
       token_mint: "Mint",
       token_ticker: "TIMBA",
@@ -217,11 +213,7 @@ describe("Game completion recovery", () => {
       return originalGetGame(address);
     };
 
-    gameDbAny.completeGame = (
-      address: string,
-      winner: string,
-      completedAt?: number
-    ) => {
+    gameDbAny.completeGame = (address: string, winner: string, completedAt?: number) => {
       if (address === gameAddress) {
         stubGameRecord.status = "completed";
         stubGameRecord.winner_address = winner;
@@ -244,7 +236,7 @@ describe("Game completion recovery", () => {
       async (address, winner, totalPot, signature) => {
         completionCalls.push([address, winner, totalPot, signature]);
         gameDbAny.completeGame(address, winner, Date.now());
-      }
+      },
     );
 
     try {
@@ -255,9 +247,7 @@ describe("Game completion recovery", () => {
     }
 
     expect(historyCalls).toEqual([gameAddress]);
-    expect(completionCalls).toEqual([
-      [gameAddress, "RecoveredWinner", 42_000, "sig123"],
-    ]);
+    expect(completionCalls).toEqual([[gameAddress, "RecoveredWinner", 42_000, "sig123"]]);
 
     expect(stubGameRecord.status).toBe("completed");
     expect(stubGameRecord.winner_address).toBe("RecoveredWinner");
@@ -298,11 +288,7 @@ describe("Game completion recovery", () => {
       return originalGetGame(address);
     };
 
-    gameDbAny.completeGame = (
-      address: string,
-      winner: string,
-      completedAt?: number
-    ) => {
+    gameDbAny.completeGame = (address: string, winner: string, completedAt?: number) => {
       if (address === gameAddress) {
         stubGameRecord.status = "completed";
         stubGameRecord.winner_address = winner;
@@ -312,12 +298,9 @@ describe("Game completion recovery", () => {
       originalCompleteGame(address, winner, completedAt);
     };
 
-    const completionCalls: Array<[
-      string,
-      string | undefined,
-      number | undefined,
-      string | undefined
-    ]> = [];
+    const completionCalls: Array<
+      [string, string | undefined, number | undefined, string | undefined]
+    > = [];
     let releaseCompletion: (() => void) | undefined;
 
     botModule.__test_setProcessGameCompletionHandler(
@@ -327,7 +310,7 @@ describe("Game completion recovery", () => {
           releaseCompletion = () => resolve();
         });
         gameDbAny.completeGame(address, winner ?? "cancelled", Date.now());
-      }
+      },
     );
 
     botModule.__test_setCompletionHistoryFetcher(async () => ({
@@ -341,7 +324,7 @@ describe("Game completion recovery", () => {
         gameAddress,
         "RecoveredWinner",
         42_000,
-        "sig123"
+        "sig123",
       );
 
       expect(botModule.__test_isCompletionJobActive(gameAddress)).toBe(true);

@@ -1,6 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
-import { SwapManager, __test_setJupiterQuoteExpirationMs, __test_resetJupiterQuoteExpirationMs } from "../src/utils/swap-manager";
+import {
+  SwapManager,
+  __test_setJupiterQuoteExpirationMs,
+  __test_resetJupiterQuoteExpirationMs,
+} from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
 const quoteResponse = {
@@ -28,7 +32,7 @@ describe("SwapManager quote expiration", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
     (sm as any).createTokenAccountsIfNeeded = async () => [];
@@ -73,7 +77,7 @@ describe("SwapManager quote expiration", () => {
         inputTicker: "SOL",
         outputTicker: "USDC",
       },
-      quote
+      quote,
     );
 
     expect(quoteFetchCount).toBe(1);

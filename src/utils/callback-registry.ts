@@ -13,18 +13,18 @@ export type CallbackPrefixContext = {
 export type CallbackPrefixHandler = (
   ctx: Context,
   data: CallbackPrefixContext,
-  next: () => Promise<void>
+  next: () => Promise<void>,
 ) => Promise<void> | void;
 
 export type WrapCallbackHandler = <TCtx extends Context>(
   handler: (ctx: TCtx, next: NextFunction) => Promise<void> | void,
-  options?: { action?: string; errorAck?: string }
+  options?: { action?: string; errorAck?: string },
 ) => (ctx: TCtx, next: NextFunction) => Promise<void>;
 
 export type RegisterCallbackPrefixHandler = (
   prefix: string,
   handler: CallbackPrefixHandler,
-  options?: CallbackPrefixHandlerOptions
+  options?: CallbackPrefixHandlerOptions,
 ) => void;
 
 export const createCallbackPrefixRegistrar = ({
@@ -50,9 +50,8 @@ export const createCallbackPrefixRegistrar = ({
         {
           action: options.logLabel ?? `${prefix} handler`,
           errorAck: options.errorAck,
-        }
-      )
+        },
+      ),
     );
   };
 };
-

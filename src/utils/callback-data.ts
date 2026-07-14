@@ -70,9 +70,7 @@ const decodeSigned = (value: string | undefined): number | null => {
   return parsed;
 };
 
-const normalizeAmount = (
-  amount: string
-): { digits: bigint; scale: number } | null => {
+const normalizeAmount = (amount: string): { digits: bigint; scale: number } | null => {
   if (typeof amount !== "string") return null;
   const trimmed = amount.trim();
   if (!/^\d+(?:\.\d+)?$/.test(trimmed)) return null;
@@ -154,7 +152,7 @@ const buildCallback = (parts: string[]): string | null => {
 const parseCallbackParts = (
   data: string | undefined,
   expectedPrefix: CallbackPrefix,
-  totalParts: number
+  totalParts: number,
 ): string[] | null => {
   if (!data) return null;
   const parts = data.split(CALLBACK_SEPARATOR);
@@ -181,13 +179,7 @@ export const encodeGameConfirmPayload = (payload: EncodedGameConfirmPayload) => 
   const minPlayersPart = encodeUnsigned(payload.minPlayers);
   const visibilityPart = payload.isPrivate ? "1" : "0";
 
-  if (
-    !amountPart ||
-    !creatorPart ||
-    !playersPart ||
-    !timeoutPart ||
-    !minPlayersPart
-  ) {
+  if (!amountPart || !creatorPart || !playersPart || !timeoutPart || !minPlayersPart) {
     return null;
   }
 
@@ -204,7 +196,7 @@ export const encodeGameConfirmPayload = (payload: EncodedGameConfirmPayload) => 
 };
 
 export const decodeGameConfirmPayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedGameConfirmPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.confirmGame, 8);
   if (!parts) return null;
@@ -246,9 +238,7 @@ export type EncodedTimeoutChangePayload = {
   creatorId: string;
 };
 
-export const encodeTimeoutChangePayload = (
-  payload: EncodedTimeoutChangePayload
-) => {
+export const encodeTimeoutChangePayload = (payload: EncodedTimeoutChangePayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
   const playersPart = encodeUnsigned(payload.players);
@@ -269,7 +259,7 @@ export const encodeTimeoutChangePayload = (
 };
 
 export const decodeTimeoutChangePayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedTimeoutChangePayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.timeoutChange, 6);
   if (!parts) return null;
@@ -300,9 +290,7 @@ export type EncodedVisibilityPayload = {
   creatorId: string;
 };
 
-export const encodeVisibilityPayload = (
-  payload: EncodedVisibilityPayload
-) => {
+export const encodeVisibilityPayload = (payload: EncodedVisibilityPayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
   const playersPart = encodeUnsigned(payload.players);
@@ -323,7 +311,7 @@ export const encodeVisibilityPayload = (
 };
 
 export const decodeVisibilityPayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedVisibilityPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.visibility, 6);
   if (!parts) return null;
@@ -354,9 +342,7 @@ export type EncodedMinPlayersChangePayload = {
   creatorId: string;
 };
 
-export const encodeMinPlayersChangePayload = (
-  payload: EncodedMinPlayersChangePayload
-) => {
+export const encodeMinPlayersChangePayload = (payload: EncodedMinPlayersChangePayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
   const playersPart = encodeUnsigned(payload.players);
@@ -377,7 +363,7 @@ export const encodeMinPlayersChangePayload = (
 };
 
 export const decodeMinPlayersChangePayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedMinPlayersChangePayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.minPlayersChange, 6);
   if (!parts) return null;
@@ -406,9 +392,7 @@ export type EncodedAmountSelectionPayload = {
   creatorId: string;
 };
 
-export const encodeAmountSelectionPayload = (
-  payload: EncodedAmountSelectionPayload
-) => {
+export const encodeAmountSelectionPayload = (payload: EncodedAmountSelectionPayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
 
@@ -425,7 +409,7 @@ export const encodeAmountSelectionPayload = (
 };
 
 export const decodeAmountSelectionPayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedAmountSelectionPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.amountSelection, 4);
   if (!parts) return null;
@@ -451,9 +435,7 @@ export type EncodedPlayersSelectionPayload = {
   creatorId: string;
 };
 
-export const encodePlayersSelectionPayload = (
-  payload: EncodedPlayersSelectionPayload
-) => {
+export const encodePlayersSelectionPayload = (payload: EncodedPlayersSelectionPayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
   const playersPart = encodeUnsigned(payload.players);
@@ -472,7 +454,7 @@ export const encodePlayersSelectionPayload = (
 };
 
 export const decodePlayersSelectionPayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedPlayersSelectionPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.playersSelection, 5);
   if (!parts) return null;
@@ -499,9 +481,7 @@ export type EncodedCustomPlayersPayload = {
   creatorId: string;
 };
 
-export const encodeCustomPlayersPayload = (
-  payload: EncodedCustomPlayersPayload
-) => {
+export const encodeCustomPlayersPayload = (payload: EncodedCustomPlayersPayload) => {
   const amountPart = encodeAmount(payload.amount);
   const creatorPart = encodeCreatorId(payload.creatorId);
 
@@ -518,7 +498,7 @@ export const encodeCustomPlayersPayload = (
 };
 
 export const decodeCustomPlayersPayload = (
-  data: string | undefined
+  data: string | undefined,
 ): EncodedCustomPlayersPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.customPlayers, 4);
   if (!parts) return null;

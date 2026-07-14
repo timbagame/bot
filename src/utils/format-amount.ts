@@ -67,7 +67,7 @@ function toBigIntString(value: number | string | bigint): { sign: string; digits
 export function formatAmount(
   raw: number | string | bigint,
   decimals: number,
-  opts: FormatOptions = {}
+  opts: FormatOptions = {},
 ): string {
   const { maxFractionDigits = decimals, trim = true } = opts;
   const { sign, digits } = toBigIntString(raw);
@@ -124,10 +124,7 @@ export function formatAmount(
   return signed;
 }
 
-export function formatTokenDisplay(
-  value: number,
-  options: FormatTokenDisplayOptions = {}
-): string {
+export function formatTokenDisplay(value: number, options: FormatTokenDisplayOptions = {}): string {
   if (!Number.isFinite(value)) {
     return "0";
   }
@@ -147,9 +144,7 @@ export function formatTokenDisplay(
   }
 
   const maximumFractionDigits = precision;
-  const minimumFractionDigits = Number.isInteger(value)
-    ? 0
-    : Math.min(maximumFractionDigits, 6);
+  const minimumFractionDigits = Number.isInteger(value) ? 0 : Math.min(maximumFractionDigits, 6);
 
   return value.toLocaleString("en-US", {
     minimumFractionDigits,
@@ -204,10 +199,7 @@ export function formatCompactTokenDisplay(value: string | number): string {
   return `${sign}${formatted}${suffixes[suffixIndex]}`;
 }
 
-export function formatUsdValue(
-  value: number,
-  options: FormatUsdValueOptions = {}
-): string {
+export function formatUsdValue(value: number, options: FormatUsdValueOptions = {}): string {
   const {
     approximate = false,
     minimumFractionDigits = 0,

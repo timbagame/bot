@@ -1,6 +1,5 @@
 export type InferPlayersResult =
-  | { ok: true; value: number; source: "default" | "arg" }
-  | { ok: false; error: string };
+  { ok: true; value: number; source: "default" | "arg" } | { ok: false; error: string };
 
 /**
  * Infer max players from command args in a robust, index-based way.
@@ -17,7 +16,7 @@ export function inferMaxPlayers(
   tokenWasSpecified: boolean,
   defaultPlayers: number,
   minPlayers: number,
-  maxPlayers: number
+  maxPlayers: number,
 ): InferPlayersResult {
   // Determine expected index for a players argument
   const playersIndex = tokenWasSpecified

@@ -1,8 +1,4 @@
-import {
-  buildTokenList,
-  resolveDefaultToken,
-  WSOL_MINT,
-} from "./token-registry";
+import { buildTokenList, resolveDefaultToken, WSOL_MINT } from "./token-registry";
 import { FeeBudgetManager } from "./fee-budget";
 
 // ================================
@@ -15,19 +11,14 @@ export let MIN_SOL_FOR_TX =
 export const SOL_BALANCE_PRECISION = 6;
 export let MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS =
   FeeBudgetManager.getDefaultGameSafetyBufferLamports();
-export let JIT_SWAP_FEE_BUFFER_LAMPORTS =
-  FeeBudgetManager.getDefaultJitSwapFeeBufferLamports();
+export let JIT_SWAP_FEE_BUFFER_LAMPORTS = FeeBudgetManager.getDefaultJitSwapFeeBufferLamports();
 
 export const applyDynamicFeeBudgets = (options: {
   singleTransactionLamports?: number;
   gameSafetyBufferLamports?: number;
   jitSwapBufferLamports?: number;
 }) => {
-  const {
-    singleTransactionLamports,
-    gameSafetyBufferLamports,
-    jitSwapBufferLamports,
-  } = options;
+  const { singleTransactionLamports, gameSafetyBufferLamports, jitSwapBufferLamports } = options;
 
   if (
     typeof singleTransactionLamports === "number" &&
@@ -92,22 +83,14 @@ export const GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS = 100;
 // ================================
 
 export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
-export const FEE_SWEEP_INTERVAL_MS = parsePositiveDuration(
-  "FEE_SWEEP_INTERVAL_MS",
-  60 * 60_000
-); // Default 1 hour
+export const FEE_SWEEP_INTERVAL_MS = parsePositiveDuration("FEE_SWEEP_INTERVAL_MS", 60 * 60_000); // Default 1 hour
 export const parseEnableFeeSweeperFlag = (raw: string | undefined): boolean => {
   if (raw === undefined) return true;
   const normalized = raw.trim().toLowerCase();
   return normalized === "true" || normalized === "1";
 };
-export const ENABLE_FEE_SWEEPER = parseEnableFeeSweeperFlag(
-  process.env.ENABLE_FEE_SWEEPER
-);
-export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration(
-  "FEE_SWEEP_SOL_USD_THRESHOLD",
-  15
-);
+export const ENABLE_FEE_SWEEPER = parseEnableFeeSweeperFlag(process.env.ENABLE_FEE_SWEEPER);
+export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration("FEE_SWEEP_SOL_USD_THRESHOLD", 15);
 
 // ================================
 // CACHE DURATIONS (in milliseconds)
@@ -118,27 +101,24 @@ export const TOKEN_MANAGER_APPROVED_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const TOKEN_PRICE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const FEE_SWEEP_SOL_PRICE_MAX_AGE_MS = parsePositiveDuration(
   "FEE_SWEEP_SOL_PRICE_MAX_AGE_MS",
-  TOKEN_PRICE_CACHE_TTL_MS
+  TOKEN_PRICE_CACHE_TTL_MS,
 );
 export const FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO = parseNonNegativeFloat(
   "FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO",
-  0.2
+  0.2,
 );
 export const TELEGRAM_USERNAME_CACHE_TTL_MS = parsePositiveDuration(
   "TELEGRAM_USERNAME_CACHE_TTL_MS",
-  5 * 60_000
+  5 * 60_000,
 );
 export const TOKEN_DISCOVERY_COOLDOWN_MS = parsePositiveDuration(
   "TOKEN_DISCOVERY_COOLDOWN_MS",
-  2 * 60_000
+  2 * 60_000,
 );
-export const WALLET_RPC_CACHE_TTL_MS = parsePositiveDuration(
-  "WALLET_RPC_CACHE_TTL_MS",
-  20_000
-);
+export const WALLET_RPC_CACHE_TTL_MS = parsePositiveDuration("WALLET_RPC_CACHE_TTL_MS", 20_000);
 export const TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS = parsePositiveDuration(
   "TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS",
-  5 * 60_000
+  5 * 60_000,
 );
 
 // ================================
@@ -146,30 +126,21 @@ export const TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS = parsePositiveDuration(
 // ================================
 
 export const WALLET_RATE_LIMIT_MS = 500;
-export const USER_WALLET_RPC_WINDOW_MS = parsePositiveDuration(
-  "USER_WALLET_RPC_WINDOW_MS",
-  30_000
-);
-export const USER_WALLET_RPC_MAX_CALLS = parsePositiveInteger(
-  "USER_WALLET_RPC_MAX_CALLS",
-  6
-);
+export const USER_WALLET_RPC_WINDOW_MS = parsePositiveDuration("USER_WALLET_RPC_WINDOW_MS", 30_000);
+export const USER_WALLET_RPC_MAX_CALLS = parsePositiveInteger("USER_WALLET_RPC_MAX_CALLS", 6);
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;
 export const GAME_INFO_LIMIT = 5;
 export const GAMES_PER_PAGE = 5; // Games per page in /games command output
 export const GAMES_HISTORY_LIMIT = 50; // Max games to fetch for history
 export const MAX_ACTIVE_GAMES_PER_CREATOR = parsePositiveInteger(
   "MAX_ACTIVE_GAMES_PER_CREATOR",
-  10
+  10,
 );
 export const GAME_CREATION_RATE_LIMIT_WINDOW_MS = parsePositiveDuration(
   "GAME_CREATION_RATE_LIMIT_WINDOW_MS",
-  60_000
+  60_000,
 );
-export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger(
-  "MAX_GAMES_PER_CREATOR_WINDOW",
-  3
-);
+export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger("MAX_GAMES_PER_CREATOR_WINDOW", 3);
 export const JOIN_CALLBACK_ANSWER_SUPPRESS_MS = 7_000;
 
 // ================================
@@ -180,14 +151,14 @@ export const JOIN_CALLBACK_ANSWER_SUPPRESS_MS = 7_000;
 // This is a coalescing window: bursts of joins/unjoins are merged into a single update.
 export const GAME_MESSAGE_UPDATE_DEBOUNCE_MS = parsePositiveDuration(
   "GAME_MESSAGE_UPDATE_DEBOUNCE_MS",
-  5_000
+  5_000,
 );
 
 // Disable per-join announcements once a game grows beyond this ticket count.
 // Set to 0 to disable join announcements entirely.
 export const JOIN_ANNOUNCEMENT_MAX_TICKETS = parseNonNegativeInteger(
   "JOIN_ANNOUNCEMENT_MAX_TICKETS",
-  50
+  50,
 );
 
 // Default settings for per-chat join notification controls
@@ -220,7 +191,7 @@ const formatInputTimeoutMinutes = (timeoutMs: number): string => {
 };
 
 export const INPUT_TIMEOUT_HINT = `⏱️ <i>Reply to this message with your input. This will timeout in ${formatInputTimeoutMinutes(
-  INPUT_TIMEOUT_MS
+  INPUT_TIMEOUT_MS,
 )} minutes</i>`;
 
 // ================================
@@ -233,14 +204,14 @@ export let GAME_EXPIRATION_BUFFER_TIME = DEFAULT_GAME_EXPIRATION_BUFFER_TIME; //
 export const applyOracleBufferTime = (bufferSeconds: number): number => {
   if (!Number.isFinite(bufferSeconds)) {
     console.warn(
-      `[Config] Oracle buffer time must be a finite number. Received '${bufferSeconds}'. Keeping current value ${GAME_EXPIRATION_BUFFER_TIME}.`
+      `[Config] Oracle buffer time must be a finite number. Received '${bufferSeconds}'. Keeping current value ${GAME_EXPIRATION_BUFFER_TIME}.`,
     );
     return GAME_EXPIRATION_BUFFER_TIME;
   }
 
   if (bufferSeconds < 0) {
     console.warn(
-      `[Config] Oracle buffer time must be >= 0. Received ${bufferSeconds}, clamping to 0.`
+      `[Config] Oracle buffer time must be >= 0. Received ${bufferSeconds}, clamping to 0.`,
     );
   }
 
@@ -258,17 +229,17 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 
 export const JUPITER_MIN_SOL_BALANCE_LAMPORTS = parsePositiveInteger(
   "JUPITER_MIN_SOL_BALANCE_LAMPORTS",
-  10_000_000
+  10_000_000,
 );
 
 export const JUPITER_GASLESS_MIN_TRADE_USD = parsePositiveDuration(
   "JUPITER_GASLESS_MIN_TRADE_USD",
-  10
+  10,
 );
 
 export const USER_SOL_MAX_BUFFER_LAMPORTS = parsePositiveInteger(
   "USER_SOL_MAX_BUFFER_LAMPORTS",
-  500_000
+  500_000,
 );
 
 // ================================
@@ -286,16 +257,14 @@ function parsePositiveDuration(key: string, fallback: number): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     console.warn(
-      `[Config] ${key} must be a positive number. Received '${raw}', using fallback ${fallback}.`
+      `[Config] ${key} must be a positive number. Received '${raw}', using fallback ${fallback}.`,
     );
     return fallback;
   }
 
   if (parsed <= 0) {
     const clamped = Math.max(1, fallback);
-    console.warn(
-      `[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`
-    );
+    console.warn(`[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`);
     return clamped;
   }
 
@@ -311,16 +280,14 @@ function parsePositiveInteger(key: string, fallback: number): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     console.warn(
-      `[Config] ${key} must be a positive integer. Received '${raw}', using fallback ${fallback}.`
+      `[Config] ${key} must be a positive integer. Received '${raw}', using fallback ${fallback}.`,
     );
     return fallback;
   }
 
   if (parsed <= 0) {
     const clamped = Math.max(1, Math.floor(fallback));
-    console.warn(
-      `[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`
-    );
+    console.warn(`[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`);
     return clamped;
   }
 
@@ -336,15 +303,13 @@ function parseNonNegativeInteger(key: string, fallback: number): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     console.warn(
-      `[Config] ${key} must be a non-negative integer. Received '${raw}', using fallback ${fallback}.`
+      `[Config] ${key} must be a non-negative integer. Received '${raw}', using fallback ${fallback}.`,
     );
     return fallback;
   }
 
   if (parsed < 0) {
-    console.warn(
-      `[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`
-    );
+    console.warn(`[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`);
     return 0;
   }
 
@@ -360,15 +325,13 @@ function parseNonNegativeFloat(key: string, fallback: number): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     console.warn(
-      `[Config] ${key} must be a non-negative number. Received '${raw}', using fallback ${fallback}.`
+      `[Config] ${key} must be a non-negative number. Received '${raw}', using fallback ${fallback}.`,
     );
     return fallback;
   }
 
   if (parsed < 0) {
-    console.warn(
-      `[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`
-    );
+    console.warn(`[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`);
     return 0;
   }
 
@@ -376,15 +339,9 @@ function parseNonNegativeFloat(key: string, fallback: number): number {
 }
 
 // Cache TTL (ms) for token prices
-export const PRICES_CACHE_TTL_MS = parsePositiveDuration(
-  "PRICES_CACHE_TTL_MS",
-  60_000
-);
+export const PRICES_CACHE_TTL_MS = parsePositiveDuration("PRICES_CACHE_TTL_MS", 60_000);
 // Request timeout (ms)
-export const PRICES_TIMEOUT_MS = parsePositiveDuration(
-  "PRICES_TIMEOUT_MS",
-  3_000
-);
+export const PRICES_TIMEOUT_MS = parsePositiveDuration("PRICES_TIMEOUT_MS", 3_000);
 
 // ================================
 // MEDIA FILE IDs

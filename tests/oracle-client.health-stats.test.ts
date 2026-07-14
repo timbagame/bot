@@ -2,7 +2,9 @@ import { describe, test, expect, afterEach } from "bun:test";
 import { OracleClient } from "../src/utils/oracle";
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch as any; });
+afterEach(() => {
+  globalThis.fetch = realFetch as any;
+});
 
 describe("OracleClient health and stats", () => {
   test("isHealthy returns true on 200", async () => {
@@ -21,4 +23,3 @@ describe("OracleClient health and stats", () => {
     expect(stats).toBeNull();
   });
 });
-

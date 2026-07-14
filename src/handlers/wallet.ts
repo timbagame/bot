@@ -17,7 +17,10 @@ export type ShowWalletUIDeps = {
     formatSolBalance: (lamports: number) => string;
     formatTokenBalance?: (n: number, d: number) => string;
   };
-  getCachedWalletData: (telegramId: bigint) => Promise<{ solBalance: number; tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }> }>;
+  getCachedWalletData: (telegramId: bigint) => Promise<{
+    solBalance: number;
+    tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
+  }>;
   fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
   buildWalletCaption: (walletAddress: string, tokenLines: TokenDisplayLine[]) => string;
   createWalletKeyboard: () => InlineKeyboard;
@@ -25,7 +28,14 @@ export type ShowWalletUIDeps = {
 };
 
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
-  const { wallet, getCachedWalletData, fetchPricesUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
+  const {
+    wallet,
+    getCachedWalletData,
+    fetchPricesUSD,
+    buildWalletCaption,
+    createWalletKeyboard,
+    WINNER_VIDEO_ID,
+  } = deps;
 
   const telegramId = await getRequiredTelegramIdForContext(ctx, "wallet display", {
     onMissing: async (message) => {
@@ -49,10 +59,10 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const messageAuthorId = callbackMessage?.from?.id;
   const authoredByBot = Boolean(
     callbackMessage?.from?.is_bot ||
-      (botId != null && messageAuthorId != null && String(messageAuthorId) === String(botId))
+    (botId != null && messageAuthorId != null && String(messageAuthorId) === String(botId)),
   );
   const canEditBotMessage = Boolean(
-    typeof ctx?.editMessageMedia === "function" && callbackMessage && authoredByBot
+    typeof ctx?.editMessageMedia === "function" && callbackMessage && authoredByBot,
   );
 
   const resolveOriginChatId = (): number | undefined => {
@@ -121,7 +131,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
             ? () =>
                 ctx.editMessageMedia(
                   { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
-                  { reply_markup: getWalletKeyboard() }
+                  { reply_markup: getWalletKeyboard() },
                 )
             : undefined,
       });
@@ -157,7 +167,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     if (error instanceof RateLimitExceededError) {
       const waitSeconds = Math.max(1, Math.ceil(error.retryAfterMs / 1000));
       console.warn(
-        `Rate limit hit for wallet UI ${telegramId.toString()}: retry in ${waitSeconds}s`
+        `Rate limit hit for wallet UI ${telegramId.toString()}: retry in ${waitSeconds}s`,
       );
       const response = [
         `💳 <b>Wallet</b>`,
@@ -252,10 +262,7 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "balance command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "balance command");
 
   if (telegramId == null) {
     return;
@@ -263,7 +270,9 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   if (isPrivateChat(ctx)) {
     try {
-      try { clearWalletCache(telegramId); } catch {}
+      try {
+        clearWalletCache(telegramId);
+      } catch {}
       await showWalletUI(ctx);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
@@ -273,7 +282,9 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   // If it's not a private chat, send the same wallet UI privately to the user
   try {
-    try { clearWalletCache(telegramId); } catch {}
+    try {
+      clearWalletCache(telegramId);
+    } catch {}
 
     const dmTargetBigInt = telegramId;
     if (dmTargetBigInt === 0n) {

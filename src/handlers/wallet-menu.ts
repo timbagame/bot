@@ -12,21 +12,11 @@ import {
   type BuildWalletActionMenuForUserOptions,
   type WalletMenuBalances,
 } from "../utils/wallet-ui";
-import {
-  createWalletKeyboard,
-  createWalletSettingsKeyboard,
-} from "../utils/keyboards";
+import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/keyboards";
 import { getPricesUSD } from "../utils/prices";
 import { respondWithMenu } from "../utils/menu-response";
-import {
-  safeAnswerCallbackQuery,
-  requireTelegramId,
-} from "../utils/context-helpers";
-import type {
-  WalletManager,
-  WalletBalancesSnapshot,
-  ApprovedTokenBalance,
-} from "../utils/wallet";
+import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
+import type { WalletManager, WalletBalancesSnapshot, ApprovedTokenBalance } from "../utils/wallet";
 import type { TokenManager } from "../utils/token-manager";
 import {
   showWalletUI as showWalletUIHandler,
@@ -40,10 +30,7 @@ import {
   type RegisterCallbackPrefixHandler,
   type WrapCallbackHandler,
 } from "../utils/callback-registry";
-import {
-  RateLimitExceededError,
-  SlidingWindowRateLimiter,
-} from "../utils/rate-limiter";
+import { RateLimitExceededError, SlidingWindowRateLimiter } from "../utils/rate-limiter";
 
 export type WalletActionMenuResolution = {
   menuOptions: Omit<BuildWalletActionMenuForUserOptions, "ctx">;
@@ -89,9 +76,7 @@ type WalletMenuModuleOptions = {
 type WalletMenuModule = {
   registerWalletMenuHandlers: () => void;
   registerCallbackPrefixHandler: RegisterCallbackPrefixHandler;
-  registerWalletActionMenuHandler: (
-    config: WalletActionMenuHandlerConfig
-  ) => void;
+  registerWalletActionMenuHandler: (config: WalletActionMenuHandlerConfig) => void;
   getCachedWalletData: (telegramId: bigint) => Promise<WalletBalancesSnapshot>;
   clearWalletCache: (telegramId: bigint) => void;
   defaultWalletActionMenuDeps: {
@@ -105,7 +90,7 @@ type WalletMenuModule = {
   __test_setWalletCache: (
     telegramId: bigint | number | string,
     data: WalletSnapshotSeed,
-    ttlOverrideMs?: number
+    ttlOverrideMs?: number,
   ) => void;
   __test_getWalletSnapshotCacheKeys: () => string[];
   __test_clearWalletSnapshotCache: () => void;
@@ -114,32 +99,20 @@ type WalletMenuModule = {
   __test_resetWalletRpcCacheTtlMs: () => void;
 };
 
-export const createWalletMenuModule = (
-  options: WalletMenuModuleOptions
-): WalletMenuModule => {
-  const { bot, wallet, getTokenManager, wrapCallbackHandler, rpcRateLimiter } =
-    options;
+export const createWalletMenuModule = (options: WalletMenuModuleOptions): WalletMenuModule => {
+  const { bot, wallet, getTokenManager, wrapCallbackHandler, rpcRateLimiter } = options;
 
   const walletRpcLimiter = rpcRateLimiter.limiter;
-  const walletRpcMax = Math.max(
-    1,
-    rpcRateLimiter.maxRequests ?? USER_WALLET_RPC_MAX_CALLS
-  );
+  const walletRpcMax = Math.max(1, rpcRateLimiter.maxRequests ?? USER_WALLET_RPC_MAX_CALLS);
   let walletRpcCacheTtlMs = WALLET_RPC_CACHE_TTL_MS;
   const walletSnapshotCache = new Map<
     string,
     { expiresAt: number; snapshot: WalletBalancesSnapshot }
   >();
-  const pendingWalletFetches = new Map<
-    string,
-    Promise<WalletBalancesSnapshot>
-  >();
+  const pendingWalletFetches = new Map<string, Promise<WalletBalancesSnapshot>>();
   const cacheInvalidations = new Map<string, number>();
 
-  const testApprovedTokenOverrides = new Map<
-    string,
-    WalletBalancesSnapshot["approvedTokens"]
-  >();
+  const testApprovedTokenOverrides = new Map<string, WalletBalancesSnapshot["approvedTokens"]>();
 
   const normalizeTelegramId = (value: bigint | number | string): bigint =>
     typeof value === "bigint" ? value : BigInt(value);
@@ -157,12 +130,11 @@ export const createWalletMenuModule = (
   });
 
   const coerceApprovedTokenBalances = (
-    entries: WalletSnapshotSeed["tokenBalances"]
+    entries: WalletSnapshotSeed["tokenBalances"],
   ): ApprovedTokenBalance[] =>
     entries.map((entry) => {
       const rawBalance =
-        entry.rawBalance ??
-        (Number.isFinite(entry.balance) ? String(entry.balance) : "0");
+        entry.rawBalance ?? (Number.isFinite(entry.balance) ? String(entry.balance) : "0");
 
       let lamports: bigint;
       try {
@@ -191,7 +163,7 @@ export const createWalletMenuModule = (
       const waitSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
       throw new RateLimitExceededError(
         `⏳ Too many wallet refreshes. Try again in ${waitSeconds}s.`,
-        retryAfterMs
+        retryAfterMs,
       );
     }
   };
@@ -201,9 +173,7 @@ export const createWalletMenuModule = (
     return `${telegramId.toString()}:${rpcEndpoint}`;
   };
 
-  const getCachedWalletData = async (
-    telegramId: bigint
-  ): Promise<WalletBalancesSnapshot> => {
+  const getCachedWalletData = async (telegramId: bigint): Promise<WalletBalancesSnapshot> => {
     const cacheKey = getCacheKey(telegramId);
     const now = Date.now();
     const cachedSnapshot = walletSnapshotCache.get(cacheKey);
@@ -225,8 +195,7 @@ export const createWalletMenuModule = (
 
     const staleNative = wallet.peekCachedNativeBalance(telegramId);
     const staleTokens = wallet.peekCachedApprovedTokenBalances(telegramId);
-    const allowStaleOnError =
-      staleNative !== undefined || (staleTokens?.length ?? 0) > 0;
+    const allowStaleOnError = staleNative !== undefined || (staleTokens?.length ?? 0) > 0;
 
     const fetchPromise = (async () => {
       const fetchStart = Date.now();
@@ -235,15 +204,11 @@ export const createWalletMenuModule = (
         const nativeSolBalance = await wallet.getBalance(telegramId, {
           allowStaleOnError,
         });
-        const tokenBalances = await wallet.getAllApprovedTokenBalances(
-          telegramId,
-          approvedTokens,
-          { allowStaleOnError }
-        );
+        const tokenBalances = await wallet.getAllApprovedTokenBalances(telegramId, approvedTokens, {
+          allowStaleOnError,
+        });
 
-        const wsolToken = tokenBalances.find(
-          (token) => token.mint === WSOL_MINT
-        );
+        const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
         const wsolBalance = wsolToken?.balance ?? 0;
 
         const snapshot: WalletBalancesSnapshot = {
@@ -263,27 +228,21 @@ export const createWalletMenuModule = (
         return snapshot;
       } catch (error) {
         if (allowStaleOnError) {
-          const fallbackNative =
-            wallet.peekCachedNativeBalance(telegramId) ?? staleNative;
-          const fallbackTokens =
-            wallet.peekCachedApprovedTokenBalances(telegramId) ?? staleTokens;
+          const fallbackNative = wallet.peekCachedNativeBalance(telegramId) ?? staleNative;
+          const fallbackTokens = wallet.peekCachedApprovedTokenBalances(telegramId) ?? staleTokens;
 
-          if (
-            fallbackNative !== undefined ||
-            (fallbackTokens && fallbackTokens.length > 0)
-          ) {
+          if (fallbackNative !== undefined || (fallbackTokens && fallbackTokens.length > 0)) {
             console.warn(
               `⚠️ Falling back to stale wallet cache for user ${telegramId.toString()} due to RPC error:`,
-              error
+              error,
             );
 
             const resolvedNative = fallbackNative ?? 0;
             const resolvedTokensSource = fallbackTokens ?? [];
-            const resolvedTokens: ApprovedTokenBalance[] =
-              resolvedTokensSource.map((token) => ({ ...token }));
-            const wsolToken = resolvedTokens.find(
-              (token) => token.mint === WSOL_MINT
-            );
+            const resolvedTokens: ApprovedTokenBalance[] = resolvedTokensSource.map((token) => ({
+              ...token,
+            }));
+            const wsolToken = resolvedTokens.find((token) => token.mint === WSOL_MINT);
             const wsolBalance = wsolToken?.balance ?? 0;
 
             const snapshot: WalletBalancesSnapshot = {
@@ -322,8 +281,7 @@ export const createWalletMenuModule = (
     console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
   };
 
-  const getWalletSnapshotCacheKeys = () =>
-    Array.from(walletSnapshotCache.keys());
+  const getWalletSnapshotCacheKeys = () => Array.from(walletSnapshotCache.keys());
   const clearWalletSnapshotCache = () => walletSnapshotCache.clear();
   const getPendingWalletFetchCount = () => pendingWalletFetches.size;
   const setWalletRpcCacheTtlMs = (value: number) => {
@@ -376,14 +334,9 @@ export const createWalletMenuModule = (
 
   const defaultWalletActionMenuDeps = {
     requireTelegramId,
-    getWalletAddress: (telegramId: bigint) =>
-      wallet.getKeyPair(telegramId).publicKey.toBase58(),
-    getWalletBalances: async (
-      telegramId: bigint
-    ): Promise<WalletMenuBalances> => {
-      const { solBalance, tokenBalances } = await getCachedWalletData(
-        telegramId
-      );
+    getWalletAddress: (telegramId: bigint) => wallet.getKeyPair(telegramId).publicKey.toBase58(),
+    getWalletBalances: async (telegramId: bigint): Promise<WalletMenuBalances> => {
+      const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
       return { solBalance, tokenBalances };
     },
     formatSolBalance: (lamports: number) => wallet.formatSolBalance(lamports),
@@ -406,13 +359,10 @@ export const createWalletMenuModule = (
             return;
           }
 
-          const { menu } = await buildWalletActionMenuForUser(
-            defaultWalletActionMenuDeps,
-            {
-              ctx,
-              ...resolution.menuOptions,
-            }
-          );
+          const { menu } = await buildWalletActionMenuForUser(defaultWalletActionMenuDeps, {
+            ctx,
+            ...resolution.menuOptions,
+          });
 
           await respondWithMenu(ctx, menu);
 
@@ -420,34 +370,25 @@ export const createWalletMenuModule = (
             await safeAnswerCallbackQuery(ctx, resolution.successAck);
           }
         },
-        { action: logLabel ?? callback, errorAck }
-      )
+        { action: logLabel ?? callback, errorAck },
+      ),
     );
   };
 
   const __test_setWalletCache = (
     telegramId: bigint | number | string,
     data: WalletSnapshotSeed,
-    ttlOverrideMs?: number
+    ttlOverrideMs?: number,
   ) => {
     const normalizedId = normalizeTelegramId(telegramId);
     const nativeBalance = data.nativeSolBalance ?? data.solBalance;
-    const coercedTokenBalances = coerceApprovedTokenBalances(
-      data.tokenBalances ?? []
-    );
+    const coercedTokenBalances = coerceApprovedTokenBalances(data.tokenBalances ?? []);
 
     wallet.setCachedNativeBalance(normalizedId, nativeBalance, ttlOverrideMs);
-    wallet.setCachedApprovedTokenBalances(
-      normalizedId,
-      coercedTokenBalances,
-      ttlOverrideMs
-    );
+    wallet.setCachedApprovedTokenBalances(normalizedId, coercedTokenBalances, ttlOverrideMs);
 
     if (data.approvedTokens) {
-      testApprovedTokenOverrides.set(
-        normalizedId.toString(),
-        data.approvedTokens
-      );
+      testApprovedTokenOverrides.set(normalizedId.toString(), data.approvedTokens);
     }
   };
 

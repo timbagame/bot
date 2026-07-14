@@ -10,13 +10,10 @@ const originalSolanaNetwork = process.env.SOLANA_NETWORK;
 describe("Bot Main Entry Point Tests", () => {
   beforeAll(async () => {
     process.env.NODE_ENV = "test";
-    process.env.TELEGRAM_TOKEN =
-      process.env.TELEGRAM_TOKEN || "test-token";
+    process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
     process.env.MNEMONIC =
-      process.env.MNEMONIC ||
-      "test test test test test test test test test test test junk";
-    process.env.SOLANA_NETWORK =
-      process.env.SOLANA_NETWORK || "http://localhost:8899";
+      process.env.MNEMONIC || "test test test test test test test test test test test junk";
+    process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
 
     botModule = await import("../src/bot");
 
@@ -115,9 +112,7 @@ describe("Bot Main Entry Point Tests", () => {
           botModule.wallet.formatTokenBalance(value, decimals),
       });
 
-      expect(result.displayAmount).toBe(
-        botModule.wallet.formatSolBalance(LAMPORTS_PER_SOL)
-      );
+      expect(result.displayAmount).toBe(botModule.wallet.formatSolBalance(LAMPORTS_PER_SOL));
     });
   });
 

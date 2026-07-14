@@ -6,7 +6,7 @@ const wrapReplyMethod = (
   ctx: Context,
   method: ReplyMethod,
   original: ((...args: any[]) => Promise<unknown>) | undefined,
-  replyId?: number
+  replyId?: number,
 ): void => {
   if (!original) {
     return;
@@ -14,10 +14,7 @@ const wrapReplyMethod = (
 
   (ctx as any)[method] = async (payload: any, other?: any) => {
     const base = other ?? {};
-    if (
-      replyId &&
-      (base.reply_to_message_id === undefined || base.reply_to_message_id === null)
-    ) {
+    if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
       base.reply_to_message_id = replyId;
     }
 
@@ -41,15 +38,8 @@ const wrapReplyMethod = (
  * - Retry without reply_to_message_id if Telegram returns "message to be replied not found"
  */
 export function patchReplyBehavior(ctx: Context): void {
-  const replyId =
-    ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
+  const replyId = ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
 
   wrapReplyMethod(ctx, "reply", (ctx as any).reply?.bind(ctx), replyId);
-  wrapReplyMethod(
-    ctx,
-    "replyWithVideo",
-    (ctx as any).replyWithVideo?.bind(ctx),
-    replyId
-  );
+  wrapReplyMethod(ctx, "replyWithVideo", (ctx as any).replyWithVideo?.bind(ctx), replyId);
 }
-

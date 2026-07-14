@@ -50,12 +50,12 @@ type OracleOperatorOptions = {
 export const resolveKeypairFromEnv = (
   envVarName: string,
   fallback: Keypair,
-  roleDescription: string
+  roleDescription: string,
 ): Keypair => {
   const configuredPath = process.env[envVarName]?.trim();
   if (!configuredPath) {
     console.log(
-      `${roleDescription}: env ${envVarName} not set; using fallback ${fallback.publicKey.toBase58()}`
+      `${roleDescription}: env ${envVarName} not set; using fallback ${fallback.publicKey.toBase58()}`,
     );
     return fallback;
   }
@@ -63,19 +63,17 @@ export const resolveKeypairFromEnv = (
   try {
     const keypair = loadKeypairFromPath(configuredPath);
     console.log(
-      `${roleDescription}: loaded ${keypair.publicKey.toBase58()} from ${configuredPath}`
+      `${roleDescription}: loaded ${keypair.publicKey.toBase58()} from ${configuredPath}`,
     );
     return keypair;
   } catch (error) {
-    throw new Error(
-      `${roleDescription}: failed to load keypair from ${configuredPath}: ${error}`
-    );
+    throw new Error(`${roleDescription}: failed to load keypair from ${configuredPath}: ${error}`);
   }
 };
 
 export const resolveOracleOperatorKeypair = (
   fallback: Keypair,
-  options: OracleOperatorOptions = {}
+  options: OracleOperatorOptions = {},
 ): Keypair => {
   const envVar = options.envVar ?? ORACLE_OPERATOR_KEYPAIR_ENV;
   const description = options.description ?? "Oracle operator keypair";
@@ -84,15 +82,13 @@ export const resolveOracleOperatorKeypair = (
 
 export const resolveOracleOperatorBundle = (
   fallback: Keypair,
-  options: OracleOperatorOptions = {}
+  options: OracleOperatorOptions = {},
 ): KeypairBundle => {
   const resolved = resolveOracleOperatorKeypair(fallback, options);
   return bundleFromKeypair(resolved);
 };
 
-export const uniqueSigners = <T extends SignerLike>(
-  ...signers: (T | null | undefined)[]
-): T[] => {
+export const uniqueSigners = <T extends SignerLike>(...signers: (T | null | undefined)[]): T[] => {
   const seen = new Set<string>();
   const deduped: T[] = [];
   for (const signer of signers) {

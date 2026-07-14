@@ -3,10 +3,10 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
 
-const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 describe("WalletManager.transferToken", () => {
-
   test("sends SPL token transfer with ATA creations when missing", async () => {
     const usdcMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn: any = {
@@ -22,9 +22,7 @@ describe("WalletManager.transferToken", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
       tokenMetadataResolver: async (mint) =>
-        mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-          ? { decimals: 6 }
-          : null,
+        mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" ? { decimals: 6 } : null,
     });
 
     (wm as any).sendAndConfirmWithResubmits = async () => "SIG_SPL";
@@ -44,7 +42,9 @@ describe("WalletManager.transferToken", () => {
         return null; // ATAs do not exist
       },
       // Provide decimals for getTokenMetadata via getParsedAccountInfo
-      getParsedAccountInfo: async (_pk: PublicKey) => ({ value: { data: { parsed: { info: { decimals: 7 } } } } }),
+      getParsedAccountInfo: async (_pk: PublicKey) => ({
+        value: { data: { parsed: { info: { decimals: 7 } } } },
+      }),
     } as Partial<Connection> as any;
 
     const wm = WalletManager.createForTest(MNEMONIC, {

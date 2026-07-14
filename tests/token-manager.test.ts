@@ -3,10 +3,7 @@ import { Keypair } from "@solana/web3.js";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
-import {
-  WSOL_MINT,
-  TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
-} from "../src/utils/constants";
+import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "../src/utils/constants";
 import * as priceService from "../src/utils/price-service";
 import { __test_clearPriceServiceCache } from "../src/utils/price-service";
 import { createWalletStub, resetTokenManagerState } from "./helpers/fixtures";
@@ -105,9 +102,7 @@ test("parseAmount reports unknown token tickers distinctly", async () => {
 });
 
 test("parseAmount converts USD hints using chat/default token pricing", async () => {
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(0.5, "TOK")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(0.5, "TOK"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
@@ -124,9 +119,7 @@ test("parseAmount converts USD hints using chat/default token pricing", async ()
 });
 
 test("parseAmount supports USD hints for tips and withdrawals (argIndex != 1)", async () => {
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(0.5, "TOK")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(0.5, "TOK"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
@@ -142,9 +135,7 @@ test("parseAmount supports USD hints for tips and withdrawals (argIndex != 1)", 
 });
 
 test("parseAmount supports $-prefixed USD amounts without explicit token", async () => {
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(2, "TOK")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(2, "TOK"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
@@ -159,9 +150,7 @@ test("parseAmount supports $-prefixed USD amounts without explicit token", async
 });
 
 test("parseAmount supports $-suffixed USD amounts without explicit token", async () => {
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(2, "TOK")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(2, "TOK"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
@@ -176,9 +165,7 @@ test("parseAmount supports $-suffixed USD amounts without explicit token", async
 });
 
 test("parseAmount USD conversion keeps precision for low-priced tokens", async () => {
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(0.00000654, "TOK")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(0.00000654, "TOK"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 0);
 
@@ -193,9 +180,7 @@ test("parseAmount USD conversion keeps precision for low-priced tokens", async (
 
 test("parseAmount supports $-prefixed USD amounts for tips and withdrawals (argIndex != 1)", async () => {
   const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
-  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(2, "WBTC")
-  );
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(mockPriceLookup(2, "WBTC"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
   await tm.addToken(wbtcMint, "WBTC", 8);
@@ -227,9 +212,9 @@ test("parseAmount fails gracefully when USD pricing is unavailable", async () =>
 });
 
 test("parseAmount converts $-prefixed USD amounts when explicit token is provided", async () => {
-  const priceSpy = vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(2, "WSOL")
-  );
+  const priceSpy = vi
+    .spyOn(priceService, "getUsdPrice")
+    .mockResolvedValue(mockPriceLookup(2, "WSOL"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken(WSOL_MINT, "WSOL", 9);
 
@@ -247,9 +232,9 @@ test("parseAmount converts $-prefixed USD amounts when explicit token is provide
 
 test("parseAmount converts $-prefixed USD amounts into the requested token", async () => {
   const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
-  const priceSpy = vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
-    mockPriceLookup(2, "WBTC")
-  );
+  const priceSpy = vi
+    .spyOn(priceService, "getUsdPrice")
+    .mockResolvedValue(mockPriceLookup(2, "WBTC"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken(wbtcMint, "WBTC", 8);
 
@@ -268,12 +253,7 @@ test("parseAmount converts $-prefixed USD amounts into the requested token", asy
 
 test("parseAmount rejects 19-digit numeric token arguments as invalid", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
-  const res = await tm.parseAmount(
-    ["/cf", "10", "123456789012345678901"],
-    1,
-    2,
-    "game"
-  );
+  const res = await tm.parseAmount(["/cf", "10", "123456789012345678901"], 1, 2, "game");
 
   expect(res.success).toBe(false);
   if (res.success) {
@@ -381,12 +361,7 @@ test("games reject chat default tokens discovered via tips", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const discoveredMint = Keypair.generate().publicKey.toBase58();
 
-  const tipResult = await tm.parseAmount(
-    ["/tip", "1", discoveredMint],
-    1,
-    999,
-    "tip"
-  );
+  const tipResult = await tm.parseAmount(["/tip", "1", discoveredMint], 1, 999, "tip");
 
   if (!tipResult.success) {
     throw new Error(`expected tip success, got ${tipResult.error}`);
@@ -617,11 +592,7 @@ test("registerTokenIfNeeded fails when metadata decimals invalid", async () => {
     getFullTokenMetadata: async () => ({ symbol: "BAD", decimals: -1 }),
   };
 
-  const tm = TokenManager.getInstance(
-    invalidDecimalsWallet as any,
-    "DEF_MINT",
-    "DEF"
-  );
+  const tm = TokenManager.getInstance(invalidDecimalsWallet as any, "DEF_MINT", "DEF");
 
   const mint = Keypair.generate().publicKey.toBase58();
   const result = await tm.registerTokenIfNeeded({ mint, tickerHint: "BAD" });

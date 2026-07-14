@@ -1,7 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer,
-} from "../src/bot";
+import { __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer } from "../src/bot";
 
 const solAsset = {
   ticker: "SOL",

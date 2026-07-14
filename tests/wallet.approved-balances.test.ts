@@ -39,12 +39,7 @@ class ConnParsed implements Partial<Connection> {
       throw new Error("owner not set");
     }
 
-    const ata = await getAssociatedTokenAddress(
-      options.mint,
-      this.owner,
-      false,
-      options.programId
-    );
+    const ata = await getAssociatedTokenAddress(options.mint, this.owner, false, options.programId);
 
     const buffer = Buffer.alloc(AccountLayout.span);
     AccountLayout.encode(
@@ -61,7 +56,7 @@ class ConnParsed implements Partial<Connection> {
         closeAuthorityOption: 0,
         closeAuthority: this.owner,
       } as any,
-      buffer
+      buffer,
     );
 
     this.accounts.set(ata.toBase58(), {
@@ -148,7 +143,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const connection = new ConnParsed();
     const wm = WalletManager.createForTest(
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
 
     const owner = wm.getPublicKey(1n);
@@ -169,8 +164,16 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     });
 
     const approved = [
-      { token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", token_ticker: "USDC", decimals: 6 },
-      { token_mint: "So11111111111111111111111111111111111111112", token_ticker: "WSOL", decimals: 9 },
+      {
+        token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        token_ticker: "USDC",
+        decimals: 6,
+      },
+      {
+        token_mint: "So11111111111111111111111111111111111111112",
+        token_ticker: "WSOL",
+        decimals: 9,
+      },
     ];
 
     const res = await wm.getAllApprovedTokenBalances(1n, approved);
@@ -212,7 +215,11 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
 
     const wm = WalletManager.createForTest(
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-      { connection: connection as Connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      {
+        connection: connection as Connection,
+        fetch: globalThis.fetch as any,
+        timeNow: () => Date.now(),
+      },
     );
 
     const owner = wm.getPublicKey(1n);
@@ -236,7 +243,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
         closeAuthorityOption: 0,
         closeAuthority: owner,
       } as any,
-      accountData
+      accountData,
     );
     balances[expectedAta] = accountData;
 
@@ -248,7 +255,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const connection = new ConnParsed();
     const wm = WalletManager.createForTest(
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
 
     const owner = wm.getPublicKey(1n);
@@ -262,9 +269,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       decimals: 6,
     });
 
-    const approved = [
-      { token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 },
-    ];
+    const approved = [{ token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 }];
 
     let invocations = 0;
     let failures = 0;
@@ -303,7 +308,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
         fetch: globalThis.fetch as any,
         timeNow: () => Date.now(),
         tokenDb: tokenDbStub,
-      }
+      },
     );
 
     const owner = wm.getPublicKey(1n);
@@ -348,7 +353,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const discoveryConnection = {
       getParsedTokenAccountsByOwner: async (
         _owner: PublicKey,
-        filter: { programId: PublicKey }
+        filter: { programId: PublicKey },
       ) => {
         discoveryCalls.push(filter.programId.toBase58());
         return { value: [] } as any;
@@ -361,7 +366,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
         connection: discoveryConnection as Connection,
         fetch: globalThis.fetch as any,
         timeNow: () => now,
-      }
+      },
     );
 
     const owner = wm.getPublicKey(1n);

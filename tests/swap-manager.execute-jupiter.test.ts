@@ -14,8 +14,13 @@ import { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
-  beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
-  afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+  beforeEach(() => {
+    origNet = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+  });
+  afterEach(() => {
+    process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!;
+  });
 
   const buildBase64Tx = (payer: Keypair): string => {
     const message = new TransactionMessage({
@@ -42,7 +47,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -111,7 +116,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -190,7 +195,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -275,7 +280,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -315,8 +320,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getAdminKeypair", () => admin);
     Object.assign(connection, {
-      getBalance: async (address: PublicKey) =>
-        address.equals(user.publicKey) ? 0 : 10_000_000,
+      getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       getLatestBlockhash: async () => ({
         blockhash: "11111111111111111111111111111111",
         lastValidBlockHeight: 123,
@@ -327,7 +331,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         return "SIG_BUILD_FALLBACK";
       },
       confirmTransaction: async () => ({ value: { err: null } }),
-      getSignatureStatuses: async () => ({ value: [{ confirmationStatus: "confirmed", confirmations: 1, err: null }] }),
+      getSignatureStatuses: async () => ({
+        value: [{ confirmationStatus: "confirmed", confirmations: 1, err: null }],
+      }),
     });
 
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
@@ -348,41 +354,43 @@ describe("SwapManager.executeJupiterSwap", () => {
       return { status: "Success", signature: "SIG_SHOULD_NOT_RUN" };
     };
     let capturedBuildRequest: Record<string, unknown> | null = null;
-    Reflect.get(sm, "jupiterClient").getBuildInstructions = async (payload: Record<string, unknown>) => {
+    Reflect.get(sm, "jupiterClient").getBuildInstructions = async (
+      payload: Record<string, unknown>,
+    ) => {
       capturedBuildRequest = payload;
       return {
-      inputMint: quote.inputMint,
-      outputMint: quote.outputMint,
-      inAmount: quote.inputAmountRaw,
-      outAmount: quote.outputAmount,
-      otherAmountThreshold: "0",
-      swapMode: "ExactIn",
-      slippageBps: 100,
-      routePlan: [],
-      computeBudgetInstructions: [],
-      setupInstructions: [],
-      swapInstruction: apiInstruction(
-        new TransactionInstruction({
-          programId: swapProgram,
-          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
-          data: Buffer.from([1, 2, 3]),
-        })
-      ),
-      cleanupInstruction: apiInstruction(
-        new TransactionInstruction({
-          programId: cleanupProgram,
-          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
-          data: Buffer.from([4, 5, 6]),
-        })
-      ),
-      otherInstructions: [],
-      tipInstruction: null,
-      addressesByLookupTableAddress: null,
-      blockhashWithMetadata: {
-        blockhash: Array.from(Buffer.alloc(32)),
-        lastValidBlockHeight: 123,
-      },
-    };
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        inAmount: quote.inputAmountRaw,
+        outAmount: quote.outputAmount,
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        routePlan: [],
+        computeBudgetInstructions: [],
+        setupInstructions: [],
+        swapInstruction: apiInstruction(
+          new TransactionInstruction({
+            programId: swapProgram,
+            keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+            data: Buffer.from([1, 2, 3]),
+          }),
+        ),
+        cleanupInstruction: apiInstruction(
+          new TransactionInstruction({
+            programId: cleanupProgram,
+            keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+            data: Buffer.from([4, 5, 6]),
+          }),
+        ),
+        otherInstructions: [],
+        tipInstruction: null,
+        addressesByLookupTableAddress: null,
+        blockhashWithMetadata: {
+          blockhash: Array.from(Buffer.alloc(32)),
+          lastValidBlockHeight: 123,
+        },
+      };
     };
 
     let capturedTx: VersionedTransaction | null = null;
@@ -397,7 +405,7 @@ describe("SwapManager.executeJupiterSwap", () => {
         inputTicker: "TIMBA",
         outputTicker: "SOL",
       },
-      quote
+      quote,
     );
 
     expect(sig).toBe("SIG_BUILD_FALLBACK");
@@ -416,15 +424,15 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(message.staticAccountKeys[0]!.toBase58()).toBe(admin.publicKey.toBase58());
     expect(capturedTx!.signatures[0]!.some((byte) => byte !== 0)).toBe(true);
     expect(capturedTx!.signatures[1]!.some((byte) => byte !== 0)).toBe(true);
-    const compiledPrograms = message.compiledInstructions.map(
-      (ix) => message.staticAccountKeys[ix.programIdIndex]!.toBase58()
+    const compiledPrograms = message.compiledInstructions.map((ix) =>
+      message.staticAccountKeys[ix.programIdIndex]!.toBase58(),
     );
     expect(compiledPrograms).toContain(swapProgram.toBase58());
     expect(compiledPrograms.indexOf(swapProgram.toBase58())).toBeLessThan(
-      compiledPrograms.indexOf(cleanupProgram.toBase58())
+      compiledPrograms.indexOf(cleanupProgram.toBase58()),
     );
     expect(compiledPrograms.indexOf(cleanupProgram.toBase58())).toBeLessThan(
-      compiledPrograms.lastIndexOf(SystemProgram.programId.toBase58())
+      compiledPrograms.lastIndexOf(SystemProgram.programId.toBase58()),
     );
     expect(compiledPrograms.at(-1)).toBe(SystemProgram.programId.toBase58());
   });
@@ -433,7 +441,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -471,9 +479,10 @@ describe("SwapManager.executeJupiterSwap", () => {
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getAdminKeypair", () => admin);
     Object.assign(connection, {
-      getBalance: async (address: PublicKey) =>
-        address.equals(user.publicKey) ? 0 : 10_000_000,
-      simulateTransaction: async () => ({ value: { err: "SimulationFailed", unitsConsumed: null } }),
+      getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
+      simulateTransaction: async () => ({
+        value: { err: "SimulationFailed", unitsConsumed: null },
+      }),
     });
 
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
@@ -504,7 +513,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           programId: Keypair.generate().publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
-        })
+        }),
       ),
       cleanupInstruction: null,
       otherInstructions: [],
@@ -528,7 +537,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           inputTicker: "TIMBA",
           outputTicker: "SOL",
         },
-        quote
+        quote,
       );
       expect.unreachable();
     } catch (error) {
@@ -541,7 +550,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -579,8 +588,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getAdminKeypair", () => admin);
     Object.assign(connection, {
-      getBalance: async (address: PublicKey) =>
-        address.equals(user.publicKey) ? 0 : 10_000_000,
+      getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
     });
 
@@ -612,7 +620,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           programId: Keypair.generate().publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
-        })
+        }),
       ),
       cleanupInstruction: null,
       otherInstructions: [],
@@ -636,7 +644,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           inputTicker: "TIMBA",
           outputTicker: "SOL",
         },
-        quote
+        quote,
       );
       expect.unreachable();
     } catch (error) {
@@ -649,7 +657,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, timeNow: () => Date.now() }
+      { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
 
@@ -687,8 +695,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getAdminKeypair", () => admin);
     Object.assign(connection, {
-      getBalance: async (address: PublicKey) =>
-        address.equals(user.publicKey) ? 0 : 10_000_000,
+      getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
       sendTransaction: async () => "SIG_ERR",
       confirmTransaction: async () => ({ value: { err: "InsufficientFundsForRent" } }),
@@ -722,7 +729,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           programId: Keypair.generate().publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
-        })
+        }),
       ),
       cleanupInstruction: null,
       otherInstructions: [],
@@ -746,7 +753,7 @@ describe("SwapManager.executeJupiterSwap", () => {
           inputTicker: "TIMBA",
           outputTicker: "SOL",
         },
-        quote
+        quote,
       );
       expect.unreachable();
     } catch (error) {

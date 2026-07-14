@@ -34,11 +34,7 @@ describe("GameManager expired coinflip handler", () => {
     const cleanupCalls: any[] = [];
     let partialCalled = false;
 
-    (gm as any).analyzePlayerKeys = (
-      pda: PublicKey,
-      account: any,
-      address: string
-    ) => {
+    (gm as any).analyzePlayerKeys = (pda: PublicKey, account: any, address: string) => {
       expect(pda).toBeInstanceOf(PublicKey);
       expect(address).toBe("ADDR1");
       expect(account).toMatchObject({ creator: "CREATOR" });
@@ -56,7 +52,7 @@ describe("GameManager expired coinflip handler", () => {
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
       { creator: "CREATOR", ticketsCount: 2, participants: ["P1", "P2"] },
-      "ADDR1"
+      "ADDR1",
     );
 
     expect(result).toBe(true);
@@ -83,11 +79,7 @@ describe("GameManager expired coinflip handler", () => {
     let completeCalled = false;
     const partialCalls: any[] = [];
 
-    (gm as any).analyzePlayerKeys = (
-      pda: PublicKey,
-      _account: any,
-      address: string
-    ) => {
+    (gm as any).analyzePlayerKeys = (pda: PublicKey, _account: any, address: string) => {
       expect(pda).toBeInstanceOf(PublicKey);
       expect(address).toBe("ADDR2");
       return analyzeInfo;
@@ -104,7 +96,7 @@ describe("GameManager expired coinflip handler", () => {
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader2111111111111111111111111111111111"),
       { creator: "CREATOR2", ticketsCount: 1, participants: ["P1"] },
-      "ADDR2"
+      "ADDR2",
     );
 
     expect(result).toBe(false);

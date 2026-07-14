@@ -21,9 +21,9 @@ describe("TransactionHistory", () => {
     expect(txDb).toBeDefined();
 
     const verifier = new Database(dbPath, { create: true });
-    const cols = verifier
-      .query("PRAGMA table_info(transaction_history)")
-      .all() as Array<{ name: string }>;
+    const cols = verifier.query("PRAGMA table_info(transaction_history)").all() as Array<{
+      name: string;
+    }>;
     const colNames = new Set(cols.map((c) => c.name));
 
     expect(colNames.has("created_at")).toBeTrue();
@@ -41,7 +41,7 @@ describe("TransactionHistory", () => {
       "PUMP",
       "1.0",
       "100.0",
-      "PENDING"
+      "PENDING",
     );
 
     const id = txDb.addTransaction(rec);
@@ -53,9 +53,7 @@ describe("TransactionHistory", () => {
     // Verify update applied
     const verifier = new Database(dbPath, { create: true });
     const row = verifier
-      .query(
-        "SELECT status, block_height FROM transaction_history WHERE signature = ?"
-      )
+      .query("SELECT status, block_height FROM transaction_history WHERE signature = ?")
       .get("sig-123") as { status: string; block_height: number };
 
     expect(row.status).toBe("SUCCESS");

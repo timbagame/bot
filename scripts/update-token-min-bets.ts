@@ -6,16 +6,8 @@ import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
 import { LAMPORTS_PER_SOL } from "../src/utils/constants";
-import {
-  getSupportedTokens,
-  type TokenConfig,
-  WSOL_MINT,
-} from "../src/utils/token-registry";
-import {
-  bundleFromKeypair,
-  resolveOracleOperatorBundle,
-  uniqueSigners,
-} from "./utils/keypairs";
+import { getSupportedTokens, type TokenConfig, WSOL_MINT } from "../src/utils/token-registry";
+import { bundleFromKeypair, resolveOracleOperatorBundle, uniqueSigners } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
@@ -23,15 +15,9 @@ import { loadWalletMnemonic } from "../src/utils/secrets";
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
-const DEFAULT_COMPLETION_COMPUTE_UNITS = BigInt(
-  process.env["COMPLETION_COMPUTE_UNITS"] ?? 200_000
-);
-const DEFAULT_COMPLETION_SIGNATURES = BigInt(
-  process.env["COMPLETION_SIGNATURES"] ?? 1
-);
-const DEFAULT_MARGIN_MULTIPLIER = Number(
-  process.env["MIN_BET_MARGIN_MULTIPLIER"] ?? "1.5"
-);
+const DEFAULT_COMPLETION_COMPUTE_UNITS = BigInt(process.env["COMPLETION_COMPUTE_UNITS"] ?? 200_000);
+const DEFAULT_COMPLETION_SIGNATURES = BigInt(process.env["COMPLETION_SIGNATURES"] ?? 1);
+const DEFAULT_MARGIN_MULTIPLIER = Number(process.env["MIN_BET_MARGIN_MULTIPLIER"] ?? "1.5");
 const HARD_MIN_BET_USD_FLOOR = 0.1;
 
 function resolveMinBetUsdFloor(): number {
@@ -53,7 +39,7 @@ type PriceResolver = (identifier: string) => Promise<number>;
 export function computeMinBetUsdFloorRaw(
   tokenPriceUSD: number,
   decimals: number,
-  minBetUsdFloor: number = MIN_BET_USD_FLOOR
+  minBetUsdFloor: number = MIN_BET_USD_FLOOR,
 ): bigint {
   if (!Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
     return 0n;
@@ -62,9 +48,7 @@ export function computeMinBetUsdFloorRaw(
     !Number.isFinite(minBetUsdFloor) || minBetUsdFloor <= 0
       ? HARD_MIN_BET_USD_FLOOR
       : Math.max(minBetUsdFloor, HARD_MIN_BET_USD_FLOOR);
-  const rawAmount = Math.ceil(
-    (normalizedFloor / tokenPriceUSD) * Math.pow(10, decimals)
-  );
+  const rawAmount = Math.ceil((normalizedFloor / tokenPriceUSD) * Math.pow(10, decimals));
   return rawAmount > 0 ? BigInt(rawAmount) : 0n;
 }
 
@@ -92,9 +76,7 @@ const TARGET_TOKENS: TokenTarget[] = getSupportedTokens().map((token) => ({
   }),
 }));
 
-async function estimateCompletionCostLamports(
-  connection: anchor.web3.Connection
-): Promise<bigint> {
+async function estimateCompletionCostLamports(connection: anchor.web3.Connection): Promise<bigint> {
   let lamportsPerSignature = 5000n;
   try {
     const { blockhash } = await connection.getLatestBlockhash();
@@ -103,7 +85,7 @@ async function estimateCompletionCostLamports(
         payerKey: Web3Keypair.generate().publicKey,
         recentBlockhash: blockhash,
         instructions: [],
-      }).compileToLegacyMessage()
+      }).compileToLegacyMessage(),
     );
     if (typeof feeForMessage === "number" && feeForMessage > 0) {
       lamportsPerSignature = BigInt(feeForMessage);
@@ -111,7 +93,7 @@ async function estimateCompletionCostLamports(
   } catch (error) {
     console.warn(
       "⚠️  Failed to fetch base fee via getFeeForMessage; using default 5000 lamports.",
-      error
+      error,
     );
   }
 
@@ -123,10 +105,7 @@ async function estimateCompletionCostLamports(
     const perComputeUnit = BigInt(Math.max(sample ?? 0, 0));
     priorityFeeLamports = perComputeUnit * DEFAULT_COMPLETION_COMPUTE_UNITS;
   } catch (error) {
-    console.warn(
-      "⚠️  Failed to fetch prioritization fees; assuming zero.",
-      error
-    );
+    console.warn("⚠️  Failed to fetch prioritization fees; assuming zero.", error);
   }
 
   const signatureCost = lamportsPerSignature * DEFAULT_COMPLETION_SIGNATURES;
@@ -152,33 +131,29 @@ async function buildProposal(
   oracleFeePercentage: bigint,
   completionCostLamports: bigint,
   solPriceUSD: number,
-  target: TokenTarget
+  target: TokenTarget,
 ): Promise<Proposal | null> {
   const mint = new anchor.web3.PublicKey(target.mint);
   const [gameTokenPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
 
   const accountInfo = await connection.getAccountInfo(gameTokenPda);
   if (!accountInfo) {
-    console.warn(
-      `⚠️  Game token account not found for ${target.ticker}. Skipping.`
-    );
+    console.warn(`⚠️  Game token account not found for ${target.ticker}. Skipping.`);
     return null;
   }
 
   const gameToken = await program.account.gameToken.fetch(gameTokenPda);
   const metadata = await wallet.getTokenMetadata(target.mint);
   const scale = 10n ** BigInt(metadata.decimals);
-  const tokenPriceUSD =
-    (await getPriceUSD(target.mint)) || (await getPriceUSD(target.ticker));
+  const tokenPriceUSD = (await getPriceUSD(target.mint)) || (await getPriceUSD(target.ticker));
 
   const currentMinAmount = BigInt(gameToken.minAmount.toString());
   const currentFee = (currentMinAmount * oracleFeePercentage) / 100n;
 
-  const tokenCompletionCostLamports =
-    target.minCompletionFeeLamports ?? completionCostLamports;
+  const tokenCompletionCostLamports = target.minCompletionFeeLamports ?? completionCostLamports;
 
   const effectiveCompletionCostUSD =
     tokenCompletionCostLamports === 0n
@@ -192,30 +167,22 @@ async function buildProposal(
     costInTokenRaw = BigInt(raw);
   } else {
     // fallback: use completion cost in lamports converted by decimals ratio
-    const ratio =
-      (scale * tokenCompletionCostLamports) / BigInt(LAMPORTS_PER_SOL);
+    const ratio = (scale * tokenCompletionCostLamports) / BigInt(LAMPORTS_PER_SOL);
     costInTokenRaw = ratio;
   }
 
-  const marginMultiplier =
-    DEFAULT_MARGIN_MULTIPLIER > 1 ? DEFAULT_MARGIN_MULTIPLIER : 1.0;
+  const marginMultiplier = DEFAULT_MARGIN_MULTIPLIER > 1 ? DEFAULT_MARGIN_MULTIPLIER : 1.0;
   const costRawNumber = Number(costInTokenRaw);
   const marginAdjustedCostNumber = Math.ceil(costRawNumber * marginMultiplier);
   const requiredMinNumber = Math.ceil(
-    (marginAdjustedCostNumber * 100) / Number(oracleFeePercentage || 1n)
+    (marginAdjustedCostNumber * 100) / Number(oracleFeePercentage || 1n),
   );
 
   // Round to 2 significant digits for user-friendly numbers
-  const roundedRequiredMinNumber = roundToSignificantDigits(
-    requiredMinNumber,
-    2
-  );
+  const roundedRequiredMinNumber = roundToSignificantDigits(requiredMinNumber, 2);
 
   let requiredMinAmount = BigInt(Math.ceil(roundedRequiredMinNumber));
-  const minBetUsdFloorRaw = computeMinBetUsdFloorRaw(
-    tokenPriceUSD,
-    metadata.decimals
-  );
+  const minBetUsdFloorRaw = computeMinBetUsdFloorRaw(tokenPriceUSD, metadata.decimals);
   if (minBetUsdFloorRaw > requiredMinAmount) {
     requiredMinAmount = minBetUsdFloorRaw;
   }
@@ -253,12 +220,12 @@ async function confirm(prompt: string): Promise<boolean> {
 }
 
 export async function resolveRequiredSolPriceUSD(
-  resolvePrice: PriceResolver = getPriceUSD
+  resolvePrice: PriceResolver = getPriceUSD,
 ): Promise<number> {
   const solPriceUSD = await resolvePrice(WSOL_MINT);
   if (!Number.isFinite(solPriceUSD) || solPriceUSD <= 0) {
     throw new Error(
-      `Failed to fetch SOL price for ${WSOL_MINT}. Aborting to avoid zero minimum bet updates.`
+      `Failed to fetch SOL price for ${WSOL_MINT}. Aborting to avoid zero minimum bet updates.`,
     );
   }
   return solPriceUSD;
@@ -279,12 +246,10 @@ async function main() {
 
   console.log(`Program ID: ${program.programId.toBase58()}`);
   console.log(
-    `Admin signer: ${adminBundle.anchor.publicKey.toBase58()}, Oracle operator signer: ${oracleOperatorBundle.anchor.publicKey.toBase58()}`
+    `Admin signer: ${adminBundle.anchor.publicKey.toBase58()}, Oracle operator signer: ${oracleOperatorBundle.anchor.publicKey.toBase58()}`,
   );
 
-  const completionCostLamports = await estimateCompletionCostLamports(
-    connection
-  );
+  const completionCostLamports = await estimateCompletionCostLamports(connection);
   const solPriceUSD = await resolveRequiredSolPriceUSD();
   const completionCostSOL = Number(completionCostLamports) / LAMPORTS_PER_SOL;
   const completionCostUSD = completionCostSOL * solPriceUSD;
@@ -292,19 +257,17 @@ async function main() {
   console.log("\n🔍 Estimated completion cost:");
   console.log(
     `   Base + priority fees: ${completionCostLamports} lamports (~${completionCostSOL.toFixed(
-      6
-    )} SOL)`
+      6,
+    )} SOL)`,
   );
   console.log(`   SOL price (USD): ${solPriceUSD.toFixed(4)}`);
-  console.log(
-    `   Estimated USD cost per completion: $${completionCostUSD.toFixed(4)}`
-  );
+  console.log(`   Estimated USD cost per completion: $${completionCostUSD.toFixed(4)}`);
   console.log(`   Margin multiplier: x${DEFAULT_MARGIN_MULTIPLIER}`);
   console.log(`   Minimum bet USD floor: $${MIN_BET_USD_FLOOR.toFixed(2)}`);
 
   const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
-    program.programId
+    program.programId,
   );
   const oracleAccount = await program.account.oracle.fetch(oraclePda);
   const oracleFeePercentage = BigInt(oracleAccount.feePercentage);
@@ -322,7 +285,7 @@ async function main() {
       oracleFeePercentage,
       completionCostLamports,
       solPriceUSD,
-      target
+      target,
     );
     if (proposal) proposals.push(proposal);
   }
@@ -342,44 +305,42 @@ async function main() {
       price === 0
         ? "0.0000000000"
         : price >= 1
-        ? price.toFixed(4)
-        : price.toLocaleString("en-US", {
-            minimumFractionDigits: 10,
-            maximumFractionDigits: 10,
-            useGrouping: false,
-          });
+          ? price.toFixed(4)
+          : price.toLocaleString("en-US", {
+              minimumFractionDigits: 10,
+              maximumFractionDigits: 10,
+              useGrouping: false,
+            });
     console.log(`   Token price: $${priceDisplay}`);
     console.log(
       `   Current min: ${proposal.currentMinAmount} raw (~${formatter(
         proposal.currentMinAmount,
-        proposal.decimals
-      )})`
+        proposal.decimals,
+      )})`,
     );
     console.log(
       `   Current fee (1%): ${proposal.currentFee} raw (~${formatter(
         proposal.currentFee,
-        proposal.decimals
-      )})`
+        proposal.decimals,
+      )})`,
     );
     console.log(
       `   Proposed min: ${proposal.requiredMinAmount} raw (~${formatter(
         proposal.requiredMinAmount,
-        proposal.decimals
-      )})`
+        proposal.decimals,
+      )})`,
     );
     console.log(
       `   Proposed fee (1%): ${proposal.newFee} raw (~${formatter(
         proposal.newFee,
-        proposal.decimals
-      )})`
+        proposal.decimals,
+      )})`,
     );
     console.log(`   Needs update: ${proposal.updateNeeded ? "YES" : "no"}`);
   }
 
   if (!proposals.some((p) => p.updateNeeded)) {
-    console.log(
-      "\nAll tokens already satisfy the fee threshold. No updates applied."
-    );
+    console.log("\nAll tokens already satisfy the fee threshold. No updates applied.");
     return;
   }
 
@@ -392,7 +353,7 @@ async function main() {
   console.log("\n🛠  Applying updates...");
   const [oraclePdaAgain] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
-    program.programId
+    program.programId,
   );
 
   for (const proposal of proposals) {
@@ -400,7 +361,7 @@ async function main() {
     const mint = new anchor.web3.PublicKey(proposal.mint);
     const [gameTokenPda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from("game_token"), mint.toBuffer()],
-      program.programId
+      program.programId,
     );
 
     const config = {
@@ -421,12 +382,10 @@ async function main() {
     const tx = await wallet.sendAndConfirmWithResubmits(
       [instruction],
       uniqueSigners(adminBundle.root, oracleOperatorBundle.root),
-      { operationLabel: `Update ${proposal.ticker} min bet` }
+      { operationLabel: `Update ${proposal.ticker} min bet` },
     );
 
-    console.log(
-      `   ✅ Updated ${proposal.ticker} minimum bet. Transaction: ${tx}`
-    );
+    console.log(`   ✅ Updated ${proposal.ticker} minimum bet. Transaction: ${tx}`);
   }
 
   console.log("\n🎉 Minimum bet calibration complete.");

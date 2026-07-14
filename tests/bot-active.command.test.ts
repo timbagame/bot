@@ -14,8 +14,7 @@ if (originalToken === undefined) {
   process.env.TELEGRAM_TOKEN = "test-token";
 }
 if (originalMnemonic === undefined) {
-  process.env.MNEMONIC =
-    "test test test test test test test test test test test junk";
+  process.env.MNEMONIC = "test test test test test test test test test test test junk";
 }
 if (originalSolanaNetwork === undefined) {
   process.env.SOLANA_NETWORK = "http://localhost:8899";
@@ -124,8 +123,7 @@ describe("/active command in group chats", () => {
     expect(text).not.toContain("#2 Second Game");
 
     const inlineKeyboard = options?.reply_markup?.inline_keyboard as
-      | InlineKeyboardButton[][]
-      | undefined;
+      InlineKeyboardButton[][] | undefined;
     expect(inlineKeyboard).toBeDefined();
     expect(inlineKeyboard?.length).toBe(4);
 
@@ -155,8 +153,7 @@ describe("/active command in group chats", () => {
       ?.flat()
       ?.some(
         (button) =>
-          "callback_data" in button &&
-          button.callback_data?.toString().startsWith("refresh_")
+          "callback_data" in button && button.callback_data?.toString().startsWith("refresh_"),
       );
     expect(hasRefreshButton).toBe(false);
 
@@ -189,7 +186,7 @@ describe("active game keyboard helpers", () => {
     const callbacksModule = createGameCallbacksModule({
       bot: {} as any,
       wallet: {} as any,
-      getGameManager: () => ({} as any),
+      getGameManager: () => ({}) as any,
       gameDb: {} as any,
       wrapCallbackHandler: (handler: any) => handler,
       withCreatorContext: (handler: any) => handler,
@@ -202,14 +199,13 @@ describe("active game keyboard helpers", () => {
         decimals: 6,
       }),
       fetchTokenPriceUSD: async () => null,
-      getProgram: () => ({} as any),
+      getProgram: () => ({}) as any,
       validateGameTokenData: () => ({ isValid: true }),
       gameSetupCopy: { coinflip: {} as any, giveaway: {} as any },
       getChatGameSettings: () => null,
     });
 
-    const shouldSkip =
-      callbacksModule.__test_shouldSkipGenericGameCallback("active_list:noop");
+    const shouldSkip = callbacksModule.__test_shouldSkipGenericGameCallback("active_list:noop");
 
     expect(shouldSkip).toBe(true);
   });
@@ -266,7 +262,8 @@ describe("/active command pagination", () => {
     expect(text).toContain("Active games (8)");
     expect(text).toContain("Page 1/2");
 
-    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as
+      InlineKeyboardButton[][] | undefined;
     expect(inlineKeyboard).toBeDefined();
 
     // Check for pagination nav row (last row)
@@ -274,9 +271,9 @@ describe("/active command pagination", () => {
     expect(lastRow).toBeDefined();
 
     // Should have page indicator and Next button (no Prev on first page)
-    const hasNextButton = lastRow?.some(btn => btn.text === "Next →");
-    const hasPrevButton = lastRow?.some(btn => btn.text === "← Prev");
-    const hasPageIndicator = lastRow?.some(btn => btn.text === "1/2");
+    const hasNextButton = lastRow?.some((btn) => btn.text === "Next →");
+    const hasPrevButton = lastRow?.some((btn) => btn.text === "← Prev");
+    const hasPageIndicator = lastRow?.some((btn) => btn.text === "1/2");
 
     expect(hasNextButton).toBe(true);
     expect(hasPrevButton).toBe(false);
@@ -310,11 +307,12 @@ describe("/active command pagination", () => {
     expect(text).toContain("Active games (3)");
     expect(text).not.toContain("Page");
 
-    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as
+      InlineKeyboardButton[][] | undefined;
 
     // No pagination buttons - check that last row is a game button, not navigation
     const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
-    const hasNavButtons = lastRow?.some(btn => btn.text === "Next →" || btn.text === "← Prev");
+    const hasNavButtons = lastRow?.some((btn) => btn.text === "Next →" || btn.text === "← Prev");
     expect(hasNavButtons).toBeFalsy();
   });
 
@@ -329,9 +327,9 @@ describe("/active command pagination", () => {
     });
 
     const lastRow = keyboard[keyboard.length - 1]!;
-    expect(lastRow.some(btn => btn.text === "1/3")).toBe(true);
-    expect(lastRow.some(btn => btn.text === "Next →")).toBe(true);
-    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(false);
+    expect(lastRow.some((btn) => btn.text === "1/3")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "Next →")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "← Prev")).toBe(false);
   });
 
   test("buildActiveGamesKeyboard shows both nav buttons on middle page", () => {
@@ -344,9 +342,9 @@ describe("/active command pagination", () => {
     });
 
     const lastRow = keyboard[keyboard.length - 1]!;
-    expect(lastRow.some(btn => btn.text === "2/3")).toBe(true);
-    expect(lastRow.some(btn => btn.text === "Next →")).toBe(true);
-    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "2/3")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "Next →")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "← Prev")).toBe(true);
   });
 
   test("buildActiveGamesKeyboard hides next button on last page", () => {
@@ -359,9 +357,9 @@ describe("/active command pagination", () => {
     });
 
     const lastRow = keyboard[keyboard.length - 1]!;
-    expect(lastRow.some(btn => btn.text === "3/3")).toBe(true);
-    expect(lastRow.some(btn => btn.text === "Next →")).toBe(false);
-    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "3/3")).toBe(true);
+    expect(lastRow.some((btn) => btn.text === "Next →")).toBe(false);
+    expect(lastRow.some((btn) => btn.text === "← Prev")).toBe(true);
   });
 
   test("pagination callbacks use correct prefix format", () => {
@@ -425,13 +423,14 @@ describe("/public command pagination", () => {
     expect(text).toContain("Active Public Games (7)");
     expect(text).toContain("Page 1/2");
 
-    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as
+      InlineKeyboardButton[][] | undefined;
     const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
 
-    expect(lastRow?.some(btn => btn.text === "Next →")).toBe(true);
-    expect(lastRow?.some(btn =>
-      "callback_data" in btn && btn.callback_data === "public_page:1"
-    )).toBe(true);
+    expect(lastRow?.some((btn) => btn.text === "Next →")).toBe(true);
+    expect(
+      lastRow?.some((btn) => "callback_data" in btn && btn.callback_data === "public_page:1"),
+    ).toBe(true);
   });
 
   test("shows no pagination for single page of public games", async () => {
@@ -461,10 +460,11 @@ describe("/public command pagination", () => {
     expect(text).toContain("Active Public Games (4)");
     expect(text).not.toContain("Page");
 
-    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as
+      InlineKeyboardButton[][] | undefined;
     const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
 
-    const hasNavButtons = lastRow?.some(btn => btn.text === "Next →" || btn.text === "← Prev");
+    const hasNavButtons = lastRow?.some((btn) => btn.text === "Next →" || btn.text === "← Prev");
     expect(hasNavButtons).toBeFalsy();
   });
 });

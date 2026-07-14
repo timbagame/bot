@@ -8,7 +8,7 @@ export type DynamicFeeBudgetSnapshot = {
 };
 
 export const refreshDynamicFeeBudgets = async (
-  feeBudget: FeeBudgetProvider
+  feeBudget: FeeBudgetProvider,
 ): Promise<DynamicFeeBudgetSnapshot> => {
   const [singleTransactionLamports, gameSafetyBufferLamports, jitSwapBufferLamports] =
     await Promise.all([

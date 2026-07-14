@@ -11,9 +11,7 @@ export function getTestDatabasePath(filename: string): string {
   }
 
   const configuredBaseDir = process.env["BOT_DB_DIR"];
-  const baseDir = configuredBaseDir
-    ? resolve(configuredBaseDir)
-    : resolve(process.cwd());
+  const baseDir = configuredBaseDir ? resolve(configuredBaseDir) : resolve(process.cwd());
   return join(baseDir, filename);
 }
 

@@ -27,12 +27,7 @@ const makeCtx = (options: MockCtxOptions = {}) => {
     from: { id: TELEGRAM_ID },
     chat: { id: CHAT_ID },
     api: {
-      editMessageText: async (
-        chatId: number,
-        messageId: number,
-        text: string,
-        opts: any
-      ) => {
+      editMessageText: async (chatId: number, messageId: number, text: string, opts: any) => {
         calls.push({ type: "edit", chatId, messageId, text, opts });
         if (editError) {
           throw editError;
@@ -95,9 +90,9 @@ describe("handleAddressInput", () => {
     const firstReply = replies[0]!;
     expect(firstReply.text).toContain("Send Confirmation");
     expect(firstReply.text).toContain(ADDRESS);
-    expect(
-      firstReply.opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
-    ).toMatch(/^confirm_send_/);
+    expect(firstReply.opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toMatch(
+      /^confirm_send_/,
+    );
   });
 
   test("replies directly when original message id is missing", async () => {
@@ -122,11 +117,10 @@ describe("handleAddressInput", () => {
     const invalid = ADDRESS.replace("H", "0");
 
     await expect(__test_handleAddressInput(ctx, baseState, invalid)).rejects.toThrow(
-      /Invalid wallet address format/
+      /Invalid wallet address format/,
     );
 
     const calls = ctx.__calls as RecordedCall[];
     expect(calls.length).toBe(0);
   });
-
 });

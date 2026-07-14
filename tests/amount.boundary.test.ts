@@ -16,6 +16,6 @@ test("presentSpendAmount rejects inputs exceeding Number.MAX_SAFE_INTEGER", () =
       formatSol: () => "",
       formatToken: () => "",
       applySolFeeBuffer: false,
-    })
+    }),
   ).toThrow("Amount is too large");
 });

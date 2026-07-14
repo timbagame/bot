@@ -13,10 +13,7 @@ import { EventParser } from "@anchor-lang/core";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import { contractIdl, contractVersion } from "./utils/contract-idl";
-import {
-  GameDatabase,
-  type LeaderboardStatsRecord,
-} from "./utils/game-database";
+import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
 import { GameManager, type GamesTab } from "./utils/game";
 import { PDAManager } from "./utils/pda";
@@ -73,10 +70,7 @@ import {
   createAmountSelectionKeyboard,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
-import {
-  showCustomAmountPrompt,
-  persistInputPromptFromContext,
-} from "./utils/wallet-ui";
+import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
   buildEmptyLeaderboardMessage,
@@ -85,12 +79,7 @@ import {
   buildGlobalLeaderboardMessage,
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
-import {
-  formatAmount,
-  escapeHtml,
-  formatRate,
-  formatUsdValue,
-} from "./utils/format-amount";
+import { formatAmount, escapeHtml, formatRate, formatUsdValue } from "./utils/format-amount";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
@@ -117,10 +106,7 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getUsdPrice } from "./utils/price-service";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import type { IntegratorSwapParams } from "./utils/integrator-fees";
-import {
-  getReferralConfigForMint,
-  type ReferralTokenConfigEntry,
-} from "./utils/token-registry";
+import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
@@ -162,7 +148,7 @@ bot.api.config.use(
     maxRetryAttempts: 3,
     maxDelaySeconds: 60,
     rethrowInternalServerErrors: false,
-  })
+  }),
 );
 
 // Global error boundary for unhandled middleware errors
@@ -172,8 +158,8 @@ bot.catch((err) => {
     const path = ctx?.update?.callback_query
       ? "callback_query"
       : ctx?.update?.message
-      ? "message"
-      : "update";
+        ? "message"
+        : "update";
     console.error(`Bot error while handling ${path}:`, err.error || err);
   } catch (e) {
     console.error("Bot error (logging failed):", err);
@@ -211,9 +197,7 @@ bot.use(async (ctx, next) => {
   await next();
 });
 export const wallet = WalletManager.getInstance(loadWalletMnemonic());
-const walletRpcLimiter = new SlidingWindowRateLimiter(
-  USER_WALLET_RPC_WINDOW_MS
-);
+const walletRpcLimiter = new SlidingWindowRateLimiter(USER_WALLET_RPC_WINDOW_MS);
 const privateKeyExportLimiter = new SlidingWindowRateLimiter(60 * 60_000);
 const pendingPrivateKeyExports = new Map<string, number>();
 const PRIVATE_KEY_CONFIRM_TTL_MS = 60_000;
@@ -232,17 +216,12 @@ type CachedTokenMetadata = {
   expiresAt: number;
 };
 const cachedTokenMetadata = new Map<string, CachedTokenMetadata>();
-const inflightTokenMetadataFetches = new Map<
-  string,
-  Promise<CachedTokenMetadata>
->();
-export const __test_getSolFeeBufferLamports = (): number =>
-  SOL_FEE_BUFFER_LAMPORTS;
+const inflightTokenMetadataFetches = new Map<string, Promise<CachedTokenMetadata>>();
+export const __test_getSolFeeBufferLamports = (): number => SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
   SOL_FEE_BUFFER_LAMPORTS = value;
 };
-export const __test_getSolWrapRentReserveLamports = (): number =>
-  SOL_WRAP_RENT_RESERVE_LAMPORTS;
+export const __test_getSolWrapRentReserveLamports = (): number => SOL_WRAP_RENT_RESERVE_LAMPORTS;
 export const __test_setSolWrapRentReserveLamports = (value: number): void => {
   SOL_WRAP_RENT_RESERVE_LAMPORTS = value;
 };
@@ -252,8 +231,7 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
   const isCached =
     Number.isFinite(SOL_WRAP_RENT_RESERVE_LAMPORTS) &&
     SOL_WRAP_RENT_RESERVE_LAMPORTS > 0 &&
-    now - solWrapRentReserveLastFetched <
-      SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS;
+    now - solWrapRentReserveLastFetched < SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS;
 
   if (isCached) {
     return SOL_WRAP_RENT_RESERVE_LAMPORTS;
@@ -276,10 +254,7 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     solWrapRentReserveLastFetched = now;
     return fresh;
   } catch (error) {
-    console.warn(
-      "Failed to refresh SOL wrap rent reserve from fee budget:",
-      error
-    );
+    console.warn("Failed to refresh SOL wrap rent reserve from fee budget:", error);
   }
 
   if (!fallbackValid) {
@@ -291,8 +266,7 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
   return fallback;
 };
 
-export const __test_refreshSolWrapRentReserveLamports =
-  getSolWrapRentReserveLamports;
+export const __test_refreshSolWrapRentReserveLamports = getSolWrapRentReserveLamports;
 
 const pruneExpiredTokenMetadata = (now: number): void => {
   for (const [mint, entry] of cachedTokenMetadata.entries()) {
@@ -303,10 +277,7 @@ const pruneExpiredTokenMetadata = (now: number): void => {
   }
 };
 
-const setTokenMetadataCacheEntry = (
-  mint: string,
-  entry: CachedTokenMetadata
-): void => {
+const setTokenMetadataCacheEntry = (mint: string, entry: CachedTokenMetadata): void => {
   cachedTokenMetadata.delete(mint);
   cachedTokenMetadata.set(mint, entry);
 
@@ -353,9 +324,7 @@ const getCachedTokenMetadata = async (mint: string) => {
       setTokenMetadataCacheEntry(normalizedMint, entry);
       return entry;
     } catch (error) {
-      throw new Error(
-        `Token metadata unavailable for ${normalizedMint}: ${String(error)}`
-      );
+      throw new Error(`Token metadata unavailable for ${normalizedMint}: ${String(error)}`);
     } finally {
       inflightTokenMetadataFetches.delete(normalizedMint);
     }
@@ -385,15 +354,10 @@ export const __test_resetTokenMetadataCacheMaxEntries = () => {
 
 void (async () => {
   try {
-    const { singleTransactionLamports } = await refreshDynamicFeeBudgets(
-      feeBudget
-    );
+    const { singleTransactionLamports } = await refreshDynamicFeeBudgets(feeBudget);
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
-    console.warn(
-      "Failed to refresh dynamic fee budgets during startup:",
-      error
-    );
+    console.warn("Failed to refresh dynamic fee budgets during startup:", error);
   }
 
   try {
@@ -402,12 +366,8 @@ void (async () => {
       SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
     }
   } catch (error) {
-    console.warn(
-      "Failed to refresh wrap fee buffer during startup, using fallback:",
-      error
-    );
-    SOL_WRAP_RENT_RESERVE_LAMPORTS =
-      feeBudget.getDefaultWrapFeeBufferLamports();
+    console.warn("Failed to refresh wrap fee buffer during startup, using fallback:", error);
+    SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getDefaultWrapFeeBufferLamports();
   }
 })();
 let chatDb = ChatDatabase.getInstance();
@@ -426,20 +386,19 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
 
 type CallbackHandler<TCtx extends Context = any> = (
   ctx: TCtx,
-  next: NextFunction
+  next: NextFunction,
 ) => Promise<void> | void;
 
 const wrapCallbackHandler = <TCtx extends Context>(
   handler: CallbackHandler<TCtx>,
-  options: { action?: string; errorAck?: string } = {}
+  options: { action?: string; errorAck?: string } = {},
 ) => {
   return async (ctx: TCtx, next: NextFunction) => {
     try {
       await handler(ctx, next);
     } catch (error) {
       const fallbackAction = handler.name || "callback handler";
-      const actionLabel =
-        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
+      const actionLabel = options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
       if (options.errorAck) {
         console.error(`Error in ${actionLabel}:`, error);
         await safeAnswerCallbackQuery(ctx, options.errorAck);
@@ -507,7 +466,7 @@ registerWalletTransactionHandlers();
 
 const clampSolFeeBufferLamports = (
   solBalanceLamports: number,
-  desiredBufferLamports: number
+  desiredBufferLamports: number,
 ): number => {
   if (!Number.isFinite(desiredBufferLamports) || desiredBufferLamports <= 0) {
     return 0;
@@ -559,10 +518,7 @@ const parseOracleNumeric = (value: unknown): number | null => {
         return null;
       }
 
-      if (
-        converted > Number.MAX_SAFE_INTEGER ||
-        converted < Number.MIN_SAFE_INTEGER
-      ) {
+      if (converted > Number.MAX_SAFE_INTEGER || converted < Number.MIN_SAFE_INTEGER) {
         return null;
       }
 
@@ -599,8 +555,7 @@ export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
 };
 
-export const __test_getPendingGameCreations = (): Set<string> =>
-  new Set(pendingGameCreations);
+export const __test_getPendingGameCreations = (): Set<string> => new Set(pendingGameCreations);
 
 export const __test_getChatDatabase = () => chatDb;
 
@@ -623,10 +578,8 @@ export const __test_resetGameDatabase = () => {
 };
 
 // Test-only proxies for user-state helpers
-export const __test_setUserState = (userId: string, state: any) =>
-  setUserState(userId, state);
-export const __test_getUserState = (userId: string) =>
-  getUserState(userId, false);
+export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
+export const __test_getUserState = (userId: string) => getUserState(userId, false);
 export const __test_clearUserState = (userId: string) => {
   getUserState(userId, true);
 };
@@ -648,8 +601,7 @@ const createSwapAmountKeyboard = ({
   canTrade,
 }: SwapAmountKeyboardOptions) =>
   buildQuickAmountKeyboard({
-    baseCallback: (value) =>
-      `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
+    baseCallback: (value) => `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
     backCallback: `swap_from_${fromToken}`,
     showQuickRows: canTrade,
     insufficientLabel: "❌ Insufficient balance",
@@ -671,9 +623,7 @@ const formatUsdThresholdLabel = (value: number): string => {
 
 const buildGaslessFeeRequirementMessage = (): string => {
   const usdLabel = formatUsdThresholdLabel(JUPITER_GASLESS_MIN_TRADE_USD);
-  const solBufferDisplay = wallet.formatSolBalance(
-    JUPITER_MIN_SOL_BALANCE_LAMPORTS
-  );
+  const solBufferDisplay = wallet.formatSolBalance(JUPITER_MIN_SOL_BALANCE_LAMPORTS);
   return `Swaps under ~${usdLabel} must keep at least ${solBufferDisplay} SOL for fees. Add SOL or try a larger swap.`;
 };
 
@@ -686,7 +636,7 @@ type WalletBalanceEntry = {
 const resolveFormattedBalance = (
   ticker: string,
   solBalance: number,
-  tokenBalances: WalletBalanceEntry[]
+  tokenBalances: WalletBalanceEntry[],
 ): { decimalBalance: number; formattedBalance: string } => {
   if (ticker === "SOL") {
     return {
@@ -719,13 +669,12 @@ interface TokenSelectionCacheEntry {
   timestamp?: number;
 }
 
-const createTokenLookupId = (): string =>
-  Math.random().toString(36).substring(2, 15);
+const createTokenLookupId = (): string => Math.random().toString(36).substring(2, 15);
 
 type TransactionCacheEntry = TokenSelectionCacheEntry;
 
 const isTokenSelectionCacheEntry = (
-  entry: TransactionCacheEntry | undefined
+  entry: TransactionCacheEntry | undefined,
 ): entry is TokenSelectionCacheEntry =>
   Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
 
@@ -776,21 +725,14 @@ const formatTradeConfirmationSummary = ({
   quote,
   contractAddress,
 }: TradeConfirmationParams) => {
-  const receiveDisplay = formatAmount(
-    quote.outputAmount ?? "0",
-    receiveDecimals,
-    {
-      maxFractionDigits: receiveDecimals,
-      trim: true,
-    }
-  );
+  const receiveDisplay = formatAmount(quote.outputAmount ?? "0", receiveDecimals, {
+    maxFractionDigits: receiveDecimals,
+    trim: true,
+  });
 
-  const payAmountDecimal =
-    payRawAmount > 0 ? payRawAmount / Math.pow(10, payDecimals) : 0;
-  const receiveAmountDecimal =
-    Number(quote.outputAmount ?? "0") / Math.pow(10, receiveDecimals);
-  const rateValue =
-    payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
+  const payAmountDecimal = payRawAmount > 0 ? payRawAmount / Math.pow(10, payDecimals) : 0;
+  const receiveAmountDecimal = Number(quote.outputAmount ?? "0") / Math.pow(10, receiveDecimals);
+  const rateValue = payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
   const rateDisplay = formatRate(rateValue);
 
   const providerLabel = (() => {
@@ -805,13 +747,11 @@ const formatTradeConfirmationSummary = ({
   })();
 
   const slippageText = formatSlippagePercent(
-    quote.slippage !== undefined ? (quote.slippage as number) : 1
+    quote.slippage !== undefined ? (quote.slippage as number) : 1,
   );
 
-  const feeBps =
-    quote.providerQuote?.feeBps ?? quote.integrator?.referralFee ?? 0;
-  const feePercentValue =
-    feeBps && payAmountDecimal > 0 ? feeBps / 100 : 0;
+  const feeBps = quote.providerQuote?.feeBps ?? quote.integrator?.referralFee ?? 0;
+  const feePercentValue = feeBps && payAmountDecimal > 0 ? feeBps / 100 : 0;
 
   const safePayDisplay = escapeHtml(payDisplay);
   const safePayToken = escapeHtml(payToken);
@@ -819,9 +759,7 @@ const formatTradeConfirmationSummary = ({
   const safeReceiveDisplay = escapeHtml(receiveDisplay);
   const safeRateDisplay = escapeHtml(rateDisplay);
   const safeProviderLabel = escapeHtml(providerLabel);
-  const safeContractAddress = contractAddress
-    ? escapeHtml(contractAddress)
-    : undefined;
+  const safeContractAddress = contractAddress ? escapeHtml(contractAddress) : undefined;
 
   const heading = "Swap Confirmation";
 
@@ -855,9 +793,7 @@ const formatTradeConfirmationSummary = ({
   };
 };
 
-type TradeConfirmationSummary = ReturnType<
-  typeof formatTradeConfirmationSummary
->;
+type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
 
 // ================================
 // TEST HELPERS
@@ -872,18 +808,16 @@ const shouldSkipSolFeeBuffer = (
   inputAsset: ResolvedTradeAsset,
   outputTicker: string,
   amountInput: string,
-  referralConfig?: ReferralEntryLite | null
+  referralConfig?: ReferralEntryLite | null,
 ): boolean => {
   if (inputAsset.ticker !== "SOL") return false;
 
   if (outputTicker !== "SOL") return false;
 
   const hasAdminReferralPayer = Boolean(
-    referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
+    referralConfig?.adminPayer && referralConfig?.adminCloseAuthority,
   );
-  const wantsMax =
-    typeof amountInput === "string" &&
-    amountInput.trim().toLowerCase() === "max";
+  const wantsMax = typeof amountInput === "string" && amountInput.trim().toLowerCase() === "max";
 
   return hasAdminReferralPayer || wantsMax;
 };
@@ -909,13 +843,8 @@ type TradeQuoteErrorParams = {
   retryCallback: string;
 };
 
-const renderTradeQuoteError = async ({
-  error,
-  retryCallback,
-}: TradeQuoteErrorParams) => {
-  const keyboard = new InlineKeyboard()
-    .text("← Try Again", retryCallback)
-    .row();
+const renderTradeQuoteError = async ({ error, retryCallback }: TradeQuoteErrorParams) => {
+  const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
   const userFriendly = await formatUserFriendlyError(error, wallet);
   return {
     text: `❌ <b>Quote Error</b>\n\n${userFriendly}`,
@@ -928,15 +857,11 @@ type PrepareTradeQuoteParams = {
   spinnerText: string;
   summaryInput: Omit<TradeConfirmationParams, "quote">;
   quoteFetcher: () => Promise<SwapQuote>;
-  cacheQuote: (
-    txId: string,
-    quote: SwapQuote,
-    summary: TradeConfirmationSummary
-  ) => void;
+  cacheQuote: (txId: string, quote: SwapQuote, summary: TradeConfirmationSummary) => void;
   buildConfirmationKeyboard: (
     txId: string,
     summary: TradeConfirmationSummary,
-    quote: SwapQuote
+    quote: SwapQuote,
   ) => InlineKeyboard;
   onError: (error: unknown) => Promise<void> | void;
   parseMode?: "HTML" | "Markdown" | "MarkdownV2";
@@ -1009,10 +934,10 @@ type PrepareTokenTradeQuoteParams = {
   telegramId: bigint;
   amountInput: string;
   inputFactory: (
-    context: TradeAssetFactoryContext
+    context: TradeAssetFactoryContext,
   ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
   outputFactory: (
-    context: TradeAssetFactoryContext
+    context: TradeAssetFactoryContext,
   ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
   spinnerText: (info: {
     displayAmount: string;
@@ -1020,20 +945,16 @@ type PrepareTokenTradeQuoteParams = {
     inputTicker: string;
     outputTicker: string;
   }) => string;
-  cacheQuote: (
-    txId: string,
-    quote: SwapQuote,
-    context: PreparedTradeQuoteContext
-  ) => void;
+  cacheQuote: (txId: string, quote: SwapQuote, context: PreparedTradeQuoteContext) => void;
   buildConfirmationKeyboard: (
     txId: string,
     summary: TradeConfirmationSummary,
     quote: SwapQuote,
-    context: PreparedTradeQuoteContext
+    context: PreparedTradeQuoteContext,
   ) => InlineKeyboard;
   onError: (error: unknown) => Promise<void> | void;
   summaryExtras?: (
-    context: PreparedTradeQuoteContext
+    context: PreparedTradeQuoteContext,
   ) => Partial<Omit<TradeConfirmationParams, "quote">>;
   quoteErrorMessage?: string;
 };
@@ -1063,19 +984,11 @@ const prepareTokenTradeQuote = async ({
 
   const referralConfig = getReferralConfigForMint(inputAsset.mint);
 
-  let shouldApplySolFeeBuffer =
-    inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
+  let shouldApplySolFeeBuffer = inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
   // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
   if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
-    if (
-      shouldSkipSolFeeBuffer(
-        inputAsset,
-        outputAsset.ticker,
-        amountInput,
-        referralConfig
-      )
-    ) {
+    if (shouldSkipSolFeeBuffer(inputAsset, outputAsset.ticker, amountInput, referralConfig)) {
       shouldApplySolFeeBuffer = false;
     }
   }
@@ -1088,28 +1001,20 @@ const prepareTokenTradeQuote = async ({
       const rentReserveLamports = await getSolWrapRentReserveLamports();
       solFeeBufferLamports = clampSolFeeBufferLamports(
         snapshot.solBalance,
-        solFeeBufferLamports + rentReserveLamports
+        solFeeBufferLamports + rentReserveLamports,
       );
     } else {
-      solFeeBufferLamports = Math.max(
-        solFeeBufferLamports,
-        JUPITER_MIN_SOL_BALANCE_LAMPORTS
-      );
+      solFeeBufferLamports = Math.max(solFeeBufferLamports, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
     }
   }
 
-  if (
-    solFeeBufferLamports === undefined &&
-    referralConfig &&
-    inputAsset.ticker !== "SOL"
-  ) {
+  if (solFeeBufferLamports === undefined && referralConfig && inputAsset.ticker !== "SOL") {
     solFeeBufferLamports = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
   }
 
   const userKeypair = wallet.getKeyPair(telegramId);
 
-  const shouldProbeGasless =
-    shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
+  const shouldProbeGasless = shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
@@ -1122,41 +1027,30 @@ const prepareTokenTradeQuote = async ({
       solBalance: snapshot.solBalance,
       tokenBalance: inputAsset.tokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
+      formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
       applySolFeeBuffer: false,
       userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
     });
 
-    const prospectiveBalance = Math.max(
-      0,
-      snapshot.solBalance - probe.rawAmount
-    );
-    const wouldLeaveBelowMinimum =
-      prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+    const prospectiveBalance = Math.max(0, snapshot.solBalance - probe.rawAmount);
+    const wouldLeaveBelowMinimum = prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
 
     if (wouldLeaveBelowMinimum) {
       let solPriceUsd = 0;
       try {
         const priceMint =
-          inputAsset.mint === "SOL" || inputAsset.ticker === "SOL"
-            ? WSOL_MINT
-            : inputAsset.mint;
+          inputAsset.mint === "SOL" || inputAsset.ticker === "SOL" ? WSOL_MINT : inputAsset.mint;
         const priceLookup = await getUsdPrice({
           tokenMint: priceMint,
         });
         solPriceUsd = priceLookup?.price ?? 0;
       } catch (priceError) {
-        console.warn(
-          "Failed to fetch SOL price for gasless eligibility check:",
-          priceError
-        );
+        console.warn("Failed to fetch SOL price for gasless eligibility check:", priceError);
       }
 
       const meetsUsdThreshold =
         solPriceUsd > 0 &&
-        (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >=
-          JUPITER_GASLESS_MIN_TRADE_USD;
+        (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >= JUPITER_GASLESS_MIN_TRADE_USD;
 
       if (meetsUsdThreshold) {
         shouldApplySolFeeBuffer = false;
@@ -1178,17 +1072,16 @@ const prepareTokenTradeQuote = async ({
         solBalance: snapshot.solBalance,
         tokenBalance: inputAsset.tokenBalance,
         formatSol: (lamports) => wallet.formatSolBalance(lamports),
-        formatToken: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
+        formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
         applySolFeeBuffer: shouldApplySolFeeBuffer,
         ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
         userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
         ...(gaslessInsufficientMessage
           ? {
               insufficientSolForFeesMessage: gaslessInsufficientMessage,
-            omitSolFeeBufferHint: true,
-          }
-        : {}),
+              omitSolFeeBufferHint: true,
+            }
+          : {}),
       });
   } catch (error) {
     await onError(error);
@@ -1247,7 +1140,7 @@ const prepareTokenTradeQuote = async ({
       const integratorForQuote = prepareIntegratorForQuote(
         integratorConfig,
         outputAsset.ticker,
-        userKeypair.publicKey.toBase58()
+        userKeypair.publicKey.toBase58(),
       );
 
       const quote = await swapService.prepareSwap(
@@ -1262,12 +1155,11 @@ const prepareTokenTradeQuote = async ({
           outputTicker: outputAsset.ticker.toUpperCase(),
           integrator: integratorForQuote,
         },
-        integratorForQuote
+        integratorForQuote,
       );
       if (!quote) {
         throw new Error(
-          quoteErrorMessage ??
-            `Cannot get quote for ${inputAsset.ticker} → ${outputAsset.ticker}`
+          quoteErrorMessage ?? `Cannot get quote for ${inputAsset.ticker} → ${outputAsset.ticker}`,
         );
       }
       return quote;
@@ -1313,16 +1205,14 @@ const ACTIVE_PAGE_CALLBACK_PREFIX = "active_page:";
 const PUBLIC_PAGE_CALLBACK_PREFIX = "public_page:";
 const ACTIVE_GAME_LABEL_MAX_LENGTH = 60;
 
-const cloneInlineKeyboardRow = (
-  row: InlineKeyboardButton[]
-): InlineKeyboardButton[] => row.map((button) => ({ ...button }));
+const cloneInlineKeyboardRow = (row: InlineKeyboardButton[]): InlineKeyboardButton[] =>
+  row.map((button) => ({ ...button }));
 
-const cloneInlineKeyboard = (
-  keyboard: InlineKeyboardButton[][]
-): InlineKeyboardButton[][] => keyboard.map((row) => cloneInlineKeyboardRow(row));
+const cloneInlineKeyboard = (keyboard: InlineKeyboardButton[][]): InlineKeyboardButton[][] =>
+  keyboard.map((row) => cloneInlineKeyboardRow(row));
 
 const filterActiveGameKeyboardRows = (
-  keyboard: InlineKeyboardButton[][]
+  keyboard: InlineKeyboardButton[][],
 ): InlineKeyboardButton[][] =>
   keyboard
     .map((row) =>
@@ -1331,15 +1221,15 @@ const filterActiveGameKeyboardRows = (
           !(
             "callback_data" in button &&
             (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
-              "refresh_"
+              "refresh_",
             )
-          )
-      )
+          ),
+      ),
     )
     .filter((row) => row.length > 0);
 
 const parseActiveGameHeader = (
-  messageText: string
+  messageText: string,
 ): {
   gameType: string;
   ticker: string | null;
@@ -1349,7 +1239,11 @@ const parseActiveGameHeader = (
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  const sanitized = firstLine?.replace(/<[^>]*>/g, "").replace(/🅴/g, "").trim() ?? "";
+  const sanitized =
+    firstLine
+      ?.replace(/<[^>]*>/g, "")
+      .replace(/🅴/g, "")
+      .trim() ?? "";
   const [left, right] = sanitized.split("•").map((part) => part.trim());
   const gameType = left || "Game";
   const amountPart = right || null;
@@ -1368,7 +1262,7 @@ const extractCondensedGameLabel = (
   messageText: string,
   currentTickets?: number,
   maxTickets?: number,
-  index?: number
+  index?: number,
 ): string => {
   const { gameType, ticker } = parseActiveGameHeader(messageText);
   const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
@@ -1383,19 +1277,12 @@ const extractCondensedGameLabel = (
   return `${baseLabel.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
 };
 
-const escapeRegex = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const formatActiveJoinLabel = (
-  amountPart?: string | null,
-  ticker?: string | null
-): string => {
+const formatActiveJoinLabel = (amountPart?: string | null, ticker?: string | null): string => {
   let cleanedAmount = amountPart ?? null;
   if (cleanedAmount && ticker) {
-    cleanedAmount = cleanedAmount.replace(
-      new RegExp(`\\s*${escapeRegex(ticker)}(?![\\w])`),
-      ""
-    );
+    cleanedAmount = cleanedAmount.replace(new RegExp(`\\s*${escapeRegex(ticker)}(?![\\w])`), "");
     cleanedAmount = cleanedAmount.replace(/\s{2,}/g, " ").trim();
   }
   const amountSegment = cleanedAmount ? ` • ${cleanedAmount}` : "";
@@ -1404,20 +1291,20 @@ const formatActiveJoinLabel = (
 
 const rewriteJoinButtons = (
   row: InlineKeyboardButton[],
-  game: ActiveGameListing
+  game: ActiveGameListing,
 ): InlineKeyboardButton[] =>
   row.map((button) => {
     if (
       "callback_data" in button &&
       (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
-        "join_"
+        "join_",
       )
     ) {
       return {
         ...button,
         text: formatActiveJoinLabel(
           parseActiveGameHeader(game.messageText).amountPart,
-          parseActiveGameHeader(game.messageText).ticker
+          parseActiveGameHeader(game.messageText).ticker,
         ),
       };
     }
@@ -1432,7 +1319,7 @@ type PaginationOptions = {
 
 const buildActiveGamesKeyboard = (
   games: ActiveGameListing[],
-  pagination?: PaginationOptions
+  pagination?: PaginationOptions,
 ): InlineKeyboardButton[][] => {
   const inlineKeyboard: InlineKeyboardButton[][] = [];
   const startIndex = pagination ? pagination.page * ACTIVE_GAMES_PER_PAGE : 0;
@@ -1444,7 +1331,7 @@ const buildActiveGamesKeyboard = (
       game.messageText,
       game.currentTickets,
       game.maxTickets,
-      globalIndex
+      globalIndex,
     );
 
     // Use URL button if Solscan URL is available, otherwise fall back to callback
@@ -1494,8 +1381,7 @@ const buildActiveGamesKeyboard = (
 export const __test_extractCondensedGameLabel = extractCondensedGameLabel;
 export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
 
-export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA =
-  ACTIVE_LIST_HEADER_CALLBACK_DATA;
+export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA = ACTIVE_LIST_HEADER_CALLBACK_DATA;
 export const __test_ACTIVE_GAMES_PER_PAGE = ACTIVE_GAMES_PER_PAGE;
 export const __test_ACTIVE_PAGE_CALLBACK_PREFIX = ACTIVE_PAGE_CALLBACK_PREFIX;
 export const __test_PUBLIC_PAGE_CALLBACK_PREFIX = PUBLIC_PAGE_CALLBACK_PREFIX;
@@ -1517,9 +1403,7 @@ let playerUnjoinedListenerId: number | null = null;
 let rpcEndpointListenerCleanup: (() => void) | null = null;
 let programEventListenersReady = false;
 
-export const __test_setProgram = (
-  nextProgram: anchor.Program<Timba> | undefined
-) => {
+export const __test_setProgram = (nextProgram: anchor.Program<Timba> | undefined) => {
   program = nextProgram as anchor.Program<Timba>;
 };
 
@@ -1538,14 +1422,12 @@ const createApiContext = (chatId: number, api?: any): Context =>
   ({
     api: api || bot.api,
     chat: { id: chatId },
-  } as unknown as Context);
+  }) as unknown as Context;
 
 /**
  * Validate that game data has required token information
  */
-const validateGameTokenData = (
-  gameData: any
-): { isValid: boolean; error?: string } => {
+const validateGameTokenData = (gameData: any): { isValid: boolean; error?: string } => {
   if (!gameData) return { isValid: false, error: "Game not found" };
   if (!gameData.token_mint || !gameData.token_ticker) {
     return { isValid: false, error: "Game missing token information" };
@@ -1562,8 +1444,7 @@ export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_presentSpendAmount = presentSpendAmount;
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
-export const __test_formatTradeConfirmationSummary =
-  formatTradeConfirmationSummary;
+export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
 export const __test_shouldSkipSolFeeBuffer = shouldSkipSolFeeBuffer;
 
 /**
@@ -1575,7 +1456,7 @@ const updateGameMessageSafely = async (
   status: string = "Completed",
   winnerAddress?: string,
   totalPot?: number,
-  winnerSignature?: string
+  winnerSignature?: string,
 ): Promise<void> => {
   if (!gameData?.chat_id || !gameData?.message_id) return;
 
@@ -1587,19 +1468,16 @@ const updateGameMessageSafely = async (
       status,
       winnerAddress,
       totalPot,
-      winnerSignature
+      winnerSignature,
     );
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
   }
 };
 
-let prepareTokenTradeQuoteRunner: typeof prepareTokenTradeQuote =
-  prepareTokenTradeQuote;
+let prepareTokenTradeQuoteRunner: typeof prepareTokenTradeQuote = prepareTokenTradeQuote;
 
-export const __test_setPrepareTokenTradeQuote = (
-  fn: typeof prepareTokenTradeQuote
-): void => {
+export const __test_setPrepareTokenTradeQuote = (fn: typeof prepareTokenTradeQuote): void => {
   prepareTokenTradeQuoteRunner = fn;
 };
 
@@ -1626,9 +1504,7 @@ const getGameMessageTargets = (gameAddress: string): GameMessageTarget[] => {
       }
     }
   } catch (error) {
-    console.warn(
-      `Game manager not ready when resolving message targets for ${gameAddress}`
-    );
+    console.warn(`Game manager not ready when resolving message targets for ${gameAddress}`);
   }
 
   // Check DB for any missing ones
@@ -1759,7 +1635,8 @@ const joinNotificationBuckets = new Map<number, JoinNotificationBucket>();
 
 const canSendJoinNotification = (chatId: number): boolean => {
   const chatSettings = chatDb.getChatGameSettings(chatId);
-  const limit = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+  const limit =
+    chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
 
   // Rate limit disabled (0) - no notifications
   if (limit === 0) {
@@ -1786,7 +1663,7 @@ const canSendJoinNotification = (chatId: number): boolean => {
 
 const shouldReceiveJoinNotification = (
   targetChatId: number,
-  gameOriginChatId: number | null | undefined
+  gameOriginChatId: number | null | undefined,
 ): boolean => {
   // Always allow origin chat to receive notifications (subject to rate limiting)
   if (targetChatId === gameOriginChatId) {
@@ -1795,25 +1672,26 @@ const shouldReceiveJoinNotification = (
 
   // For other chats, check if external notifications are enabled
   const chatSettings = chatDb.getChatGameSettings(targetChatId);
-  const allowExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+  const allowExternal =
+    chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
 
   return allowExternal;
 };
 
 export const __test_clearJoinNotificationBuckets = () => joinNotificationBuckets.clear();
-export const __test_getJoinNotificationBucket = (chatId: number) => joinNotificationBuckets.get(chatId);
+export const __test_getJoinNotificationBucket = (chatId: number) =>
+  joinNotificationBuckets.get(chatId);
 
 const scheduleGameMessageUpdate = (
   gameAddress: string,
   referenceChatId: number,
   totalPot?: number,
-  options: { delayMs?: number } = {}
+  options: { delayMs?: number } = {},
 ): void => {
-  const state =
-    pendingGameMessageUpdates.get(gameAddress) ?? {
-      pending: false,
-      running: false,
-    };
+  const state = pendingGameMessageUpdates.get(gameAddress) ?? {
+    pending: false,
+    running: false,
+  };
 
   state.referenceChatId = referenceChatId;
   if (typeof options.delayMs === "number" && Number.isFinite(options.delayMs)) {
@@ -1837,7 +1715,7 @@ const scheduleGameMessageUpdate = (
     0,
     typeof state.nextDelayMs === "number" && Number.isFinite(state.nextDelayMs)
       ? state.nextDelayMs
-      : gameMessageUpdateDebounceMs
+      : gameMessageUpdateDebounceMs,
   );
   state.nextDelayMs = undefined;
 
@@ -1873,16 +1751,10 @@ const scheduleGameMessageUpdate = (
         return;
       }
 
-      const gameData =
-        typeof gameDb?.getGame === "function"
-          ? gameDb.getGame(gameAddress)
-          : null;
+      const gameData = typeof gameDb?.getGame === "function" ? gameDb.getGame(gameAddress) : null;
       const normalizedStatus =
-        typeof gameData?.status === "string"
-          ? gameData.status.toLowerCase()
-          : null;
-      const isCompleted =
-        normalizedStatus === "completed" || !!gameData?.winner_address;
+        typeof gameData?.status === "string" ? gameData.status.toLowerCase() : null;
+      const isCompleted = normalizedStatus === "completed" || !!gameData?.winner_address;
       const apiCtx = createApiContext(chatId, bot.api);
 
       if (isCompleted) {
@@ -1896,7 +1768,7 @@ const scheduleGameMessageUpdate = (
           gameAddress,
           "Completed",
           gameData?.winner_address ?? undefined,
-          completionTotalPot
+          completionTotalPot,
         );
         return;
       }
@@ -1906,7 +1778,7 @@ const scheduleGameMessageUpdate = (
         gameAddress,
         "Active",
         undefined,
-        normalizeTotalPot(state.latestTotalPot)
+        normalizeTotalPot(state.latestTotalPot),
       );
     } catch (error) {
       if (isRateLimited(error)) {
@@ -1915,7 +1787,7 @@ const scheduleGameMessageUpdate = (
           state.pending = true;
           state.nextDelayMs = Math.max(
             gameMessageUpdateDebounceMs,
-            Math.max(0, Math.trunc(retryAfterSeconds * 1000))
+            Math.max(0, Math.trunc(retryAfterSeconds * 1000)),
           );
         }
       }
@@ -1926,7 +1798,7 @@ const scheduleGameMessageUpdate = (
         scheduleGameMessageUpdate(
           gameAddress,
           state.referenceChatId ?? referenceChatId,
-          state.latestTotalPot
+          state.latestTotalPot,
         );
         return;
       }
@@ -1940,16 +1812,12 @@ const scheduleGameMessageUpdate = (
   pendingGameMessageUpdates.set(gameAddress, state);
 };
 
-const prunePendingPlayerEvents = (
-  state: PendingPlayerEventState
-): PendingPlayerEventPayload[] => {
+const prunePendingPlayerEvents = (state: PendingPlayerEventState): PendingPlayerEventPayload[] => {
   const now = Date.now();
   return state.events.filter((payload) => {
     const age = now - payload.receivedAt;
     if (age > PENDING_PLAYER_EVENT_MAX_AGE_MS) {
-      console.warn(
-        `⚠️ Dropping stale ${payload.eventName} event after waiting ${age}ms`
-      );
+      console.warn(`⚠️ Dropping stale ${payload.eventName} event after waiting ${age}ms`);
       return false;
     }
     return true;
@@ -1958,14 +1826,14 @@ const prunePendingPlayerEvents = (
 
 const enqueuePendingPlayerEvent = (
   gameAddress: string,
-  payload: PendingPlayerEventPayload
+  payload: PendingPlayerEventPayload,
 ): void => {
   const state = pendingPlayerEvents.get(gameAddress) ?? { events: [] };
   state.events.push(payload);
   pendingPlayerEvents.set(gameAddress, state);
 
   console.log(
-    `⌛ Queued ${payload.eventName} event for ${gameAddress} until message target is available`
+    `⌛ Queued ${payload.eventName} event for ${gameAddress} until message target is available`,
   );
 
   schedulePendingPlayerEventFlush(gameAddress);
@@ -1974,11 +1842,11 @@ const enqueuePendingPlayerEvent = (
 const processPlayerEvent = async (
   event: PlayerEvent,
   eventName: string,
-  targets: GameMessageTarget[]
+  targets: GameMessageTarget[],
 ): Promise<void> => {
   if (!gameManager) {
     console.warn(
-      `Game manager not ready to process ${eventName} event for ${event.gameKey.toString()}`
+      `Game manager not ready to process ${eventName} event for ${event.gameKey.toString()}`,
     );
     return;
   }
@@ -1999,7 +1867,7 @@ const processPlayerEvent = async (
     eventTimestamp < lastSlotInfo.timestamp
   ) {
     console.log(
-      `⏭️ Skipping stale ${eventName} event for ${gameAddress} (event ${eventTimestamp}, recorded ${lastSlotInfo.timestamp})`
+      `⏭️ Skipping stale ${eventName} event for ${gameAddress} (event ${eventTimestamp}, recorded ${lastSlotInfo.timestamp})`,
     );
     return;
   }
@@ -2017,19 +1885,16 @@ const processPlayerEvent = async (
       const playerPublicKey = event.player.toString();
       const creatorPublicKey =
         typeof gameDb?.getCreatorInfo === "function"
-          ? gameDb.getCreatorInfo(gameAddress)?.publicKey ?? null
+          ? (gameDb.getCreatorInfo(gameAddress)?.publicKey ?? null)
           : null;
 
       if (creatorPublicKey && creatorPublicKey === playerPublicKey) {
         console.debug(
-          `Skipping auto-join announcement for creator ${creatorPublicKey} in game ${gameAddress}`
+          `Skipping auto-join announcement for creator ${creatorPublicKey} in game ${gameAddress}`,
         );
       } else {
         try {
-          const displayName = await gameManager.getPlayerUsername(
-            apiCtx,
-            playerPublicKey
-          );
+          const displayName = await gameManager.getPlayerUsername(apiCtx, playerPublicKey);
           const safeDisplayName = escapeHtml(displayName);
 
           // Get game data for origin chat and type
@@ -2050,7 +1915,7 @@ const processPlayerEvent = async (
             // Check rate limiting
             if (!canSendJoinNotification(target.chatId)) {
               console.debug(
-                `Rate limited join notification for chat ${target.chatId} in game ${gameAddress}`
+                `Rate limited join notification for chat ${target.chatId} in game ${gameAddress}`,
               );
               return false;
             }
@@ -2060,24 +1925,16 @@ const processPlayerEvent = async (
 
           if (notifiableTargets.length > 0) {
             await Promise.all(
-              notifiableTargets.map((target) =>
-                sendReplyToGameMessage(target, announcement)
-              )
+              notifiableTargets.map((target) => sendReplyToGameMessage(target, announcement)),
             );
           }
         } catch (announcementError) {
-          console.error(
-            `Error announcing player join for game ${gameAddress}:`,
-            announcementError
-          );
+          console.error(`Error announcing player join for game ${gameAddress}:`, announcementError);
         }
       }
     }
   } catch (error) {
-    console.error(
-      `Error processing ${eventName} for game ${gameAddress}:`,
-      error
-    );
+    console.error(`Error processing ${eventName} for game ${gameAddress}:`, error);
   }
 };
 
@@ -2105,7 +1962,7 @@ function schedulePendingPlayerEventFlush(gameAddress: string): void {
 
 async function flushPendingPlayerEvents(
   gameAddress: string,
-  reason: "notify" | "retry" = "retry"
+  reason: "notify" | "retry" = "retry",
 ): Promise<void> {
   const state = pendingPlayerEvents.get(gameAddress);
   if (!state) {
@@ -2129,7 +1986,7 @@ async function flushPendingPlayerEvents(
     pendingPlayerEvents.set(gameAddress, state);
     if (reason === "notify") {
       console.warn(
-        `⚠️ Message targets still unavailable for ${gameAddress}; will retry pending events`
+        `⚠️ Message targets still unavailable for ${gameAddress}; will retry pending events`,
       );
     }
     schedulePendingPlayerEventFlush(gameAddress);
@@ -2139,9 +1996,7 @@ async function flushPendingPlayerEvents(
   pendingPlayerEvents.delete(gameAddress);
 
   if (state.events.length > 0) {
-    console.log(
-      `📬 Flushing ${state.events.length} pending player event(s) for ${gameAddress}`
-    );
+    console.log(`📬 Flushing ${state.events.length} pending player event(s) for ${gameAddress}`);
   }
 
   for (const payload of state.events) {
@@ -2152,15 +2007,11 @@ async function flushPendingPlayerEvents(
 export const __test_processPlayerEvent = processPlayerEvent;
 export const __test_enqueuePendingPlayerEvent = enqueuePendingPlayerEvent;
 export const __test_flushPendingPlayerEvents = flushPendingPlayerEvents;
-export const __test_clearPendingPlayerEvents = () =>
-  pendingPlayerEvents.clear();
+export const __test_clearPendingPlayerEvents = () => pendingPlayerEvents.clear();
 export const __test_getPendingPlayerEventsState = (gameAddress: string) =>
   pendingPlayerEvents.get(gameAddress);
 
-const sendReplyToGameMessage = async (
-  target: GameMessageTarget,
-  text: string
-): Promise<void> => {
+const sendReplyToGameMessage = async (target: GameMessageTarget, text: string): Promise<void> => {
   try {
     await bot.api.sendMessage(target.chatId, text, {
       parse_mode: "HTML",
@@ -2179,7 +2030,7 @@ const processGameCompletion = async (
   gameAddress: string,
   winnerAddress: string,
   totalPot?: number,
-  winnerTxSignature?: string
+  winnerTxSignature?: string,
 ): Promise<void> => {
   cancelPendingGameMessageUpdate(gameAddress);
 
@@ -2201,48 +2052,37 @@ const processGameCompletion = async (
     "Completed",
     winnerAddress,
     totalPot,
-    winnerTxSignature
+    winnerTxSignature,
   );
 
-  if (
-    winnerAddress &&
-    winnerAddress !== "cancelled" &&
-    winnerAddress !== DEFAULT_NULL_ADDRESS
-  ) {
+  if (winnerAddress && winnerAddress !== "cancelled" && winnerAddress !== DEFAULT_NULL_ADDRESS) {
     const targets = getGameMessageTargets(gameAddress);
     if (targets.length > 0) {
       try {
         const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
-        const winnerDisplay = await gameManager.getPlayerUsername(
-          apiCtx,
-          winnerAddress
-        );
+        const winnerDisplay = await gameManager.getPlayerUsername(apiCtx, winnerAddress);
         let prizeDetails = "";
         const participantCount = gameDb.getGameParticipantsCount(gameAddress);
         const prizePot =
           typeof totalPot === "number"
             ? totalPot
             : typeof gameData?.total_amount === "number"
-            ? gameData.total_amount
-            : typeof gameData?.amount === "number" && participantCount > 0
-            ? gameData.game_type === "giveaway"
-              ? gameData.amount
-              : gameData.amount * participantCount
-            : null;
+              ? gameData.total_amount
+              : typeof gameData?.amount === "number" && participantCount > 0
+                ? gameData.game_type === "giveaway"
+                  ? gameData.amount
+                  : gameData.amount * participantCount
+                : null;
         if (typeof prizePot === "number" && prizePot > 0) {
           const prizeInfo = await gameManager.getPrizeDisplay(
             gameAddress,
             prizePot,
             gameData?.token_ticker,
-            gameData?.token_mint ?? undefined
+            gameData?.token_mint ?? undefined,
           );
           if (prizeInfo) {
-            const tickerSegment = prizeInfo.tokenTicker
-              ? ` ${prizeInfo.tokenTicker}`
-              : "";
-            const usdSegment = prizeInfo.usdApproximation
-              ? ` (${prizeInfo.usdApproximation})`
-              : "";
+            const tickerSegment = prizeInfo.tokenTicker ? ` ${prizeInfo.tokenTicker}` : "";
+            const usdSegment = prizeInfo.usdApproximation ? ` (${prizeInfo.usdApproximation})` : "";
             prizeDetails =
               ` Prize: ${escapeHtml(prizeInfo.formattedAmount)}` +
               `${escapeHtml(tickerSegment)}` +
@@ -2254,30 +2094,24 @@ const processGameCompletion = async (
           gameData?.game_type === "coinflip"
             ? "coinflip"
             : gameData?.game_type === "giveaway"
-            ? "giveaway"
-            : "game";
+              ? "giveaway"
+              : "game";
 
         await Promise.all(
           targets.map((target) =>
             sendReplyToGameMessage(
               target,
-              `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`
-            )
-          )
+              `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`,
+            ),
+          ),
         );
-
       } catch (winnerAnnouncementError) {
-        console.error(
-          `Error announcing winner for game ${gameAddress}:`,
-          winnerAnnouncementError
-        );
+        console.error(`Error announcing winner for game ${gameAddress}:`, winnerAnnouncementError);
       }
     }
   }
 
-  console.log(
-    `✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`
-  );
+  console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
 };
 
 let processGameCompletionHandler = processGameCompletion;
@@ -2296,7 +2130,7 @@ const runProcessGameCompletion = async (
   gameAddress: string,
   winnerAddress: string,
   totalPot?: number,
-  winnerTxSignature?: string
+  winnerTxSignature?: string,
 ): Promise<boolean> => {
   const now = Date.now();
   pruneStaleCompletionJob(gameAddress, now);
@@ -2305,28 +2139,21 @@ const runProcessGameCompletion = async (
 
   if (inFlightCompletionJobs.has(gameAddress)) {
     console.log(
-      `⏳ Skipping duplicate completion processing for ${gameAddress}; job already in-flight`
+      `⏳ Skipping duplicate completion processing for ${gameAddress}; job already in-flight`,
     );
     return false;
   }
 
   inFlightCompletionJobs.set(gameAddress, now);
   try {
-    await processGameCompletionHandler(
-      gameAddress,
-      winnerAddress,
-      totalPot,
-      winnerTxSignature
-    );
+    await processGameCompletionHandler(gameAddress, winnerAddress, totalPot, winnerTxSignature);
     return true;
   } finally {
     inFlightCompletionJobs.delete(gameAddress);
   }
 };
 
-export const __test_setProcessGameCompletionHandler = (
-  handler: typeof processGameCompletion
-) => {
+export const __test_setProcessGameCompletionHandler = (handler: typeof processGameCompletion) => {
   processGameCompletionHandler = handler;
 };
 
@@ -2345,15 +2172,13 @@ export const __test_resetCompletionJobs = () => inFlightCompletionJobs.clear();
 const handleGameCompletedAnchorEvent = async (
   event: GameCompletedEvent,
   slot: number,
-  signature?: string
+  signature?: string,
 ): Promise<void> => {
   try {
     const gameAddress = event.gameKey.toString();
     const winnerAddress = event.winner.toString();
 
-    console.log(
-      `🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`
-    );
+    console.log(`🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`);
     if (signature) {
       console.log(`🔗 Completion signature: ${signature}`);
     }
@@ -2363,28 +2188,22 @@ const handleGameCompletedAnchorEvent = async (
       gameAddress,
       winnerAddress,
       totalPot,
-      signature
+      signature,
     );
 
     if (processed) {
-      console.log(
-        `✅ Successfully processed GameCompleted event for game ${gameAddress}`
-      );
+      console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
     }
   } catch (error) {
     console.error("Error processing GameCompleted event:", error);
   }
 };
 
-const handlePlayerJoinedAnchorEvent = async (
-  event: PlayerJoinedEvent
-): Promise<void> => {
+const handlePlayerJoinedAnchorEvent = async (event: PlayerJoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
 };
 
-const handlePlayerUnjoinedAnchorEvent = async (
-  event: PlayerUnjoinedEvent
-): Promise<void> => {
+const handlePlayerUnjoinedAnchorEvent = async (event: PlayerUnjoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
@@ -2436,7 +2255,7 @@ const defaultSleep = (ms: number): Promise<void> =>
 let sleep = defaultSleep;
 
 export const __test_setSleepImplementation = (
-  implementation: (ms: number) => Promise<void>
+  implementation: (ms: number) => Promise<void>,
 ): void => {
   sleep = implementation;
 };
@@ -2468,13 +2287,13 @@ const unregisterProgramEventListeners = async (): Promise<boolean> => {
       } catch (error) {
         console.warn(
           `⚠️ Failed to remove ${descriptor.label} event listener (id=${id}) on attempt ${attempt}/${EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS}:`,
-          error
+          error,
         );
 
         if (attempt < EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS) {
           const delayMs = EVENT_LISTENER_REMOVAL_BACKOFF_MS * 2 ** (attempt - 1);
           console.warn(
-            `⏳ Retrying ${descriptor.label} event listener removal in ${delayMs}ms (id=${id})`
+            `⏳ Retrying ${descriptor.label} event listener removal in ${delayMs}ms (id=${id})`,
           );
           await sleep(delayMs);
         }
@@ -2486,14 +2305,14 @@ const unregisterProgramEventListeners = async (): Promise<boolean> => {
     } else {
       allListenersRemoved = false;
       console.error(
-        `❌ Exhausted retries removing ${descriptor.label} event listener (id=${id}); retaining listener handle to avoid duplicate subscriptions.`
+        `❌ Exhausted retries removing ${descriptor.label} event listener (id=${id}); retaining listener handle to avoid duplicate subscriptions.`,
       );
     }
   }
 
   if (!allListenersRemoved) {
     console.warn(
-      "⚠️ One or more program event listeners could not be removed; aborting re-registration to prevent duplicate subscriptions."
+      "⚠️ One or more program event listeners could not be removed; aborting re-registration to prevent duplicate subscriptions.",
     );
   }
 
@@ -2515,7 +2334,7 @@ const registerProgramEventListeners = async (): Promise<void> => {
     for (const descriptor of programEventDescriptors) {
       if (descriptor.getId() !== null) {
         console.warn(
-          `⚠️ Skipping ${descriptor.label} event listener registration because an active listener handle is still present (id=${descriptor.getId()}).`
+          `⚠️ Skipping ${descriptor.label} event listener registration because an active listener handle is still present (id=${descriptor.getId()}).`,
         );
         continue;
       }
@@ -2523,7 +2342,7 @@ const registerProgramEventListeners = async (): Promise<void> => {
       console.log(`Setting up ${descriptor.label} event listener...`);
       const listenerId = (await program.addEventListener(
         descriptor.eventName,
-        descriptor.handler as any
+        descriptor.handler as any,
       )) as number;
       descriptor.setId(listenerId);
       console.log(`${descriptor.label} event listener set up successfully`);
@@ -2541,43 +2360,38 @@ const registerProgramEventListeners = async (): Promise<void> => {
 const attachRpcEndpointFailoverHandler = (): void => {
   rpcEndpointListenerCleanup?.();
   try {
-    rpcEndpointListenerCleanup = wallet.onRpcEndpointChange(
-      ({ endpoint, previousEndpoint }) => {
-        const hasActiveListeners = hasActiveProgramEventListenerHandles();
-        if ((!programEventListenersReady && !hasActiveListeners) || !program) {
-          return;
-        }
-
-        console.warn(
-          `RPC endpoint changed from ${previousEndpoint} to ${endpoint}; restarting program event listeners.`
-        );
-
-        const restart = async () => {
-          try {
-            await registerProgramEventListeners();
-            console.log(`🔁 Re-subscribed event listeners on ${endpoint}`);
-          } catch (error) {
-            console.error(
-              `❌ Failed to restart program event listeners after switching to ${endpoint}:`,
-              error
-            );
-          }
-        };
-
-        void restart();
+    rpcEndpointListenerCleanup = wallet.onRpcEndpointChange(({ endpoint, previousEndpoint }) => {
+      const hasActiveListeners = hasActiveProgramEventListenerHandles();
+      if ((!programEventListenersReady && !hasActiveListeners) || !program) {
+        return;
       }
-    );
+
+      console.warn(
+        `RPC endpoint changed from ${previousEndpoint} to ${endpoint}; restarting program event listeners.`,
+      );
+
+      const restart = async () => {
+        try {
+          await registerProgramEventListeners();
+          console.log(`🔁 Re-subscribed event listeners on ${endpoint}`);
+        } catch (error) {
+          console.error(
+            `❌ Failed to restart program event listeners after switching to ${endpoint}:`,
+            error,
+          );
+        }
+      };
+
+      void restart();
+    });
   } catch (error) {
     console.warn("⚠️ Unable to attach RPC endpoint failover handler:", error);
   }
 };
 
-export const __test_registerProgramEventListeners =
-  registerProgramEventListeners;
-export const __test_unregisterProgramEventListeners =
-  unregisterProgramEventListeners;
-export const __test_attachRpcEndpointFailoverHandler =
-  attachRpcEndpointFailoverHandler;
+export const __test_registerProgramEventListeners = registerProgramEventListeners;
+export const __test_unregisterProgramEventListeners = unregisterProgramEventListeners;
+export const __test_attachRpcEndpointFailoverHandler = attachRpcEndpointFailoverHandler;
 export const __test_getProgramEventListenerState = () => ({
   gameCompletedListenerId,
   playerJoinedListenerId,
@@ -2670,7 +2484,7 @@ type EventParserLike = Pick<EventParser, "parseLogs">;
 const parseCompletionEventFromLogs = (
   logs: readonly string[] | null | undefined,
   parser: EventParserLike,
-  expectedGameAddress: string
+  expectedGameAddress: string,
 ): Omit<CompletionDetails, "signature"> | null => {
   if (!logs?.length) {
     return null;
@@ -2679,10 +2493,7 @@ const parseCompletionEventFromLogs = (
   const mutableLogs = [...logs];
 
   for (const event of parser.parseLogs(mutableLogs)) {
-    if (
-      !event ||
-      (event.name !== "gameCompleted" && event.name !== "GameCompleted")
-    ) {
+    if (!event || (event.name !== "gameCompleted" && event.name !== "GameCompleted")) {
       continue;
     }
 
@@ -2713,7 +2524,7 @@ const parseCompletionEventFromLogs = (
 };
 
 const fetchCompletionDetailsFromHistory = async (
-  gameAddress: string
+  gameAddress: string,
 ): Promise<CompletionDetails | null> => {
   if (!program) {
     return null;
@@ -2742,8 +2553,8 @@ const fetchCompletionDetailsFromHistory = async (
                 commitment: "confirmed",
                 maxSupportedTransactionVersion: 0,
               })
-            : Promise.resolve(null)
-        )
+            : Promise.resolve(null),
+        ),
       );
 
       for (let txIndex = 0; txIndex < window.length; txIndex += 1) {
@@ -2757,7 +2568,7 @@ const fetchCompletionDetailsFromHistory = async (
         const parsed = parseCompletionEventFromLogs(
           transaction.meta?.logMessages ?? null,
           parser,
-          gameAddress
+          gameAddress,
         );
 
         if (parsed) {
@@ -2769,18 +2580,14 @@ const fetchCompletionDetailsFromHistory = async (
       }
     }
   } catch (error) {
-    console.error(
-      `Error reconstructing completion history for ${gameAddress}:`,
-      error
-    );
+    console.error(`Error reconstructing completion history for ${gameAddress}:`, error);
   }
 
   return null;
 };
 
-let completionHistoryFetcher: (
-  gameAddress: string
-) => Promise<CompletionDetails | null> = fetchCompletionDetailsFromHistory;
+let completionHistoryFetcher: (gameAddress: string) => Promise<CompletionDetails | null> =
+  fetchCompletionDetailsFromHistory;
 
 const getDefaultCompletionEventParserFactory = () => () => {
   if (!program) {
@@ -2789,12 +2596,9 @@ const getDefaultCompletionEventParserFactory = () => () => {
   return new EventParser(program.programId, program.coder);
 };
 
-let completionEventParserFactory: () => EventParserLike =
-  getDefaultCompletionEventParserFactory();
+let completionEventParserFactory: () => EventParserLike = getDefaultCompletionEventParserFactory();
 
-export const __test_setCompletionHistoryFetcher = (
-  fetcher: typeof completionHistoryFetcher
-) => {
+export const __test_setCompletionHistoryFetcher = (fetcher: typeof completionHistoryFetcher) => {
   completionHistoryFetcher = fetcher;
 };
 
@@ -2803,7 +2607,7 @@ export const __test_resetCompletionHistoryFetcher = () => {
 };
 
 export const __test_setCompletionEventParserFactory = (
-  factory: typeof completionEventParserFactory
+  factory: typeof completionEventParserFactory,
 ) => {
   completionEventParserFactory = factory;
 };
@@ -2815,7 +2619,7 @@ export const __test_resetCompletionEventParserFactory = () => {
 export const __test_parseCompletionEventFromLogs = (
   logs: readonly string[] | null | undefined,
   parser: EventParserLike,
-  expectedGameAddress: string
+  expectedGameAddress: string,
 ) => parseCompletionEventFromLogs(logs, parser, expectedGameAddress);
 
 export const __test_fetchCompletionDetailsFromHistory = (gameAddress: string) =>
@@ -2835,20 +2639,18 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
 
   const completionDetails = await completionHistoryFetcher(gameAddress);
   if (completionDetails) {
-    console.log(
-      `♻️ Reconstructed completion for ${gameAddress} from transaction history`
-    );
+    console.log(`♻️ Reconstructed completion for ${gameAddress} from transaction history`);
 
     const processed = await runProcessGameCompletion(
       gameAddress,
       completionDetails.winnerAddress,
       completionDetails.totalPot,
-      completionDetails.signature
+      completionDetails.signature,
     );
 
     if (!processed) {
       console.log(
-        `⏳ Skipping orphaned cleanup replay for ${gameAddress}; completion already running`
+        `⏳ Skipping orphaned cleanup replay for ${gameAddress}; completion already running`,
       );
     }
 
@@ -2856,12 +2658,7 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
   }
 
   gameDb.completeGame(gameAddress, "cancelled", Date.now());
-  await updateGameMessageSafely(
-    gameAddress,
-    gameData,
-    "Completed",
-    "cancelled"
-  );
+  await updateGameMessageSafely(gameAddress, gameData, "Completed", "cancelled");
 
   console.log(`✅ Successfully cleaned up orphaned game ${gameAddress}`);
 };
@@ -2872,18 +2669,13 @@ export const __test_cleanupOrphanedGame = cleanupOrphanedGame;
 // BOT SEQUENTIALIZATION
 // ================================
 
-const getSequentializationKey = (
-  ctx: Context
-): string | string[] | undefined => {
+const getSequentializationKey = (ctx: Context): string | string[] | undefined => {
   const userId = getTelegramIdString(ctx);
   if (!userId) return undefined;
 
   if (ctx.callbackQuery?.data) {
     const callbackData = ctx.callbackQuery.data;
-    if (
-      callbackData.startsWith("join_") ||
-      callbackData.startsWith("refresh_")
-    ) {
+    if (callbackData.startsWith("join_") || callbackData.startsWith("refresh_")) {
       const gameAddress = callbackData.split("_")[1];
       return [userId, `game_${gameAddress}`];
     }
@@ -2904,11 +2696,7 @@ const getDefaultTokenMetadata = async () => {
   return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
-const fetchTokenPriceUSD = async ({
-  tokenMint,
-}: {
-  tokenMint: string;
-}): Promise<number | null> => {
+const fetchTokenPriceUSD = async ({ tokenMint }: { tokenMint: string }): Promise<number | null> => {
   const lookup = await getUsdPrice({
     tokenMint: tokenMint === "SOL" ? WSOL_MINT : tokenMint,
   });
@@ -2942,15 +2730,13 @@ const {
 export const __test_startInteractiveGameSetup = startInteractiveGameSetupTest;
 
 const gameCommandsModule = createGameCommandsModule({
-  parseAmount: (args, index, chatId) =>
-    tokenManager.parseAmount(args, index, chatId),
+  parseAmount: (args, index, chatId) => tokenManager.parseAmount(args, index, chatId),
   inferMaxPlayers,
   wallet: {
     getTokenBalance: (telegramId, mint, options) =>
       wallet.getTokenBalance(telegramId, mint, options),
     getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
-    formatTokenBalance: (amount, decimals) =>
-      wallet.formatTokenBalance(amount, decimals),
+    formatTokenBalance: (amount, decimals) => wallet.formatTokenBalance(amount, decimals),
     getBalance: (telegramId) => wallet.getBalance(telegramId),
     formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
   },
@@ -2966,17 +2752,13 @@ const gameCommandsModule = createGameCommandsModule({
     startInteractiveGameSetup(ctx, telegramId, copy, tokenOverride),
   resolveCommandTokenOverride: (tokenInput, chatId) =>
     resolveGameCommandTokenOverride(tokenInput, chatId),
-  getRequiredTelegramIdForContext: (ctx, label) =>
-    getRequiredTelegramIdForContext(ctx, label),
+  getRequiredTelegramIdForContext: (ctx, label) => getRequiredTelegramIdForContext(ctx, label),
   gameSetupCopy: GAME_SETUP_COPY,
   getChatGameSettings: (chatId) => chatDb.getChatGameSettings(chatId),
 });
 
-const {
-  createCoinflipDeps,
-  handleGiveawayCommand,
-  __test_createGameViaCommand,
-} = gameCommandsModule;
+const { createCoinflipDeps, handleGiveawayCommand, __test_createGameViaCommand } =
+  gameCommandsModule;
 
 export { __test_createGameViaCommand };
 
@@ -3006,10 +2788,7 @@ const {
   __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallbackTest,
 } = gameCallbacksModule;
 
-const isUserGroupAdmin = async (
-  ctx: Context,
-  userId: number
-): Promise<boolean> => {
+const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> => {
   try {
     if (!ctx.chat || ctx.chat.type === "private") return false;
     const member = await ctx.api.getChatMember(ctx.chat.id, userId);
@@ -3023,7 +2802,7 @@ const isUserGroupAdmin = async (
 const replyToMessage = async (
   ctx: Context,
   text: string,
-  parseMode: "HTML" | "MarkdownV2" = "HTML"
+  parseMode: "HTML" | "MarkdownV2" = "HTML",
 ): Promise<void> => {
   await ctx.reply(text, {
     parse_mode: parseMode,
@@ -3048,13 +2827,9 @@ registerGameCallbackHandlers();
 bot.use(createGameSetupTextInputMiddleware());
 
 export const __test_handleGameSetupTextInput = handleGameSetupTextInputTest;
-export const __test_shouldSkipGenericGameCallback =
-  shouldSkipGenericGameCallbackTest;
+export const __test_shouldSkipGenericGameCallback = shouldSkipGenericGameCallbackTest;
 
-const getPlayerData = async (
-  telegramId: bigint,
-  tokenMint?: string
-): Promise<PlayerData> => {
+const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
 
@@ -3091,22 +2866,18 @@ const validateAndProcessTransaction = async (
   isSol: boolean,
   description: string,
   transactionFn: (
-    playerData: PlayerData
+    playerData: PlayerData,
   ) => Promise<string | { signature: string; message?: string }>,
-  options?: ValidateTransactionOptions
+  options?: ValidateTransactionOptions,
 ): Promise<void> => {
   const { showSolscanLink = false, tokenMint, balanceLabel } = options ?? {};
-  const playerData = await getPlayerData(
-    telegramId,
-    isSol ? undefined : tokenMint
-  );
+  const playerData = await getPlayerData(telegramId, isSol ? undefined : tokenMint);
   // Validate balance
   const totalBalance = isSol
     ? playerData.solBalance
     : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
-    const shortageLabel =
-      balanceLabel ?? (isSol ? "SOL" : DEFAULT_TOKEN_TICKER);
+    const shortageLabel = balanceLabel ?? (isSol ? "SOL" : DEFAULT_TOKEN_TICKER);
     const shortageMessage = `❌ Not enough ${shortageLabel}. Add more ${shortageLabel} or lower the amount and try again.`;
     await ctx.reply(shortageMessage, {
       reply_to_message_id: ctx.message?.message_id,
@@ -3126,11 +2897,7 @@ const validateAndProcessTransaction = async (
 
     if (typeof txResult === "string") {
       txString = txResult.toString().trim();
-    } else if (
-      txResult &&
-      typeof txResult === "object" &&
-      typeof txResult.signature === "string"
-    ) {
+    } else if (txResult && typeof txResult === "object" && typeof txResult.signature === "string") {
       txString = txResult.signature.trim();
       overrideMessage = txResult.message;
     }
@@ -3138,9 +2905,7 @@ const validateAndProcessTransaction = async (
     // Debug: Log transaction details when creating Solscan link
     if (showSolscanLink) {
       console.log(
-        `🔗 Solscan link requested. txString: "${txString}", length: ${
-          txString?.length || 0
-        }`
+        `🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`,
       );
     }
 
@@ -3167,47 +2932,31 @@ const validateAndProcessTransaction = async (
       }
     }
 
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      successMessage,
-      {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: disablePreview },
-      }
-    );
+    await ctx.api.editMessageText(ctx.chat!.id, processingMsg.message_id, successMessage, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: disablePreview },
+    });
   } catch (error: any) {
     await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
     throw error;
   }
 };
 
-export const __test_validateAndProcessTransaction =
-  validateAndProcessTransaction;
+export const __test_validateAndProcessTransaction = validateAndProcessTransaction;
 
 // ================================
 // RESPONSE HELPERS
 // ================================
 
-const handleCommandError = async (
-  ctx: Context,
-  error: any,
-  commandName: string
-): Promise<void> => {
+const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
   await handleCommandErrorHelper(ctx, error, commandName, wallet);
 };
 
-const replyUsageError = async (
-  ctx: Context,
-  message: string
-): Promise<void> => {
+const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
   return replyToMessage(ctx, message);
 };
 
-const formatDefaultTokenSetMessage = (
-  tokenTicker: string,
-  tokenMint: string
-): string => {
+const formatDefaultTokenSetMessage = (tokenTicker: string, tokenMint: string): string => {
   const safeTicker = escapeHtml(tokenTicker);
   const safeMint = escapeHtml(tokenMint);
   return (
@@ -3225,9 +2974,7 @@ export const __test_formatDefaultTokenSetMessage = formatDefaultTokenSetMessage;
 
 const initializeAnchorProvider = async () => {
   const adminKeypair = wallet.getAdminKeypair();
-  const adminWallet = new anchor.Wallet(
-    adminKeypair as unknown as anchor.web3.Keypair
-  );
+  const adminWallet = new anchor.Wallet(adminKeypair as unknown as anchor.web3.Keypair);
   const connection = wallet.getConnection();
 
   const provider = new anchor.AnchorProvider(
@@ -3238,7 +2985,7 @@ const initializeAnchorProvider = async () => {
       preflightCommitment: "confirmed",
       skipPreflight: false,
       maxRetries: 3,
-    }
+    },
   );
 
   anchor.setProvider(provider);
@@ -3251,14 +2998,8 @@ const setupAnchor = async () => {
     program = await initializeAnchorProvider();
     console.log(`Initialized Anchor program: ${program.programId}`);
 
-    tokenManager = TokenManager.getInstance(
-      wallet,
-      DEFAULT_TOKEN_MINT,
-      DEFAULT_TOKEN_TICKER
-    );
-    console.log(
-      `Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`
-    );
+    tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
+    console.log(`Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`);
 
     swapManager = new SwapManager(wallet.getConnection(), wallet);
     swapService = new SwapService(wallet, swapManager);
@@ -3272,9 +3013,7 @@ const setupAnchor = async () => {
     await checkGameTokenStatus();
   } catch (error) {
     console.error("Error initializing Anchor program:", error);
-    console.error(
-      "Make sure admin-keypair.json exists in the project root directory."
-    );
+    console.error("Make sure admin-keypair.json exists in the project root directory.");
     throw error;
   }
 };
@@ -3297,9 +3036,7 @@ const initializeTokensList = async () => {
       }
     }
 
-    console.log(
-      `Initialized token database with ${tokenDb.getTokenCount()} tokens`
-    );
+    console.log(`Initialized token database with ${tokenDb.getTokenCount()} tokens`);
   } catch (error) {
     console.warn("Error initializing approved tokens:", error);
   }
@@ -3318,7 +3055,7 @@ const checkOracleStatus = async () => {
     } else {
       console.warn(
         "Unable to determine oracle max tickets, keeping previous limit",
-        oracleAccount.maxTickets
+        oracleAccount.maxTickets,
       );
     }
 
@@ -3326,14 +3063,12 @@ const checkOracleStatus = async () => {
     if (bufferSeconds !== null) {
       const appliedBuffer = applyOracleBufferTime(bufferSeconds);
       console.log(
-        `Oracle buffer time set to ${appliedBuffer} seconds (~${formatDuration(
-          appliedBuffer
-        )})`
+        `Oracle buffer time set to ${appliedBuffer} seconds (~${formatDuration(appliedBuffer)})`,
       );
     } else {
       console.warn(
         "Unable to determine oracle buffer time, keeping previous value",
-        oracleAccount.oracleBufferTime
+        oracleAccount.oracleBufferTime,
       );
     }
   } catch (error) {
@@ -3344,9 +3079,9 @@ const checkOracleStatus = async () => {
 /**
  * Get the actual minimum amount from the smart contract for a specific token.
  */
-export let getContractMinimumAmount = async (
+export const getContractMinimumAmount = async (
   tokenMint: string = DEFAULT_TOKEN_MINT,
-  decimalsHint?: number
+  decimalsHint?: number,
 ): Promise<{ formatted: number; raw: number; decimals: number }> => {
   let resolvedMint = tokenMint;
   let decimals = typeof decimalsHint === "number" ? decimalsHint : undefined;
@@ -3358,7 +3093,7 @@ export let getContractMinimumAmount = async (
     } catch (metadataError) {
       console.warn(
         `⚠️ Could not fetch metadata for ${resolvedMint}, falling back to default token metadata`,
-        metadataError
+        metadataError,
       );
       const fallbackMetadata = await getDefaultTokenMetadata();
       decimals = fallbackMetadata.decimals;
@@ -3367,20 +3102,13 @@ export let getContractMinimumAmount = async (
   }
 
   try {
-    const gameTokenPda = PDAManager.getGameTokenPDA(
-      new PublicKey(resolvedMint),
-      program.programId
-    );
-    const gameTokenAccount = await program.account.gameToken.fetch(
-      gameTokenPda
-    );
+    const gameTokenPda = PDAManager.getGameTokenPDA(new PublicKey(resolvedMint), program.programId);
+    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
 
     const minAmountRaw = Number(gameTokenAccount.minAmount);
     const minAmountFormatted = minAmountRaw / Math.pow(10, decimals!);
 
-    console.log(
-      `✅ Contract minimum for ${resolvedMint}: ${minAmountFormatted}`
-    );
+    console.log(`✅ Contract minimum for ${resolvedMint}: ${minAmountFormatted}`);
     return {
       formatted: minAmountFormatted,
       raw: minAmountRaw,
@@ -3389,7 +3117,7 @@ export let getContractMinimumAmount = async (
   } catch (error) {
     console.warn(
       `⚠️ Could not fetch minimum from contract for ${resolvedMint}, using fallback`,
-      error
+      error,
     );
     const fallbackRaw = Math.round(20 * Math.pow(10, decimals!));
     return {
@@ -3404,20 +3132,18 @@ const checkGameTokenStatus = async () => {
   try {
     const gameTokenPda = PDAManager.getGameTokenPDA(
       new PublicKey(DEFAULT_TOKEN_MINT),
-      program.programId
+      program.programId,
     );
-    const gameTokenAccount = await program.account.gameToken.fetch(
-      gameTokenPda
-    );
+    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
 
     const metadata = await getDefaultTokenMetadata();
     const formattedMinAmount = wallet.formatTokenBalance(
       Number(gameTokenAccount.minAmount),
-      metadata.decimals
+      metadata.decimals,
     );
 
     console.log(
-      `Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`
+      `Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`,
     );
   } catch (error) {
     console.log("Game token not found, it might need to be initialized");
@@ -3438,7 +3164,7 @@ bot.use(caseInsensitiveCommands);
 
 const registerCaseInsensitiveCommand = (
   command: string | string[],
-  handler: (ctx: Context) => Promise<unknown> | unknown
+  handler: (ctx: Context) => Promise<unknown> | unknown,
 ) => {
   const commands = Array.isArray(command) ? command : [command];
   for (const commandName of commands) {
@@ -3456,10 +3182,7 @@ registerCaseInsensitiveCommand(["start", "balance"], async (ctx: Context) => {
 
 registerCaseInsensitiveCommand(["coinflip", "cf"], async (ctx) => {
   try {
-    await handleCoinflipCommand(
-      ctx as Context & { message?: any },
-      createCoinflipDeps()
-    );
+    await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
   } catch (error) {
     console.error("Error in coinflip command:", error);
     await ctx.reply("❌ Error setting up coinflip game. Please try again.");
@@ -3475,10 +3198,7 @@ registerCaseInsensitiveCommand(["giveaway", "ga"], async (ctx) => {
 // ================================
 
 registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "withdraw command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "withdraw command");
   if (telegramId == null) {
     return;
   }
@@ -3487,39 +3207,32 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
   if (!args || args.length < 3) {
     return replyUsageError(
       ctx,
-      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN|USD] (or use $ for USD, e.g. /withdraw &lt;address&gt; $10 WBTC)"
+      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN|USD] (or use $ for USD, e.g. /withdraw &lt;address&gt; $10 WBTC)",
     );
   }
 
   const addressArg = args[1];
   if (!addressArg) {
-    return replyToMessage(
-      ctx,
-      "Invalid wallet address. Please provide a valid Solana address."
-    );
+    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
   }
 
   let toAddress: PublicKey;
   try {
     toAddress = new PublicKey(addressArg);
   } catch {
-    return replyToMessage(
-      ctx,
-      "Invalid wallet address. Please provide a valid Solana address."
-    );
+    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
   }
 
   const amountArgRaw = args[2]?.trim();
   const tokenArgRaw = args[3]?.trim();
-  const isAllRequest =
-    amountArgRaw && ["all", "max"].includes(amountArgRaw.toLowerCase());
+  const isAllRequest = amountArgRaw && ["all", "max"].includes(amountArgRaw.toLowerCase());
 
   if (isAllRequest) {
     const wantsSol = !tokenArgRaw || tokenArgRaw.toUpperCase() === "SOL";
     if (!wantsSol) {
       return replyToMessage(
         ctx,
-        "Use a numeric amount when withdrawing SPL tokens. `all` is only supported for SOL."
+        "Use a numeric amount when withdrawing SPL tokens. `all` is only supported for SOL.",
       );
     }
 
@@ -3527,10 +3240,7 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
       const nativeLamports = await wallet.getBalance(telegramId);
 
       if (nativeLamports <= 0) {
-        return replyToMessage(
-          ctx,
-          "Your wallet has no SOL available to withdraw."
-        );
+        return replyToMessage(ctx, "Your wallet has no SOL available to withdraw.");
       }
 
       await validateAndProcessTransaction(
@@ -3548,7 +3258,7 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
 
           return { signature: result.signature, message };
         },
-        { showSolscanLink: true }
+        { showSolscanLink: true },
       );
     } catch (error: any) {
       await handleCommandError(ctx, error, "withdraw");
@@ -3561,10 +3271,7 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
   if (!parsed.success) {
     return replyToMessage(
       ctx,
-      formatParseAmountError(
-        parsed,
-        "Please provide a valid amount greater than 0."
-      )
+      formatParseAmountError(parsed, "Please provide a valid amount greater than 0."),
     );
   }
 
@@ -3579,17 +3286,13 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
       `Withdrawal of ${parsedAmount.formattedAmount}`,
       async (_playerData) => {
         if (parsedAmount.isSol) {
-          return await wallet.transferSol(
-            telegramId,
-            toAddress,
-            parsedAmount.amount
-          );
+          return await wallet.transferSol(telegramId, toAddress, parsedAmount.amount);
         } else {
           return await wallet.transferToken(
             telegramId,
             toAddress,
             parsedAmount.amount,
-            parsedAmount.tokenMint
+            parsedAmount.tokenMint,
           );
         }
       },
@@ -3597,7 +3300,7 @@ registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
         showSolscanLink: true,
         tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
         balanceLabel: parsedAmount.tokenTicker,
-      }
+      },
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "withdraw");
@@ -3614,7 +3317,7 @@ type TipMentionTokenInfo = {
 
 const getTipMentionTokenInfo = (
   entity: { offset?: number; length?: number },
-  text: string
+  text: string,
 ): TipMentionTokenInfo => {
   if (typeof entity.offset !== "number" || entity.offset < 0) {
     return { index: null, length: null };
@@ -3622,16 +3325,13 @@ const getTipMentionTokenInfo = (
 
   const before = text.slice(0, entity.offset);
   const trimmedBefore = before.trim();
-  const index =
-    trimmedBefore.length === 0 ? 0 : trimmedBefore.split(/\s+/).length;
+  const index = trimmedBefore.length === 0 ? 0 : trimmedBefore.split(/\s+/).length;
 
   if (typeof entity.length !== "number" || entity.length <= 0) {
     return { index, length: null };
   }
 
-  const mentionText = text
-    .slice(entity.offset, entity.offset + entity.length)
-    .trim();
+  const mentionText = text.slice(entity.offset, entity.offset + entity.length).trim();
 
   if (mentionText.length === 0) {
     return { index, length: null };
@@ -3654,8 +3354,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   const message = ctx.message;
   const repliedMessage = message?.reply_to_message;
   const messageText = message?.text ?? "";
-  const args =
-    messageText.trim().length > 0 ? messageText.trim().split(/\s+/) : [];
+  const args = messageText.trim().length > 0 ? messageText.trim().split(/\s+/) : [];
 
   if (!repliedMessage?.from && args.length < 2) {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
@@ -3678,21 +3377,14 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     }
 
     if (fromUser.username) {
-      gameManager.primeUsernameCache(
-        ctx,
-        String(fromUser.id),
-        `@${fromUser.username}`
-      );
+      gameManager.primeUsernameCache(ctx, String(fromUser.id), `@${fromUser.username}`);
       recipientName = `@${fromUser.username}`;
     } else if (fromUser.first_name) {
       recipientName = fromUser.first_name;
     }
-
   } else {
     const tokens = args;
-    const entities = Array.isArray(message?.entities)
-      ? (message?.entities as Array<any>)
-      : [];
+    const entities = Array.isArray(message?.entities) ? (message?.entities as Array<any>) : [];
 
     let mentionTokenIndex: number | null = null;
     let mentionUsername: string | null = null;
@@ -3718,10 +3410,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         } else if (slice?.startsWith("@")) {
           mentionUsername = slice;
         }
-        mentionLabel =
-          slice && slice.trim().length > 0
-            ? slice
-            : entity.user.first_name ?? null;
+        mentionLabel = slice && slice.trim().length > 0 ? slice : (entity.user.first_name ?? null);
         const info = getTipMentionTokenInfo(entity, messageText);
         mentionTokenIndex = info.index;
         mentionTokenLength = info.length;
@@ -3747,11 +3436,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     if (!mentionUsername && tokens.length > 1) {
       for (let i = 1; i < tokens.length; i++) {
         const token = tokens[i];
-        if (
-          typeof token === "string" &&
-          token.startsWith("@") &&
-          token.length > 1
-        ) {
+        if (typeof token === "string" && token.startsWith("@") && token.length > 1) {
           mentionUsername = token;
           mentionTokenIndex = i;
           mentionTokenLength = 1;
@@ -3776,8 +3461,8 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         return replyToMessage(
           ctx,
           `Unable to resolve <code>${escapeHtml(
-            mentionUsername
-          )}</code>. Ask them to start a chat with the bot first.`
+            mentionUsername,
+          )}</code>. Ask them to start a chat with the bot first.`,
         );
       }
       resolvedId = lookedUpId;
@@ -3789,7 +3474,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     } catch {
       return replyToMessage(
         ctx,
-        "Unable to resolve the specified user. Please try replying to their message instead."
+        "Unable to resolve the specified user. Please try replying to their message instead.",
       );
     }
 
@@ -3797,11 +3482,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       return replyToMessage(ctx, "You can't tip yourself!");
     }
 
-    if (
-      mentionIsBot !== true &&
-      ctx.chat?.id &&
-      typeof ctx.api?.getChatMember === "function"
-    ) {
+    if (mentionIsBot !== true && ctx.chat?.id && typeof ctx.api?.getChatMember === "function") {
       const candidate = Number(resolvedId);
       if (Number.isSafeInteger(candidate)) {
         try {
@@ -3826,8 +3507,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     }
 
     recipientTelegramId = recipientIdBigInt;
-    recipientName =
-      mentionUsername ?? mentionLabel ?? mentionUser?.first_name ?? "User";
+    recipientName = mentionUsername ?? mentionLabel ?? mentionUser?.first_name ?? "User";
 
     if (mentionUsername) {
       gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
@@ -3835,16 +3515,13 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
 
     const mentionStart = mentionTokenIndex;
     const mentionTokenCount =
-      mentionStart !== null && mentionStart >= 0
-        ? Math.max(1, mentionTokenLength ?? 1)
-        : 0;
+      mentionStart !== null && mentionStart >= 0 ? Math.max(1, mentionTokenLength ?? 1) : 0;
 
     amountArgs =
       mentionStart === null || mentionStart < 1
         ? args
         : args.filter(
-            (_token, idx) =>
-              idx < mentionStart || idx >= mentionStart + mentionTokenCount
+            (_token, idx) => idx < mentionStart || idx >= mentionStart + mentionTokenCount,
           );
   }
 
@@ -3858,25 +3535,14 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  const parsed = await tokenManager.parseAmount(
-    amountArgs,
-    amountArgIndex,
-    ctx.chat?.id,
-    "tip"
-  );
+  const parsed = await tokenManager.parseAmount(amountArgs, amountArgIndex, ctx.chat?.id, "tip");
   if (!parsed.success) {
     const errorMessage =
       parsed.error === "amount_too_large"
         ? "Amount is too large; please use a smaller value."
-        : formatParseAmountError(
-            parsed,
-            "Please provide a valid amount greater than 0."
-          );
+        : formatParseAmountError(parsed, "Please provide a valid amount greater than 0.");
 
-    return replyToMessage(
-      ctx,
-      errorMessage
-    );
+    return replyToMessage(ctx, errorMessage);
   }
 
   const parsedAmount = parsed.data;
@@ -3915,24 +3581,20 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       tipDescription,
       async (_playerData) => {
         if (parsedAmount.isSol) {
-          return await wallet.transferSol(
-            telegramId,
-            recipientPubKey,
-            parsedAmount.amount
-          );
+          return await wallet.transferSol(telegramId, recipientPubKey, parsedAmount.amount);
         } else {
           return await wallet.transferToken(
             telegramId,
             recipientPubKey,
             parsedAmount.amount,
-            parsedAmount.tokenMint
+            parsedAmount.tokenMint,
           );
         }
       },
       {
         tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
         balanceLabel: parsedAmount.tokenTicker,
-      }
+      },
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "tip");
@@ -3945,14 +3607,12 @@ export const __test_handleTipCommand = handleTipCommand;
 
 // Transaction cache for trade operations with TTL
 const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
-const transactionCache = createExpiringCache<TransactionCacheEntry>(
-  TRANSACTION_CACHE_TTL_MS
-);
+const transactionCache = createExpiringCache<TransactionCacheEntry>(TRANSACTION_CACHE_TTL_MS);
 
 export const __test_setTransactionCacheEntry = (
   key: string,
   entry: TransactionCacheEntry | null,
-  ttlMs: number = TRANSACTION_CACHE_TTL_MS
+  ttlMs: number = TRANSACTION_CACHE_TTL_MS,
 ): void => {
   if (!entry) {
     transactionCache.delete(key);
@@ -3961,9 +3621,8 @@ export const __test_setTransactionCacheEntry = (
   transactionCache.setWithTTL(key, entry, ttlMs);
 };
 
-export const __test_getTransactionCacheEntry = (
-  key: string
-): TransactionCacheEntry | undefined => transactionCache.peek(key);
+export const __test_getTransactionCacheEntry = (key: string): TransactionCacheEntry | undefined =>
+  transactionCache.peek(key);
 
 export const __test_clearTransactionCache = (): void => {
   transactionCache.clear();
@@ -4033,10 +3692,7 @@ registerCaseInsensitiveCommand("help", async (ctx: Context) => {
 });
 
 const handleActiveCommand = async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "active command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "active command");
   if (telegramId == null) {
     return;
   }
@@ -4048,10 +3704,7 @@ const handleActiveCommand = async (ctx: Context) => {
         return;
       }
 
-      const chatActiveGames = await gameManager.getChatActiveGames(
-        ctx,
-        ctx.chat.id
-      );
+      const chatActiveGames = await gameManager.getChatActiveGames(ctx, ctx.chat.id);
 
       if (chatActiveGames.length === 0) {
         await ctx.reply("No active games in this chat.", {
@@ -4109,10 +3762,7 @@ const handleActiveCommand = async (ctx: Context) => {
 registerCaseInsensitiveCommand("active", handleActiveCommand);
 
 const handlePublicCommand = async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "public command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "public command");
   if (telegramId == null) {
     return;
   }
@@ -4127,12 +3777,10 @@ const handlePublicCommand = async (ctx: Context) => {
       return;
     }
 
-    const normalizedGames: ActiveGameListing[] = publicActiveGames.map(
-      (game) => ({
-        ...game,
-        keyboard: cloneInlineKeyboard(game.keyboard ?? []),
-      })
-    );
+    const normalizedGames: ActiveGameListing[] = publicActiveGames.map((game) => ({
+      ...game,
+      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+    }));
 
     if (normalizedGames.length === 0) {
       await ctx.reply("No active public games found.", {
@@ -4168,10 +3816,7 @@ registerCaseInsensitiveCommand("public", handlePublicCommand);
 export const __test_handlePublicCommand = handlePublicCommand;
 
 registerCaseInsensitiveCommand("games", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "games command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "games command");
   if (telegramId == null) {
     return;
   }
@@ -4184,7 +3829,8 @@ registerCaseInsensitiveCommand("games", async (ctx: Context) => {
       ? `@${ctx.from.username}`
       : ctx.from?.first_name || "Player";
 
-    const totalGames = result.won.games.length + result.lost.games.length + result.cancelled.games.length;
+    const totalGames =
+      result.won.games.length + result.lost.games.length + result.cancelled.games.length;
 
     if (totalGames === 0) {
       await ctx.reply("You don't have any recent games.", {
@@ -4233,9 +3879,7 @@ const handleGamesTabCallback = async (ctx: Context) => {
   const telegramId = BigInt(ownerId);
   const result = await gameManager.getUserGamesHistory(ctx, telegramId);
 
-  const username = ctx.from?.username
-    ? `@${ctx.from.username}`
-    : ctx.from?.first_name || "Player";
+  const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "Player";
 
   const messageText = gameManager.formatGamesMessage(username, result, tab, page);
   const keyboard = gameManager.buildGamesKeyboard(ownerId, result, tab, page);
@@ -4312,10 +3956,7 @@ export const __test_handleGamesTabCallback = handleGamesTabCallback;
 
 bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
   try {
-    await safeAnswerCallbackQuery(
-      ctx,
-      "Select a join button below to enter a game."
-    );
+    await safeAnswerCallbackQuery(ctx, "Select a join button below to enter a game.");
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "active games header");
   }
@@ -4418,10 +4059,7 @@ bot.callbackQuery(/^public_page:(\d+)$/, async (ctx: Context) => {
 
 const LEADERBOARD_PLAYER_LIMIT = 5;
 
-const resolveLeaderboardDisplayName = async (
-  ctx: Context,
-  telegramId: string
-): Promise<string> => {
+const resolveLeaderboardDisplayName = async (ctx: Context, telegramId: string): Promise<string> => {
   try {
     return await gameManager.getLeaderboardDisplayName(ctx, telegramId);
   } catch (error) {
@@ -4433,7 +4071,7 @@ const resolveLeaderboardDisplayName = async (
 
 const resolveLeaderboardPlayers = async (
   ctx: Context,
-  stats: LeaderboardStatsRecord[]
+  stats: LeaderboardStatsRecord[],
 ): Promise<LeaderboardPlayerDisplay[]> => {
   // Get unique token mints from all players' netAmountByToken
   const tokenMints = new Set<string>();
@@ -4471,15 +4109,12 @@ const resolveLeaderboardPlayers = async (
       } catch (error) {
         console.warn(`Could not get price for token ${mint}:`, error);
       }
-    })
+    }),
   );
 
   const players = await Promise.all(
     stats.map(async (row) => {
-      const displayName = await resolveLeaderboardDisplayName(
-        ctx,
-        row.telegramId
-      );
+      const displayName = await resolveLeaderboardDisplayName(ctx, row.telegramId);
       const wins = Math.max(0, row.gamesWon);
       const totalGames = Math.max(0, row.totalGames);
       const losses = Math.max(totalGames - wins, 0);
@@ -4507,7 +4142,7 @@ const resolveLeaderboardPlayers = async (
         totalVolume: Math.max(0, row.totalVolume),
         netWonUsd,
       } satisfies LeaderboardPlayerDisplay;
-    })
+    }),
   );
 
   // Filter players with games and sort by net USD descending
@@ -4554,14 +4189,20 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
     const telegramIds = allPlayersUnfiltered.map((p) => p.telegramId);
 
     // Check cache first for all players
-    const cachedMemberships = gameDb.getCachedMemberships(chatId, telegramIds, MEMBERSHIP_CACHE_TTL_MS);
+    const cachedMemberships = gameDb.getCachedMemberships(
+      chatId,
+      telegramIds,
+      MEMBERSHIP_CACHE_TTL_MS,
+    );
 
     // Separate into cached and uncached
     const playersNeedingCheck = allPlayersUnfiltered.filter(
-      (p) => !cachedMemberships.has(p.telegramId)
+      (p) => !cachedMemberships.has(p.telegramId),
     );
 
-    console.log(`📊 Membership cache: ${cachedMemberships.size} cached, ${playersNeedingCheck.length} need API check`);
+    console.log(
+      `📊 Membership cache: ${cachedMemberships.size} cached, ${playersNeedingCheck.length} need API check`,
+    );
 
     // Check membership via API for uncached players
     const membershipChecks = await Promise.all(
@@ -4569,7 +4210,8 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
         try {
           const member = await ctx.api.getChatMember(chatId, Number(player.telegramId));
           // member, administrator, creator are valid members; left, kicked, restricted (without is_member) are not
-          const isMember = ["member", "administrator", "creator"].includes(member.status) ||
+          const isMember =
+            ["member", "administrator", "creator"].includes(member.status) ||
             (member.status === "restricted" && member.is_member);
 
           // Save to cache
@@ -4583,7 +4225,7 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
           gameDb.saveMembershipCache(chatId, player.telegramId, false);
           return { player, isMember: false };
         }
-      })
+      }),
     );
 
     // Combine cached results with fresh API results
@@ -4620,7 +4262,7 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
     });
 
     console.log(
-      `✅ Leaderboard generated for chat ${chatId} with ${displayedPlayers.length} players (${allPlayers.length} members, ${playersNeedingCheck.length} API checks, ${allPlayersUnfiltered.length} candidates)`
+      `✅ Leaderboard generated for chat ${chatId} with ${displayedPlayers.length} players (${allPlayers.length} members, ${playersNeedingCheck.length} API checks, ${allPlayersUnfiltered.length} candidates)`,
     );
   } catch (error) {
     console.error("Error generating leaderboard:", error);
@@ -4666,7 +4308,7 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
     });
 
     console.log(
-      `✅ Global leaderboard generated with ${displayedPlayers.length} players (${allPlayers.length} total)`
+      `✅ Global leaderboard generated with ${displayedPlayers.length} players (${allPlayers.length} total)`,
     );
   } catch (error) {
     console.error("Error generating global leaderboard:", error);
@@ -4691,9 +4333,7 @@ registerCaseInsensitiveCommand("oracle", async (ctx: Context) => {
       `Min Timeout: ${formatDuration(oracleAccount.minTimeout.toNumber())}`,
       `Max Timeout: ${formatDuration(oracleAccount.maxTimeout.toNumber())}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDuration(
-        oracleAccount.oracleBufferTime.toNumber()
-      )}`,
+      `Oracle Buffer Time: ${formatDuration(oracleAccount.oracleBufferTime.toNumber())}`,
     ].join("\n");
 
     await ctx.reply(response, {
@@ -4709,7 +4349,7 @@ const handlePlayerEvent = async (
   event: PlayerEvent,
   eventName: string,
   emoji: string,
-  action: string
+  action: string,
 ): Promise<void> => {
   try {
     const gameAddress = event.gameKey.toString();
@@ -4719,14 +4359,10 @@ const handlePlayerEvent = async (
     const timestamp = Number(event.timestamp);
 
     console.log(
-      `${emoji} ${eventName} event: ${playerAddress} ${action} game ${gameAddress} (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`
+      `${emoji} ${eventName} event: ${playerAddress} ${action} game ${gameAddress} (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`,
     );
 
-    const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(
-      gameAddress,
-      lastSlot,
-      timestamp
-    );
+    const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
 
     if (slotWasUpdated) {
       const targets = getGameMessageTargets(gameAddress);
@@ -4759,17 +4395,11 @@ bot.callbackQuery(
     async (ctx) => {
       // Only show private key in private chats for security
       if (ctx.chat?.type !== "private") {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "❌ Private key only available in private chat"
-        );
+        await safeAnswerCallbackQuery(ctx, "❌ Private key only available in private chat");
         return;
       }
 
-      const telegramId = await resolveTelegramIdOrRespond(
-        ctx,
-        "show private key"
-      );
+      const telegramId = await resolveTelegramIdOrRespond(ctx, "show private key");
       if (telegramId == null) {
         return;
       }
@@ -4784,8 +4414,8 @@ bot.callbackQuery(
       });
       await safeAnswerCallbackQuery(ctx, "Confirmation required");
     },
-    { action: "cmd_privatekey", errorAck: "❌ Error preparing private key export" }
-  )
+    { action: "cmd_privatekey", errorAck: "❌ Error preparing private key export" },
+  ),
 );
 
 bot.callbackQuery(
@@ -4811,9 +4441,7 @@ bot.callbackQuery(
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
-      const privateKeyBase64 = Buffer.from(keypair.secretKey).toString(
-        "base64"
-      );
+      const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
       const response = [
         `🔐 <b>Private Key</b>`,
@@ -4822,14 +4450,10 @@ bot.callbackQuery(
         `Never share your private key with anyone.`,
         `Store it securely offline.`,
         "",
-        `Wallet Address: <code>${escapeHtml(
-          keypair.publicKey.toBase58()
-        )}</code>`,
+        `Wallet Address: <code>${escapeHtml(keypair.publicKey.toBase58())}</code>`,
         "",
         `<b>Secret Key (Base64):</b>`,
-        `<span class="tg-spoiler"><code>${escapeHtml(
-          privateKeyBase64
-        )}</code></span>`,
+        `<span class="tg-spoiler"><code>${escapeHtml(privateKeyBase64)}</code></span>`,
         "",
         `You can import this key into Phantom, Solflare, or other Solana wallets.`,
       ];
@@ -4841,8 +4465,8 @@ bot.callbackQuery(
       timer.unref?.();
       await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
     },
-    { action: "confirm_privatekey", errorAck: "❌ Error showing private key" }
-  )
+    { action: "confirm_privatekey", errorAck: "❌ Error showing private key" },
+  ),
 );
 
 type SolWsolSwapDeps = {
@@ -4859,7 +4483,7 @@ const handleSolWsolSwap = async (
   ctx: Context,
   transaction: PendingSwapTransaction,
   amountLamports: number,
-  deps: Partial<SolWsolSwapDeps> = {}
+  deps: Partial<SolWsolSwapDeps> = {},
 ): Promise<"success" | "insufficient" | "empty" | "error"> => {
   const resolvedDeps: SolWsolSwapDeps = {
     executeWrapFlow,
@@ -4875,15 +4499,10 @@ const handleSolWsolSwap = async (
   const telegramId = BigInt(transaction.userId);
   const fallbackAmountLabel = resolvedDeps.wallet.formatSolBalance(amountLamports);
 
-  if (
-    transaction.fromToken === "SOL" &&
-    transaction.toToken === "WSOL"
-  ) {
+  if (transaction.fromToken === "SOL" && transaction.toToken === "WSOL") {
     const result = await resolvedDeps.executeWrapFlow(telegramId, amountLamports, {
       onProcessing: async (formattedAmount) => {
-        const amountLabel = escapeHtml(
-          formattedAmount ?? fallbackAmountLabel
-        );
+        const amountLabel = escapeHtml(formattedAmount ?? fallbackAmountLabel);
         await resolvedDeps.respondWithMenu(ctx, {
           text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountLabel} SOL to WSOL...\n\n<i>Please wait...</i>`,
           keyboard: new InlineKeyboard(),
@@ -4892,7 +4511,7 @@ const handleSolWsolSwap = async (
       onInsufficientBalance: async (formattedAmount) => {
         await resolvedDeps.respondWithMenu(ctx, {
           text: `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${escapeHtml(
-            formattedAmount
+            formattedAmount,
           )}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
           keyboard: createBackToWalletKeyboard(),
         });
@@ -4913,7 +4532,7 @@ const handleSolWsolSwap = async (
       onError: async (error) => {
         const userFriendlyError = await resolvedDeps.formatUserFriendlyError(
           error,
-          resolvedDeps.wallet
+          resolvedDeps.wallet,
         );
         await resolvedDeps.respondWithMenu(ctx, {
           text: userFriendlyError,
@@ -4923,10 +4542,7 @@ const handleSolWsolSwap = async (
     });
 
     if (result.status === "success") {
-      await resolvedDeps.safeAnswerCallbackQuery(
-        ctx,
-        "✅ Wrapped SOL to WSOL"
-      );
+      await resolvedDeps.safeAnswerCallbackQuery(ctx, "✅ Wrapped SOL to WSOL");
     } else if (result.status === "insufficient") {
       await resolvedDeps.safeAnswerCallbackQuery(ctx, "❌ Not enough SOL");
     } else {
@@ -4940,9 +4556,7 @@ const handleSolWsolSwap = async (
     expectedAmountLamports: amountLamports,
     unwrapLamports: amountLamports,
     onProcessing: async (formattedAmount) => {
-      const amountLabel = escapeHtml(
-        formattedAmount ?? fallbackAmountLabel
-      );
+      const amountLabel = escapeHtml(formattedAmount ?? fallbackAmountLabel);
       await resolvedDeps.respondWithMenu(ctx, {
         text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${amountLabel} WSOL to SOL...\n\n<i>Please wait...</i>`,
         keyboard: new InlineKeyboard(),
@@ -4970,7 +4584,7 @@ const handleSolWsolSwap = async (
     onError: async (error) => {
       const userFriendlyError = await resolvedDeps.formatUserFriendlyError(
         error,
-        resolvedDeps.wallet
+        resolvedDeps.wallet,
       );
       await resolvedDeps.respondWithMenu(ctx, {
         text: userFriendlyError,
@@ -4980,10 +4594,7 @@ const handleSolWsolSwap = async (
   });
 
   if (result.status === "success") {
-    await resolvedDeps.safeAnswerCallbackQuery(
-      ctx,
-      "✅ Unwrapped WSOL to SOL"
-    );
+    await resolvedDeps.safeAnswerCallbackQuery(ctx, "✅ Unwrapped WSOL to SOL");
   } else if (result.status === "empty") {
     await resolvedDeps.safeAnswerCallbackQuery(ctx, "ℹ️ No WSOL to unwrap");
   } else {
@@ -5001,11 +4612,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     const callbackData = ctx.callbackQuery?.data || "";
     const txId = callbackData.replace("confirm_swap_", "");
 
-    const validation = validatePendingTransaction<PendingSwapTransaction>(
-      ctx,
-      txId,
-      "swap"
-    );
+    const validation = validatePendingTransaction<PendingSwapTransaction>(ctx, txId, "swap");
 
     if (validation.status === "expired") {
       await safeAnswerCallbackQuery(ctx, "❌ Transaction expired or not found");
@@ -5020,7 +4627,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     const transaction = validation.transaction;
 
     console.log(
-      `✅ Confirmed swap: ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}`
+      `✅ Confirmed swap: ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}`,
     );
 
     // Update message to show processing state
@@ -5028,7 +4635,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       "swap",
       transaction.amount,
       transaction.fromToken,
-      transaction.toToken
+      transaction.toToken,
     );
 
     await respondWithMenu(ctx, {
@@ -5038,10 +4645,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     });
 
     const amountLamports = Number(transaction.rawAmount);
-    const isSolWrapSwap =
-      transaction.fromToken === "SOL" && transaction.toToken === "WSOL";
-    const isSolUnwrapSwap =
-      transaction.fromToken === "WSOL" && transaction.toToken === "SOL";
+    const isSolWrapSwap = transaction.fromToken === "SOL" && transaction.toToken === "WSOL";
+    const isSolUnwrapSwap = transaction.fromToken === "WSOL" && transaction.toToken === "SOL";
 
     if (
       (isSolWrapSwap || isSolUnwrapSwap) &&
@@ -5061,25 +4666,18 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
 
-      const rawOutputDecimals =
-        quote.outputDecimals ?? (transaction as any).outputDecimals;
+      const rawOutputDecimals = quote.outputDecimals ?? (transaction as any).outputDecimals;
       const inferredOutputDecimals = Number(rawOutputDecimals);
-      const outputDecimals = Number.isFinite(inferredOutputDecimals)
-        ? inferredOutputDecimals
-        : 9;
+      const outputDecimals = Number.isFinite(inferredOutputDecimals) ? inferredOutputDecimals : 9;
 
       const txSignature = await swapService.execute(quote, keypair);
 
       console.log(`🚀 Swap transaction submitted: ${txSignature}`);
 
-      const receivedDisplay = formatAmount(
-        quote.outputAmount ?? "0",
-        outputDecimals,
-        {
-          maxFractionDigits: outputDecimals,
-          trim: true,
-        }
-      );
+      const receivedDisplay = formatAmount(quote.outputAmount ?? "0", outputDecimals, {
+        maxFractionDigits: outputDecimals,
+        trim: true,
+      });
 
       const successLines = [
         `✅ <b>Swap Completed</b>`,
@@ -5113,10 +4711,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       });
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
-      const userFriendlyError = await formatUserFriendlyError(
-        swapError,
-        wallet
-      );
+      const userFriendlyError = await formatUserFriendlyError(swapError, wallet);
       await respondWithMenu(ctx, {
         text: `❌ <b>Swap Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
         parseMode: "HTML",
@@ -5155,14 +4750,14 @@ registerWalletActionMenuHandler({
             token.rawBalance !== undefined
               ? Number.parseFloat(String(token.rawBalance))
               : token.balance > 0
-              ? token.balance
-              : 0;
+                ? token.balance
+                : 0;
           return Number.isFinite(rawValue) && rawValue > 0;
         },
         emptyLabel: "❌ No tokens available to swap",
       },
     },
-  successAck: "💱 Select token to swap from",
+    successAck: "💱 Select token to swap from",
   }),
 });
 
@@ -5176,7 +4771,7 @@ type ResolveAdminIntegratorConfigOptions = {
 };
 
 const resolveAdminIntegratorConfig = async (
-  options: ResolveAdminIntegratorConfigOptions
+  options: ResolveAdminIntegratorConfigOptions,
 ): Promise<IntegratorSwapParams | null> => {
   const {
     integratorConfig,
@@ -5188,8 +4783,7 @@ const resolveAdminIntegratorConfig = async (
   } = options;
 
   let config = integratorConfig;
-  const baseFeeBps =
-    config?.referralFee ?? referralConfig.baseFeeBps ?? 85;
+  const baseFeeBps = config?.referralFee ?? referralConfig.baseFeeBps ?? 85;
 
   const shouldForceAdminForMax =
     amountResolution.normalizedAmount === "max" &&
@@ -5208,10 +4802,7 @@ const resolveAdminIntegratorConfig = async (
     });
   }
 
-  const bufferThreshold = Math.max(
-    USER_SOL_MAX_BUFFER_LAMPORTS,
-    JUPITER_MIN_SOL_BALANCE_LAMPORTS
-  );
+  const bufferThreshold = Math.max(USER_SOL_MAX_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
   const needsAdminPayer = snapshot.solBalance < bufferThreshold;
 
   if (needsAdminPayer && config?.payerKind !== "admin") {
@@ -5253,9 +4844,7 @@ const buildAdminIntegratorConfig = async ({
   } catch (error) {
     const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
     if (!Number.isFinite(fallback) || fallback <= 0) {
-      throw new Error(
-        "Wrap rent reserve unavailable; retry when fee cache refreshes."
-      );
+      throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.");
     }
     rentReserveLamports = fallback;
   }
@@ -5265,30 +4854,27 @@ const buildAdminIntegratorConfig = async ({
   const extraAtaLamports = rentReserveLamports;
   const priorityBufferLamports = Math.max(
     200_000,
-    Math.floor(JUPITER_MIN_SOL_BALANCE_LAMPORTS * 0.2)
+    Math.floor(JUPITER_MIN_SOL_BALANCE_LAMPORTS * 0.2),
   );
   const requiredLamports = computeRequiredAdminLamports(
     JUPITER_MIN_SOL_BALANCE_LAMPORTS,
     rentReserveLamports,
     extraAtaLamports,
-    priorityBufferLamports
+    priorityBufferLamports,
   );
-  const adminBalance = await wallet
-    .getConnection()
-    .getBalance(adminKeypair.publicKey);
+  const adminBalance = await wallet.getConnection().getBalance(adminKeypair.publicKey);
 
   if (adminBalance < requiredLamports) {
     throw new Error(
       `Integrator gas payer is low on SOL. Need at least ${wallet.formatSolBalance(
-        requiredLamports
-      )} to cover rent and priority fees.`
+        requiredLamports,
+      )} to cover rent and priority fees.`,
     );
   }
 
   let referralFeeBps = baseFeeBps;
   try {
-    const tradeIsSol =
-      tradeMint === WSOL_MINT || tradeTicker.trim().toUpperCase() === "SOL";
+    const tradeIsSol = tradeMint === WSOL_MINT || tradeTicker.trim().toUpperCase() === "SOL";
     const tradePriceMint = tradeIsSol ? WSOL_MINT : tradeMint;
     const [tradePriceLookup, solPriceLookup] = await Promise.all([
       getUsdPrice({
@@ -5297,11 +4883,11 @@ const buildAdminIntegratorConfig = async ({
       getUsdPrice({ tokenMint: WSOL_MINT }),
     ]);
     const tradePriceUsd = tradeIsSol
-      ? tradePriceLookup?.price ?? 0
-      : tradePriceLookup?.price ?? 0;
+      ? (tradePriceLookup?.price ?? 0)
+      : (tradePriceLookup?.price ?? 0);
     const solPrice = tradeIsSol
-      ? tradePriceLookup?.price ?? solPriceLookup?.price ?? 0
-      : solPriceLookup?.price ?? 0;
+      ? (tradePriceLookup?.price ?? solPriceLookup?.price ?? 0)
+      : (solPriceLookup?.price ?? 0);
     const deficitLamports =
       solFeeBufferLamports ??
       Math.max(JUPITER_MIN_SOL_BALANCE_LAMPORTS, USER_SOL_MAX_BUFFER_LAMPORTS);
@@ -5316,7 +4902,7 @@ const buildAdminIntegratorConfig = async ({
   } catch (surchargeError) {
     console.warn(
       "Failed to compute admin payer surcharge, falling back to base referral fee",
-      surchargeError
+      surchargeError,
     );
   }
 
@@ -5336,21 +4922,21 @@ const buildAdminIntegratorConfig = async ({
 const prepareIntegratorForQuote = (
   integrator: IntegratorSwapParams | null,
   outputTicker: string,
-  userPublicKey: string
+  userPublicKey: string,
 ): IntegratorSwapParams | null =>
   outputTicker === "SOL"
     ? integrator
     : integrator
-    ? {
-        ...integrator,
-        payer: userPublicKey,
-        closeAuthority: userPublicKey,
-        payerKind: "user",
-        adminBalanceLamports: undefined,
-        adminRequiredLamports: undefined,
-        adminRouteLamports: undefined,
-      }
-    : null;
+      ? {
+          ...integrator,
+          payer: userPublicKey,
+          closeAuthority: userPublicKey,
+          payerKind: "user",
+          adminBalanceLamports: undefined,
+          adminRequiredLamports: undefined,
+          adminRouteLamports: undefined,
+        }
+      : null;
 
 // Expose helpers for tests
 export const __test_prepareIntegratorForQuote = prepareIntegratorForQuote;
@@ -5393,10 +4979,7 @@ registerCallbackPrefixHandler(
     console.log("🔔 Swap FROM token selected:", fromToken);
 
     try {
-      const telegramId = await resolveTelegramIdOrRespond(
-        ctx,
-        "swap menu from token"
-      );
+      const telegramId = await resolveTelegramIdOrRespond(ctx, "swap menu from token");
       if (telegramId == null) {
         return;
       }
@@ -5441,7 +5024,7 @@ registerCallbackPrefixHandler(
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap selection");
     }
   },
-  { logLabel: "swap_from" }
+  { logLabel: "swap_from" },
 );
 
 // Handle "TO" token selection for swap
@@ -5487,8 +5070,7 @@ registerCallbackPrefixHandler(
 
       const cachedEntry = transactionCache.get(toToken);
       if (isTokenSelectionCacheEntry(cachedEntry)) {
-        const displayToken =
-          cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
+        const displayToken = cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
         await showSwapAmountSelection(ctx, fromToken, displayToken, {
           toTokenIdentifier: toToken,
         });
@@ -5506,7 +5088,7 @@ registerCallbackPrefixHandler(
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
     }
   },
-  { logLabel: "swap_to" }
+  { logLabel: "swap_to" },
 );
 
 // Handle swap amount selection
@@ -5528,15 +5110,13 @@ registerCallbackPrefixHandler(
       return;
     }
 
-    console.log(
-      `🔔 Swap amount selected: ${amount} ${fromToken} → ${toTokenIdentifier}`
-    );
+    console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toTokenIdentifier}`);
 
     try {
       const cachedTarget = transactionCache.get(toTokenIdentifier);
       const isCachedSelection = isTokenSelectionCacheEntry(cachedTarget);
       const displayToToken = isCachedSelection
-        ? cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken
+        ? (cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken)
         : toTokenIdentifier.toUpperCase();
 
       const quoteOverrides: {
@@ -5557,21 +5137,11 @@ registerCallbackPrefixHandler(
           ctx,
           userId,
           title: "✏️ <b>Custom Amount</b>",
-          tokenLines: [
-            `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(
-              displayToToken
-            )}`,
-          ],
+          tokenLines: [`<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`],
           instructions: [
-            `Reply to this message with the amount of ${escapeHtml(
-              fromToken
-            )} to swap.`,
+            `Reply to this message with the amount of ${escapeHtml(fromToken)} to swap.`,
           ],
-          examples: [
-            "• <code>10</code>",
-            "• <code>0.5</code>",
-            "• <code>max</code> (all balance)",
-          ],
+          examples: ["• <code>10</code>", "• <code>0.5</code>", "• <code>max</code> (all balance)"],
           cancelCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
           state: {
             type: "swap_custom_amount",
@@ -5587,32 +5157,22 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      const telegramId = await resolveTelegramIdOrRespond(
-        ctx,
-        "swap amount selection"
-      );
+      const telegramId = await resolveTelegramIdOrRespond(ctx, "swap amount selection");
       if (telegramId == null) {
         return;
       }
 
-      await showSwapQuoteAndConfirmation(
-        ctx,
-        fromToken,
-        displayToToken,
-        amount,
-        telegramId,
-        {
-          toMint: quoteOverrides.toMint,
-          toDecimals: quoteOverrides.toDecimals,
-        }
-      );
+      await showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
+        toMint: quoteOverrides.toMint,
+        toDecimals: quoteOverrides.toDecimals,
+      });
       await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
     } catch (error) {
       console.error("Error in swap amount selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
     }
   },
-  { logLabel: "swap_amount" }
+  { logLabel: "swap_amount" },
 );
 
 /**
@@ -5622,15 +5182,18 @@ const showSwapAmountSelection = async (
   ctx: any,
   fromToken: string,
   toToken: string,
-  options: { toTokenIdentifier?: string } = {}
+  options: { toTokenIdentifier?: string } = {},
 ) => {
   const telegramId = requireTelegramId(ctx, "swap amount selection");
 
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  const { decimalBalance: balanceDecimal, formattedBalance } =
-    resolveFormattedBalance(fromToken, solBalance, tokenBalances);
+  const { decimalBalance: balanceDecimal, formattedBalance } = resolveFormattedBalance(
+    fromToken,
+    solBalance,
+    tokenBalances,
+  );
 
   const response = [
     `💱 <b>Swap Amount</b>`,
@@ -5671,7 +5234,7 @@ const showSwapQuoteAndConfirmation = async (
     fromDecimals?: number;
     toMint?: string;
     toDecimals?: number;
-  } = {}
+  } = {},
 ) => {
   const userId = telegramId || getTelegramId(ctx);
   const cancelCallback = `swap_to_${fromToken}_${toToken}`;
@@ -5683,22 +5246,18 @@ const showSwapQuoteAndConfirmation = async (
       amountInput: amount,
       inputFactory: async ({ tokenBalances }) => {
         const inputMint =
-          overrides.fromMint ??
-          (await tokenManager.resolveMintForTicker(fromToken));
+          overrides.fromMint ?? (await tokenManager.resolveMintForTicker(fromToken));
         if (!inputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
 
         const balanceEntry =
-          fromToken === "SOL"
-            ? undefined
-            : tokenBalances.find((t) => t.ticker === fromToken);
+          fromToken === "SOL" ? undefined : tokenBalances.find((t) => t.ticker === fromToken);
         const decimals =
           overrides.fromDecimals ??
           (fromToken === "SOL"
             ? 9
-            : balanceEntry?.decimals ??
-              (await getCachedTokenMetadata(inputMint)).decimals);
+            : (balanceEntry?.decimals ?? (await getCachedTokenMetadata(inputMint)).decimals));
 
         return {
           ticker: fromToken,
@@ -5711,17 +5270,13 @@ const showSwapQuoteAndConfirmation = async (
         };
       },
       outputFactory: async () => {
-        const outputMint =
-          overrides.toMint ??
-          (await tokenManager.resolveMintForTicker(toToken));
+        const outputMint = overrides.toMint ?? (await tokenManager.resolveMintForTicker(toToken));
         if (!outputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
         const decimals =
           overrides.toDecimals ??
-          (toToken === "SOL"
-            ? 9
-            : (await getCachedTokenMetadata(outputMint)).decimals);
+          (toToken === "SOL" ? 9 : (await getCachedTokenMetadata(outputMint)).decimals);
 
         return {
           ticker: toToken,
@@ -5814,13 +5369,12 @@ bot.on("message:text", async (ctx, next) => {
       {
         parse_mode: "HTML",
         reply_markup: createBackToWalletKeyboard(),
-      }
+      },
     );
     return;
   }
 
-  const lockerSuffix =
-    ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
+  const lockerSuffix = ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
   const lockerId = `${userId}:${lockerSuffix}`;
   const locked = markInputSessionProcessing(sessionKey, lockerId);
 
@@ -5844,16 +5398,11 @@ bot.on("message:text", async (ctx, next) => {
     } else if (inputSession.type === "swap_custom_amount") {
       await handleSwapCustomAmountInput(ctx, inputSession, userMessage);
     } else if (inputSession.type === "chat_defaults") {
-      await chatDefaultsModule.handleSettingsInput(
-        ctx,
-        inputSession,
-        userMessage
-      );
+      await chatDefaultsModule.handleSettingsInput(ctx, inputSession, userMessage);
     }
 
     const updatedSession = getInputSession(sessionKey);
-    const sessionTransitioned =
-      updatedSession && updatedSession.type !== previousSessionType;
+    const sessionTransitioned = updatedSession && updatedSession.type !== previousSessionType;
 
     // Clear session after successful processing unless a new session replaced it
     if (!sessionTransitioned) {
@@ -5866,13 +5415,10 @@ bot.on("message:text", async (ctx, next) => {
 
     // Try to update the original message with error
     try {
-      await ctx.editMessageText(
-        "❌ <b>Error processing input</b>\n\nPlease try again.",
-        {
-          parse_mode: "HTML",
-          reply_markup: createBackToWalletKeyboard(),
-        }
-      );
+      await ctx.editMessageText("❌ <b>Error processing input</b>\n\nPlease try again.", {
+        parse_mode: "HTML",
+        reply_markup: createBackToWalletKeyboard(),
+      });
     } catch (editError) {
       await ctx.reply("❌ <b>Error processing input</b>\n\nPlease try again.", {
         parse_mode: "HTML",
@@ -5887,7 +5433,7 @@ bot.on("message:text", async (ctx, next) => {
 // Handle media messages (video, photo, animation) for chat defaults video ID settings
 const handleMediaForChatDefaults = async (
   ctx: any,
-  mediaType: "video" | "photo" | "animation" | "document"
+  mediaType: "video" | "photo" | "animation" | "document",
 ) => {
   const userId = getTelegramIdString(ctx);
   if (!userId) {
@@ -5923,7 +5469,7 @@ const handleMediaForChatDefaults = async (
       "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue.",
       {
         parse_mode: "HTML",
-      }
+      },
     );
     return;
   }
@@ -5943,9 +5489,9 @@ const handleMediaForChatDefaults = async (
       // Reject all documents - only accept direct photos, videos, and animations
       await ctx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
-        "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
-        "Files sent as documents are not supported.",
-        { parse_mode: "HTML" }
+          "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
+          "Files sent as documents are not supported.",
+        { parse_mode: "HTML" },
       );
       clearInputSession(sessionKey);
       return;
@@ -5954,9 +5500,7 @@ const handleMediaForChatDefaults = async (
     const hasMedia =
       (mediaType === "video" && !!message?.video) ||
       (mediaType === "animation" && !!message?.animation) ||
-      (mediaType === "photo" &&
-        Array.isArray(message?.photo) &&
-        message.photo.length > 0);
+      (mediaType === "photo" && Array.isArray(message?.photo) && message.photo.length > 0);
 
     if (!hasMedia) {
       await ctx.reply("❌ Could not read that media. Please try again.");
@@ -6003,17 +5547,11 @@ bot.on("message:document", async (ctx, next) => {
 /**
  * Handle swap token input (when user sends token mint or symbol)
  */
-const handleSwapToTokenInput = async (
-  ctx: any,
-  userState: any,
-  tokenInput: string
-) => {
+const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: string) => {
   const fromToken = userState.fromToken;
   const trimmedInput = tokenInput.trim();
 
-  console.log(
-    `🔍 Token input received for swap from ${fromToken}: ${trimmedInput}`
-  );
+  console.log(`🔍 Token input received for swap from ${fromToken}: ${trimmedInput}`);
 
   if (!trimmedInput) {
     await respondWithMenu(ctx, {
@@ -6041,21 +5579,15 @@ const handleSwapToTokenInput = async (
   try {
     const resolved = await tokenManager.resolveSwapToken(trimmedInput);
     if (!resolved) {
-      throw new Error(
-        `Token "${trimmedInput}" not found. Try using the contract address.`
-      );
+      throw new Error(`Token "${trimmedInput}" not found. Try using the contract address.`);
     }
 
     const decimals = Number(resolved.decimals);
     if (!Number.isFinite(decimals) || decimals < 0) {
-      throw new Error(
-        `Token metadata missing decimals for ${resolved.token_ticker}`
-      );
+      throw new Error(`Token metadata missing decimals for ${resolved.token_ticker}`);
     }
 
-    const tokenSymbol = resolved.isNativeSol
-      ? "SOL"
-      : resolved.token_ticker.toUpperCase();
+    const tokenSymbol = resolved.isNativeSol ? "SOL" : resolved.token_ticker.toUpperCase();
 
     const metadata: SwapTokenMetadata = {
       symbol: tokenSymbol,
@@ -6122,15 +5654,9 @@ export const __test_handleSwapToTokenInput = handleSwapToTokenInput;
 /**
  * Handle swap custom amount input
  */
-const handleSwapCustomAmountInput = async (
-  ctx: any,
-  userState: any,
-  amount: string
-) => {
-  const fromToken =
-    typeof userState.fromToken === "string" ? userState.fromToken : undefined;
-  const toTokenIdentifier =
-    typeof userState.toToken === "string" ? userState.toToken : undefined;
+const handleSwapCustomAmountInput = async (ctx: any, userState: any, amount: string) => {
+  const fromToken = typeof userState.fromToken === "string" ? userState.fromToken : undefined;
+  const toTokenIdentifier = typeof userState.toToken === "string" ? userState.toToken : undefined;
 
   if (!fromToken || !toTokenIdentifier) {
     await respondWithMenu(ctx, {
@@ -6146,7 +5672,7 @@ const handleSwapCustomAmountInput = async (
   const normalizedAmount = amount.trim();
 
   console.log(
-    `💱 Custom swap amount received: ${normalizedAmount} ${fromToken} → ${toTokenIdentifier}`
+    `💱 Custom swap amount received: ${normalizedAmount} ${fromToken} → ${toTokenIdentifier}`,
   );
 
   const quoteOverrides: {
@@ -6154,10 +5680,7 @@ const handleSwapCustomAmountInput = async (
     toDecimals?: number;
   } = {};
 
-  if (
-    typeof userState.toMintOverride === "string" &&
-    userState.toMintOverride.length > 0
-  ) {
+  if (typeof userState.toMintOverride === "string" && userState.toMintOverride.length > 0) {
     quoteOverrides.toMint = userState.toMintOverride;
   }
 
@@ -6166,34 +5689,25 @@ const handleSwapCustomAmountInput = async (
   }
 
   let displayToToken =
-    typeof userState.toTokenDisplay === "string" &&
-    userState.toTokenDisplay.length > 0
+    typeof userState.toTokenDisplay === "string" && userState.toTokenDisplay.length > 0
       ? userState.toTokenDisplay
       : toTokenIdentifier.toUpperCase();
 
   if (!quoteOverrides.toMint || quoteOverrides.toDecimals === undefined) {
     const cachedTarget = transactionCache.get(toTokenIdentifier);
     if (isTokenSelectionCacheEntry(cachedTarget)) {
-      displayToToken =
-        cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken;
-      quoteOverrides.toMint =
-        quoteOverrides.toMint ?? cachedTarget.targetTokenAddress;
+      displayToToken = cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken;
+      quoteOverrides.toMint = quoteOverrides.toMint ?? cachedTarget.targetTokenAddress;
       if (quoteOverrides.toDecimals === undefined) {
         const cachedDecimals = cachedTarget.tokenMetadata?.decimals;
-        if (
-          typeof cachedDecimals === "number" &&
-          Number.isFinite(cachedDecimals)
-        ) {
+        if (typeof cachedDecimals === "number" && Number.isFinite(cachedDecimals)) {
           quoteOverrides.toDecimals = cachedDecimals;
         }
       }
     }
   }
 
-  if (
-    displayToToken !== toTokenIdentifier.toUpperCase() &&
-    !quoteOverrides.toMint
-  ) {
+  if (displayToToken !== toTokenIdentifier.toUpperCase() && !quoteOverrides.toMint) {
     await respondWithMenu(ctx, {
       text: "❌ <b>Swap session expired</b>\n\nPlease reselect the token to continue.",
       parseMode: "HTML",
@@ -6202,15 +5716,13 @@ const handleSwapCustomAmountInput = async (
     return;
   }
 
-  console.log(
-    `💱 Normalized swap amount: ${normalizedAmount} ${fromToken} → ${displayToToken}`
-  );
+  console.log(`💱 Normalized swap amount: ${normalizedAmount} ${fromToken} → ${displayToToken}`);
 
   // Show quote and confirmation
   const walletCtx = createMessageEditAdapter(
     ctx,
     userState.messageId,
-    userState.chatId ?? ctx.chat?.id
+    userState.chatId ?? ctx.chat?.id,
   );
 
   await showSwapQuoteAndConfirmation(
@@ -6219,7 +5731,7 @@ const handleSwapCustomAmountInput = async (
     displayToToken,
     normalizedAmount,
     telegramId,
-    quoteOverrides
+    quoteOverrides,
   );
 };
 
@@ -6234,8 +5746,7 @@ export const __test_handleCustomAmountInput = handleCustomAmountInput;
 export const __test_handleAddressInput = handleAddressInput;
 export const __test_handleWrapAmountInput = handleWrapAmountInput;
 export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
-export const __test_buildSwapConfirmationKeyboard =
-  buildSwapConfirmationKeyboard;
+export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
 // Start the bot and setup Anchor (skip during tests)
@@ -6253,9 +5764,7 @@ if (process.env.NODE_ENV !== "test") {
 
       const scheduleFeeSweeper = () => {
         if (!ENABLE_FEE_SWEEPER) {
-          console.log(
-            "ℹ️ Automated fee sweeper disabled; skipping scheduled runs."
-          );
+          console.log("ℹ️ Automated fee sweeper disabled; skipping scheduled runs.");
           return;
         }
 
@@ -6269,8 +5778,8 @@ if (process.env.NODE_ENV !== "test") {
 
         console.log(
           `🧹 Automated fee sweeper enabled (interval: ${Math.round(
-            FEE_SWEEP_INTERVAL_MS / 60_000
-          )} min)`
+            FEE_SWEEP_INTERVAL_MS / 60_000,
+          )} min)`,
         );
 
         setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
@@ -6288,7 +5797,7 @@ if (process.env.NODE_ENV !== "test") {
             const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
             if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
               console.log(
-                `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`
+                `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`,
               );
             }
           } catch (error) {
@@ -6297,7 +5806,7 @@ if (process.env.NODE_ENV !== "test") {
         };
 
         console.log(
-          `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`
+          `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`,
         );
 
         setInterval(runCleanup, CLEANUP_INTERVAL_MS);
@@ -6313,36 +5822,22 @@ if (process.env.NODE_ENV !== "test") {
         try {
           gamePda = new PublicKey(game.game_address);
         } catch (error) {
-          console.error(
-            `❌ Invalid game address in processExpiredGame: ${game.game_address}`
-          );
+          console.error(`❌ Invalid game address in processExpiredGame: ${game.game_address}`);
           return;
         }
         const gameAccount = await program.account.game.fetch(gamePda);
 
         console.log(
-          `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+          `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`,
         );
 
-        const result = await gameManager.handleExpiredGame(
-          gamePda,
-          gameAccount
-        );
+        const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
         if (result) {
-          console.log(
-            `✅ Successfully processed expired game ${game.game_address}`
-          );
+          console.log(`✅ Successfully processed expired game ${game.game_address}`);
           gameDb.completeGame(game.game_address, "cancelled", Date.now());
-          await updateGameMessageSafely(
-            game.game_address,
-            game,
-            "Completed",
-            "cancelled"
-          );
+          await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
         } else {
-          console.log(
-            `ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`
-          );
+          console.log(`ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`);
         }
       };
 
@@ -6371,7 +5866,7 @@ if (process.env.NODE_ENV !== "test") {
             expiringGames = gameDb.getGamesExpiringBefore(
               cutoffMs,
               MAX_EXPIRING_GAMES_PER_SCAN,
-              processedAddresses
+              processedAddresses,
             );
 
             if (expiringGames.length === 0) {
@@ -6387,9 +5882,7 @@ if (process.env.NODE_ENV !== "test") {
               processedAddresses.push(game.game_address);
 
               if (game.game_address === DEFAULT_NULL_ADDRESS) {
-                console.log(
-                  `🗑️ Skipping placeholder game address ${game.game_address}`
-                );
+                console.log(`🗑️ Skipping placeholder game address ${game.game_address}`);
                 await cleanupOrphanedGame(game.game_address);
                 continue;
               }
@@ -6399,9 +5892,7 @@ if (process.env.NODE_ENV !== "test") {
                 try {
                   gamePda = new PublicKey(game.game_address);
                 } catch (pkError) {
-                  console.log(
-                    `🗑️ Skipping game with invalid address format: ${game.game_address}`
-                  );
+                  console.log(`🗑️ Skipping game with invalid address format: ${game.game_address}`);
                   continue;
                 }
                 const gameAccount = await program.account.game.fetch(gamePda);
@@ -6417,19 +5908,13 @@ if (process.env.NODE_ENV !== "test") {
                 ) {
                   await cleanupOrphanedGame(game.game_address);
                 } else {
-                  console.error(
-                    `Error processing game ${game.game_address}:`,
-                    error
-                  );
+                  console.error(`Error processing game ${game.game_address}:`, error);
                 }
               }
             }
 
             batchCount += 1;
-          } while (
-            expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN &&
-            batchCount < 10
-          );
+          } while (expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN && batchCount < 10);
         } catch (error) {
           console.error("Error in periodic game check:", error);
         }
@@ -6449,18 +5934,33 @@ if (process.env.NODE_ENV !== "test") {
           if (url.pathname === "/internal/completed" && request.method === "POST") {
             try {
               const body = (await request.json()) as Record<string, unknown>;
-              const gameAddress = typeof body["gameAddress"] === "string" ? body["gameAddress"] : "";
-              const winnerAddress = typeof body["winnerAddress"] === "string" ? body["winnerAddress"] : "";
-              const winnerTxSignature = typeof body["winnerTxSignature"] === "string" ? body["winnerTxSignature"] : undefined;
+              const gameAddress =
+                typeof body["gameAddress"] === "string" ? body["gameAddress"] : "";
+              const winnerAddress =
+                typeof body["winnerAddress"] === "string" ? body["winnerAddress"] : "";
+              const winnerTxSignature =
+                typeof body["winnerTxSignature"] === "string"
+                  ? body["winnerTxSignature"]
+                  : undefined;
               const totalPot = typeof body["totalPot"] === "number" ? body["totalPot"] : undefined;
               if (!gameAddress || !winnerAddress) {
-                return new Response(JSON.stringify({ error: "Missing gameAddress or winnerAddress" }), { status: 400 });
+                return new Response(
+                  JSON.stringify({ error: "Missing gameAddress or winnerAddress" }),
+                  { status: 400 },
+                );
               }
-              await runProcessGameCompletion(gameAddress, winnerAddress, totalPot, winnerTxSignature);
+              await runProcessGameCompletion(
+                gameAddress,
+                winnerAddress,
+                totalPot,
+                winnerTxSignature,
+              );
               return new Response(JSON.stringify({ success: true }), { status: 200 });
             } catch (error) {
               console.error("Error handling /internal/completed:", error);
-              return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500 });
+              return new Response(JSON.stringify({ error: "Internal server error" }), {
+                status: 500,
+              });
             }
           }
           return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });

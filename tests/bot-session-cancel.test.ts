@@ -9,8 +9,7 @@ import {
 // Set required env vars before importing the bot
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
-  process.env.MNEMONIC ||
-  "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 
 let bot: any;
@@ -22,7 +21,7 @@ beforeAll(async () => {
 
   // Replace global fetch used by grammy API with a dummy success
   // for methods invoked in these handlers
-  const okJson = async () => ({ ok: true, result: true } as any);
+  const okJson = async () => ({ ok: true, result: true }) as any;
   // @ts-ignore
   globalThis.fetch = async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return {
@@ -79,7 +78,11 @@ test("cancel_game_setup clears session so next text is not intercepted", async (
       callback_query: {
         id: "cb-1",
         from: { id: uid } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: uid, type: "private" },
+        } as any,
         data: `cancel_game_setup_${uid}`,
       } as any,
     } as any);
@@ -108,7 +111,11 @@ test("back_to_amounts clears session so next text is not intercepted", async () 
       callback_query: {
         id: "cb-2",
         from: { id: uid } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: uid, type: "private" },
+        } as any,
         data: `back_to_amounts_coinflip_${uid}`,
       } as any,
     } as any);
@@ -137,7 +144,11 @@ test("cancel by non-creator does not clear another user's session", async () => 
       callback_query: {
         id: "cb-3",
         from: { id: other } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: creator, type: "private" },
+        } as any,
         data: `cancel_game_setup_${creator}`,
       } as any,
     } as any);
@@ -167,7 +178,11 @@ test("back_to_amounts by non-creator does not clear session", async () => {
       callback_query: {
         id: "cb-4",
         from: { id: other } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: creator, type: "private" },
+        } as any,
         data: `back_to_amounts_coinflip_${creator}`,
       } as any,
     } as any);
@@ -188,7 +203,11 @@ test("back_to_amounts with no existing session does not create one", async () =>
       callback_query: {
         id: "cb-5",
         from: { id: uid } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: uid, type: "private" },
+        } as any,
         data: `back_to_amounts_coinflip_${uid}`,
       } as any,
     } as any);
@@ -216,7 +235,11 @@ test("cancel clears players_input sessions as well", async () => {
       callback_query: {
         id: "cb-6",
         from: { id: uid } as any,
-        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: uid, type: "private" },
+        } as any,
         data: `cancel_game_setup_${uid}`,
       } as any,
     } as any);

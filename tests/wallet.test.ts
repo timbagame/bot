@@ -92,7 +92,7 @@ test("getAdminKeypair throws when file missing", () => {
   try {
     process.chdir(tmpDir);
     const manager = WalletManager.createForTest(mnemonic, {
-      connection: { } as any,
+      connection: {} as any,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
@@ -111,7 +111,7 @@ test("getAdminKeypair surfaces parse failures", () => {
     process.chdir(tmpDir);
     writeFileSync(join(tmpDir, "admin-keypair.json"), "not-json", "utf-8");
     const manager = WalletManager.createForTest(mnemonic, {
-      connection: { } as any,
+      connection: {} as any,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });

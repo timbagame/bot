@@ -27,7 +27,8 @@ export function loadWalletMnemonic(env: NodeJS.ProcessEnv = process.env): string
   const mnemonic = file
     ? readProtectedSecretFile(file, "Wallet mnemonic file")
     : env.MNEMONIC?.trim();
-  if (!mnemonic) throw new Error("MNEMONIC_FILE is required (MNEMONIC is supported for development)");
+  if (!mnemonic)
+    throw new Error("MNEMONIC_FILE is required (MNEMONIC is supported for development)");
   if (!validateMnemonic(mnemonic)) throw new Error("Wallet mnemonic is not valid BIP-39");
   return mnemonic;
 }

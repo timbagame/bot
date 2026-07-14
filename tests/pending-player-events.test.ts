@@ -2,13 +2,11 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
-process.env.TELEGRAM_TOKEN =
-  process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
+process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
 process.env.MNEMONIC =
   process.env.MNEMONIC ??
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-process.env.SOLANA_NETWORK =
-  process.env.SOLANA_NETWORK ?? "http://localhost:8899";
+process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK ?? "http://localhost:8899";
 
 const botModulePromise = import("../src/bot");
 
@@ -22,11 +20,7 @@ describe("Pending player events", () => {
     sendCalls = [];
 
     originalSendMessage = botModule.bot.api.sendMessage.bind(botModule.bot.api);
-    (botModule.bot.api as any).sendMessage = async (
-      chatId: number,
-      text: string,
-      options: any
-    ) => {
+    (botModule.bot.api as any).sendMessage = async (chatId: number, text: string, options: any) => {
       sendCalls.push({ chatId, text, options });
       return { ok: true, result: { message_id: 999 } } as any;
     };
@@ -59,19 +53,16 @@ describe("Pending player events", () => {
 
   const baseGameKey = Keypair.generate().publicKey;
 
-  const makePlayerEvent = (
-    player: PublicKey,
-    slot: number,
-    timestamp: number
-  ) => ({
-    gameKey: baseGameKey,
-    player,
-    totalAmount: new BN(1000),
-    ticketsCount: 1,
-    ticketIndex: 0,
-    lastSlot: new BN(slot),
-    timestamp: new BN(timestamp),
-  }) as any;
+  const makePlayerEvent = (player: PublicKey, slot: number, timestamp: number) =>
+    ({
+      gameKey: baseGameKey,
+      player,
+      totalAmount: new BN(1000),
+      ticketsCount: 1,
+      ticketIndex: 0,
+      lastSlot: new BN(slot),
+      timestamp: new BN(timestamp),
+    }) as any;
 
   test("player join announcements escape display names", async () => {
     const target = { chatId: 77, messageId: 301 };
@@ -83,11 +74,7 @@ describe("Pending player events", () => {
       getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
     } as any);
 
-    await botModule.__test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await botModule.__test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
@@ -115,11 +102,7 @@ describe("Pending player events", () => {
       getGameMessages: () => [],
     } as any);
 
-    await botModule.__test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await botModule.__test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("joined the coinflip!");
@@ -146,11 +129,7 @@ describe("Pending player events", () => {
       getGameMessages: () => [],
     } as any);
 
-    await botModule.__test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await botModule.__test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("joined the giveaway!");
@@ -182,7 +161,7 @@ describe("Pending player events", () => {
     await botModule.__test_processPlayerEvent(
       { ...makePlayerEvent(player, 5, 10), ticketsCount: 2 } as any,
       "PlayerJoined",
-      [target]
+      [target],
     );
 
     expect(sendCalls.length).toBe(0);
@@ -204,7 +183,7 @@ describe("Pending player events", () => {
         gameAddress: string,
         _status: string,
         _winner?: any,
-        totalPot?: number
+        totalPot?: number,
       ) => {
         updateCalls.push({ gameAddress, totalPot });
       },
@@ -226,15 +205,9 @@ describe("Pending player events", () => {
     const eventB = { ...makePlayerEvent(player, 6, 11), totalAmount: new BN(2000) };
     const eventC = { ...makePlayerEvent(player, 7, 12), totalAmount: new BN(3000) };
 
-    await isolatedModule.__test_processPlayerEvent(eventA as any, "PlayerUnjoined", [
-      target,
-    ]);
-    await isolatedModule.__test_processPlayerEvent(eventB as any, "PlayerUnjoined", [
-      target,
-    ]);
-    await isolatedModule.__test_processPlayerEvent(eventC as any, "PlayerUnjoined", [
-      target,
-    ]);
+    await isolatedModule.__test_processPlayerEvent(eventA as any, "PlayerUnjoined", [target]);
+    await isolatedModule.__test_processPlayerEvent(eventB as any, "PlayerUnjoined", [target]);
+    await isolatedModule.__test_processPlayerEvent(eventC as any, "PlayerUnjoined", [target]);
 
     expect(updateCalls.length).toBe(0);
 
@@ -282,7 +255,7 @@ describe("Pending player events", () => {
     await isolatedModule.__test_processPlayerEvent(
       { ...makePlayerEvent(player, 5, 10), totalAmount: new BN(1000) } as any,
       "PlayerUnjoined",
-      [target]
+      [target],
     );
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -303,11 +276,7 @@ describe("Pending player events", () => {
       }),
     } as any);
 
-    await botModule.__test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await botModule.__test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendCalls.length).toBe(0);
   });
@@ -324,8 +293,7 @@ describe("Pending player events", () => {
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
-      getPlayerUsername: async (_ctx: any, pubkey: string) =>
-        names.get(pubkey) ?? "Unknown",
+      getPlayerUsername: async (_ctx: any, pubkey: string) => names.get(pubkey) ?? "Unknown",
       getActiveGameMessages: () => {
         const m = new Map();
         m.set(77, { chatId: 77, messageId: 301 });
@@ -341,11 +309,7 @@ describe("Pending player events", () => {
     } as any);
 
     let enqueueTriggered = false;
-    (botModule.bot.api as any).sendMessage = async (
-      chatId: number,
-      text: string,
-      options: any
-    ) => {
+    (botModule.bot.api as any).sendMessage = async (chatId: number, text: string, options: any) => {
       sendCalls.push({ chatId, text, options });
       if (!enqueueTriggered) {
         enqueueTriggered = true;
@@ -368,9 +332,7 @@ describe("Pending player events", () => {
 
     // New event added during flush should remain queued.
     expect(sendCalls.length).toBe(1);
-    expect(
-      botModule.__test_getPendingPlayerEventsState(gameAddress)?.events.length
-    ).toBe(1);
+    expect(botModule.__test_getPendingPlayerEventsState(gameAddress)?.events.length).toBe(1);
 
     await botModule.__test_flushPendingPlayerEvents(gameAddress, "retry");
 
@@ -391,8 +353,7 @@ describe("Pending player events", () => {
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
-      getPlayerUsername: async (_ctx: any, pubkey: string) =>
-        names.get(pubkey) ?? "Unknown",
+      getPlayerUsername: async (_ctx: any, pubkey: string) => names.get(pubkey) ?? "Unknown",
       getActiveGameMessages: () => {
         if (!targetReady) return null;
         const m = new Map();

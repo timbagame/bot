@@ -8,9 +8,7 @@ test("truncateMessage returns original message when under limit", () => {
 
 test("truncateMessage truncates long message and appends ellipsis", () => {
   const longMessage = "a".repeat(50);
-  expect(truncateMessage(longMessage, { maxLength: 10 })).toBe(
-    "a".repeat(7) + "..."
-  );
+  expect(truncateMessage(longMessage, { maxLength: 10 })).toBe("a".repeat(7) + "...");
 });
 
 test("parseTransactionError formats insufficient lamports message", async () => {
@@ -22,9 +20,7 @@ test("parseTransactionError formats insufficient lamports message", async () => 
 
 test("parseTransactionError handles transaction timeout with signature", async () => {
   const signature = "A".repeat(88);
-  const error = new Error(
-    `Transaction confirmation timeout. signature ${signature}`
-  );
+  const error = new Error(`Transaction confirmation timeout. signature ${signature}`);
   const message = await parseTransactionError(error);
   expect(message).toContain(`Transaction signature: ${signature}`);
   expect(message).toContain("Solscan");
@@ -44,7 +40,7 @@ test("parseTransactionError handles Jupiter no route errors", async () => {
 
 test("parseTransactionError handles Jupiter failed quote errors", async () => {
   const error = new Error(
-    'Jupiter order failed: 400 Bad Request - {"requestId":"req","error":"Failed to get quotes"}'
+    'Jupiter order failed: 400 Bad Request - {"requestId":"req","error":"Failed to get quotes"}',
   );
   const message = await parseTransactionError(error);
   expect(message).toContain("Swap route missing");
@@ -52,9 +48,7 @@ test("parseTransactionError handles Jupiter failed quote errors", async () => {
 });
 
 test("parseTransactionError handles address lookup table errors", async () => {
-  const error = new Error(
-    "Jupiter: address table account not found in AddressTableLookup"
-  );
+  const error = new Error("Jupiter: address table account not found in AddressTableLookup");
   const message = await parseTransactionError(error);
   expect(message).toContain("Swap route unavailable");
 });
@@ -73,7 +67,7 @@ test("parseTransactionError handles price impact errors", async () => {
 
 test("parseTransactionError handles Jupiter connectivity errors", async () => {
   const error = new Error(
-    "Failed to get swap quote: Unable to connect. Is the computer able to access the url?"
+    "Failed to get swap quote: Unable to connect. Is the computer able to access the url?",
   );
   const message = await parseTransactionError(error);
   expect(message).toContain("Jupiter is temporarily unavailable");
@@ -89,7 +83,7 @@ test("parseTransactionError returns default message for unknown errors", async (
 
 test("parseTransactionError handles 'no record of prior credit' Solana error", async () => {
   const error = new Error(
-    "Transaction simulation failed: Attempt to debit an account but found no record of a prior credit."
+    "Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.",
   );
   const message = await parseTransactionError(error);
   expect(message).toContain("Insufficient token balance");
@@ -97,9 +91,7 @@ test("parseTransactionError handles 'no record of prior credit' Solana error", a
 });
 
 test("parseTransactionError handles 'attempt to debit' variant", async () => {
-  const error = new Error(
-    "Simulation failed. Message: Attempt to debit an account."
-  );
+  const error = new Error("Simulation failed. Message: Attempt to debit an account.");
   const message = await parseTransactionError(error);
   expect(message).toContain("Insufficient token balance");
 });

@@ -1,16 +1,9 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Connection } from "@solana/web3.js";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 
 const createConnectionStub = (
-  overrides: Partial<Connection> & { rpcEndpoint?: string } = {}
+  overrides: Partial<Connection> & { rpcEndpoint?: string } = {},
 ): Connection => {
   return {
     rpcEndpoint: "http://stub" as string,
@@ -23,9 +16,7 @@ const createConnectionStub = (
       context: { slot: 0 },
       value: 5_000,
     }),
-    getRecentPrioritizationFees: async () => [
-      { prioritizationFee: "1200000" } as any,
-    ],
+    getRecentPrioritizationFees: async () => [{ prioritizationFee: "1200000" } as any],
     ...overrides,
   } as unknown as Connection;
 };
@@ -49,9 +40,7 @@ describe("FeeBudgetManager", () => {
     process.env["FEE_CACHE_TTL_MS"] = "0";
 
     try {
-      const module = await import(
-        `../src/utils/fee-budget?ttl=${Date.now()}`
-      );
+      const module = await import(`../src/utils/fee-budget?ttl=${Date.now()}`);
       const FreshManager = module.FeeBudgetManager;
       const manager = FreshManager.createForTest(createConnectionStub());
       expect((manager as any).config.cacheTtlMs).toBeGreaterThan(0);
@@ -153,19 +142,15 @@ describe("FeeBudgetManager", () => {
     expect(result).toBe(0);
 
     const zeroConnection = createConnectionStub({
-      getRecentPrioritizationFees: async () => [
-        { prioritizationFee: "0" },
-        { prioritizationFee: "-5" },
-      ] as any,
+      getRecentPrioritizationFees: async () =>
+        [{ prioritizationFee: "0" }, { prioritizationFee: "-5" }] as any,
     });
     const zeroManager = FeeBudgetManager.createForTest(zeroConnection);
     result = await (zeroManager as any).estimatePriorityFee();
     expect(result).toBe(0);
 
     const positiveConnection = createConnectionStub({
-      getRecentPrioritizationFees: async () => [
-        { prioritizationFee: "2500000" },
-      ] as any,
+      getRecentPrioritizationFees: async () => [{ prioritizationFee: "2500000" }] as any,
     });
     const positiveManager = FeeBudgetManager.createForTest(positiveConnection, {
       computeUnitLimit: 1_000,
@@ -195,10 +180,7 @@ describe("FeeBudgetManager", () => {
   test("estimatePriorityFee selects upper sample when only two entries", async () => {
     const connection = createConnectionStub({
       getRecentPrioritizationFees: async () =>
-        [
-          { prioritizationFee: "100000" },
-          { prioritizationFee: "600000" },
-        ] as any,
+        [{ prioritizationFee: "100000" }, { prioritizationFee: "600000" }] as any,
     });
     const manager = FeeBudgetManager.createForTest(connection, {
       computeUnitLimit: 1_000,
@@ -257,11 +239,11 @@ describe("FeeBudgetManager", () => {
       async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         return 123_456;
-      }
+      },
     );
 
     const concurrent = await Promise.all(
-      Array.from({ length: 5 }, () => manager.getSingleTransactionLamports())
+      Array.from({ length: 5 }, () => manager.getSingleTransactionLamports()),
     );
     expect(new Set(concurrent)).toEqual(new Set([123_456]));
     expect(computeSpy).toHaveBeenCalledTimes(1);
@@ -269,7 +251,7 @@ describe("FeeBudgetManager", () => {
     const failingManager = FeeBudgetManager.createForTest(connection, { cacheTtlMs: 5_000 });
     const failingSpy = spyOn(
       failingManager as any,
-      "computeSingleTransaction"
+      "computeSingleTransaction",
     ).mockRejectedValueOnce(new Error("boom"));
     failingSpy.mockResolvedValueOnce(654_321);
 

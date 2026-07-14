@@ -32,7 +32,7 @@ describe("GameManager Public Games", () => {
       mockGameDb,
       {} as any, // oracleClient
       {} as any, // swapManager
-      {} as any // feeBudget
+      {} as any, // feeBudget
     );
   });
 

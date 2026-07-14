@@ -58,18 +58,18 @@ describe("handleSolWsolSwap", () => {
       baseContext,
       baseTransaction,
       Number(baseTransaction.rawAmount),
-      deps
+      deps,
     );
 
     expect(status).toBe("success");
     expect(deps.executeWrapFlow).toHaveBeenCalledWith(
       1n,
       Number(baseTransaction.rawAmount),
-      expect.any(Object)
+      expect.any(Object),
     );
     expect(deps.safeAnswerCallbackQuery).toHaveBeenCalledWith(
       baseContext,
-      expect.stringContaining("Wrapped")
+      expect.stringContaining("Wrapped"),
     );
   });
 
@@ -80,17 +80,17 @@ describe("handleSolWsolSwap", () => {
       baseContext,
       { ...baseTransaction, fromToken: "WSOL", toToken: "SOL" },
       Number(baseTransaction.rawAmount),
-      deps
+      deps,
     );
 
     expect(status).toBe("success");
     expect(deps.executeUnwrapFlow).toHaveBeenCalledWith(
       1n,
-      expect.objectContaining({ unwrapLamports: Number(baseTransaction.rawAmount) })
+      expect.objectContaining({ unwrapLamports: Number(baseTransaction.rawAmount) }),
     );
     expect(deps.safeAnswerCallbackQuery).toHaveBeenCalledWith(
       baseContext,
-      expect.stringContaining("Unwrapped")
+      expect.stringContaining("Unwrapped"),
     );
   });
 });

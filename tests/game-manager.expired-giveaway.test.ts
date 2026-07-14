@@ -75,4 +75,3 @@ describe("GameManager expired giveaway handler", () => {
     expect(result).toBe(false);
   });
 });
-

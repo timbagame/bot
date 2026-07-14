@@ -14,25 +14,28 @@ describe("media retry helpers", () => {
     let attempts = 0;
     const error = new Error("forbidden");
     await expect(
-      awaitTelegramRetry(async () => {
-        attempts += 1;
-        throw error;
-      }, { maxAttempts: 2 })
+      awaitTelegramRetry(
+        async () => {
+          attempts += 1;
+          throw error;
+        },
+        { maxAttempts: 2 },
+      ),
     ).rejects.toBe(error);
     expect(attempts).toBe(1);
   });
 
   test("awaitTelegramRetry respects retry-after metadata (property)", async () => {
     await fc.assert(
-        fc.asyncProperty(
-          fc.integer({ min: 1, max: 4 }),
-          fc.integer({ min: 0, max: 5 }),
-          async (maxAttempts: number, retryAfter: number) => {
-            const delays: number[] = [];
-            // @ts-ignore override timers for deterministic measurement
-            globalThis.setTimeout = ((cb: (...args: any[]) => void, ms?: number) => {
-              delays.push(ms ?? 0);
-              cb();
+      fc.asyncProperty(
+        fc.integer({ min: 1, max: 4 }),
+        fc.integer({ min: 0, max: 5 }),
+        async (maxAttempts: number, retryAfter: number) => {
+          const delays: number[] = [];
+          // @ts-ignore override timers for deterministic measurement
+          globalThis.setTimeout = ((cb: (...args: any[]) => void, ms?: number) => {
+            delays.push(ms ?? 0);
+            cb();
             return 0 as any;
           }) as any;
 
@@ -42,10 +45,13 @@ describe("media retry helpers", () => {
           let attempts = 0;
           try {
             await expect(
-              awaitTelegramRetry(async () => {
-                attempts += 1;
-                throw err;
-              }, { maxAttempts })
+              awaitTelegramRetry(
+                async () => {
+                  attempts += 1;
+                  throw err;
+                },
+                { maxAttempts },
+              ),
             ).rejects.toBe(err);
 
             expect(attempts).toBe(maxAttempts);
@@ -56,9 +62,9 @@ describe("media retry helpers", () => {
           } finally {
             globalThis.setTimeout = originalSetTimeout;
           }
-        }
+        },
       ),
-      { seed: 9123, numRuns: 15 }
+      { seed: 9123, numRuns: 15 },
     );
   });
 
@@ -75,7 +81,7 @@ describe("media retry helpers", () => {
         fallbackCalls += 1;
         return { text: "fallback" };
       },
-      { logLabel: "test video" }
+      { logLabel: "test video" },
     );
 
     expect(result).toEqual({ result: { text: "fallback" }, usedFallback: true });

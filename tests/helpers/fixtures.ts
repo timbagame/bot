@@ -13,7 +13,7 @@ export type TestContext = Partial<Context> & {
 export const createTelegramContext = (
   text: string,
   chatType: ChatType = "group",
-  overrides: Partial<TestContext> = {}
+  overrides: Partial<TestContext> = {},
 ): TestContext => {
   const calls: any[] = [];
   return {
@@ -42,9 +42,7 @@ type WalletStubOverrides = {
   getConnection?: () => any;
 };
 
-export const createWalletStub = (
-  overrides: WalletStubOverrides = {}
-): any => {
+export const createWalletStub = (overrides: WalletStubOverrides = {}): any => {
   const decimals = overrides.decimals ?? 6;
   const formatTokenBalance =
     overrides.formatTokenBalance ??
@@ -57,9 +55,7 @@ export const createWalletStub = (
     });
 
   return {
-    getTokenMetadata:
-      overrides.getTokenMetadata ??
-      (async (_mint: string) => ({ decimals })),
+    getTokenMetadata: overrides.getTokenMetadata ?? (async (_mint: string) => ({ decimals })),
     getFullTokenMetadata:
       overrides.getFullTokenMetadata ??
       (async (mint: string) => ({
@@ -69,9 +65,8 @@ export const createWalletStub = (
       })),
     formatTokenBalance,
     formatSolBalance:
-      overrides.formatSolBalance ??
-      ((lamports: number) => (lamports / 1_000_000_000).toFixed(6)),
-    getConnection: overrides.getConnection ?? (() => ({} as any)),
+      overrides.formatSolBalance ?? ((lamports: number) => (lamports / 1_000_000_000).toFixed(6)),
+    getConnection: overrides.getConnection ?? (() => ({}) as any),
     ...overrides,
   } as any;
 };

@@ -16,9 +16,7 @@ export function resolveDatabaseFilename(filename: string): string {
   }
 
   const configuredBaseDir = process.env["BOT_DB_DIR"];
-  const baseDir = configuredBaseDir
-    ? resolve(configuredBaseDir)
-    : resolve(process.cwd());
+  const baseDir = configuredBaseDir ? resolve(configuredBaseDir) : resolve(process.cwd());
   const fullPath = join(baseDir, filename);
   mkdirSync(dirname(fullPath), { recursive: true });
   return fullPath;
@@ -32,11 +30,7 @@ export abstract class BaseDatabase {
   private readonly name: string;
   private readonly filename: string;
 
-  protected constructor(
-    filename: string,
-    initStatements: string[],
-    name: string
-  ) {
+  protected constructor(filename: string, initStatements: string[], name: string) {
     const resolvedFilename = resolveDatabaseFilename(filename);
     this.name = name;
     this.filename = filename; // Store original filename
@@ -55,7 +49,7 @@ export abstract class BaseDatabase {
   protected run(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] = [],
-    operation: string = "running statement"
+    operation: string = "running statement",
   ): Changes {
     try {
       const stmt = this.db.prepare(sql);
@@ -69,7 +63,7 @@ export abstract class BaseDatabase {
   protected get<T>(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] = [],
-    operation: string = "executing query"
+    operation: string = "executing query",
   ): T | null {
     try {
       const stmt = this.db.prepare(sql);
@@ -84,7 +78,7 @@ export abstract class BaseDatabase {
   protected all<T>(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] = [],
-    operation: string = "executing query"
+    operation: string = "executing query",
   ): T[] {
     try {
       const stmt = this.db.prepare(sql);
@@ -98,7 +92,7 @@ export abstract class BaseDatabase {
   protected getCount(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] = [],
-    operation: string = "executing count query"
+    operation: string = "executing count query",
   ): number {
     try {
       const result = this.get<{ count: number }>(sql, params, operation);
@@ -109,7 +103,7 @@ export abstract class BaseDatabase {
   }
 
   private normalizeParams(
-    params: SQLQueryBindings | SQLQueryBindings[] | undefined
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined,
   ): SQLQueryBindings[] {
     if (params === undefined) {
       return [];
@@ -142,9 +136,7 @@ export interface DatabaseInstanceHandle<T> {
   reset: () => void;
 }
 
-export function createDatabaseHandle<T>(
-  factory: () => T
-): DatabaseInstanceHandle<T> {
+export function createDatabaseHandle<T>(factory: () => T): DatabaseInstanceHandle<T> {
   const singleton = createSingleton(factory);
 
   return {
@@ -177,14 +169,16 @@ export function createDatabaseHandle<T>(
  */
 export function initializeDatabaseSingleton<T extends BaseDatabase>(
   DatabaseClass: { getInstance?: () => T; resetForTesting?: () => void },
-  factory: () => T
+  factory: () => T,
 ): void {
   const { getInstance, resetForTesting } = createDatabaseSingleton(factory);
   DatabaseClass.getInstance = getInstance;
   DatabaseClass.resetForTesting = resetForTesting;
 }
 
-export function createDatabaseSingleton<T extends BaseDatabase>(factory: () => T): {
+export function createDatabaseSingleton<T extends BaseDatabase>(
+  factory: () => T,
+): {
   getInstance: () => T;
   resetForTesting: () => void;
 } {

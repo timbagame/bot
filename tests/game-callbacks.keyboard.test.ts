@@ -10,22 +10,32 @@ import {
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
   // Try typical grammy InlineKeyboard shape
-  const grid = (kb && (kb.inline_keyboard || kb.keyboard || kb['inlineKeyboard'] || kb['rows'])) as any[] | undefined;
+  const grid = (kb && (kb.inline_keyboard || kb.keyboard || kb["inlineKeyboard"] || kb["rows"])) as
+    any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   // Fallback: attempt JSON-serialize and inspect
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.callback_data).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.callback_data)
+        .filter(Boolean);
     }
   } catch {}
   // Last resort: dig known private field used by some versions
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   return [];
 }
@@ -75,20 +85,18 @@ test("long inputs still keep confirm callbacks within Telegram limits", () => {
     "coinflip",
     "12345678901234567890.123456",
     "25",
-    "123456789012345678901234567890"
+    "123456789012345678901234567890",
   );
   const callbacks = extractCallbacks(kb);
   expect(callbacks.some((cb) => cb.startsWith("cg|"))).toBe(true);
-  expect(
-    callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
-  ).toBe(true);
+  expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(true);
 });
 
 test("player selection remains compact for large numbers and creator IDs", () => {
   const kb = createPlayerSelectionKeyboard(
     "giveaway",
     "98765432109876543210.987654",
-    "123456789012345678901234567890"
+    "123456789012345678901234567890",
   );
   const callbacks = extractCallbacks(kb);
   const encoded = callbacks.find((cb) => cb.startsWith("gp|"))!;

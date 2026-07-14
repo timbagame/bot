@@ -31,7 +31,10 @@ describe("GameManager unjoin errors", () => {
     resetGM();
     const gm = GameManager.getInstance(baseProgram({}), baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => false;
-    const res = await gm.unjoinGame(new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.unjoinGame(
+      new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/not in this game/i);
   });
@@ -40,7 +43,11 @@ describe("GameManager unjoin errors", () => {
     resetGM();
     const gm = GameManager.getInstance(baseProgram({}), baseWallet(), baseDb());
     await expect(
-      (gm as any).unjoinPlayerFromGame(new PublicKey("BPFLoader2111111111111111111111111111111111"), Keypair.generate(), new PublicKey("BPFLoader3111111111111111111111111111111111"))
+      (gm as any).unjoinPlayerFromGame(
+        new PublicKey("BPFLoader2111111111111111111111111111111111"),
+        Keypair.generate(),
+        new PublicKey("BPFLoader3111111111111111111111111111111111"),
+      ),
     ).rejects.toThrow(/No participants/);
   });
 
@@ -48,11 +55,16 @@ describe("GameManager unjoin errors", () => {
     resetGM();
     const db = baseDb({
       getGameParticipants: (_: string) => ["777"],
-      getPlayerPublicKey: (_: string) => new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(),
+      getPlayerPublicKey: (_: string) =>
+        new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(),
     });
     const gm = GameManager.getInstance(baseProgram({}), baseWallet(), db);
     await expect(
-      (gm as any).unjoinPlayerFromGame(new PublicKey("BPFLoader5111111111111111111111111111111111"), Keypair.generate(), new PublicKey("BPFLoader6111111111111111111111111111111111"))
+      (gm as any).unjoinPlayerFromGame(
+        new PublicKey("BPFLoader5111111111111111111111111111111111"),
+        Keypair.generate(),
+        new PublicKey("BPFLoader6111111111111111111111111111111111"),
+      ),
     ).rejects.toThrow(/Player not found/);
   });
 
@@ -74,8 +86,8 @@ describe("GameManager unjoin errors", () => {
         impostor,
         player.publicKey,
         "123",
-        { skipDbCheck: true }
-      )
+        { skipDbCheck: true },
+      ),
     ).rejects.toThrow(/Unauthorized unjoin attempt/);
   });
 });

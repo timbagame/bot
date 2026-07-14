@@ -5,8 +5,14 @@ function makeCtx(messageId?: number) {
   const calls: any[] = [];
   const ctx: any = {
     message: messageId ? { message_id: messageId } : undefined,
-    reply: async (text: string, opts?: any) => { calls.push(["reply", text, opts]); return { ok: true }; },
-    replyWithVideo: async (vid: any, opts?: any) => { calls.push(["video", vid, opts]); return { ok: true }; },
+    reply: async (text: string, opts?: any) => {
+      calls.push(["reply", text, opts]);
+      return { ok: true };
+    },
+    replyWithVideo: async (vid: any, opts?: any) => {
+      calls.push(["video", vid, opts]);
+      return { ok: true };
+    },
     __calls: calls,
   };
   return ctx;

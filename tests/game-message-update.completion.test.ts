@@ -2,13 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
-process.env.TELEGRAM_TOKEN =
-  process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
+process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
 process.env.MNEMONIC =
   process.env.MNEMONIC ??
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-process.env.SOLANA_NETWORK =
-  process.env.SOLANA_NETWORK ?? "http://localhost:8899";
+process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK ?? "http://localhost:8899";
 
 const botModulePromise = import("../src/bot");
 
@@ -22,14 +20,12 @@ describe("Game message updates during completion", () => {
     botModule = await botModulePromise;
     originalSendMessage = botModule.bot.api.sendMessage.bind(botModule.bot.api);
     originalGameManager = botModule.gameManager;
-    originalGetBlockchainTime = botModule.wallet.getBlockchainTime.bind(
-      botModule.wallet
-    );
+    originalGetBlockchainTime = botModule.wallet.getBlockchainTime.bind(botModule.wallet);
 
     (botModule.bot.api as any).sendMessage = async (
       _chatId: number,
       _text: string,
-      _options: any
+      _options: any,
     ) => ({ ok: true, result: { message_id: 900 } });
   });
 
@@ -61,12 +57,7 @@ describe("Game message updates during completion", () => {
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       getGameMessages: () => [{ chatId: target.chatId, messageId: target.messageId }],
       getGame: () => gameRecord,
-      completeGame: (
-        _address: string,
-        winner: string,
-        completedAt?: number,
-        totalPot?: number
-      ) => {
+      completeGame: (_address: string, winner: string, completedAt?: number, totalPot?: number) => {
         gameRecord.status = "completed";
         gameRecord.winner_address = winner;
         gameRecord.completed_at = completedAt;
@@ -91,7 +82,7 @@ describe("Game message updates during completion", () => {
         _game: string,
         status: string,
         winner?: string,
-        totalPot?: number
+        totalPot?: number,
       ) => {
         messageUpdates.push({ status, winner, totalPot });
       },
@@ -127,7 +118,7 @@ describe("Game message updates during completion", () => {
       gameAddress,
       winnerAddress,
       gameRecord.amount,
-      "WIN_SIGNATURE"
+      "WIN_SIGNATURE",
     );
 
     await new Promise((resolve) => setTimeout(resolve, 50));

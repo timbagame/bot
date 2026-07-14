@@ -83,11 +83,7 @@ export function createRebateAwareFetch(
     let requestInput: RequestInfo = input instanceof URL ? input.toString() : input;
     let requestInit: FetchInit | undefined = init;
     const rawUrl =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     if (rpcMethod === "sendTransaction" && rawUrl) {
       const url = new URL(rawUrl);
@@ -109,11 +105,7 @@ export function createRebateAwareFetch(
   return rebateFetch;
 }
 
-function cloneRequestWithUpdatedUrl(
-  request: Request,
-  url: URL,
-  overrideInit?: FetchInit,
-): Request {
+function cloneRequestWithUpdatedUrl(request: Request, url: URL, overrideInit?: FetchInit): Request {
   const mergedInit: Record<string, unknown> = {
     method: request.method,
     headers: new Headers(request.headers),

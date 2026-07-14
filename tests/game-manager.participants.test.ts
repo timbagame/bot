@@ -51,14 +51,18 @@ describe("GameManager participants rendering", () => {
     });
     const gm = GameManager.getInstance(program, makeWallet(), makeDb());
     const ctx = makeCtx();
-  const gamePda = new PublicKey("11111111111111111111111111111111");
-    const res = await gm.formatGameMessage(ctx, gamePda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
-    expect(res.messageText).toContain(
-      sanitizeTelegramDisplayName("@user111")
+    const gamePda = new PublicKey("11111111111111111111111111111111");
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
     );
-    expect(res.messageText).toContain(
-      sanitizeTelegramDisplayName("@user222")
-    );
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user111"));
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user222"));
   });
 
   test("uses DB preview fetch for huge games and uses on-chain ticket count for omitted total", async () => {
@@ -98,7 +102,7 @@ describe("GameManager participants rendering", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     expect(previewCalls.length).toBe(1);
@@ -119,21 +123,17 @@ describe("GameManager participants rendering", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     });
-    const gm = GameManager.getInstance(
-      program,
-      makeWallet(),
-      {
-        getGameParticipants: () => participantIds,
-        getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
-      } as any
-    );
+    const gm = GameManager.getInstance(program, makeWallet(), {
+      getGameParticipants: () => participantIds,
+      getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
+    } as any);
     (gm as any).getUsernameFromTelegramId = async (_ctx: any, id: string) =>
       `user${id}${"x".repeat(80)}`;
     const ctx = {
       chat: { id: 1, type: "group" },
       api: {},
     } as any;
-  const gamePda = Keypair.generate().publicKey;
+    const gamePda = Keypair.generate().publicKey;
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -142,7 +142,7 @@ describe("GameManager participants rendering", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     expect(res.messageText.length).toBeLessThanOrEqual(4096);
@@ -153,7 +153,7 @@ describe("GameManager participants rendering", () => {
     reset();
     const participantIds = Array.from(
       { length: GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT + 5000 },
-      (_, i) => String(10_000 + i)
+      (_, i) => String(10_000 + i),
     );
     const program = makeProgram({
       ticketsCount: participantIds.length,
@@ -164,14 +164,10 @@ describe("GameManager participants rendering", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     });
-    const gm = GameManager.getInstance(
-      program,
-      makeWallet(),
-      {
-        getGameParticipants: () => participantIds,
-        getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
-      } as any
-    );
+    const gm = GameManager.getInstance(program, makeWallet(), {
+      getGameParticipants: () => participantIds,
+      getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
+    } as any);
     let calls = 0;
     (gm as any).getUsernameFromTelegramId = async (_ctx: any, _id: string) => {
       calls += 1;
@@ -190,7 +186,7 @@ describe("GameManager participants rendering", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     expect(calls).toBeLessThanOrEqual(GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);

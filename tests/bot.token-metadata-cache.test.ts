@@ -111,7 +111,7 @@ describe("token metadata cache", () => {
     };
 
     await expect(__test_getCachedTokenMetadata(mint)).rejects.toThrow(
-      `Token metadata unavailable for ${mint}: Error: network down`
+      `Token metadata unavailable for ${mint}: Error: network down`,
     );
 
     wallet.getTokenMetadata = originalGetTokenMetadata;

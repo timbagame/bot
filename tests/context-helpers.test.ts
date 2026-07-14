@@ -16,18 +16,16 @@ test("truncateMessage returns original message when under limit", () => {
 });
 
 test("truncateMessage preserves important prefix and first sentence", () => {
-  const message =
-    "❌ Error: something bad happened. Additional details that are not needed.";
+  const message = "❌ Error: something bad happened. Additional details that are not needed.";
   expect(truncateMessage(message, { maxLength: 40, preserveSentences: true })).toBe(
-    "❌ Error: something bad happened."
+    "❌ Error: something bad happened.",
   );
 });
 
 test("truncateMessage truncates long message at word boundary", () => {
-  const message =
-    "This is a very long message that should be truncated properly";
+  const message = "This is a very long message that should be truncated properly";
   expect(truncateMessage(message, { maxLength: 40, wordBoundary: true })).toBe(
-    "This is a very long message that..."
+    "This is a very long message that...",
   );
 });
 
@@ -91,8 +89,7 @@ test("requireTelegramId returns id when present", () => {
 
 test("requireTelegramId throws custom error when missing", () => {
   const ctx = { from: { id: undefined } } as any;
-  expect(() => requireTelegramId(ctx, "test"))
-    .toThrow(MissingTelegramIdError);
+  expect(() => requireTelegramId(ctx, "test")).toThrow(MissingTelegramIdError);
 });
 
 test("getRequiredTelegramIdForContext notifies when identity missing", async () => {
@@ -133,34 +130,16 @@ test("getRequiredTelegramIdForContext uses onMissing handler when provided", asy
 });
 
 test("createMessageEditAdapter reuses API with pinned targets", async () => {
-  const capturedTextCalls: Array<[
-    number,
-    number,
-    string,
-    any
-  ]> = [];
-  const capturedCaptionCalls: Array<[
-    number,
-    number,
-    any
-  ]> = [];
+  const capturedTextCalls: Array<[number, number, string, any]> = [];
+  const capturedCaptionCalls: Array<[number, number, any]> = [];
 
   const ctx = {
     from: { id: 555 },
     api: {
-      editMessageText: async (
-        chatId: number,
-        messageId: number,
-        text: string,
-        options: any
-      ) => {
+      editMessageText: async (chatId: number, messageId: number, text: string, options: any) => {
         capturedTextCalls.push([chatId, messageId, text, options]);
       },
-      editMessageCaption: async (
-        chatId: number,
-        messageId: number,
-        options: any
-      ) => {
+      editMessageCaption: async (chatId: number, messageId: number, options: any) => {
         capturedCaptionCalls.push([chatId, messageId, options]);
       },
     },
@@ -171,9 +150,7 @@ test("createMessageEditAdapter reuses API with pinned targets", async () => {
   await adapter.editMessageText("hello", { parse_mode: "MarkdownV2" });
   await adapter.editMessageCaption({ caption: "world" });
 
-  expect(capturedTextCalls).toEqual([
-    [333, 222, "hello", { parse_mode: "MarkdownV2" }],
-  ]);
+  expect(capturedTextCalls).toEqual([[333, 222, "hello", { parse_mode: "MarkdownV2" }]]);
   expect(capturedCaptionCalls).toEqual([[333, 222, { caption: "world" }]]);
   expect(adapter.chat?.id).toBe(333);
   expect(adapter.__editAdapterTarget).toEqual({ chatId: 333, messageId: 222 });

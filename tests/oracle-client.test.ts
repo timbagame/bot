@@ -10,8 +10,8 @@ describe("OracleClient", () => {
 
   beforeEach(() => {
     // Ensure predictable env
-    process.env['ORACLE_API_URL'] = ORACLE_URL;
-    process.env['ORACLE_API_TOKEN'] = "test-oracle-token";
+    process.env["ORACLE_API_URL"] = ORACLE_URL;
+    process.env["ORACLE_API_TOKEN"] = "test-oracle-token";
     resetTestDatabase("games.sqlite");
     GameDatabase.resetForTesting();
   });
@@ -28,7 +28,9 @@ describe("OracleClient", () => {
 
   test("isHealthy returns false on network error", async () => {
     // @ts-ignore
-    globalThis.fetch = async () => { throw new Error("timeout"); };
+    globalThis.fetch = async () => {
+      throw new Error("timeout");
+    };
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
     const healthy = await oc.isHealthy();
@@ -62,7 +64,10 @@ describe("OracleClient", () => {
     globalThis.fetch = async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ success: true, stats: { totalSecrets: 10, usedSecrets: 5, pendingGames: 2, completedGames: 8 } }),
+      json: async () => ({
+        success: true,
+        stats: { totalSecrets: 10, usedSecrets: 5, pendingGames: 2, completedGames: 8 },
+      }),
     });
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);

@@ -16,10 +16,10 @@ import type { GameCallbacksModuleDeps } from "../../src/handlers/game-callbacks"
 
 const makeDeps = () => {
   const wrapCallbackHandler: GameCallbacksModuleDeps["wrapCallbackHandler"] =
-    (handler) => async (ctx, next) => handler(ctx, next);
-  const withCreatorContext =
-    ((_: any, handler: any) => async (ctx: any) =>
-      handler(ctx, {} as any)) as GameCallbacksModuleDeps["withCreatorContext"];
+    (handler) => async (ctx, next) =>
+      handler(ctx, next);
+  const withCreatorContext = ((_: any, handler: any) => async (ctx: any) =>
+    handler(ctx, {} as any)) as GameCallbacksModuleDeps["withCreatorContext"];
 
   const gameDb = {
     getGame: () => ({ token_ticker: "TOK" }),
@@ -81,9 +81,7 @@ const makeDeps = () => {
 const makeCtx = (username?: string) => ({
   chat: { id: 1, type: "private" },
   callbackQuery: { id: "q", message: { message_id: 42 } },
-  from: username
-    ? { username, first_name: "", last_name: "" }
-    : { first_name: "", last_name: "" },
+  from: username ? { username, first_name: "", last_name: "" } : { first_name: "", last_name: "" },
   api: {
     answerCallbackQuery: vi.fn(),
     sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
@@ -108,9 +106,7 @@ describe("Game callback helpers", () => {
   let sendMessageSpy: any;
 
   beforeEach(() => {
-    sendMessageSpy = vi
-      .spyOn(bot.api, "sendMessage")
-      .mockResolvedValue({ message_id: 1 } as any);
+    sendMessageSpy = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 1 } as any);
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "@player",
@@ -140,14 +136,10 @@ describe("Game callback helpers", () => {
       ctx as unknown as Context,
       new PublicKey(Keypair.generate().publicKey),
       123n,
-      { game_address: "game1", status: "active" }
+      { game_address: "game1", status: "active" },
     );
 
-    expect(gameDb.savePlayerMapping).toHaveBeenCalledWith(
-      "player-123",
-      "123",
-      null
-    );
+    expect(gameDb.savePlayerMapping).toHaveBeenCalledWith("player-123", "123", null);
   });
 
   test("trims first/last names before persisting display name", async () => {
@@ -162,14 +154,10 @@ describe("Game callback helpers", () => {
       ctx as unknown as Context,
       new PublicKey(Keypair.generate().publicKey),
       124n,
-      { game_address: "game2", status: "active" }
+      { game_address: "game2", status: "active" },
     );
 
-    expect(gameDb.savePlayerMapping).toHaveBeenCalledWith(
-      "player-124",
-      "124",
-      "Alpha Bravo"
-    );
+    expect(gameDb.savePlayerMapping).toHaveBeenCalledWith("player-124", "124", "Alpha Bravo");
   });
 
   test("generic join callback hydrates missing game then joins", async () => {
@@ -223,11 +211,7 @@ describe("Game callback helpers", () => {
     event.timestamp = new BN(0);
     const target = { chatId: 1, messageId: 5 };
 
-    await __test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await __test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
@@ -250,16 +234,12 @@ describe("Game callback helpers", () => {
     const event = makeEvent();
     const target = { chatId: 2, messageId: 6 };
 
-    await __test_processPlayerEvent(
-      event,
-      "PlayerJoined",
-      [target]
-    );
+    await __test_processPlayerEvent(event, "PlayerJoined", [target]);
 
     expect(sendMessageSpy).toHaveBeenCalledWith(
       2,
       expect.stringContaining("&lt;script&gt;"),
-      expect.any(Object)
+      expect.any(Object),
     );
     expect(sendMessageSpy.mock.calls[0][1]).not.toContain("<script>");
   });
@@ -271,19 +251,11 @@ describe("Game callback helpers", () => {
     const gamePda = new PublicKey(Keypair.generate().publicKey);
 
     await Promise.all([
-      module.__test_handleJoinGame(
-        ctxA as unknown as Context,
-        gamePda,
-        10n,
-        {
+      module.__test_handleJoinGame(ctxA as unknown as Context, gamePda, 10n, {
         game_address: "gameX",
         status: "active",
       }),
-      module.__test_handleJoinGame(
-        ctxB as unknown as Context,
-        gamePda,
-        11n,
-        {
+      module.__test_handleJoinGame(ctxB as unknown as Context, gamePda, 11n, {
         game_address: "gameX",
         status: "active",
       }),
@@ -312,14 +284,14 @@ describe("Game callback helpers", () => {
         game_type: "coinflip",
         amount: 100,
         token_ticker: "SOL",
-      }
+      },
     );
 
     // Should NOT send DM
     expect(ctx.api.sendMessage).not.toHaveBeenCalledWith(
       "456",
       expect.anything(),
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -341,7 +313,7 @@ describe("Game callback helpers", () => {
         game_type: "giveaway",
         amount: 50,
         token_ticker: "USDC",
-      }
+      },
     );
 
     // Should NOT have sent DM (same chat)

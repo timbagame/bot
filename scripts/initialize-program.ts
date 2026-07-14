@@ -2,34 +2,23 @@ import * as anchor from "@anchor-lang/core";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import type { WalletManager } from "../src/utils/wallet";
-import {
-  resolveOracleOperatorKeypair,
-  uniqueSigners,
-} from "./utils/keypairs";
-import {
-  createOracleConfig,
-  logOracleConfig,
-} from "./utils/oracle-config";
+import { resolveOracleOperatorKeypair, uniqueSigners } from "./utils/keypairs";
+import { createOracleConfig, logOracleConfig } from "./utils/oracle-config";
 import { loadProgramContext } from "./utils/anchor-context";
 
 // Initialize Oracle if it doesn't exist
-const initializeOracle = async (
-  program: anchor.Program<Timba>,
-  wallet: WalletManager
-) => {
+const initializeOracle = async (program: anchor.Program<Timba>, wallet: WalletManager) => {
   try {
     // Get Oracle PDA
     const [oraclePda] = PublicKey.findProgramAddressSync(
       [Buffer.from("oracle")],
-      program.programId
+      program.programId,
     );
 
     // Check if Oracle exists
     try {
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      console.log(
-        `Oracle already exists, operator: ${oracleAccount.operator.toString()}`
-      );
+      console.log(`Oracle already exists, operator: ${oracleAccount.operator.toString()}`);
       return oraclePda;
     } catch (error) {
       console.log("Oracle doesn't exist, creating...");
@@ -40,7 +29,7 @@ const initializeOracle = async (
     const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
     const [programData] = PublicKey.findProgramAddressSync(
       [program.programId.toBuffer()],
-      new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111")
+      new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111"),
     );
 
     // Initialize Oracle
@@ -61,7 +50,7 @@ const initializeOracle = async (
     const tx = await wallet.sendAndConfirmWithResubmits(
       [oracleInstruction],
       uniqueSigners(adminKeypair, oracleOperatorKeypair),
-      { operationLabel: 'Initialize oracle' }
+      { operationLabel: "Initialize oracle" },
     );
     console.log(`Oracle initialized! Transaction: ${tx}`);
     return oraclePda;
@@ -87,7 +76,7 @@ const initializeProgram = async () => {
 
     console.log("Program initialization completed successfully!");
     console.log(
-      "Note: Game tokens should be initialized separately using the initialize-game-token.ts script"
+      "Note: Game tokens should be initialized separately using the initialize-game-token.ts script",
     );
   } catch (error) {
     console.error("Error initializing program:", error);

@@ -29,7 +29,7 @@ export const readBigIntEnv = ({
       return undefined;
     }
     throw new Error(
-      `${formatDescription(key, description)} must be provided via environment variable ${key}`
+      `${formatDescription(key, description)} must be provided via environment variable ${key}`,
     );
   }
 
@@ -38,13 +38,13 @@ export const readBigIntEnv = ({
     parsed = BigInt(rawValue);
   } catch (error) {
     throw new Error(
-      `${formatDescription(key, description)} must be a valid integer, received "${rawValue}": ${error}`
+      `${formatDescription(key, description)} must be a valid integer, received "${rawValue}": ${error}`,
     );
   }
 
   if (min !== undefined && parsed < min) {
     throw new Error(
-      `${formatDescription(key, description)} must be greater than or equal to ${min}, received ${parsed}`
+      `${formatDescription(key, description)} must be greater than or equal to ${min}, received ${parsed}`,
     );
   }
 

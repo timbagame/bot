@@ -136,9 +136,9 @@ describe("FeeBudgetManager caching and fallbacks", () => {
           expect(wrapFallback).toBeGreaterThanOrEqual(config.wrapBufferMinLamports);
           expect(jitFallback).toBeGreaterThanOrEqual(config.jitBufferMinLamports);
           expect(gameFallback).toBeGreaterThanOrEqual(config.gameBufferMinLamports);
-        }
+        },
       ),
-      { numRuns: 25, seed: 6789 }
+      { numRuns: 25, seed: 6789 },
     );
   });
 });

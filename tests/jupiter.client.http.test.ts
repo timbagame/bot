@@ -1,5 +1,9 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { JupiterClient, type JupiterQuoteRequest, type JupiterSwapRequest } from "../src/utils/jupiter";
+import {
+  JupiterClient,
+  type JupiterQuoteRequest,
+  type JupiterSwapRequest,
+} from "../src/utils/jupiter";
 
 // Save and restore global fetch between tests
 const realFetch = globalThis.fetch;
@@ -125,7 +129,7 @@ describe("JupiterClient HTTP", () => {
     };
 
     await expect(jc.getQuote(req)).rejects.toThrow(
-      /Failed to request Jupiter order: Jupiter order failed: 404/
+      /Failed to request Jupiter order: Jupiter order failed: 404/,
     );
   });
 
@@ -185,7 +189,7 @@ describe("JupiterClient HTTP", () => {
     };
 
     await expect(jc.getSwapTransaction(req)).rejects.toThrow(
-      /Failed to request Jupiter order: Jupiter order failed: 500/
+      /Failed to request Jupiter order: Jupiter order failed: 500/,
     );
   });
 });

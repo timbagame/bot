@@ -21,8 +21,7 @@ export class OracleClient {
 
   private constructor() {
     this.gameDb = GameDatabase.getInstance();
-    this.oracleApiUrl =
-      process.env["ORACLE_API_URL"] || "http://localhost:3001";
+    this.oracleApiUrl = process.env["ORACLE_API_URL"] || "http://localhost:3001";
   }
 
   public static getInstance(wallet?: WalletManager): OracleClient {
@@ -60,9 +59,7 @@ export class OracleClient {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Oracle API request failed: ${response.status} ${response.statusText}`,
-        );
+        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
       }
 
       const data = (await response.json()) as OracleApiResponse;
@@ -82,9 +79,7 @@ export class OracleClient {
     }
   }
 
-  public async signGameTransaction(
-    transaction: Transaction,
-  ): Promise<Transaction> {
+  public async signGameTransaction(transaction: Transaction): Promise<Transaction> {
     const txBase64 = transaction
       .serialize({ requireAllSignatures: false, verifySignatures: false })
       .toString("base64");
@@ -141,9 +136,7 @@ export class OracleClient {
         signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
-      console.log(
-        `🔍 Oracle health response: ${response.status} ${response.statusText}`,
-      );
+      console.log(`🔍 Oracle health response: ${response.status} ${response.statusText}`);
       return response.ok;
     } catch (error) {
       console.error("❌ Oracle health check failed:", {
@@ -174,10 +167,7 @@ export class OracleClient {
 
       return true;
     } catch (error) {
-      console.warn(
-        `Oracle completion wake-up failed for ${gameAddress}:`,
-        error,
-      );
+      console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
       return false;
     }
   }
@@ -186,10 +176,7 @@ export class OracleClient {
   // PRIVATE GAME AUTHORIZATION (kept for private games)
   // ================================
 
-  public async authorizePlayer(
-    gamePda: PublicKey,
-    chatId: number,
-  ): Promise<AuthorizationResult> {
+  public async authorizePlayer(gamePda: PublicKey, chatId: number): Promise<AuthorizationResult> {
     try {
       const game = this.gameDb.getGame(gamePda.toBase58());
       if (!game) {

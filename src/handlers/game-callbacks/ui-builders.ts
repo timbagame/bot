@@ -20,10 +20,7 @@ export const toTitleCase = (value: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-export const determineFractionDigits = (
-  value: string,
-  maxDecimals: number
-): number => {
+export const determineFractionDigits = (value: string, maxDecimals: number): number => {
   const [_, fraction = ""] = value.split(".");
   if (!fraction) {
     return Math.min(6, maxDecimals);
@@ -39,7 +36,7 @@ export const buildPlayerSelectionMessage = (
   gameType: GameType,
   formattedAmount: string,
   tokenTicker: string,
-  usdApproximation?: string | null
+  usdApproximation?: string | null,
 ): string => {
   const formattedGameType = toTitleCase(gameType);
   const usdSegment = usdApproximation ? ` (${usdApproximation})` : "";
@@ -118,7 +115,7 @@ export const buildGameConfirmMenuConfig = ({
     players.toString(),
     creatorId,
     advanced,
-    ui
+    ui,
   );
 
   return {
@@ -191,7 +188,7 @@ export const presentConfirmMenu = async (params: {
     {
       allowContextEdit: true,
       logLabel: logLabel ?? "confirm_menu",
-    }
+    },
   );
 };
 
@@ -203,15 +200,11 @@ export type CustomAmountPromptParams = {
   creatorId?: string;
 };
 
-export const presentCustomAmountPrompt = async (
-  params: CustomAmountPromptParams
-) => {
+export const presentCustomAmountPrompt = async (params: CustomAmountPromptParams) => {
   const { ctx, gameType, tokenTicker, contractMin, creatorId } = params;
 
   const formattedGameType = toTitleCase(gameType);
-  const keyboard = new InlineKeyboard()
-    .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-    .row();
+  const keyboard = new InlineKeyboard().text("❌ Cancel", `cancel_game_setup_${creatorId}`).row();
 
   const groupMessage = [
     `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,

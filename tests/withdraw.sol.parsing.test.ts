@@ -10,9 +10,6 @@ describe("/withdraw command", () => {
     // Ensure the withdraw handler uses the SOL-friendly context
     const needle = 'const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id, "tip")';
 
-    expect(
-      content.replace(/\s+/g, " ")
-    ).toContain(needle);
+    expect(content.replace(/\s+/g, " ")).toContain(needle);
   });
 });
-

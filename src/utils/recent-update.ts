@@ -16,8 +16,10 @@ function getUpdateUnixSeconds(ctx: Context): number | null {
   if ((ctx as any).message?.date) return (ctx as any).message.date as number;
   if ((ctx as any).editedMessage?.edit_date) return (ctx as any).editedMessage.edit_date as number;
   if ((ctx as any).channelPost?.date) return (ctx as any).channelPost.date as number;
-  if ((ctx as any).editedChannelPost?.edit_date) return (ctx as any).editedChannelPost.edit_date as number;
-  if ((ctx as any).callbackQuery?.message?.date) return (ctx as any).callbackQuery.message.date as number;
+  if ((ctx as any).editedChannelPost?.edit_date)
+    return (ctx as any).editedChannelPost.edit_date as number;
+  if ((ctx as any).callbackQuery?.message?.date)
+    return (ctx as any).callbackQuery.message.date as number;
   return null;
 }
 
@@ -53,10 +55,7 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   const isInlineCallback = Boolean((ctx as any).callbackQuery?.inline_message_id);
   if (updateUnix == null) {
     if (isInlineCallback) {
-      await safeAnswerCallbackQuery(
-        ctx,
-        "⏱️ This action expired. Please open a new menu.",
-      );
+      await safeAnswerCallbackQuery(ctx, "⏱️ This action expired. Please open a new menu.");
       return;
     }
     return next();
@@ -66,10 +65,7 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   if (shouldDropUpdate(updateUnix, nowSec, maxAgeSec)) {
     if (ctx.callbackQuery) {
       try {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "⏱️ This action expired. Please open a new menu."
-        );
+        await safeAnswerCallbackQuery(ctx, "⏱️ This action expired. Please open a new menu.");
       } catch {}
     }
     return; // drop silently for old messages

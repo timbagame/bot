@@ -17,11 +17,38 @@ test("TransactionHistory: query helpers and cleanup", () => {
     signature: (s: string) => `${s}-${Math.random().toString(36).slice(2, 8)}`,
   };
 
-  const tx1 = createTransactionRecord(base.user, "BUY", base.signature("sig1"), "SOL", "PUMP", "1", "100", "SUCCESS");
+  const tx1 = createTransactionRecord(
+    base.user,
+    "BUY",
+    base.signature("sig1"),
+    "SOL",
+    "PUMP",
+    "1",
+    "100",
+    "SUCCESS",
+  );
   tx1.timestamp = now - 1000;
-  const tx2 = createTransactionRecord(base.user, "SELL", base.signature("sig2"), "PUMP", "SOL", "50", "0.5", "FAILED");
+  const tx2 = createTransactionRecord(
+    base.user,
+    "SELL",
+    base.signature("sig2"),
+    "PUMP",
+    "SOL",
+    "50",
+    "0.5",
+    "FAILED",
+  );
   tx2.timestamp = now - 500;
-  const tx3 = createTransactionRecord(base.user, "SWAP", base.signature("sig3"), "SOL", "USDC", "0.1", "15", "SUCCESS");
+  const tx3 = createTransactionRecord(
+    base.user,
+    "SWAP",
+    base.signature("sig3"),
+    "SOL",
+    "USDC",
+    "0.1",
+    "15",
+    "SUCCESS",
+  );
   tx3.timestamp = now;
 
   db.addTransaction(tx1);

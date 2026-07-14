@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { GameManager } from "../src/utils/game";
 
 function resetGM() {
@@ -16,9 +13,7 @@ describe("GameManager join lifecycle", () => {
     resetGM();
 
     const playerKp = Keypair.generate();
-    const tokenMint = new PublicKey(
-      "So11111111111111111111111111111111111111112"
-    );
+    const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     let capturedJoinAccounts: any;
 
     const program = {
@@ -94,7 +89,7 @@ describe("GameManager join lifecycle", () => {
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
-      1n
+      1n,
     );
 
     expect(result.success).toBe(true);
@@ -113,20 +108,12 @@ describe("GameManager join lifecycle", () => {
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
     expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(
-      gameTokenAccount.toBase58(),
-    );
+    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
-    expect(ctx.associatedTokenProgram.toBase58()).toBe(
-      ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
-    );
-    expect(
-      capturedJoinAccounts.playerTokenAccount.toBase58(),
-    ).toBe(playerTokenAccount.toBase58());
+    expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
+    expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
     // Optional signer should be populated so Anchor doesn't inject the default null signer
-    expect(capturedJoinAccounts.oracleOperator?.toBase58()).toBe(
-      playerKp.publicKey.toBase58(),
-    );
+    expect(capturedJoinAccounts.oracleOperator?.toBase58()).toBe(playerKp.publicKey.toBase58());
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
     expect(capturedJoinAccounts.gameToken).toBeUndefined();
@@ -138,9 +125,7 @@ describe("GameManager join lifecycle", () => {
     resetGM();
 
     const playerKp = Keypair.generate();
-    const tokenMint = new PublicKey(
-      "So11111111111111111111111111111111111111112"
-    );
+    const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     let capturedJoinAccounts: any;
 
     const program = {
@@ -212,7 +197,7 @@ describe("GameManager join lifecycle", () => {
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(),
-      2n
+      2n,
     );
 
     expect(result.success).toBe(false);
@@ -226,16 +211,10 @@ describe("GameManager join lifecycle", () => {
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
     expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(
-      gameTokenAccount.toBase58(),
-    );
+    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
-    expect(ctx.associatedTokenProgram.toBase58()).toBe(
-      ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
-    );
-    expect(
-      capturedJoinAccounts.playerTokenAccount.toBase58(),
-    ).toBe(playerTokenAccount.toBase58());
+    expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
+    expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
     expect(capturedJoinAccounts.gameToken).toBeUndefined();
@@ -247,9 +226,7 @@ describe("GameManager join lifecycle", () => {
     resetGM();
 
     const playerKp = Keypair.generate();
-    const tokenMint = new PublicKey(
-      "So11111111111111111111111111111111111111112"
-    );
+    const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     const gameAccounts = [
       {
         isPrivate: false,
@@ -335,9 +312,7 @@ describe("GameManager join lifecycle", () => {
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 
-    const gameAddress = new PublicKey(
-      "BPFLoader1111111111111111111111111111111111"
-    ).toBase58();
+    const gameAddress = new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58();
     const result = await gm.joinGame(gameAddress, 3n);
 
     expect(result.success).toBe(true);
@@ -361,12 +336,10 @@ describe("GameManager join lifecycle", () => {
     (gm as any).isPlayerInGame = async () => true;
 
     const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
-    const success = await (gm as any).verifyParticipantJoin(
-      gamePda,
-      playerKp.publicKey,
-      "123",
-      { joinSignature: "SIG999", maxAttempts: 1 }
-    );
+    const success = await (gm as any).verifyParticipantJoin(gamePda, playerKp.publicKey, "123", {
+      joinSignature: "SIG999",
+      maxAttempts: 1,
+    });
 
     expect(success).toBe(true);
     expect(participantCalls.length).toBe(1);
@@ -407,8 +380,7 @@ describe("GameManager join lifecycle", () => {
       getPendingParticipants: () => pendingEntries,
       saveGameParticipant: (...args: any[]) => saveCalls.push(args),
       removeGameParticipant: (...args: any[]) => removed.push(args),
-      getPlayerPublicKey: (telegramId: string) =>
-        telegramId === "222" ? stalePubkey : null,
+      getPlayerPublicKey: (telegramId: string) => (telegramId === "222" ? stalePubkey : null),
     } as any;
 
     const gm = GameManager.getInstance(program, wallet, gameDb);
@@ -416,16 +388,14 @@ describe("GameManager join lifecycle", () => {
     (gm as any).verifyParticipantJoin = async (
       gamePda: PublicKey,
       pubkey: PublicKey,
-      telegramId: string
+      telegramId: string,
     ) => {
       verifyInvocations += 1;
       if (telegramId === "111") {
-        gameDb.saveGameParticipant(
-          gamePda.toBase58(),
-          telegramId,
-          pubkey.toBase58(),
-          { status: "confirmed", joinSignature: "S1" }
-        );
+        gameDb.saveGameParticipant(gamePda.toBase58(), telegramId, pubkey.toBase58(), {
+          status: "confirmed",
+          joinSignature: "S1",
+        });
         return true;
       }
       return false;
@@ -461,7 +431,7 @@ describe("GameManager join lifecycle", () => {
       methods: {
         joinGame: () => ({
           accounts: () => ({
-            instruction: async () => ({})
+            instruction: async () => ({}),
           }),
         }),
       },
@@ -498,13 +468,11 @@ describe("GameManager join lifecycle", () => {
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
-      5n
+      5n,
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe(
-      "This game has already completed. Refresh to see the result."
-    );
+    expect(result.error).toBe("This game has already completed. Refresh to see the result.");
     expect(sendSignatures.length).toBe(0);
   });
 
@@ -512,9 +480,7 @@ describe("GameManager join lifecycle", () => {
     resetGM();
 
     const playerKp = Keypair.generate();
-    const tokenMint = new PublicKey(
-      "So11111111111111111111111111111111111111112"
-    );
+    const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
 
     const program = {
       programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
@@ -606,7 +572,7 @@ describe("GameManager join lifecycle", () => {
       _gamePda: PublicKey,
       _player: PublicKey,
       telegramId: string,
-      options: { joinSignature?: string | null }
+      options: { joinSignature?: string | null },
     ) => {
       confirmedCalls.push({ telegramId, joinSignature: options.joinSignature });
       return true;
@@ -614,15 +580,13 @@ describe("GameManager join lifecycle", () => {
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
-      7n
+      7n,
     );
 
     expect(result.success).toBe(true);
     expect(sendSignatures).toEqual(["SIG1", "SIG2"]);
     expect(confirmCalls).toBe(2);
     expect(participantCalls.length).toBe(2);
-    expect(confirmedCalls).toEqual([
-      { telegramId: "7", joinSignature: "SIG2" },
-    ]);
+    expect(confirmedCalls).toEqual([{ telegramId: "7", joinSignature: "SIG2" }]);
   });
 });

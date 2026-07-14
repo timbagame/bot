@@ -63,7 +63,7 @@ test("formatTokenDisplay respects provided decimals", () => {
   expect(
     formatTokenDisplay(1.2, {
       decimals: 4,
-    })
+    }),
   ).toBe("1.2000");
 });
 
@@ -75,7 +75,7 @@ test("formatTokenDisplay clamps to six fractional digits", () => {
   expect(
     formatTokenDisplay(0.123456789, {
       decimals: 9,
-    })
+    }),
   ).toBe("0.123457");
 });
 
@@ -128,7 +128,7 @@ test("formatUsdValue uses the same rounding when marked approximate", () => {
       approximate: true,
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
-    })
+    }),
   ).toBe("≈ $0.35");
 });
 
@@ -137,13 +137,13 @@ test("formatUsdValue respects maximum fractional digits with trimming", () => {
     formatUsdValue(1.234, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
-    })
+    }),
   ).toBe("1.23");
   expect(
     formatUsdValue(1.2, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
-    })
+    }),
   ).toBe("1.2");
 });
 
@@ -156,7 +156,7 @@ test("formatUsdValue default fallback respects fractional digit options", () => 
     formatUsdValue(Number.NaN, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    })
+    }),
   ).toBe("0.00");
 });
 
@@ -166,7 +166,7 @@ test("formatUsdValue approximate fallback includes currency and fraction digits"
       approximate: true,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    })
+    }),
   ).toBe("≈ $0.00");
 });
 

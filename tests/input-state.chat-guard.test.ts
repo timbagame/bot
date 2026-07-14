@@ -3,8 +3,7 @@ import { expect, test, beforeAll, afterAll } from "bun:test";
 // Ensure required env vars are set before importing the bot module
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
-  process.env.MNEMONIC ||
-  "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 const previousPricesEnabled = process.env["PRICES_ENABLED"];
 process.env["PRICES_ENABLED"] = "false";
@@ -25,13 +24,8 @@ let __test_getUserState: any;
 let __test_clearUserState: any;
 
 beforeAll(async () => {
-  ({
-    bot,
-    wallet,
-    __test_setUserState,
-    __test_getUserState,
-    __test_clearUserState,
-  } = await import("../src/bot"));
+  ({ bot, wallet, __test_setUserState, __test_getUserState, __test_clearUserState } =
+    await import("../src/bot"));
 
   // Provide botInfo to avoid getMe()
   (bot as any).botInfo = {
@@ -51,8 +45,10 @@ beforeAll(async () => {
   // Stub Telegram API methods that may be called
   (bot as any).api.editMessageText = async () => ({ ok: true, result: true });
   (bot as any).api.deleteMessage = async () => ({ ok: true, result: true });
-  (bot as any).api.sendMessage = async () => ({ message_id: 999, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) } as any);
-  (bot as any).api.sendVideo = async () => ({ message_id: 998, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) } as any);
+  (bot as any).api.sendMessage = async () =>
+    ({ message_id: 999, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) }) as any;
+  (bot as any).api.sendVideo = async () =>
+    ({ message_id: 998, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) }) as any;
   (bot as any).api.answerCallbackQuery = async () => ({ ok: true, result: true });
 });
 
@@ -67,8 +63,14 @@ test("typed-input ignores messages from a different chat (swap_to_token)", async
 
   let editCalls = 0;
   let deleteCalls = 0;
-  (bot as any).api.editMessageText = async () => { editCalls++; return { ok: true } as any; };
-  (bot as any).api.deleteMessage = async () => { deleteCalls++; return { ok: true } as any; };
+  (bot as any).api.editMessageText = async () => {
+    editCalls++;
+    return { ok: true } as any;
+  };
+  (bot as any).api.deleteMessage = async () => {
+    deleteCalls++;
+    return { ok: true } as any;
+  };
 
   await bot.handleUpdate({
     update_id: 100,

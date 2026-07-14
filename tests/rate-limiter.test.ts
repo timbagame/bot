@@ -48,13 +48,13 @@ describe("SlidingWindowRateLimiter", () => {
   });
 
   test("denies simultaneous consumes beyond limit", async () => {
-    let now = 0;
+    const now = 0;
     const limiter = new SlidingWindowRateLimiter(1_000, () => now);
     const budget = 1;
 
     const results = await Promise.all(
       Array.from({ length: 2 }, () => {
-        return new Promise(resolve => {
+        return new Promise((resolve) => {
           setTimeout(() => resolve(limiter.consume("user", budget)), 0);
         });
       }),

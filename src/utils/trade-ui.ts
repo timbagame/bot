@@ -24,15 +24,14 @@ export type ProcessingStatusKind = keyof typeof PROCESSING_STATUS_CONFIG;
 const toSafeString = (value: string | number | null | undefined, fallback: string) =>
   String(value ?? fallback);
 
-const sanitizeToken = (token: string | null | undefined) =>
-  token?.trim() ? token : "UNKNOWN";
+const sanitizeToken = (token: string | null | undefined) => (token?.trim() ? token : "UNKNOWN");
 
 export const buildProcessingStatus = (
   kind: ProcessingStatusKind,
   amount: string | number | null | undefined,
   fromToken: string | null | undefined,
   toToken: string | null | undefined,
-  options: ProcessingStatusOptions = {}
+  options: ProcessingStatusOptions = {},
 ) => {
   const config = PROCESSING_STATUS_CONFIG[kind];
 

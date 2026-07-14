@@ -1,12 +1,8 @@
 import { expect, test } from "bun:test";
-import {
-  LAMPORTS_PER_SOL,
-  WSOL_MINT,
-} from "../src/utils/constants";
+import { LAMPORTS_PER_SOL, WSOL_MINT } from "../src/utils/constants";
 import { buildWalletTokenLines } from "../src/utils/wallet-ui";
 
-const formatSol = (lamports: number): string =>
-  (lamports / LAMPORTS_PER_SOL).toFixed(2);
+const formatSol = (lamports: number): string => (lamports / LAMPORTS_PER_SOL).toFixed(2);
 
 const formatToken = (balance: number, decimals: number): string =>
   (balance / Math.pow(10, decimals)).toFixed(2);

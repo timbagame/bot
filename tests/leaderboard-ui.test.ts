@@ -41,7 +41,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 10,
         gamesJoined: 40,
         totalVolume: 0,
-        netWonUsd: 150.50,
+        netWonUsd: 150.5,
       },
       {
         telegramId: "2",
@@ -65,7 +65,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 60,
         gamesJoined: 30,
         totalVolume: 0,
-        netWonUsd: -25.00,
+        netWonUsd: -25.0,
       },
     ];
 
@@ -146,55 +146,55 @@ describe("leaderboard UI rendering", () => {
   test("player names are always HTML escaped (property)", async () => {
     await fc.assert(
       fc.asyncProperty(
-           fc.array(
-             fc.record<LeaderboardPlayerSeed>({
-               displayName: fc.string({ minLength: 1, maxLength: 20 }),
-               winRate: fc.float({ min: 0, max: 100 }),
-               wins: fc.integer({ min: 0, max: 100 }),
-               losses: fc.integer({ min: 0, max: 100 }),
-               totalGames: fc.integer({ min: 0, max: 200 }),
-               gamesCreated: fc.integer({ min: 0, max: 200 }),
-               gamesJoined: fc.integer({ min: 0, max: 200 }),
-             }),
-             { minLength: 1, maxLength: 5 }
-           ),
-           async (entries: LeaderboardPlayerSeed[]) => {
-             const players: LeaderboardPlayerDisplay[] = entries.map(
-               (entry: LeaderboardPlayerSeed, index: number) => ({
-                 telegramId: `${index}`,
-                 displayName: entry.displayName,
-                 totalGames: entry.totalGames,
-                 wins: entry.wins,
-                 losses: entry.losses,
-                 winRate: entry.winRate,
-                 gamesCreated: entry.gamesCreated,
-                 gamesJoined: entry.gamesJoined,
-                 totalVolume: 0,
-                 netWonUsd: 0,
-               })
-             );
+        fc.array(
+          fc.record<LeaderboardPlayerSeed>({
+            displayName: fc.string({ minLength: 1, maxLength: 20 }),
+            winRate: fc.float({ min: 0, max: 100 }),
+            wins: fc.integer({ min: 0, max: 100 }),
+            losses: fc.integer({ min: 0, max: 100 }),
+            totalGames: fc.integer({ min: 0, max: 200 }),
+            gamesCreated: fc.integer({ min: 0, max: 200 }),
+            gamesJoined: fc.integer({ min: 0, max: 200 }),
+          }),
+          { minLength: 1, maxLength: 5 },
+        ),
+        async (entries: LeaderboardPlayerSeed[]) => {
+          const players: LeaderboardPlayerDisplay[] = entries.map(
+            (entry: LeaderboardPlayerSeed, index: number) => ({
+              telegramId: `${index}`,
+              displayName: entry.displayName,
+              totalGames: entry.totalGames,
+              wins: entry.wins,
+              losses: entry.losses,
+              winRate: entry.winRate,
+              gamesCreated: entry.gamesCreated,
+              gamesJoined: entry.gamesJoined,
+              totalVolume: 0,
+              netWonUsd: 0,
+            }),
+          );
 
-             const rendered = buildLeaderboardMessage({ chatTitle: "Guild", players });
+          const rendered = buildLeaderboardMessage({ chatTitle: "Guild", players });
           for (const player of players) {
             const escaped = escapeHtml(sanitizeLeaderboardDisplayName(player.displayName));
             expect(rendered).toContain(`<b>${escaped}</b>`);
           }
-        }
+        },
       ),
-      { seed: 4242, numRuns: 30 }
+      { seed: 4242, numRuns: 30 },
     );
   });
 });
 
 describe("formatNetUsd", () => {
   test("formats positive values with + prefix", () => {
-    expect(formatNetUsd(100.50)).toBe("+$100.50");
+    expect(formatNetUsd(100.5)).toBe("+$100.50");
     expect(formatNetUsd(1234.56)).toBe("+$1.2k");
     expect(formatNetUsd(0.0025)).toBe("+$0.0025");
   });
 
   test("formats negative values with - prefix", () => {
-    expect(formatNetUsd(-50.00)).toBe("-$50.00");
+    expect(formatNetUsd(-50.0)).toBe("-$50.00");
     expect(formatNetUsd(-2500)).toBe("-$2.5k");
     expect(formatNetUsd(-0.005)).toBe("-$0.0050");
   });
@@ -230,7 +230,7 @@ describe("global leaderboard UI rendering", () => {
         gamesCreated: 30,
         gamesJoined: 70,
         totalVolume: 0,
-        netWonUsd: 500.00,
+        netWonUsd: 500.0,
       },
     ];
 
@@ -254,7 +254,7 @@ describe("global leaderboard UI rendering", () => {
         gamesCreated: 5,
         gamesJoined: 5,
         totalVolume: 0,
-        netWonUsd: 1000.00,
+        netWonUsd: 1000.0,
       },
     ];
 

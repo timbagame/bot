@@ -2,17 +2,13 @@ import "./setup-env";
 import { describe, test, expect } from "bun:test";
 import { InlineKeyboard } from "grammy";
 import { showWalletUI } from "../src/handlers/wallet";
-import {
-  buildWalletTokenLines,
-  buildWalletActionMenu,
-} from "../src/utils/wallet-ui";
+import { buildWalletTokenLines, buildWalletActionMenu } from "../src/utils/wallet-ui";
 import { __test_buildQuickAmountKeyboard } from "../src/bot";
 import { WSOL_MINT } from "../src/utils/constants";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
-  process.env.MNEMONIC ||
-  "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 
 type MakeCtxOptions = {
   editError?: Error;
@@ -41,8 +37,14 @@ function makeCtx(options: MakeCtxOptions = {}) {
       }
       return { ok: true };
     },
-    replyWithVideo: async (...args: any[]) => { calls.push(["video", ...args]); return { ok: true }; },
-    reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
+    replyWithVideo: async (...args: any[]) => {
+      calls.push(["video", ...args]);
+      return { ok: true };
+    },
+    reply: async (...args: any[]) => {
+      calls.push(["reply", ...args]);
+      return { ok: true };
+    },
     api: {
       sendMessage: async (...args: any[]) => {
         calls.push(["send", ...args]);
@@ -66,11 +68,16 @@ describe("wallet handler showWalletUI", () => {
     let capturedLines: any;
     const deps: any = {
       wallet: {
-        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" },
+        }),
         formatSolBalance: (_: number) => "0.000000",
         formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
       },
-      getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }] }),
+      getCachedWalletData: async () => ({
+        solBalance: 0,
+        tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }],
+      }),
       fetchPricesUSD: async (references: string[]) => {
         const record: Record<string, number> = {};
         for (const reference of references) {
@@ -82,7 +89,7 @@ describe("wallet handler showWalletUI", () => {
         capturedLines = lines;
         return "CAPTION";
       },
-      createWalletKeyboard: () => ({ rows: [] } as any),
+      createWalletKeyboard: () => ({ rows: [] }) as any,
       WINNER_VIDEO_ID: "VID",
     };
     await showWalletUI(ctx, deps);
@@ -100,11 +107,16 @@ describe("wallet handler showWalletUI", () => {
     let capturedLines: any;
     const deps: any = {
       wallet: {
-        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" },
+        }),
         formatSolBalance: (_: number) => "0.000000",
         formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
       },
-      getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }] }),
+      getCachedWalletData: async () => ({
+        solBalance: 0,
+        tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }],
+      }),
       fetchPricesUSD: async (references: string[]) => {
         const record: Record<string, number> = {};
         for (const reference of references) {
@@ -116,7 +128,7 @@ describe("wallet handler showWalletUI", () => {
         capturedLines = lines;
         return "CAPTION";
       },
-      createWalletKeyboard: () => ({ rows: [] } as any),
+      createWalletKeyboard: () => ({ rows: [] }) as any,
       WINNER_VIDEO_ID: "VID",
     };
 
@@ -141,10 +153,14 @@ describe("wallet handler showWalletUI", () => {
     };
     const deps: any = {
       wallet: {
-        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" },
+        }),
         formatSolBalance: (_: number) => "0.000000",
       },
-      getCachedWalletData: async () => { throw new Error("fail"); },
+      getCachedWalletData: async () => {
+        throw new Error("fail");
+      },
       fetchPricesUSD: async (references: string[]) => {
         const record: Record<string, number> = {};
         for (const reference of references) {
@@ -153,7 +169,7 @@ describe("wallet handler showWalletUI", () => {
         return record;
       },
       buildWalletCaption: () => "CAPTION",
-      createWalletKeyboard: () => ({ rows: [] } as any),
+      createWalletKeyboard: () => ({ rows: [] }) as any,
       WINNER_VIDEO_ID: "VID",
     };
     await showWalletUI(ctx, deps);
@@ -176,7 +192,9 @@ describe("wallet handler showWalletUI", () => {
     };
     const deps: any = {
       wallet: {
-        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" },
+        }),
         formatSolBalance: (_: number) => "0.000000",
       },
       getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [] }),
@@ -188,7 +206,7 @@ describe("wallet handler showWalletUI", () => {
         return record;
       },
       buildWalletCaption: () => "CAPTION",
-      createWalletKeyboard: () => ({ rows: [] } as any),
+      createWalletKeyboard: () => ({ rows: [] }) as any,
       WINNER_VIDEO_ID: "VID",
     };
 
@@ -213,7 +231,9 @@ describe("wallet handler showWalletUI", () => {
     };
     const deps: any = {
       wallet: {
-        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" },
+        }),
         formatSolBalance: (_: number) => "0.000000",
       },
       getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [] }),
@@ -237,13 +257,11 @@ describe("wallet handler showWalletUI", () => {
     ctx.__originChatId = -100;
     ctx.me = { id: 42, username: "playtimbabot" };
 
-    const recoverableVideoError: any = new Error(
-      "Bad Request: wrong file identifier specified"
-    );
+    const recoverableVideoError: any = new Error("Bad Request: wrong file identifier specified");
     recoverableVideoError.description = "Bad Request: wrong file identifier specified";
 
     const forbiddenDmError: any = new Error(
-      "Forbidden: bot can't initiate conversation with a user"
+      "Forbidden: bot can't initiate conversation with a user",
     );
     forbiddenDmError.error_code = 403;
     forbiddenDmError.description = "Forbidden: bot can't initiate conversation with a user";
@@ -267,7 +285,7 @@ describe("wallet handler showWalletUI", () => {
       getCachedWalletData: async () => ({ solBalance: 0n, tokenBalances: [] }),
       fetchPricesUSD: async () => ({}),
       buildWalletCaption: () => "CAPTION",
-      createWalletKeyboard: () => ({ rows: [] } as any),
+      createWalletKeyboard: () => ({ rows: [] }) as any,
       WINNER_VIDEO_ID: "VID",
     };
 
@@ -314,8 +332,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
 
 describe("buildWalletActionMenu", () => {
   const formatters = {
-    formatSolBalance: (lamports: number) =>
-      (lamports / 1_000_000_000).toFixed(3),
+    formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(3),
     formatTokenBalance: (balance: number, decimals: number) =>
       (balance / Math.pow(10, decimals)).toFixed(3),
   };
@@ -353,7 +370,7 @@ describe("buildWalletActionMenu", () => {
         "<b>From:</b> <code>ADDR1111111111111111111111111111111</code>",
         "",
         "<b>Select token to withdraw:</b>",
-      ].join("\n")
+      ].join("\n"),
     );
     expect(menu.keyboard.inline_keyboard).toEqual([
       [{ text: "SOL (1.500)", callback_data: "send_select_SOL" }],
@@ -402,10 +419,7 @@ describe("buildWalletActionMenu", () => {
     const menu = buildWalletActionMenu({
       title: "📤 <b>Send AAA</b>",
       walletAddress: "send-user",
-      bodyLines: [
-        "<b>From:</b> <code>{{WALLET_ADDRESS}}</code>",
-        "<b>Balance:</b> 1 AAA",
-      ],
+      bodyLines: ["<b>From:</b> <code>{{WALLET_ADDRESS}}</code>", "<b>Balance:</b> 1 AAA"],
       balances: { solBalanceLamports: 0, tokenBalances: [] },
       formatters,
       quickActions: { type: "prebuilt", keyboard: prebuilt },

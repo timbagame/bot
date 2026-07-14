@@ -16,8 +16,7 @@ import { join } from "node:path";
 
 const DEFAULTS = {
   TELEGRAM_TOKEN: "TEST_TOKEN",
-  MNEMONIC:
-    "test walk nut penalty hip pave soap entry language right filter choice",
+  MNEMONIC: "test walk nut penalty hip pave soap entry language right filter choice",
   SOLANA_NETWORK: "http://localhost:8899",
 };
 
@@ -36,9 +35,9 @@ if (!process.env["BOT_DB_DIR"]) {
 const originalFetch = globalThis.fetch?.bind(globalThis);
 
 // Expose the original fetch so tests can opt-in when required.
-(Object.assign(globalThis, {
+Object.assign(globalThis, {
   __TEST_ORIGINAL_FETCH__: originalFetch,
-}) as any);
+}) as any;
 
 const buildJsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -76,18 +75,13 @@ const disabledFetch = Object.assign(
       return buildJsonResponse({ result: null });
     }
 
-    throw new Error(
-      "Network access is disabled in tests. Provide a mock for globalThis.fetch."
-    );
+    throw new Error("Network access is disabled in tests. Provide a mock for globalThis.fetch.");
   },
   {
     preconnect: async (..._args: Parameters<typeof fetch.preconnect>) => {
-      throw new Error(
-        "Network access is disabled in tests. Provide a mock for fetch.preconnect."
-      );
+      throw new Error("Network access is disabled in tests. Provide a mock for fetch.preconnect.");
     },
-  }
+  },
 ) as typeof fetch;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).fetch = disabledFetch;

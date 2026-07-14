@@ -24,30 +24,16 @@ import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "./constants";
-import type {
-  JustInTimeSwapResult,
-  SwapQuote,
-  SwapRequest,
-} from "./swap/types";
+import type { JustInTimeSwapResult, SwapQuote, SwapRequest } from "./swap/types";
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { calculateDynamicReferralFee } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
 import { SwapService } from "./swap/service";
-import {
-  calculateRouteCosts,
-  DEFAULT_ROUTE_LAMPORTS_PADDING,
-} from "./swap/route-cost";
-import {
-  DEFAULT_REFERRAL_BASE_FEE_BPS,
-  DEFAULT_MAX_EXTRA_FEE_BPS,
-} from "./admin-payer-surcharge";
+import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "./swap/route-cost";
+import { DEFAULT_REFERRAL_BASE_FEE_BPS, DEFAULT_MAX_EXTRA_FEE_BPS } from "./admin-payer-surcharge";
 
-export type {
-  SwapQuote,
-  SwapRequest,
-  JustInTimeSwapResult,
-} from "./swap/types";
+export type { SwapQuote, SwapRequest, JustInTimeSwapResult } from "./swap/types";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -60,9 +46,7 @@ const ROUTE_LAMPORTS_BUFFER = DEFAULT_ROUTE_LAMPORTS_PADDING;
 const JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX = 1_400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
-type HelperResult<TValue> =
-  | { ok: true; value: TValue }
-  | { ok: false; error: JitSwapError };
+type HelperResult<TValue> = { ok: true; value: TValue } | { ok: false; error: JitSwapError };
 
 type StepAttemptResult =
   | { status: "success"; result: JustInTimeSwapResult }
@@ -137,11 +121,7 @@ export class SwapManager {
   private readonly quoteCache = new SwapQuoteCache();
   private readonly swapService: SwapService;
 
-  constructor(
-    connection: Connection,
-    wallet: WalletManager,
-    feeBudget?: FeeBudgetProvider
-  ) {
+  constructor(connection: Connection, wallet: WalletManager, feeBudget?: FeeBudgetProvider) {
     this.connection = connection;
     this.wallet = wallet;
     this.network = NetworkDetector.getCurrentNetwork();
@@ -155,20 +135,15 @@ export class SwapManager {
     return mint === SOL_MINT || mint === "SOL";
   }
 
-  private getJupiterQuote(
-    params: JupiterQuoteRequest
-  ): Promise<JupiterQuoteResponse> {
-    return this.quoteCache.getJupiterQuote(params, () =>
-      this.jupiterClient.getQuote(params)
-    );
+  private getJupiterQuote(params: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
+    return this.quoteCache.getJupiterQuote(params, () => this.jupiterClient.getQuote(params));
   }
 
   /**
    * Get the best quote for a token swap across all providers
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
-    const { inputMint, outputMint, amount, inputTicker, outputTicker } =
-      request;
+    const { inputMint, outputMint, amount, inputTicker, outputTicker } = request;
 
     console.log(`🔍 SwapManager.getQuote called:`);
     console.log(`   Input: ${inputMint} (${inputTicker})`);
@@ -194,9 +169,7 @@ export class SwapManager {
       normalizedOutputTicker === "SOL";
 
     if (isWrapSwap || isUnwrapSwap) {
-      console.log(
-        `   🧊 Handling ${isWrapSwap ? "wrap" : "unwrap"} without Jupiter`
-      );
+      console.log(`   🧊 Handling ${isWrapSwap ? "wrap" : "unwrap"} without Jupiter`);
 
       const integrator =
         isUnwrapSwap && request.integrator?.payerKind === "admin"
@@ -243,7 +216,7 @@ export class SwapManager {
       quoteRequest.payer = request.integrator.payer;
       quoteRequest.closeAuthority = request.integrator.closeAuthority;
       console.log(
-        `   🧾 Integrator fee ${request.integrator.referralFee} bps via ${request.integrator.payerKind} payer`
+        `   🧾 Integrator fee ${request.integrator.referralFee} bps via ${request.integrator.payerKind} payer`,
       );
     }
 
@@ -310,7 +283,7 @@ export class SwapManager {
       const targetState = targetResult.value;
       if (targetState.status === "satisfied") {
         console.log(
-          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${targetState.currentLamports} ≥ target ${targetState.targetLamports}.`
+          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${targetState.currentLamports} ≥ target ${targetState.targetLamports}.`,
         );
         return { swapped: false };
       }
@@ -338,9 +311,7 @@ export class SwapManager {
         : JitRetryStrategy.SwapFirst;
 
       const retryAction =
-        strategy === JitRetryStrategy.UnwrapFirst
-          ? JitRetryAction.Unwrap
-          : JitRetryAction.Swap;
+        strategy === JitRetryStrategy.UnwrapFirst ? JitRetryAction.Unwrap : JitRetryAction.Swap;
 
       const retrySteps: RetryStep[] = [
         {
@@ -358,10 +329,9 @@ export class SwapManager {
         });
       }
 
-      const actionLabel =
-        strategy === JitRetryStrategy.UnwrapFirst ? "WSOL unwrap" : "SOL swap";
+      const actionLabel = strategy === JitRetryStrategy.UnwrapFirst ? "WSOL unwrap" : "SOL swap";
       console.log(
-        `⚡ Executing just-in-time ${actionLabel} for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
+        `⚡ Executing just-in-time ${actionLabel} for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`,
       );
 
       let lastError: JitSwapError | null = null;
@@ -395,11 +365,8 @@ export class SwapManager {
 
         if (attemptResult.status === "error") {
           lastError = attemptResult.error;
-          const stepLabel =
-            step.action === JitRetryAction.Unwrap ? "WSOL unwrap" : "Jupiter swap";
-          console.log(
-            `⚠️ ${stepLabel} (${step.phase}) failed: ${attemptResult.error.message}`
-          );
+          const stepLabel = step.action === JitRetryAction.Unwrap ? "WSOL unwrap" : "Jupiter swap";
+          console.log(`⚠️ ${stepLabel} (${step.phase}) failed: ${attemptResult.error.message}`);
         }
       }
 
@@ -442,9 +409,7 @@ export class SwapManager {
       inputAmountRawOverride,
     } = options;
 
-    const ref =
-      getReferralConfigForMint(tokenMint) ||
-      getReferralConfigForMint(REGISTRY_SOL);
+    const ref = getReferralConfigForMint(tokenMint) || getReferralConfigForMint(REGISTRY_SOL);
     if (!ref?.referralAccount || !this.wallet.getAdminKeypair) {
       return null;
     }
@@ -485,8 +450,7 @@ export class SwapManager {
     desiredLamports?: number;
     tokenTicker: string;
   }): Promise<HelperResult<TargetComputationResult>> {
-    const { userKeypair, availableTokenAmountRaw, desiredLamports, tokenTicker } =
-      options;
+    const { userKeypair, availableTokenAmountRaw, desiredLamports, tokenTicker } = options;
 
     const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
       this.feeBudget.getGameSafetyBufferLamports(),
@@ -498,9 +462,7 @@ export class SwapManager {
       minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
     const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
 
-    const currentLamports = await this.connection.getBalance(
-      userKeypair.publicKey
-    );
+    const currentLamports = await this.connection.getBalance(userKeypair.publicKey);
 
     if (currentLamports >= targetLamports) {
       return {
@@ -594,8 +556,7 @@ export class SwapManager {
         };
       }
 
-      const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * 105n) /
-        (probeOut * 100n);
+      const requiredInput = (BigInt(targetLamportsOut) * probeIn * 105n) / (probeOut * 100n);
       const requiredInputClamped =
         requiredInput > availableRawBig ? availableRawBig : requiredInput;
 
@@ -636,11 +597,11 @@ export class SwapManager {
           outputTicker: "SOL",
           integrator: integratorForSwap,
         },
-        integratorForSwap
+        integratorForSwap,
       );
 
       const outputLamports = BigInt(
-        swapQuote.providerQuote?.outAmount ?? swapQuote.outputAmount ?? "0"
+        swapQuote.providerQuote?.outAmount ?? swapQuote.outputAmount ?? "0",
       );
       if (outputLamports < BigInt(targetLamportsOut)) {
         return {
@@ -662,9 +623,7 @@ export class SwapManager {
         ok: false,
         error: {
           type: "PROBE_FAILED",
-          message:
-            error?.message ||
-            "Jupiter route unavailable. Try again or add SOL manually.",
+          message: error?.message || "Jupiter route unavailable. Try again or add SOL manually.",
           cause: error,
         },
       };
@@ -679,14 +638,8 @@ export class SwapManager {
     userKeypair: Keypair;
     logContext: string;
   }): Promise<StepAttemptResult> {
-    const {
-      target,
-      availableRaw,
-      currentLamports,
-      jitFeeBuffer,
-      userKeypair,
-      logContext,
-    } = options;
+    const { target, availableRaw, currentLamports, jitFeeBuffer, userKeypair, logContext } =
+      options;
 
     const desiredUnwrapLamports = Math.max(target, 0);
     const unwrapLamports = Math.min(availableRaw, desiredUnwrapLamports);
@@ -697,8 +650,7 @@ export class SwapManager {
 
     try {
       const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-      const adminKeypair =
-        lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
+      const adminKeypair = lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
 
       const { signature, lamportsReceived } = await this.unwrapWsolPortion({
         userKeypair,
@@ -802,9 +754,7 @@ export class SwapManager {
         status: "error",
         error: {
           type: "SWAP_EXECUTION_FAILED",
-          message:
-            error?.message ||
-            "Jupiter route unavailable. Try again or add SOL manually.",
+          message: error?.message || "Jupiter route unavailable. Try again or add SOL manually.",
           cause: error,
         },
       };
@@ -818,19 +768,11 @@ export class SwapManager {
     adminKeypair?: Keypair;
     lendingLamports?: number;
   }): Promise<{ signature: string; lamportsReceived: number }> {
-    const {
-      userKeypair,
-      unwrapLamports,
-      logContext,
-      adminKeypair,
-      lendingLamports = 0,
-    } = options;
+    const { userKeypair, unwrapLamports, logContext, adminKeypair, lendingLamports = 0 } = options;
 
     const loanLamports = Math.max(0, Math.trunc(lendingLamports));
     if (loanLamports > 0 && !adminKeypair) {
-      throw new Error(
-        "Admin keypair required when lending lamports for WSOL unwrap."
-      );
+      throw new Error("Admin keypair required when lending lamports for WSOL unwrap.");
     }
 
     if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
@@ -849,25 +791,21 @@ export class SwapManager {
       adminKeypair: loanLamports > 0 ? adminKeypair : undefined,
     });
 
-    const formattedUnwrap = formatAmount(
-      BigInt(unwrapResult.amountLamports),
-      SOL_DECIMALS,
-      {
-        maxFractionDigits: SOL_DECIMALS,
-        trim: true,
-      }
-    );
+    const formattedUnwrap = formatAmount(BigInt(unwrapResult.amountLamports), SOL_DECIMALS, {
+      maxFractionDigits: SOL_DECIMALS,
+      trim: true,
+    });
     const formattedRemaining = formatAmount(
       BigInt(Math.max(unwrapResult.remainingLamports, 0)),
       SOL_DECIMALS,
       {
         maxFractionDigits: SOL_DECIMALS,
         trim: true,
-      }
+      },
     );
 
     console.log(
-      `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
+      `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`,
     );
 
     return {
@@ -897,7 +835,7 @@ export class SwapManager {
   async executeUnwrapSwap(
     request: SwapRequest,
     quote: SwapQuote,
-    adminTopUpLamports: bigint = 0n
+    adminTopUpLamports: bigint = 0n,
   ): Promise<string> {
     const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
     if (lamports <= 0) {
@@ -931,28 +869,23 @@ export class SwapManager {
   /**
    * Execute Jupiter swap using the complete transaction
    */
-  async executeJupiterSwap(
-    request: SwapRequest,
-    quote: SwapQuote
-  ): Promise<string> {
+  async executeJupiterSwap(request: SwapRequest, quote: SwapQuote): Promise<string> {
     const { userKeypair } = request;
 
     // First, create token accounts if they don't exist
     const setupInstructions = await this.createTokenAccountsIfNeeded(
       userKeypair,
       quote.inputMint,
-      quote.outputMint
+      quote.outputMint,
     );
 
     // If we need to create token accounts, do that first
     if (setupInstructions.length > 0) {
-      console.log(
-        `Creating ${setupInstructions.length} token accounts before Jupiter swap`
-      );
+      console.log(`Creating ${setupInstructions.length} token accounts before Jupiter swap`);
       const setupTxid = await this.wallet.sendAndConfirmWithResubmits(
         setupInstructions,
         [userKeypair],
-        { operationLabel: "Create token accounts" }
+        { operationLabel: "Create token accounts" },
       );
       console.log(`Token accounts created: ${setupTxid}`);
 
@@ -1039,7 +972,7 @@ export class SwapManager {
         }
 
         throw new Error(
-          "Jupiter admin payer fallback requires user-paid SOL fees, but the user balance is too low."
+          "Jupiter admin payer fallback requires user-paid SOL fees, but the user balance is too low.",
         );
       }
 
@@ -1055,8 +988,7 @@ export class SwapManager {
       const adminKeypair = this.wallet.getAdminKeypair();
       const payerMissing = !integrator.payer;
       const payerMismatch =
-        integrator.payer &&
-        adminKeypair.publicKey.toBase58() !== integrator.payer;
+        integrator.payer && adminKeypair.publicKey.toBase58() !== integrator.payer;
       const closeMismatch =
         integrator.closeAuthority &&
         adminKeypair.publicKey.toBase58() !== integrator.closeAuthority;
@@ -1064,25 +996,23 @@ export class SwapManager {
       if (payerMissing || payerMismatch || closeMismatch) {
         throw new Error(
           `Integrator requires admin payer ${integrator.payer} / closeAuthority ${integrator.closeAuthority}, ` +
-            `but loaded admin keypair is ${adminKeypair.publicKey.toBase58()}`
+            `but loaded admin keypair is ${adminKeypair.publicKey.toBase58()}`,
         );
       }
 
-      await this.ensureAdminCanCoverRoute(
-        integrator,
-        swapResponse.order,
-        adminKeypair.publicKey
-      );
+      await this.ensureAdminCanCoverRoute(integrator, swapResponse.order, adminKeypair.publicKey);
 
       signers = [userKeypair, adminKeypair];
     }
 
     try {
-      console.log(`🔄 JIT swap: calling executeJupiterTransaction with requestId=${swapResponse.requestId}`);
+      console.log(
+        `🔄 JIT swap: calling executeJupiterTransaction with requestId=${swapResponse.requestId}`,
+      );
       const sig = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         swapResponse.requestId,
-        signers
+        signers,
       );
       console.log(`✅ JIT swap: Jupiter transaction executed, signature=${sig}`);
       return sig;
@@ -1129,7 +1059,7 @@ export class SwapManager {
     inputDecimals: number,
     outputDecimals: number,
     inputTicker: string,
-    outputTicker: string
+    outputTicker: string,
   ): string {
     const slippageBps =
       typeof quote.slippage === "number" && Number.isFinite(quote.slippage)
@@ -1149,15 +1079,12 @@ export class SwapManager {
         routePlan: [],
         totalTime: 0,
         platformFee: quote.platformFee ?? null,
-        feeBps:
-          quote.providerQuote?.feeBps ??
-          quote.integrator?.referralFee ??
-          undefined,
+        feeBps: quote.providerQuote?.feeBps ?? quote.integrator?.referralFee ?? undefined,
       },
       inputDecimals,
       outputDecimals,
       inputTicker,
-      outputTicker
+      outputTicker,
     );
   }
 
@@ -1167,7 +1094,7 @@ export class SwapManager {
   private async createTokenAccountsIfNeeded(
     userKeypair: Keypair,
     inputMint: string,
-    outputMint: string
+    outputMint: string,
   ): Promise<TransactionInstruction[]> {
     const instructions: TransactionInstruction[] = [];
 
@@ -1177,14 +1104,14 @@ export class SwapManager {
       const inputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
         mintPubkey,
-        userKeypair
+        userKeypair,
       );
 
       if (inputSetup.created) {
         console.log(
           `Creating input token account for ${inputMint} (Token-${
             inputSetup.isToken2022 ? "2022" : "SPL"
-          })`
+          })`,
         );
         instructions.push(...inputSetup.instructions);
       }
@@ -1196,14 +1123,14 @@ export class SwapManager {
       const outputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
         mintPubkey,
-        userKeypair
+        userKeypair,
       );
 
       if (outputSetup.created) {
         console.log(
           `Creating output token account for ${outputMint} (Token-${
             outputSetup.isToken2022 ? "2022" : "SPL"
-          })`
+          })`,
         );
         instructions.push(...outputSetup.instructions);
       }
@@ -1218,7 +1145,7 @@ export class SwapManager {
   private async executeJupiterTransaction(
     base64Transaction: string,
     requestId: string,
-    signers: Keypair[]
+    signers: Keypair[],
   ): Promise<string> {
     try {
       console.log(`🔄 JIT swap: deserializing Jupiter transaction...`);
@@ -1226,13 +1153,15 @@ export class SwapManager {
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
       const messageAccountKeys = versionedTx.message.staticAccountKeys.map((k) => k.toBase58());
-      const relevantSigners = signers.filter((s) => messageAccountKeys.includes(s.publicKey.toBase58()));
-      console.log(`🔄 JIT swap: signing transaction with ${relevantSigners.length}/${signers.length} signers...`);
+      const relevantSigners = signers.filter((s) =>
+        messageAccountKeys.includes(s.publicKey.toBase58()),
+      );
+      console.log(
+        `🔄 JIT swap: signing transaction with ${relevantSigners.length}/${signers.length} signers...`,
+      );
       versionedTx.sign(relevantSigners);
 
-      const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
-        "base64"
-      );
+      const signedTransaction = Buffer.from(versionedTx.serialize()).toString("base64");
 
       const executeResponse = await this.jupiterClient.executeOrder({
         requestId,
@@ -1243,7 +1172,7 @@ export class SwapManager {
         throw new Error(
           executeResponse.errorMessage ||
             executeResponse.error ||
-            `Jupiter execute returned status ${executeResponse.status}`
+            `Jupiter execute returned status ${executeResponse.status}`,
         );
       }
 
@@ -1254,16 +1183,11 @@ export class SwapManager {
 
       return signature;
     } catch (error: any) {
-      throw new Error(
-        `Failed to execute Jupiter transaction: ${error?.message || error}`
-      );
+      throw new Error(`Failed to execute Jupiter transaction: ${error?.message || error}`);
     }
   }
 
-  private canUseAtomicBuildFallback(
-    request: SwapRequest,
-    quote: SwapQuote
-  ): boolean {
+  private canUseAtomicBuildFallback(request: SwapRequest, quote: SwapQuote): boolean {
     return (
       quote.integrator?.payerKind === "admin" &&
       !this.isSolMint(quote.inputMint) &&
@@ -1284,9 +1208,7 @@ export class SwapManager {
     }
   }
 
-  private toJupiterBuildInstruction(
-    instruction: JupiterBuildInstruction
-  ): TransactionInstruction {
+  private toJupiterBuildInstruction(instruction: JupiterBuildInstruction): TransactionInstruction {
     return new TransactionInstruction({
       programId: new PublicKey(instruction.programId),
       keys: instruction.accounts.map((account) => ({
@@ -1300,29 +1222,21 @@ export class SwapManager {
 
   private getJupiterBuildInstructions(
     build: JupiterBuildResponse,
-    reimbursementInstruction: TransactionInstruction
+    reimbursementInstruction: TransactionInstruction,
   ): TransactionInstruction[] {
     return [
-      ...build.setupInstructions.map((instruction) =>
-        this.toJupiterBuildInstruction(instruction)
-      ),
+      ...build.setupInstructions.map((instruction) => this.toJupiterBuildInstruction(instruction)),
       this.toJupiterBuildInstruction(build.swapInstruction),
       ...(build.cleanupInstruction
         ? [this.toJupiterBuildInstruction(build.cleanupInstruction)]
         : []),
       reimbursementInstruction,
-      ...build.otherInstructions.map((instruction) =>
-        this.toJupiterBuildInstruction(instruction)
-      ),
-      ...(build.tipInstruction
-        ? [this.toJupiterBuildInstruction(build.tipInstruction)]
-        : []),
+      ...build.otherInstructions.map((instruction) => this.toJupiterBuildInstruction(instruction)),
+      ...(build.tipInstruction ? [this.toJupiterBuildInstruction(build.tipInstruction)] : []),
     ];
   }
 
-  private getJupiterBuildLookupTables(
-    build: JupiterBuildResponse
-  ): AddressLookupTableAccount[] {
+  private getJupiterBuildLookupTables(build: JupiterBuildResponse): AddressLookupTableAccount[] {
     if (!build.addressesByLookupTableAddress) {
       return [];
     }
@@ -1337,14 +1251,12 @@ export class SwapManager {
             lastExtendedSlotStartIndex: 0,
             addresses: addresses.map((address) => new PublicKey(address)),
           },
-        })
+        }),
     );
   }
 
   private getJupiterBuildBlockhash(build: JupiterBuildResponse): string {
-    return new PublicKey(
-      Uint8Array.from(build.blockhashWithMetadata.blockhash)
-    ).toBase58();
+    return new PublicKey(Uint8Array.from(build.blockhashWithMetadata.blockhash)).toBase58();
   }
 
   private async executeAtomicBuildFallback(options: {
@@ -1355,22 +1267,16 @@ export class SwapManager {
     reimbursementLamports: number;
   }): Promise<string> {
     const { request, quote, jupiterQuote, adminKeypair } = options;
-    const reimbursementLamports = Math.max(
-      0,
-      Math.trunc(options.reimbursementLamports)
-    );
+    const reimbursementLamports = Math.max(0, Math.trunc(options.reimbursementLamports));
 
     if (!Number.isSafeInteger(reimbursementLamports)) {
       throw new Error("Jupiter build reimbursement must be a safe integer.");
     }
 
     const integrator = quote.integrator;
-    if (
-      !integrator?.payer ||
-      integrator.payer !== adminKeypair.publicKey.toBase58()
-    ) {
+    if (!integrator?.payer || integrator.payer !== adminKeypair.publicKey.toBase58()) {
       throw new Error(
-        `Integrator admin payer does not match loaded admin keypair ${adminKeypair.publicKey.toBase58()}`
+        `Integrator admin payer does not match loaded admin keypair ${adminKeypair.publicKey.toBase58()}`,
       );
     }
 
@@ -1380,7 +1286,7 @@ export class SwapManager {
         ...jupiterQuote,
         mode: "build",
       },
-      adminKeypair.publicKey
+      adminKeypair.publicKey,
     );
 
     const build = await this.jupiterClient.getBuildInstructions({
@@ -1389,14 +1295,13 @@ export class SwapManager {
       amount: quote.inputAmountRaw,
       taker: request.userKeypair.publicKey.toBase58(),
       payer: adminKeypair.publicKey.toBase58(),
-      swapMode:
-        jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
+      swapMode: jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
       slippageBps: quote.providerQuote?.slippageBps ?? jupiterQuote.slippageBps,
     });
     const expectedOutputLamports = BigInt(build.outAmount);
     if (BigInt(reimbursementLamports) > expectedOutputLamports) {
       throw new Error(
-        "Jupiter build fallback output is too small to reimburse admin fees atomically."
+        "Jupiter build fallback output is too small to reimburse admin fees atomically.",
       );
     }
     const recentBlockhash = this.getJupiterBuildBlockhash(build);
@@ -1406,10 +1311,7 @@ export class SwapManager {
       toPubkey: adminKeypair.publicKey,
       lamports: reimbursementLamports,
     });
-    const swapInstructions = this.getJupiterBuildInstructions(
-      build,
-      reimbursementInstruction
-    );
+    const swapInstructions = this.getJupiterBuildInstructions(build, reimbursementInstruction);
     const simulationMessage = new TransactionMessage({
       payerKey: adminKeypair.publicKey,
       recentBlockhash,
@@ -1421,23 +1323,20 @@ export class SwapManager {
       ],
     }).compileToV0Message(lookupTables);
     const simulationTx = new VersionedTransaction(simulationMessage);
-    const simulationResult = await this.connection.simulateTransaction(
-      simulationTx,
-      { replaceRecentBlockhash: true }
-    );
+    const simulationResult = await this.connection.simulateTransaction(simulationTx, {
+      replaceRecentBlockhash: true,
+    });
 
     if (simulationResult.value.err) {
       throw new Error(
-        `Jupiter build fallback simulation failed: ${JSON.stringify(
-          simulationResult.value.err
-        )}`
+        `Jupiter build fallback simulation failed: ${JSON.stringify(simulationResult.value.err)}`,
       );
     }
 
     const computeUnitLimit = simulationResult.value.unitsConsumed
       ? Math.min(
           Math.ceil(Number(simulationResult.value.unitsConsumed) * 1.2),
-          JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX
+          JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX,
         )
       : JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX;
     const finalMessage = new TransactionMessage({
@@ -1446,7 +1345,7 @@ export class SwapManager {
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
         ...build.computeBudgetInstructions.map((instruction) =>
-          this.toJupiterBuildInstruction(instruction)
+          this.toJupiterBuildInstruction(instruction),
         ),
         ...swapInstructions,
       ],
@@ -1465,12 +1364,12 @@ export class SwapManager {
         blockhash: recentBlockhash,
         lastValidBlockHeight: build.blockhashWithMetadata.lastValidBlockHeight,
       },
-      "confirmed"
+      "confirmed",
     );
 
     if (confirmation.value.err) {
       throw new Error(
-        `Jupiter build fallback transaction confirmed with error: ${JSON.stringify(confirmation.value.err)}`
+        `Jupiter build fallback transaction confirmed with error: ${JSON.stringify(confirmation.value.err)}`,
       );
     }
 
@@ -1480,23 +1379,20 @@ export class SwapManager {
   private async ensureAdminCanCoverRoute(
     integrator: IntegratorSwapParams | null | undefined,
     quote: JupiterUltraOrderResponse | undefined,
-    adminPublicKey: PublicKey
+    adminPublicKey: PublicKey,
   ): Promise<void> {
     if (integrator?.payerKind !== "admin" || !quote) {
       return;
     }
 
-    const adminBalance = await this.wallet
-      .getConnection()
-      .getBalance(adminPublicKey);
-    const { routeLamports, paddingLamports, requiredLamports } =
-      calculateRouteCosts(quote, {
-        paddingRatio: 0.25,
-        paddingRounding: "round",
-        minPaddingLamports: ROUTE_LAMPORTS_BUFFER,
-        baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
-        requiredStrategy: "sum",
-      });
+    const adminBalance = await this.wallet.getConnection().getBalance(adminPublicKey);
+    const { routeLamports, paddingLamports, requiredLamports } = calculateRouteCosts(quote, {
+      paddingRatio: 0.25,
+      paddingRounding: "round",
+      minPaddingLamports: ROUTE_LAMPORTS_BUFFER,
+      baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
+      requiredStrategy: "sum",
+    });
 
     integrator.adminRouteLamports = routeLamports;
 
@@ -1510,26 +1406,24 @@ export class SwapManager {
       payerKind: integrator.payerKind,
     };
     const logLabel =
-      routeLamports > 0
-        ? "Admin payer route check (rent-heavy path)"
-        : "Admin payer route check";
+      routeLamports > 0 ? "Admin payer route check (rent-heavy path)" : "Admin payer route check";
     console.log(logLabel, logDetails);
 
     if (routeLamports > 0) {
       const formattedRouteSol = this.wallet.formatSolBalance(routeLamports);
       const formattedPadding = this.wallet.formatSolBalance(paddingLamports);
       console.log(
-        `Route ${quote.router ?? "unknown"} needs ${formattedRouteSol} SOL for rent/priority. Admin payer will cover it (adds ${formattedPadding} padding).`
+        `Route ${quote.router ?? "unknown"} needs ${formattedRouteSol} SOL for rent/priority. Admin payer will cover it (adds ${formattedPadding} padding).`,
       );
     }
 
     if (adminBalance < requiredLamports) {
       throw new Error(
         `Admin wallet (${this.wallet.formatSolBalance(
-          adminBalance
+          adminBalance,
         )}) cannot cover rent+priority (${this.wallet.formatSolBalance(
-          requiredLamports
-        )}) required by Jupiter route ${quote.requestId}`
+          requiredLamports,
+        )}) required by Jupiter route ${quote.requestId}`,
       );
     }
   }

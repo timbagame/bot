@@ -50,10 +50,13 @@ describe("TokenManager wrapper methods", () => {
     expect(tm.getTokenCount()).toBe(1);
     const all = tm.getAllKnownTokens();
     expect(all.length).toBe(1);
-    expect(tm.getKnownTokenByTicker("USDC")?.token_mint).toBe("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-    expect(tm.getKnownTokenByMint("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")?.token_ticker).toBe("USDC");
+    expect(tm.getKnownTokenByTicker("USDC")?.token_mint).toBe(
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    );
+    expect(
+      tm.getKnownTokenByMint("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")?.token_ticker,
+    ).toBe("USDC");
     tm.removeToken("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     expect(tm.getTokenCount()).toBe(0);
   });
 });
-

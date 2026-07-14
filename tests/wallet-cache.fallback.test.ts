@@ -2,8 +2,7 @@ import { beforeAll, afterAll, test, expect } from "bun:test";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
-  process.env.MNEMONIC ||
-  "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 const previousPricesEnabled = process.env["PRICES_ENABLED"];
 process.env["PRICES_ENABLED"] = "false";
@@ -24,13 +23,8 @@ let __test_getCachedWalletData: any;
 let __test_clearWalletCache: any;
 
 beforeAll(async () => {
-  ({
-    bot,
-    wallet,
-    __test_setWalletCache,
-    __test_getCachedWalletData,
-    __test_clearWalletCache,
-  } = await import("../src/bot"));
+  ({ bot, wallet, __test_setWalletCache, __test_getCachedWalletData, __test_clearWalletCache } =
+    await import("../src/bot"));
 
   (bot as any).botInfo = {
     id: 0,

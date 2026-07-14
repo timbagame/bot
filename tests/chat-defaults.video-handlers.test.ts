@@ -100,11 +100,12 @@ describe("Chat defaults video settings handlers", () => {
       bot: {} as any,
       chatDb,
       gameDb,
-      getTokenManager: () => ({
-        getChatDefaultToken: () => null,
-        getDefaultToken: () => ({ tokenTicker: "TIMBA", tokenMint: "mock_mint" }),
-        getSupportedGameTokens: () => [],
-      }) as unknown as TokenManager,
+      getTokenManager: () =>
+        ({
+          getChatDefaultToken: () => null,
+          getDefaultToken: () => ({ tokenTicker: "TIMBA", tokenMint: "mock_mint" }),
+          getSupportedGameTokens: () => [],
+        }) as unknown as TokenManager,
       getGameManager: () => ({}) as any,
       wrapCallbackHandler: ((fn: any) => fn) as any,
       getOracleMaxPlayers: () => 20,

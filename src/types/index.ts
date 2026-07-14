@@ -6,10 +6,7 @@ type BN = any;
 // SHARED UTILITY TYPES
 // ================================
 
-export type FetchLike = (
-  input: RequestInfo | URL,
-  init?: RequestInit
-) => Promise<Response>;
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 // ================================
 // DATABASE TYPES
@@ -102,11 +99,7 @@ export type ParseAmountResult =
   | { success: true; data: ParsedAmount }
   | {
       success: false;
-      error:
-        | "invalid_amount"
-        | "amount_too_large"
-        | "unknown_token"
-        | "unsupported_token";
+      error: "invalid_amount" | "amount_too_large" | "unknown_token" | "unsupported_token";
       unknownToken?: string;
       reason?: "fiat_pricing_unavailable" | "fiat_amount_too_small";
     };

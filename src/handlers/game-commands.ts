@@ -7,10 +7,7 @@ import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   WSOL_MINT,
 } from "../utils/constants";
-import {
-  resolveChatDefaultPlayers,
-  resolveChatTimeout,
-} from "../utils/chat-settings";
+import { resolveChatDefaultPlayers, resolveChatTimeout } from "../utils/chat-settings";
 import { resolveGamePrivacy } from "../utils/game-settings";
 import type { GameManager } from "../utils/game";
 import type { ChatGameSettings, ParseAmountResult } from "../types";
@@ -35,14 +32,14 @@ type CreateGameViaCommandDeps = {
   parseAmount: (
     args: string[],
     amountArgIndex: number,
-    chatId?: number
+    chatId?: number,
   ) => Promise<ParseAmountResult>;
   inferMaxPlayers: typeof import("../utils/arg-parsing").inferMaxPlayers;
   wallet: {
     getTokenBalance: (
       telegramId: bigint,
       mint: string,
-      options?: { createIfMissing?: boolean }
+      options?: { createIfMissing?: boolean },
     ) => Promise<number>;
     getTokenMetadata: (mint: string) => Promise<{ decimals: number }>;
     formatTokenBalance: (amount: number, decimals: number) => string;
@@ -51,7 +48,7 @@ type CreateGameViaCommandDeps = {
   };
   getContractMinimumAmount: (
     tokenMint?: string,
-    decimalsHint?: number
+    decimalsHint?: number,
   ) => Promise<{ formatted: number; raw: number; decimals: number }>;
   gameManager: {
     createGame: (
@@ -75,23 +72,20 @@ export type GameCommandsModuleDeps = {
     ctx: Context & { message?: any },
     telegramId: bigint,
     copy: GameSetupCopy,
-    tokenOverride?: GameTokenOverride
+    tokenOverride?: GameTokenOverride,
   ) => Promise<void>;
   resolveCommandTokenOverride: (
     tokenInput: string,
-    chatId?: number
+    chatId?: number,
   ) => Promise<GameTokenOverride | null>;
-  getRequiredTelegramIdForContext: (
-    ctx: Context,
-    label: string
-  ) => Promise<bigint | null>;
+  getRequiredTelegramIdForContext: (ctx: Context, label: string) => Promise<bigint | null>;
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
   getChatGameSettings?: (chatId: number) => ChatGameSettings | null;
 };
 
 export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   const createOptions = (
-    options: Omit<CreateGameViaCommandOptions, "getMaxPlayers">
+    options: Omit<CreateGameViaCommandOptions, "getMaxPlayers">,
   ): CreateGameViaCommandOptions => ({
     ...options,
     getMaxPlayers: () => deps.getOracleMaxPlayers(),
@@ -101,7 +95,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
   const shouldSendGameCreationRateLimitNotice = (
     telegramId: bigint,
-    nowMs: number = Date.now()
+    nowMs: number = Date.now(),
   ): boolean => {
     const key = telegramId.toString();
     const lastNotice = gameCreationRateLimitNotices.get(key);
@@ -151,15 +145,11 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       wallet: deps.wallet,
       getContractMinimumAmount: deps.getContractMinimumAmount,
       gameManager: deps.gameManager,
-    }
+    },
   ): Promise<void> => {
-    console.log(
-      `${options.logPrefix} Command-based ${options.gameType} creation:`,
-      args
-    );
+    console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
 
-    let creationMessageInfo: { chatId: number; messageId: number } | null =
-      null;
+    let creationMessageInfo: { chatId: number; messageId: number } | null = null;
 
     const deleteCreationMessage = async () => {
       if (!creationMessageInfo || !ctx.api?.deleteMessage) {
@@ -167,24 +157,15 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       try {
-        await ctx.api.deleteMessage(
-          creationMessageInfo.chatId,
-          creationMessageInfo.messageId
-        );
+        await ctx.api.deleteMessage(creationMessageInfo.chatId, creationMessageInfo.messageId);
       } catch (deleteError) {
-        console.warn(
-          "Failed to delete game creation acknowledgement:",
-          deleteError
-        );
+        console.warn("Failed to delete game creation acknowledgement:", deleteError);
       }
     };
 
     try {
       const creationMessage = await ctx.reply("⏳ Creating game...");
-      if (
-        creationMessage?.chat?.id != null &&
-        creationMessage?.message_id != null
-      ) {
+      if (creationMessage?.chat?.id != null && creationMessage?.message_id != null) {
         creationMessageInfo = {
           chatId: creationMessage.chat.id,
           messageId: creationMessage.message_id,
@@ -200,19 +181,14 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       const parsedAmount = parsed.data;
-      const chatSettings = ctx.chat?.id
-        ? deps.getChatGameSettings?.(ctx.chat.id) ?? null
-        : null;
-      const maxPlayersLimit = Math.max(
-        options.minPlayers,
-        options.getMaxPlayers()
-      );
+      const chatSettings = ctx.chat?.id ? (deps.getChatGameSettings?.(ctx.chat.id) ?? null) : null;
+      const maxPlayersLimit = Math.max(options.minPlayers, options.getMaxPlayers());
       const defaultMaxPlayers = chatSettings
         ? resolveChatDefaultPlayers(
             chatSettings,
             options.gameType,
             options.defaultMaxPlayers,
-            maxPlayersLimit
+            maxPlayersLimit,
           )
         : Math.min(options.defaultMaxPlayers, maxPlayersLimit);
       const inferred = createDeps.inferMaxPlayers(
@@ -221,7 +197,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         parsedAmount.tokenWasSpecified,
         defaultMaxPlayers,
         options.minPlayers,
-        maxPlayersLimit
+        maxPlayersLimit,
       );
 
       if (!inferred.ok) {
@@ -230,28 +206,25 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       const maxPlayers = inferred.value;
-      const tokenMetadata = await createDeps.wallet.getTokenMetadata(
-        parsedAmount.tokenMint
-      );
+      const tokenMetadata = await createDeps.wallet.getTokenMetadata(parsedAmount.tokenMint);
       const { raw: minAmountRaw } = await createDeps.getContractMinimumAmount(
         parsedAmount.tokenMint,
-        tokenMetadata.decimals
+        tokenMetadata.decimals,
       );
 
       if (parsedAmount.amount < minAmountRaw) {
         const formattedMinimum = createDeps.wallet.formatTokenBalance(
           minAmountRaw,
-          tokenMetadata.decimals
+          tokenMetadata.decimals,
         );
         await ctx.reply(
-          `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
+          `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`,
         );
         return;
       }
 
       const needsNativeSolCheck =
-        parsedAmount.requestedNativeSol === true ||
-        parsedAmount.tokenMint === WSOL_MINT;
+        parsedAmount.requestedNativeSol === true || parsedAmount.tokenMint === WSOL_MINT;
       let nativeSolBalance = 0;
       let userBalance: number;
 
@@ -263,10 +236,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         userBalance = tokenBalance;
         nativeSolBalance = solBalance;
       } else {
-        userBalance = await createDeps.wallet.getTokenBalance(
-          telegramId,
-          parsedAmount.tokenMint
-        );
+        userBalance = await createDeps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint);
       }
 
       if (!needsNativeSolCheck && userBalance < parsedAmount.amount) {
@@ -279,9 +249,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         const totalLamports = userBalance + nativeSolBalance;
         if (totalLamports < parsedAmount.amount) {
           const wrappedLabel =
-            parsedAmount.tokenMint === WSOL_MINT
-              ? "wrapped SOL"
-              : parsedAmount.tokenTicker;
+            parsedAmount.tokenMint === WSOL_MINT ? "wrapped SOL" : parsedAmount.tokenTicker;
           const shortageMessage = `❌ Not enough SOL or ${wrappedLabel}. Add more SOL or ${wrappedLabel} and try again.`;
           await ctx.reply(shortageMessage, { parse_mode: "HTML" });
           return;
@@ -289,16 +257,13 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       const tokenTickerForGame =
-        parsedAmount.tokenMint === WSOL_MINT
-          ? "WSOL"
-          : parsedAmount.tokenTicker;
+        parsedAmount.tokenMint === WSOL_MINT ? "WSOL" : parsedAmount.tokenTicker;
 
-      const messageTimestampMs =
-        ctx.message?.date != null ? ctx.message.date * 1_000 : undefined;
+      const messageTimestampMs = ctx.message?.date != null ? ctx.message.date * 1_000 : undefined;
 
       const gameTimeoutSeconds = resolveChatTimeout(
         chatSettings as ChatGameSettings | null,
-        options.timeoutSeconds
+        options.timeoutSeconds,
       );
 
       // Force public visibility for DM-created games
@@ -321,7 +286,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         telegramId,
         { isPrivate },
         ctx.chat?.id || 0,
-        messageTimestampMs
+        messageTimestampMs,
       );
 
       if (!gameResult.success) {
@@ -341,10 +306,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
-        await ctx.reply(
-          gameResult.autoJoinResult.error || "Failed to auto-join game",
-          { parse_mode: "HTML" }
-        );
+        await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
+          parse_mode: "HTML",
+        });
       }
 
       const creatorUsername = ctx.from?.username
@@ -360,7 +324,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         tokenTickerForGame,
         "Active",
         undefined,
-        { priceHint: parsedAmount.priceLookup }
+        { priceHint: parsedAmount.priceLookup },
       );
     } catch (error) {
       console.error(`Error in command-based ${options.gameType}:`, error);
@@ -377,15 +341,10 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         ctxWithMessage,
         telegramId,
         deps.gameSetupCopy.coinflip,
-        tokenOverride
+        tokenOverride,
       ),
     createGameViaCommand: (ctxWithMessage, args, telegramId) =>
-      createGameViaCommand(
-        ctxWithMessage,
-        args,
-        telegramId,
-        COINFLIP_COMMAND_OPTIONS
-      ),
+      createGameViaCommand(ctxWithMessage, args, telegramId, COINFLIP_COMMAND_OPTIONS),
     resolveTokenOverride: (tokenInput, chatId) =>
       deps.resolveCommandTokenOverride(tokenInput, chatId),
   });
@@ -394,10 +353,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     try {
       // DM games are allowed but will be forced to public visibility
 
-      const telegramId = await deps.getRequiredTelegramIdForContext(
-        ctx,
-        "giveaway command"
-      );
+      const telegramId = await deps.getRequiredTelegramIdForContext(ctx, "giveaway command");
       if (telegramId == null) {
         return;
       }
@@ -406,20 +362,13 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       const tokenCandidate = args?.[1]?.trim();
 
       if (!args || args.length < 2) {
-        await deps.startInteractiveGameSetup(
-          ctx,
-          telegramId,
-          deps.gameSetupCopy.giveaway
-        );
+        await deps.startInteractiveGameSetup(ctx, telegramId, deps.gameSetupCopy.giveaway);
         return;
       }
 
       let tokenOverride: GameTokenOverride | null = null;
       if (tokenCandidate) {
-        tokenOverride = await deps.resolveCommandTokenOverride(
-          tokenCandidate,
-          ctx.chat?.id
-        );
+        tokenOverride = await deps.resolveCommandTokenOverride(tokenCandidate, ctx.chat?.id);
       }
 
       if (tokenOverride) {
@@ -427,17 +376,12 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           ctx,
           telegramId,
           deps.gameSetupCopy.giveaway,
-          tokenOverride
+          tokenOverride,
         );
         return;
       }
 
-      await createGameViaCommand(
-        ctx,
-        args,
-        telegramId,
-        GIVEAWAY_COMMAND_OPTIONS
-      );
+      await createGameViaCommand(ctx, args, telegramId, GIVEAWAY_COMMAND_OPTIONS);
     } catch (error) {
       console.error("Error in giveaway command:", error);
       await ctx.reply("❌ Error setting up giveaway game. Please try again.");

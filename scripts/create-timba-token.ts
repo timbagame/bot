@@ -1,14 +1,5 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-} from "@solana/web3.js";
-import {
-  createMint,
-  getOrCreateAssociatedTokenAccount,
-  mintTo,
-} from "@solana/spl-token";
+import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { createMint, getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
 import { NetworkDetector } from "../src/utils/network-detector";
@@ -53,9 +44,7 @@ async function createTimbaToken() {
     mintAuthority = loadKeypairFromPath(CONFIG.ADMIN_KEYPAIR_PATH);
     console.log("✅ Loaded admin keypair as mint authority");
   } catch (error) {
-    console.log(
-      "⚠️  Admin keypair not found or failed to load, creating new mint authority..."
-    );
+    console.log("⚠️  Admin keypair not found or failed to load, creating new mint authority...");
     if (error instanceof Error) {
       console.log(`   Reason: ${error.message}`);
     }
@@ -65,7 +54,7 @@ async function createTimbaToken() {
     console.log("💧 Requesting SOL airdrop...");
     const airdropSignature = await connection.requestAirdrop(
       mintAuthority.publicKey,
-      2 * LAMPORTS_PER_SOL
+      2 * LAMPORTS_PER_SOL,
     );
     await connection.confirmTransaction(airdropSignature);
     console.log("✅ Airdrop confirmed");
@@ -81,7 +70,7 @@ async function createTimbaToken() {
     console.log("💧 Requesting additional SOL airdrop...");
     const airdropSignature = await connection.requestAirdrop(
       mintAuthority.publicKey,
-      2 * LAMPORTS_PER_SOL
+      2 * LAMPORTS_PER_SOL,
     );
     await connection.confirmTransaction(airdropSignature);
     console.log("✅ Additional airdrop confirmed");
@@ -95,7 +84,7 @@ async function createTimbaToken() {
       mintAuthority,
       mintAuthority.publicKey, // mint authority
       mintAuthority.publicKey, // freeze authority
-      CONFIG.TOKEN_DECIMALS
+      CONFIG.TOKEN_DECIMALS,
     );
 
     console.log(`✅ Token mint created: ${mint.toBase58()}`);
@@ -108,12 +97,10 @@ async function createTimbaToken() {
       connection,
       mintAuthority,
       mint,
-      targetPublicKey
+      targetPublicKey,
     );
 
-    console.log(
-      `✅ Target token account: ${targetTokenAccount.address.toBase58()}`
-    );
+    console.log(`✅ Target token account: ${targetTokenAccount.address.toBase58()}`);
 
     // Step 3: Mint tokens to the target address
     console.log("\n🏭 Minting tokens...");
@@ -125,14 +112,10 @@ async function createTimbaToken() {
       mint,
       targetTokenAccount.address,
       mintAuthority.publicKey,
-      mintAmount
+      mintAmount,
     );
 
-    console.log(
-      `✅ Minted ${CONFIG.MINT_AMOUNT.toLocaleString()} ${
-        CONFIG.TOKEN_SYMBOL
-      } tokens`
-    );
+    console.log(`✅ Minted ${CONFIG.MINT_AMOUNT.toLocaleString()} ${CONFIG.TOKEN_SYMBOL} tokens`);
     console.log(`📝 Mint transaction: ${mintSignature}`);
 
     // Step 4: Display summary
@@ -144,21 +127,13 @@ async function createTimbaToken() {
     console.log(`Token Mint Address: ${mint.toBase58()}`);
     console.log(`Mint Authority: ${mintAuthority.publicKey.toBase58()}`);
     console.log(`Target Address: ${CONFIG.TARGET_ADDRESS}`);
-    console.log(
-      `Target Token Account: ${targetTokenAccount.address.toBase58()}`
-    );
-    console.log(
-      `Minted Amount: ${CONFIG.MINT_AMOUNT.toLocaleString()} ${
-        CONFIG.TOKEN_SYMBOL
-      }`
-    );
+    console.log(`Target Token Account: ${targetTokenAccount.address.toBase58()}`);
+    console.log(`Minted Amount: ${CONFIG.MINT_AMOUNT.toLocaleString()} ${CONFIG.TOKEN_SYMBOL}`);
     console.log(`Network: ${CONFIG.NETWORK}`);
     console.log("\n🔗 Solscan URL:");
     console.log(
-      NetworkDetector.buildSolscanTokenUrl(
-        mint.toBase58(),
-        CONFIG.NETWORK
-      ) ?? `Explorer not available for ${CONFIG.NETWORK}`
+      NetworkDetector.buildSolscanTokenUrl(mint.toBase58(), CONFIG.NETWORK) ??
+        `Explorer not available for ${CONFIG.NETWORK}`,
     );
 
     // Step 5: Save token info to file
@@ -182,14 +157,8 @@ async function createTimbaToken() {
 
     // Step 6: Save mint authority keypair if it was generated
     if (!fs.existsSync(CONFIG.ADMIN_KEYPAIR_PATH)) {
-      const mintAuthorityPath = path.join(
-        process.cwd(),
-        "timba-mint-authority.json"
-      );
-      fs.writeFileSync(
-        mintAuthorityPath,
-        JSON.stringify(Array.from(mintAuthority.secretKey))
-      );
+      const mintAuthorityPath = path.join(process.cwd(), "timba-mint-authority.json");
+      fs.writeFileSync(mintAuthorityPath, JSON.stringify(Array.from(mintAuthority.secretKey)));
       console.log(`💾 Mint authority keypair saved to ${mintAuthorityPath}`);
       console.log("⚠️  Keep this keypair secure - it controls the token mint!");
     }

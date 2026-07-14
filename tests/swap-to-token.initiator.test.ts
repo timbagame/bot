@@ -1,9 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
-import {
-  clearAllInputSessions,
-  getInputSession,
-  setInputSession,
-} from "../src/utils/user-state";
+import { clearAllInputSessions, getInputSession, setInputSession } from "../src/utils/user-state";
 
 const originalEnv = {
   NODE_ENV: process.env.NODE_ENV,
@@ -19,10 +15,8 @@ beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
   process.env.MNEMONIC =
-    process.env.MNEMONIC ||
-    "test test test test test test test test test test test junk";
-  process.env.SOLANA_NETWORK =
-    process.env.SOLANA_NETWORK || "http://localhost:8899";
+    process.env.MNEMONIC || "test test test test test test test test test test test junk";
+  process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
   process.env["PRICES_ENABLED"] = "false";
 
   botModule = await import("../src/bot");
@@ -116,8 +110,7 @@ test("swap_to_token reprompt keeps initiatorId ownership", async () => {
       return { message_id: 1000, chat: { id: chatId } } as any;
     },
     api: {
-      sendMessage: async () =>
-        ({ message_id: 1001, chat: { id: chatId } } as any),
+      sendMessage: async () => ({ message_id: 1001, chat: { id: chatId } }) as any,
       editMessageText: async () => ({}),
     },
   };
@@ -132,7 +125,7 @@ test("swap_to_token reprompt keeps initiatorId ownership", async () => {
         messageId: promptMessageId,
         initiatorId,
       },
-      "BADTOKEN"
+      "BADTOKEN",
     );
 
     const stored = getInputSession(`${chatId}_${promptMessageId}`);

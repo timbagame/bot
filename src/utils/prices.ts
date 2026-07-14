@@ -1,8 +1,4 @@
-import {
-  JUPITER_PRICE_URL,
-  PRICES_CACHE_TTL_MS,
-  PRICES_TIMEOUT_MS,
-} from "./constants";
+import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS } from "./constants";
 import { PublicKey } from "@solana/web3.js";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";
@@ -12,9 +8,7 @@ type PriceCacheEntry = {
   inflight?: Promise<number>;
 };
 
-const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(
-  PRICES_CACHE_TTL_MS
-);
+const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(PRICES_CACHE_TTL_MS);
 
 const PRICES_ENV_KEY = "PRICES_ENABLED";
 
@@ -44,7 +38,7 @@ function isValidMintAddress(value: string): boolean {
 
 async function withTimeout<T>(
   factory: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<T> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -52,10 +46,7 @@ async function withTimeout<T>(
   try {
     return await factory(ac.signal);
   } catch (error) {
-    if (
-      (error as any)?.name === "AbortError" ||
-      (error as any)?.code === "ABORT_ERR"
-    ) {
+    if ((error as any)?.name === "AbortError" || (error as any)?.code === "ABORT_ERR") {
       throw new Error("timeout");
     }
     throw error;
@@ -64,9 +55,7 @@ async function withTimeout<T>(
   }
 }
 
-function pickValidPrice(
-  candidates: Array<number | string | null | undefined>
-): number | null {
+function pickValidPrice(candidates: Array<number | string | null | undefined>): number | null {
   for (const candidate of candidates) {
     const price = typeof candidate === "number" ? candidate : Number(candidate);
     if (price && Number.isFinite(price) && price > 0) {
@@ -79,7 +68,7 @@ function pickValidPrice(
 async function fetchFromJupiter(
   id: string,
   fetchImpl: FetchLike,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<number | null> {
   try {
     const url = new URL(JUPITER_PRICE_URL);
@@ -93,7 +82,7 @@ async function fetchFromJupiter(
           headers: apiKey ? { "x-api-key": apiKey } : undefined,
           signal,
         }),
-      timeoutMs
+      timeoutMs,
     );
     if (!res.ok) return null;
     const data = (await res.json()) as any;
@@ -108,11 +97,9 @@ async function fetchFromJupiter(
 async function fetchBatchFromJupiter(
   ids: string[],
   fetchImpl: FetchLike,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<Record<string, number | null>> {
-  const uniqueIds = Array.from(
-    new Set(ids.map((id) => id.trim()).filter(Boolean))
-  );
+  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
   if (uniqueIds.length === 0) {
     return {};
   }
@@ -129,7 +116,7 @@ async function fetchBatchFromJupiter(
           headers: apiKey ? { "x-api-key": apiKey } : undefined,
           signal,
         }),
-      timeoutMs
+      timeoutMs,
     );
     if (!res.ok) {
       return {};
@@ -151,7 +138,7 @@ async function fetchBatchFromJupiter(
 
 export async function getPriceUSD(
   mintAddress: string,
-  fetchImpl: FetchLike = (globalThis.fetch as any)
+  fetchImpl: FetchLike = globalThis.fetch as any,
 ): Promise<number> {
   if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintAddress);
@@ -175,11 +162,7 @@ export async function getPriceUSD(
     let resolvedPrice = 0;
     try {
       // 1) Jupiter price endpoint
-      const fromJup = await fetchFromJupiter(
-        key,
-        fetchImpl,
-        PRICES_TIMEOUT_MS
-      );
+      const fromJup = await fetchFromJupiter(key, fetchImpl, PRICES_TIMEOUT_MS);
       if (fromJup && fromJup > 0) {
         resolvedPrice = fromJup;
         priceCache.setWithTTL(key, { value: fromJup });
@@ -210,16 +193,13 @@ export async function getPriceUSD(
 
 export async function getPricesUSD(
   ids: string[],
-  fetchImpl: FetchLike = (globalThis.fetch as any)
+  fetchImpl: FetchLike = globalThis.fetch as any,
 ): Promise<Record<string, number>> {
   if (!isPricesEnabled()) {
     return Object.fromEntries(ids.map((id) => [id, 0]));
   }
 
-  const batchTargets = new Map<
-    string,
-    { requestId: string; normalizedKeys: Set<string> }
-  >();
+  const batchTargets = new Map<string, { requestId: string; normalizedKeys: Set<string> }>();
 
   for (const id of ids) {
     const normalizedKey = normalizeKey(id);
@@ -243,7 +223,7 @@ export async function getPricesUSD(
     const fetched = await fetchBatchFromJupiter(
       requests.map((item) => item.requestId),
       fetchImpl,
-      PRICES_TIMEOUT_MS
+      PRICES_TIMEOUT_MS,
     );
 
     for (const target of requests) {
@@ -258,7 +238,7 @@ export async function getPricesUSD(
   }
 
   const entries = await Promise.all(
-    ids.map(async (id) => [id, await getPriceUSD(id, fetchImpl)] as const)
+    ids.map(async (id) => [id, await getPriceUSD(id, fetchImpl)] as const),
   );
   return Object.fromEntries(entries);
 }

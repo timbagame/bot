@@ -60,7 +60,7 @@ describe("Chat defaults media rejection", () => {
         const rejectionMessage = await mockCtx.reply(
           "❌ <b>Please send media directly</b>\n\n" +
             "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
-            "Files sent as documents are not supported."
+            "Files sent as documents are not supported.",
         );
         expect(rejectionMessage).toBeDefined();
       }
@@ -216,7 +216,7 @@ describe("Chat defaults media rejection", () => {
       const rejectionMessage = await mockCtx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
           "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
-          "Files sent as documents are not supported."
+          "Files sent as documents are not supported.",
       );
       expect(rejectionMessage).toBeDefined();
     }
@@ -258,10 +258,9 @@ describe("Chat defaults media rejection", () => {
       const rejectionMessage = await mockCtx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
           "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
-          "Files sent as documents are not supported."
+          "Files sent as documents are not supported.",
       );
       expect(rejectionMessage).toBeDefined();
     }
   });
 });
-

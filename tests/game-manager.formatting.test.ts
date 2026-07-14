@@ -39,9 +39,17 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = randomGamePublicKey();
+    const gamePda = randomGamePublicKey();
 
-  const res = await gm.formatGameMessage(ctx, gamePda, "coinflip", amount, "@creator", "Active", "WSOL");
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "coinflip",
+      amount,
+      "@creator",
+      "Active",
+      "WSOL",
+    );
     expect(res.messageText).toContain("WSOL");
     // Message formatting basics
     // Status present
@@ -78,13 +86,20 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = randomGamePublicKey();
+    const gamePda = randomGamePublicKey();
 
-    const res = await gm.formatGameMessage(ctx, gamePda, "giveaway", amount, "@creator", "Completed", "WSOL", winner);
-    expect(res.messageText).toContain("Winner:");
-    expect(res.messageText).toContain(
-      sanitizeTelegramDisplayName("@user999")
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "giveaway",
+      amount,
+      "@creator",
+      "Completed",
+      "WSOL",
+      winner,
     );
+    expect(res.messageText).toContain("Winner:");
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user999"));
     // No keyboard for completed
     expect(res.keyboard.length).toBe(0);
   });
@@ -128,21 +143,21 @@ describe("GameManager.formatGameMessage", () => {
       },
     } as any;
     const gm = GameManager.getInstance(program, wallet, db);
-  const gamePda = randomGamePublicKey();
+    const gamePda = randomGamePublicKey();
 
-  const res = await gm.formatGameMessage(
-    ctx,
-    gamePda,
-    "coinflip",
-    amount,
-    "@creator",
-    "Completed",
-    "WSOL",
-    winnerPubkey
-  );
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "coinflip",
+      amount,
+      "@creator",
+      "Completed",
+      "WSOL",
+      winnerPubkey,
+    );
 
-  expect(res.messageText).toContain("Winner: &lt;Winner &amp; Co&gt;");
-});
+    expect(res.messageText).toContain("Winner: &lt;Winner &amp; Co&gt;");
+  });
 
   test("falls back to stored display name and escapes HTML when Telegram lookup fails", async () => {
     resetGameManager();
@@ -197,7 +212,7 @@ describe("GameManager.formatGameMessage", () => {
       "@creator",
       "Completed",
       "WSOL",
-      winnerPubkey
+      winnerPubkey,
     );
 
     expect(res.messageText).toContain("Winner: &lt;Stored Winner&gt;");
@@ -229,7 +244,7 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = randomGamePublicKey();
+    const gamePda = randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -238,7 +253,7 @@ describe("GameManager.formatGameMessage", () => {
       amount,
       "@creator",
       "Active",
-      "WSOL"
+      "WSOL",
     );
 
     const expectedTicket = formatAmount(amount, 9, {

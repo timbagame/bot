@@ -9,7 +9,7 @@ test("getPricesUSD aggregates ids with custom fetch (no cache hit)", async () =>
       const id = new URL(url).searchParams.get("ids")!;
       return new Response(
         JSON.stringify({ data: { [id]: { price: id === WSOL_MINT ? 10 : 20 } } }),
-        { status: 200 }
+        { status: 200 },
       );
     }
     return new Response("not used", { status: 404 });
@@ -36,10 +36,7 @@ test("duplicate mint requests share a single Jupiter request and hydrate cache",
     calls.push(url);
     const ids = new URL(url).searchParams.get("ids");
     expect(ids).toBe(WSOL_MINT);
-    return new Response(
-      JSON.stringify({ data: { [WSOL_MINT]: { price } } }),
-      { status: 200 }
-    );
+    return new Response(JSON.stringify({ data: { [WSOL_MINT]: { price } } }), { status: 200 });
   }) as any;
 
   try {

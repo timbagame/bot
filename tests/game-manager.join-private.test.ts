@@ -56,13 +56,11 @@ describe("GameManager joinPrivateGame resilience", () => {
     const result = await gm.joinPrivateGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
       playerKp,
-      99
+      99,
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe(
-      "This game has already completed. Refresh to see the result."
-    );
+    expect(result.error).toBe("This game has already completed. Refresh to see the result.");
     expect(sendCount).toBe(0);
   });
 
@@ -125,7 +123,7 @@ describe("GameManager joinPrivateGame resilience", () => {
     const result = await gm.joinPrivateGame(
       new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
       playerKp,
-      101
+      101,
     );
 
     expect(result.success).toBe(true);

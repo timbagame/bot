@@ -48,10 +48,13 @@ describe("SwapManager wrap/unwrap helpers", () => {
     const wallet = createWalletStub();
     const manager = createManager(wallet);
 
-    const signature = await manager.executeWrapSwap(baseRequest as any, {
-      inputAmountRaw: "2500",
-      provider: "wrap",
-    } as any);
+    const signature = await manager.executeWrapSwap(
+      baseRequest as any,
+      {
+        inputAmountRaw: "2500",
+        provider: "wrap",
+      } as any,
+    );
 
     expect(signature).toBe("WRAP_SIG");
     expect(wallet.wrapSolWithKeypair).toHaveBeenCalledWith(
@@ -59,7 +62,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         owner: baseRequest.userKeypair.publicKey,
         payer: baseRequest.userKeypair,
         amountLamports: 2500,
-      })
+      }),
     );
   });
 
@@ -76,7 +79,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         provider: "unwrap",
         integrator: { payerKind: "admin" },
       } as any,
-      300n
+      300n,
     );
 
     expect(signature).toBe("UNWRAP_SIG");
@@ -87,7 +90,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         amountLamports: 4000,
         adminTopUpLamports: 300,
         adminKeypair,
-      })
+      }),
     );
   });
 
@@ -102,7 +105,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         inputAmountRaw: "5000",
         provider: "unwrap",
         integrator: { payerKind: "admin" },
-      } as any
+      } as any,
     );
 
     expect(signature).toBe("UNWRAP_SIG");
@@ -111,7 +114,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         payer: baseRequest.userKeypair,
         adminTopUpLamports: 0,
         adminKeypair: undefined,
-      })
+      }),
     );
   });
 
@@ -134,7 +137,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
         amountLamports: 1_800,
         adminTopUpLamports: 200,
         adminKeypair,
-      })
+      }),
     );
   });
 });

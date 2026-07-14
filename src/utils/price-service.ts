@@ -1,10 +1,6 @@
 import { TOKEN_PRICE_CACHE_TTL_MS } from "./constants";
 import { createExpiringCache } from "./expiring-cache";
-import {
-  resolveTokenPriceUSD,
-  type PriceLookupOptions,
-  type PriceLookupResult,
-} from "./prices";
+import { resolveTokenPriceUSD, type PriceLookupOptions, type PriceLookupResult } from "./prices";
 
 export type PriceLookupRequest = PriceLookupOptions;
 
@@ -13,9 +9,7 @@ export type CachedPriceLookup = PriceLookupResult & {
   resolvedAt: number;
 };
 
-const priceCache = createExpiringCache<CachedPriceLookup>(
-  TOKEN_PRICE_CACHE_TTL_MS
-);
+const priceCache = createExpiringCache<CachedPriceLookup>(TOKEN_PRICE_CACHE_TTL_MS);
 
 const normalize = (value?: string | null): string | null => {
   if (!value) return null;
@@ -40,15 +34,12 @@ const isHintFresh = (hint: CachedPriceLookup): boolean => {
   return now - hint.resolvedAt <= TOKEN_PRICE_CACHE_TTL_MS;
 };
 
-const matchesRequest = (
-  hint: CachedPriceLookup,
-  request: PriceLookupRequest
-): boolean => {
+const matchesRequest = (hint: CachedPriceLookup, request: PriceLookupRequest): boolean => {
   const keys = buildCacheKeys(request);
   const hintKeys = new Set(
     buildCacheKeys({
       tokenMint: hint.tokenMint,
-    })
+    }),
   );
 
   if (keys.length === 0) {
@@ -60,13 +51,12 @@ const matchesRequest = (
 
 export function rememberPriceLookup(
   lookup: PriceLookupResult | CachedPriceLookup,
-  request: PriceLookupRequest
+  request: PriceLookupRequest,
 ): CachedPriceLookup {
   const entry: CachedPriceLookup = {
     ...lookup,
     tokenMint: request.tokenMint?.trim() || (lookup as CachedPriceLookup).tokenMint,
-    resolvedAt:
-      (lookup as CachedPriceLookup).resolvedAt ?? Date.now(),
+    resolvedAt: (lookup as CachedPriceLookup).resolvedAt ?? Date.now(),
   };
 
   const keys = buildCacheKeys(request);
@@ -77,9 +67,7 @@ export function rememberPriceLookup(
   return entry;
 }
 
-export function getCachedPriceLookup(
-  request: PriceLookupRequest
-): CachedPriceLookup | null {
+export function getCachedPriceLookup(request: PriceLookupRequest): CachedPriceLookup | null {
   const keys = buildCacheKeys(request);
   for (const key of keys) {
     const cached = priceCache.get(key);
@@ -92,7 +80,7 @@ export function getCachedPriceLookup(
 
 const maybeUseHint = (
   hint: CachedPriceLookup | null | undefined,
-  request: PriceLookupRequest
+  request: PriceLookupRequest,
 ): CachedPriceLookup | null => {
   if (!hint) return null;
   if (!matchesRequest(hint, request)) return null;
@@ -102,7 +90,7 @@ const maybeUseHint = (
 };
 
 export async function getUsdPrice(
-  input: PriceLookupRequest & { hint?: CachedPriceLookup | null }
+  input: PriceLookupRequest & { hint?: CachedPriceLookup | null },
 ): Promise<CachedPriceLookup | null> {
   const request: PriceLookupRequest = {
     tokenMint: input.tokenMint,

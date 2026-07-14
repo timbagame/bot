@@ -43,7 +43,9 @@ describe("token-registry", () => {
   test("resolveDefaultToken falls back to network defaults when overrides blank", () => {
     process.env.DEFAULT_TOKEN_MINT = "  ";
     process.env.DEFAULT_TOKEN_TICKER = "";
-    networkSpy = spyOn(NetworkDetector, "getCurrentNetwork").mockReturnValue("devnet" as SolanaNetwork);
+    networkSpy = spyOn(NetworkDetector, "getCurrentNetwork").mockReturnValue(
+      "devnet" as SolanaNetwork,
+    );
 
     const token = resolveDefaultToken();
 
@@ -75,17 +77,14 @@ describe("token-registry", () => {
     const ticker = tokens[0]?.ticker ?? "TIMBA";
     const mint = tokens[0]?.mint ?? "unknown";
 
-    expect(getTokenByTicker(ticker.toLowerCase())).toEqual(
-      getTokenByTicker(ticker.toUpperCase())
-    );
+    expect(getTokenByTicker(ticker.toLowerCase())).toEqual(getTokenByTicker(ticker.toUpperCase()));
     expect(getTokenByMint(`  ${mint}  `)?.mint).toBe(mint);
   });
 
   test("requireToken helpers throw for missing entries", () => {
-    expect(() => requireTokenByTicker("missing")).toThrowError(
-      /Token missing is not configured/
+    expect(() => requireTokenByTicker("missing")).toThrowError(/Token missing is not configured/);
+    expect(() => requireTokenByMint("missing")).toThrowError(
+      /Token mint missing is not configured/,
     );
-    expect(() => requireTokenByMint("missing"))
-      .toThrowError(/Token mint missing is not configured/);
   });
 });

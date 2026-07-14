@@ -22,17 +22,26 @@ import { createTelegramContext } from "./helpers/fixtures";
 const extractCallbacks = (kb: any): string[] => {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.callback_data).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.callback_data)
+        .filter(Boolean);
     }
   } catch {}
   return [];
@@ -41,26 +50,33 @@ const extractCallbacks = (kb: any): string[] => {
 const extractTexts = (kb: any): string[] => {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.text).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.text)
+      .filter(Boolean);
   }
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.text).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.text)
+      .filter(Boolean);
   }
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.text).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.text)
+        .filter(Boolean);
     }
   } catch {}
   return [];
 };
 
 type BotModule = typeof import("../src/bot");
-type CreateGameViaCommandOptions = Parameters<
-  BotModule["__test_createGameViaCommand"]
->[3];
+type CreateGameViaCommandOptions = Parameters<BotModule["__test_createGameViaCommand"]>[3];
 type CreateGameViaCommandDeps = NonNullable<
   Parameters<BotModule["__test_createGameViaCommand"]>[4]
 >;
@@ -77,10 +93,8 @@ const applyTestEnv = () => {
   process.env.NODE_ENV = "test";
   process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
   process.env.MNEMONIC =
-    process.env.MNEMONIC ||
-    "test test test test test test test test test test test junk";
-  process.env.SOLANA_NETWORK =
-    process.env.SOLANA_NETWORK || "http://localhost:8899";
+    process.env.MNEMONIC || "test test test test test test test test test test test junk";
+  process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
 };
 
 const revertTestEnv = () => {
@@ -136,9 +150,7 @@ describe("Bot helper utilities", () => {
   });
 
   const expectTradeSummaryBasics = (
-    summary: ReturnType<
-      typeof botModule.__test_formatTradeConfirmationSummary
-    >,
+    summary: ReturnType<typeof botModule.__test_formatTradeConfirmationSummary>,
     {
       payDisplay,
       payToken,
@@ -157,19 +169,15 @@ describe("Bot helper utilities", () => {
       rateDisplay: string;
       slippageText: string;
       contractAddress?: string;
-    }
+    },
   ) => {
     expect(summary.receiveDisplay).toBe(receiveDisplay);
     expect(summary.rateDisplay).toBe(rateDisplay);
     expect(summary.providerLabel).toBe(providerLabel);
     expect(summary.slippageText).toBe(slippageText);
 
-    expect(summary.message).toContain(
-      `<b>You Pay:</b> ${payDisplay} ${payToken}`
-    );
-    expect(summary.message).toContain(
-      `<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`
-    );
+    expect(summary.message).toContain(`<b>You Pay:</b> ${payDisplay} ${payToken}`);
+    expect(summary.message).toContain(`<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`);
     expect(summary.message).toContain(providerLabel);
     if (contractAddress) {
       expect(summary.message).toContain(contractAddress);
@@ -229,14 +237,12 @@ describe("Bot helper utilities", () => {
       isValid: false,
       error: "Game not found",
     });
-    expect(
-      botModule.__test_validateGameTokenData({ token_mint: "mint" })
-    ).toEqual({
+    expect(botModule.__test_validateGameTokenData({ token_mint: "mint" })).toEqual({
       isValid: false,
       error: "Game missing token information",
     });
     expect(
-      botModule.__test_validateGameTokenData({ token_mint: "mint", token_ticker: "AAA" })
+      botModule.__test_validateGameTokenData({ token_mint: "mint", token_ticker: "AAA" }),
     ).toEqual({ isValid: true });
   });
 
@@ -289,9 +295,7 @@ describe("Bot helper utilities", () => {
     });
 
     expect(percentResult.rawAmount).toBe(750_000_000);
-    expect(percentResult.displayAmount).toBe(
-      botModule.wallet.formatTokenBalance(750_000_000, 6)
-    );
+    expect(percentResult.displayAmount).toBe(botModule.wallet.formatTokenBalance(750_000_000, 6));
 
     const maxResult = botModule.__test_presentSpendAmount({
       amount: "max",
@@ -305,9 +309,7 @@ describe("Bot helper utilities", () => {
     });
 
     expect(maxResult.rawAmount).toBe(1_500_000_000);
-    expect(maxResult.displayAmount).toBe(
-      botModule.wallet.formatTokenBalance(1_500_000_000, 6)
-    );
+    expect(maxResult.displayAmount).toBe(botModule.wallet.formatTokenBalance(1_500_000_000, 6));
   });
 
   test("presentSpendAmount throws when requested amount exceeds balance", () => {
@@ -324,7 +326,7 @@ describe("Bot helper utilities", () => {
         formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
         formatToken: (value: number, decimals: number) =>
           botModule.wallet.formatTokenBalance(value, decimals),
-      })
+      }),
     ).toThrow("Insufficient token balance");
   });
 
@@ -464,7 +466,7 @@ describe("Bot helper utilities", () => {
   });
 
   test("parseOracleNumeric returns null for values above Number.MAX_SAFE_INTEGER", () => {
-  const hugeResult = botModule.__test_parseOracleNumeric(2n ** 60n);
+    const hugeResult = botModule.__test_parseOracleNumeric(2n ** 60n);
     expect(hugeResult).toBeNull();
   });
 
@@ -486,10 +488,8 @@ describe("Bot helper utilities", () => {
       botModule.wallet.getKeyPair = (() => ({
         publicKey: { toBase58: () => "test-player" },
       })) as any;
-      botModule.wallet.getTokenBalance = (async (
-        _telegramId: bigint,
-        mint: string
-      ) => (mint === WSOL_MINT ? wsolBalance : 0)) as any;
+      botModule.wallet.getTokenBalance = (async (_telegramId: bigint, mint: string) =>
+        mint === WSOL_MINT ? wsolBalance : 0) as any;
       botModule.wallet.getBalance = (async () => solBalance) as any;
       botModule.wallet.getTokenMetadata = (async () => ({ decimals: 9 })) as any;
       botModule.wallet.formatSolBalance = ((lamports: number) =>
@@ -523,7 +523,7 @@ describe("Bot helper utilities", () => {
         async () => {
           transactionCalls += 1;
           return "sig-123";
-        }
+        },
       );
 
       expect(replies).toHaveLength(1);
@@ -615,16 +615,16 @@ describe("createGameViaCommand helper", () => {
     errorMessage: "❌ Error creating coinflip game. Please try again.",
   };
 
-    const baseParsedAmount = {
-      amount: 1_000_000,
-      tokenMint: "mint",
-      tokenTicker: "TOK",
-      isSol: false,
-      formattedAmount: "1 TOK",
-      decimals: 6,
-      tokenWasSpecified: true,
-      requestedNativeSol: false,
-    };
+  const baseParsedAmount = {
+    amount: 1_000_000,
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    isSol: false,
+    formattedAmount: "1 TOK",
+    decimals: 6,
+    tokenWasSpecified: true,
+    requestedNativeSol: false,
+  };
 
   const formatWindowForTests = (ms: number): string => {
     if (!Number.isFinite(ms) || ms <= 0) {
@@ -659,7 +659,7 @@ describe("createGameViaCommand helper", () => {
     overrides: Partial<CreateGameViaCommandDeps> & {
       wallet?: Partial<CreateGameViaCommandDeps["wallet"]>;
       gameManager?: Partial<CreateGameViaCommandDeps["gameManager"]>;
-    } = {}
+    } = {},
   ): CreateGameViaCommandDeps => {
     const base: CreateGameViaCommandDeps = {
       parseAmount: async () => ({ success: true, data: baseParsedAmount }),
@@ -667,8 +667,7 @@ describe("createGameViaCommand helper", () => {
       wallet: {
         getTokenBalance: async () => 2_000_000,
         getTokenMetadata: async () => ({ decimals: 6 }),
-        formatTokenBalance: (amount, decimals) =>
-          (amount / Math.pow(10, decimals)).toString(),
+        formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toString(),
         getBalance: async () => 0,
         formatSolBalance: () => "0",
       },
@@ -729,13 +728,7 @@ describe("createGameViaCommand helper", () => {
       parseAmount: async () => ({ success: false, error: "invalid_amount" }),
     });
 
-    await botModule.__test_createGameViaCommand(
-      ctx,
-      ["/cf", "oops"],
-      1n,
-      coinflipOptions,
-      deps
-    );
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "oops"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
@@ -749,13 +742,7 @@ describe("createGameViaCommand helper", () => {
       inferMaxPlayers: () => ({ ok: false, error: "players must be between 2-100" }),
     });
 
-    await botModule.__test_createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      coinflipOptions,
-      deps
-    );
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
@@ -781,29 +768,23 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await botModule.__test_createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      coinflipOptions,
-      deps
-    );
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(1);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(createCalls.length).toBe(1);
 
-      const [
-        gameType,
-        gameData,
-        maxPlayers,
-        minPlayers,
-        timeout,
-        telegramId,
-        optionsArg,
-        chatId,
-        requestTimestamp,
-      ] = createCalls[0];
+    const [
+      gameType,
+      gameData,
+      maxPlayers,
+      minPlayers,
+      timeout,
+      telegramId,
+      optionsArg,
+      chatId,
+      requestTimestamp,
+    ] = createCalls[0];
     expect(gameType).toBe("coinflip");
     expect(gameData).toEqual({
       amount: baseParsedAmount.amount,
@@ -812,14 +793,14 @@ describe("createGameViaCommand helper", () => {
       isSol: baseParsedAmount.isSol,
       requestedNativeSol: baseParsedAmount.requestedNativeSol,
     });
-      expect(maxPlayers).toBe(3);
-      expect(minPlayers).toBe(coinflipOptions.minPlayers);
-      expect(timeout).toBe(coinflipOptions.timeoutSeconds);
-      expect(telegramId).toBe(1n);
-      expect(optionsArg).toEqual({ isPrivate: false });
-      expect(chatId).toBe(ctx.chat.id);
-      expect(typeof requestTimestamp).toBe("number");
-      expect(Number.isFinite(requestTimestamp)).toBe(true);
+    expect(maxPlayers).toBe(3);
+    expect(minPlayers).toBe(coinflipOptions.minPlayers);
+    expect(timeout).toBe(coinflipOptions.timeoutSeconds);
+    expect(telegramId).toBe(1n);
+    expect(optionsArg).toEqual({ isPrivate: false });
+    expect(chatId).toBe(ctx.chat.id);
+    expect(typeof requestTimestamp).toBe("number");
+    expect(Number.isFinite(requestTimestamp)).toBe(true);
 
     expect(messageCalls.length).toBe(1);
     const messageArgs = messageCalls[0];
@@ -857,7 +838,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "12", "USD", "4"],
       1n,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(inferCalls.length).toBe(1);
@@ -901,7 +882,11 @@ describe("createGameViaCommand helper", () => {
         return { ok: true, value: 5, source: "arg" };
       },
       gameManager: {
-        createGame: async () => ({ success: true, gameAddress: "ADDR", autoJoinResult: { success: true } }),
+        createGame: async () => ({
+          success: true,
+          gameAddress: "ADDR",
+          autoJoinResult: { success: true },
+        }),
         createGameMessage: async () => 0,
       },
     });
@@ -911,7 +896,7 @@ describe("createGameViaCommand helper", () => {
       ["/ga", "$10", "WBTC", "5"],
       1n,
       giveawayOptions,
-      deps
+      deps,
     );
 
     expect(inferCalls.length).toBe(1);
@@ -928,8 +913,8 @@ describe("createGameViaCommand helper", () => {
       .mockImplementation(async (request) =>
         rememberPriceLookup(
           { price: 2, identifier: "MINT", resolvedAt: Date.now() },
-          { tokenMint: request.tokenMint }
-        )
+          { tokenMint: request.tokenMint },
+        ),
       );
     const ctx: any = makeCtx();
 
@@ -942,19 +927,14 @@ describe("createGameViaCommand helper", () => {
       formatSolBalance: () => "0",
     };
 
-    const tokenManager = TokenManager.getInstance(
-      sharedWalletStub as any,
-      "MINT",
-      "TOK"
-    );
+    const tokenManager = TokenManager.getInstance(sharedWalletStub as any, "MINT", "TOK");
     await tokenManager.addToken("MINT", "TOK", 6);
 
     const creationCalls: any[] = [];
     const messageCalls: any[] = [];
 
     const deps = makeDeps({
-      parseAmount: (args, index, chatId) =>
-        tokenManager.parseAmount(args, index, chatId, "game"),
+      parseAmount: (args, index, chatId) => tokenManager.parseAmount(args, index, chatId, "game"),
       wallet: sharedWalletStub,
       gameManager: {
         createGame: async (...args) => {
@@ -979,13 +959,7 @@ describe("createGameViaCommand helper", () => {
     });
 
     try {
-      await botModule.__test_createGameViaCommand(
-        ctx,
-        ["/cf", "$1"],
-        1n,
-        coinflipOptions,
-        deps
-      );
+      await botModule.__test_createGameViaCommand(ctx, ["/cf", "$1"], 1n, coinflipOptions, deps);
 
       expect(priceSpy).toHaveBeenCalledTimes(2);
       expect(creationCalls[0][1].priceLookup?.price).toBe(2);
@@ -1009,13 +983,7 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await botModule.__test_createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      coinflipOptions,
-      deps
-    );
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
@@ -1040,13 +1008,7 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await botModule.__test_createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      coinflipOptions,
-      deps
-    );
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
@@ -1079,7 +1041,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "5"],
       telegramId,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(firstCtx.__calls.length).toBe(2);
@@ -1091,7 +1053,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "5"],
       telegramId,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(secondCtx.__calls.length).toBe(1);
@@ -1120,8 +1082,7 @@ describe("createGameViaCommand helper", () => {
       wallet: {
         getTokenBalance: async () => 0,
         getTokenMetadata: async () => ({ decimals: 9 }),
-        formatTokenBalance: (amount, decimals) =>
-          (amount / Math.pow(10, decimals)).toString(),
+        formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toString(),
         getBalance: async () => 1_500_000,
         formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toString(),
       },
@@ -1142,7 +1103,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "0.0006", "SOL"],
       1n,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(ctx.__calls.length).toBe(1);
@@ -1182,8 +1143,7 @@ describe("createGameViaCommand helper", () => {
       wallet: {
         getTokenBalance: async () => 0,
         getTokenMetadata: async () => ({ decimals: 9 }),
-        formatTokenBalance: (amount, decimals) =>
-          (amount / Math.pow(10, decimals)).toString(),
+        formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toString(),
         getBalance: async () => {
           balanceChecks += 1;
           return 1_500_000;
@@ -1207,7 +1167,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "0.0006", "WSOL"],
       1n,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(ctx.__calls.length).toBe(1);
@@ -1244,8 +1204,7 @@ describe("createGameViaCommand helper", () => {
       wallet: {
         getTokenBalance: async () => 100_000,
         getTokenMetadata: async () => ({ decimals: 9 }),
-        formatTokenBalance: (amount, decimals) =>
-          (amount / Math.pow(10, decimals)).toFixed(6),
+        formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toFixed(6),
         getBalance: async () => 200_000,
         formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toFixed(6),
       },
@@ -1263,7 +1222,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "0.0005", "SOL"],
       1n,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(createCalls.length).toBe(0);
@@ -1298,8 +1257,7 @@ describe("createGameViaCommand helper", () => {
       wallet: {
         getTokenBalance: async () => 150_000,
         getTokenMetadata: async () => ({ decimals: 9 }),
-        formatTokenBalance: (amount, decimals) =>
-          (amount / Math.pow(10, decimals)).toFixed(6),
+        formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toFixed(6),
         getBalance: async () => 200_000,
         formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toFixed(6),
       },
@@ -1310,7 +1268,7 @@ describe("createGameViaCommand helper", () => {
       ["/cf", "0.0004", "WSOL"],
       1n,
       coinflipOptions,
-      deps
+      deps,
     );
 
     expect(ctx.__calls.length).toBe(2);
@@ -1357,13 +1315,7 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await module.createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      module.COINFLIP_COMMAND_OPTIONS,
-      deps
-    );
+    await module.createGameViaCommand(ctx, ["/cf", "5"], 1n, module.COINFLIP_COMMAND_OPTIONS, deps);
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];
@@ -1405,13 +1357,7 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await module.createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      module.COINFLIP_COMMAND_OPTIONS,
-      deps
-    );
+    await module.createGameViaCommand(ctx, ["/cf", "5"], 1n, module.COINFLIP_COMMAND_OPTIONS, deps);
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];
@@ -1453,13 +1399,7 @@ describe("createGameViaCommand helper", () => {
       },
     });
 
-    await module.createGameViaCommand(
-      ctx,
-      ["/cf", "5"],
-      1n,
-      module.COINFLIP_COMMAND_OPTIONS,
-      deps
-    );
+    await module.createGameViaCommand(ctx, ["/cf", "5"], 1n, module.COINFLIP_COMMAND_OPTIONS, deps);
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];

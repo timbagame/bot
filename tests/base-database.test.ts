@@ -9,9 +9,7 @@ class TestDatabase extends BaseDatabase {
 
   hasTable(name: string) {
     const result = this.db
-      .query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-      )
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
       .get(name) as { name?: string } | undefined;
     return result?.name === name;
   }
@@ -78,7 +76,7 @@ class WrapperDatabase extends BaseDatabase {
   public runPublic(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] | undefined,
-    operation: string
+    operation: string,
   ) {
     return this.run(sql, params ?? [], operation);
   }
@@ -86,7 +84,7 @@ class WrapperDatabase extends BaseDatabase {
   public getPublic<T>(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] | undefined,
-    operation: string
+    operation: string,
   ) {
     return this.get<T>(sql, params ?? [], operation);
   }
@@ -94,7 +92,7 @@ class WrapperDatabase extends BaseDatabase {
   public allPublic<T>(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] | undefined,
-    operation: string
+    operation: string,
   ) {
     return this.all<T>(sql, params ?? [], operation);
   }
@@ -153,9 +151,7 @@ test("BaseDatabase helpers log and rethrow errors", () => {
     expect(() => db.allPublic("ALL SQL", [], "all operation")).toThrow(error);
     expect(logs.length).toBeGreaterThanOrEqual(3);
     const [firstLog] = logs;
-    expect(String(firstLog?.[0] ?? "")).toContain(
-      "[Wrapper DB] Error during run operation"
-    );
+    expect(String(firstLog?.[0] ?? "")).toContain("[Wrapper DB] Error during run operation");
   } finally {
     console.error = originalError;
   }

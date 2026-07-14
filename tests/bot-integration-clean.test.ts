@@ -3,11 +3,7 @@ import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenManager } from "../src/utils/token-manager";
-import {
-  DEFAULT_TOKEN_MINT,
-  DEFAULT_TOKEN_TICKER,
-  WSOL_MINT,
-} from "../src/utils/constants";
+import { DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER, WSOL_MINT } from "../src/utils/constants";
 
 describe("Bot Integration Tests", () => {
   let wallet: WalletManager;
@@ -18,13 +14,12 @@ describe("Bot Integration Tests", () => {
   beforeAll(async () => {
     // Setup test environment
     process.env.NODE_ENV = "test";
-    process.env.MNEMONIC =
-      "test test test test test test test test test test test junk";
+    process.env.MNEMONIC = "test test test test test test test test test test test junk";
 
     const decimalsMap: Record<string, number> = {
       [DEFAULT_TOKEN_MINT]: 6,
       [WSOL_MINT]: 9,
-      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6,
+      EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6,
     };
 
     // Initialize components
@@ -37,11 +32,7 @@ describe("Bot Integration Tests", () => {
     });
     gameDb = GameDatabase.getInstance();
     chatDb = ChatDatabase.getInstance();
-    tokenManager = TokenManager.getInstance(
-      wallet,
-      DEFAULT_TOKEN_MINT,
-      DEFAULT_TOKEN_TICKER
-    );
+    tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
   });
 
   afterAll(async () => {
@@ -77,7 +68,7 @@ describe("Bot Integration Tests", () => {
         gameData.token_ticker,
         gameData.max_players,
         2, // min_players
-        gameData.chat_id
+        gameData.chat_id,
       );
 
       // Retrieve game
@@ -101,7 +92,7 @@ describe("Bot Integration Tests", () => {
         chatConfig.chat_id,
         chatConfig.token_mint,
         chatConfig.token_ticker,
-        chatConfig.set_by_telegram_id.toString()
+        chatConfig.set_by_telegram_id.toString(),
       );
 
       // Retrieve config using the correct method
@@ -122,7 +113,7 @@ describe("Bot Integration Tests", () => {
     test("should handle token metadata retrieval", async () => {
       // Test with known token (USDC)
       const metadata = await wallet.getTokenMetadata(
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       );
       expect(metadata.decimals).toBe(6);
     });
@@ -144,11 +135,7 @@ describe("Bot Integration Tests", () => {
       const chatId = 123456789;
 
       // Test parsing - TIMBA might not be available in test environment
-      const result = await tokenManager.parseAmount(
-        ["/cf", "1.5", "TIMBA"],
-        1,
-        chatId
-      );
+      const result = await tokenManager.parseAmount(["/cf", "1.5", "TIMBA"], 1, chatId);
 
       // The result should have the expected structure
       expect(result).toHaveProperty("success");
@@ -196,7 +183,7 @@ describe("Bot Integration Tests", () => {
           game.token_ticker,
           game.max_players,
           2, // min_players
-          game.chat_id
+          game.chat_id,
         );
       });
 
@@ -204,9 +191,7 @@ describe("Bot Integration Tests", () => {
 
       // Query active games
       const queryStartTime = Date.now();
-      const activeGames = gameDb
-        .getAllGames()
-        .filter((g) => g.status === "active");
+      const activeGames = gameDb.getAllGames().filter((g) => g.status === "active");
 
       const queryDuration = Date.now() - queryStartTime;
 
@@ -225,7 +210,7 @@ describe("Bot Integration Tests", () => {
 
       // Test concurrent keypair generation
       const keypairs = await Promise.all(
-        userIds.map((userId) => Promise.resolve(wallet.getKeyPair(userId)))
+        userIds.map((userId) => Promise.resolve(wallet.getKeyPair(userId))),
       );
 
       const duration = Date.now() - startTime;
@@ -263,7 +248,7 @@ describe("Bot Integration Tests", () => {
           invalidGameData.token_ticker,
           invalidGameData.max_players,
           2, // min_players
-          invalidGameData.chat_id
+          invalidGameData.chat_id,
         );
       }).not.toThrow();
     });

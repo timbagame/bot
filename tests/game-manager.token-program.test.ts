@@ -48,11 +48,7 @@ describe("GameManager token program resolution", () => {
     } as any);
 
     const seenPrograms: PublicKey[] = [];
-    (gm as any).deriveAta = async (
-      _mint: PublicKey,
-      ownerPk: PublicKey,
-      programId: PublicKey
-    ) => {
+    (gm as any).deriveAta = async (_mint: PublicKey, ownerPk: PublicKey, programId: PublicKey) => {
       seenPrograms.push(programId);
       return ownerPk;
     };

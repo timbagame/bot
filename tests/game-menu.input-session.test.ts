@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   __test_handleGameSetupTextInput,
   __test_startInteractiveGameSetup,
@@ -48,10 +41,13 @@ type MockCtx = {
       chatId: number,
       messageId: number,
       text: string,
-      options: Record<string, unknown>
+      options: Record<string, unknown>,
     ) => Promise<{ ok: boolean }>;
   };
-  reply: (text: string, options: Record<string, unknown>) => Promise<{
+  reply: (
+    text: string,
+    options: Record<string, unknown>,
+  ) => Promise<{
     message_id: number;
   }>;
   chat: { id: number };
@@ -80,14 +76,14 @@ const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
     message: {
       message_id: 12_345,
       text,
-      reply_to_message: reply_to_message ? reply_to_message : undefined
+      reply_to_message: reply_to_message ? reply_to_message : undefined,
     },
     api: {
       editMessageText: async (
         chatId: number,
         messageId: number,
         nextText: string,
-        options: Record<string, unknown>
+        options: Record<string, unknown>,
       ) => {
         calls.push({
           type: "edit",
@@ -127,9 +123,7 @@ describe("game setup typed input handling", () => {
       symbol: "SOL",
       decimals: 9,
     } as any);
-    respondSpy = spyOn(menuResponse, "respondWithMenu").mockResolvedValue(
-      undefined as any
-    );
+    respondSpy = spyOn(menuResponse, "respondWithMenu").mockResolvedValue(undefined as any);
   });
 
   afterEach(() => {
@@ -156,7 +150,7 @@ describe("game setup typed input handling", () => {
     upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
 
     const ctx = createMockCtx("abc", {
-      reply_to_message: { message_id: 21_000 }
+      reply_to_message: { message_id: 21_000 },
     });
     let nextCalled = false;
     const next = async () => {
@@ -289,7 +283,7 @@ describe("game setup typed input handling", () => {
 
     const ctx = createMockCtx("1", {
       editError: new Error("message not found"),
-      reply_to_message: { message_id: 31_200 }
+      reply_to_message: { message_id: 31_200 },
     });
 
     let nextCalled = false;
@@ -463,9 +457,7 @@ describe("game setup typed input handling", () => {
 
   test("startInteractiveGameSetup respects token override context", async () => {
     const ctx = createMockCtx("/cf");
-    const balanceSpy = spyOn(wallet, "getTokenBalance").mockResolvedValue(
-      2_500_000
-    );
+    const balanceSpy = spyOn(wallet, "getTokenBalance").mockResolvedValue(2_500_000);
     const minSpy = spyOn(botModule, "getContractMinimumAmount").mockResolvedValue({
       formatted: 0.2,
       raw: 200_000,
@@ -489,13 +481,10 @@ describe("game setup typed input handling", () => {
           amountPrompt: "Prompt",
           logPrefix: "🪙",
         },
-        override
+        override,
       );
 
-      expect(balanceSpy).toHaveBeenCalledWith(
-        BigInt(TELEGRAM_USER_ID),
-        "OverrideMint111"
-      );
+      expect(balanceSpy).toHaveBeenCalledWith(BigInt(TELEGRAM_USER_ID), "OverrideMint111");
       expect(minSpy).toHaveBeenCalledWith("OverrideMint111", 6);
 
       // The session key is constructed as `${ctx.chat?.id || 0}_${setupMessage.message_id}`

@@ -19,7 +19,7 @@ describe("price utilities fallbacks", () => {
       }) as any;
       const price = await module.getPriceUSD(
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        slowFetch
+        slowFetch,
       );
       expect(price).toBe(0);
     } finally {
@@ -33,13 +33,18 @@ describe("price utilities fallbacks", () => {
 
   test("returns zero when Jupiter fails to respond (market cap scenario)", async () => {
     const fetchImpl = (async (_url: string) => {
-      return { ok: false, async json() { return {}; } } as any;
+      return {
+        ok: false,
+        async json() {
+          return {};
+        },
+      } as any;
     }) as any;
 
     const module = await import(`../src/utils/prices.ts?cap=${Date.now()}`);
     const price = await module.getPriceUSD(
       "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-      fetchImpl
+      fetchImpl,
     );
     expect(price).toBe(0);
   });
@@ -57,13 +62,18 @@ describe("price utilities fallbacks", () => {
     const module = await import(`../src/utils/prices.ts?sol=${Date.now()}`);
     const price = await module.getPriceUSD(
       "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
-      fetchImpl
+      fetchImpl,
     );
     expect(price).toBe(0);
   });
 
   test("resolveTokenPriceUSD returns null when no candidates succeed", async () => {
-    const fetchImpl = (async () => ({ ok: true, async json() { return { data: {} }; } })) as any;
+    const fetchImpl = (async () => ({
+      ok: true,
+      async json() {
+        return { data: {} };
+      },
+    })) as any;
     const module = await import(`../src/utils/prices.ts?null=${Date.now()}`);
     const result = await module.resolveTokenPriceUSD({
       tokenMint: "invalid",

@@ -21,7 +21,7 @@ const clampBps = (value: number, min: number, max: number): number =>
 export const clampReferralFeeBps = (
   value: number,
   min: number = 50,
-  max: number = MAX_REFERRAL_FEE_BPS
+  max: number = MAX_REFERRAL_FEE_BPS,
 ): number => clampBps(value, min, max);
 
 export interface ReferralFeeCalculationOptions {
@@ -33,9 +33,7 @@ export interface ReferralFeeCalculationOptions {
   maxFeeBps?: number;
 }
 
-export const calculateReferralFeeBps = (
-  options: ReferralFeeCalculationOptions
-): number => {
+export const calculateReferralFeeBps = (options: ReferralFeeCalculationOptions): number => {
   const {
     baseFeeBps,
     tradeUsd,
@@ -47,35 +45,27 @@ export const calculateReferralFeeBps = (
 
   if (tradeUsd <= 0 || deficitUsd <= 0) {
     throw new Error(
-      "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade."
+      "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade.",
     );
   }
 
   const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
   if (rawExtraBps > maxExtraBps) {
     throw new Error(
-      "Trade is too small to cover integrator gas payer reimbursement. Add SOL or increase trade size."
+      "Trade is too small to cover integrator gas payer reimbursement. Add SOL or increase trade size.",
     );
   }
 
-  const referralFeeBps = clampReferralFeeBps(
-    baseFeeBps + rawExtraBps,
-    minFeeBps,
-    maxFeeBps
-  );
+  const referralFeeBps = clampReferralFeeBps(baseFeeBps + rawExtraBps, minFeeBps, maxFeeBps);
 
   if (referralFeeBps > maxFeeBps) {
-    throw new Error(
-      "Referral fee exceeds allowable limit. Add SOL or increase trade size."
-    );
+    throw new Error("Referral fee exceeds allowable limit. Add SOL or increase trade size.");
   }
 
   return referralFeeBps;
 };
 
-export function calculateAdminPayerFeeBps(
-  options: AdminPayerSurchargeOptions
-): number {
+export function calculateAdminPayerFeeBps(options: AdminPayerSurchargeOptions): number {
   const {
     baseFeeBps,
     tradeAmountRaw,
@@ -98,8 +88,7 @@ export function calculateAdminPayerFeeBps(
     return clampBps(baseFeeBps, minFeeBps, maxFeeBps);
   }
 
-  const tradeUsd =
-    (tradeAmountRaw / Math.pow(10, tradeDecimals)) * tradePriceUsd;
+  const tradeUsd = (tradeAmountRaw / Math.pow(10, tradeDecimals)) * tradePriceUsd;
   const deficitUsd = (deficitLamports / LAMPORTS_PER_SOL) * solPriceUsd;
 
   if (tradeUsd <= 0 || deficitUsd <= 0) {
@@ -115,7 +104,7 @@ export const computeRequiredAdminLamports = (
   minBalanceLamports: number,
   rentReserveLamports: number,
   extraAtaLamports: number = 0,
-  priorityBufferLamports: number = 0
+  priorityBufferLamports: number = 0,
 ): number => {
   return (
     Math.max(0, minBalanceLamports) +

@@ -198,19 +198,15 @@ describe("price utilities resilience", () => {
 
           const fetchImpl = (async (url: string) => {
             const parsed = new URL(url);
-            const idsParam =
-              parsed.searchParams.get("ids") ?? parsed.pathname.split("/").pop()!;
+            const idsParam = parsed.searchParams.get("ids") ?? parsed.pathname.split("/").pop()!;
             const ids = idsParam ? idsParam.split(",") : [];
             return {
               ok: true,
               async json() {
-                const data = ids.reduce<Record<string, { price: number }>>(
-                  (acc, id) => {
-                    acc[id] = { price: basePrice };
-                    return acc;
-                  },
-                  {}
-                );
+                const data = ids.reduce<Record<string, { price: number }>>((acc, id) => {
+                  acc[id] = { price: basePrice };
+                  return acc;
+                }, {});
                 return { data };
               },
             } as any;
@@ -221,9 +217,9 @@ describe("price utilities resilience", () => {
           for (const id of ids) {
             expect(results[id]).toBe(basePrice);
           }
-        }
+        },
       ),
-      { seed: 12345, numRuns: 25 }
+      { seed: 12345, numRuns: 25 },
     );
   });
 
@@ -232,9 +228,7 @@ describe("price utilities resilience", () => {
     const previousTimeout = process.env["PRICES_TIMEOUT_MS"];
     process.env["PRICES_TIMEOUT_MS"] = "0";
 
-    const module = await import(
-      `../src/utils/prices.ts?timeout=${Date.now()}`
-    );
+    const module = await import(`../src/utils/prices.ts?timeout=${Date.now()}`);
 
     let calls = 0;
     const fetchImpl = (async (url: string) => {

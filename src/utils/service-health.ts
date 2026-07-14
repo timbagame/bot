@@ -7,7 +7,7 @@ import type { FetchLike } from "../types";
 export async function checkServiceHealth(
   url: string,
   timeout = 5000,
-  fetchImpl: FetchLike = fetch as any
+  fetchImpl: FetchLike = fetch as any,
 ): Promise<boolean> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);

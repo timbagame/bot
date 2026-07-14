@@ -36,10 +36,9 @@ describe("GameManager processActiveGames/processRecentGames", () => {
         { game_address: "good", winner_address: null, creator_telegram_id: "1" },
       ],
       "1",
-      new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58()
+      new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(),
     );
     expect(out.length).toBe(1);
     expect(out[0]?.gameInfo).toBe("Good");
   });
 });
-

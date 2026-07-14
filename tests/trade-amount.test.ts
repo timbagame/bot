@@ -40,7 +40,7 @@ describe("trade amount helpers share validation", () => {
       presentSpendAmount({
         amount: " ",
         ...solParams,
-      })
+      }),
     ).toThrow("Amount cannot be empty");
 
     expect(() =>
@@ -48,7 +48,7 @@ describe("trade amount helpers share validation", () => {
         amount: " ",
         ...solParams,
         applySolFeeBuffer: false,
-      })
+      }),
     ).toThrow("Amount cannot be empty");
   });
 
@@ -57,7 +57,7 @@ describe("trade amount helpers share validation", () => {
       presentSpendAmount({
         amount: "150%",
         ...solParams,
-      })
+      }),
     ).toThrow("Invalid percentage format");
 
     expect(() =>
@@ -65,7 +65,7 @@ describe("trade amount helpers share validation", () => {
         amount: "150%",
         ...solParams,
         applySolFeeBuffer: false,
-      })
+      }),
     ).toThrow("Invalid percentage format");
   });
 
@@ -74,7 +74,7 @@ describe("trade amount helpers share validation", () => {
       presentSpendAmount({
         amount: "0.01%",
         ...solParams,
-      })
+      }),
     ).toThrow("Percentage results in zero amount");
 
     expect(() =>
@@ -82,7 +82,7 @@ describe("trade amount helpers share validation", () => {
         amount: "0.01%",
         ...solParams,
         applySolFeeBuffer: false,
-      })
+      }),
     ).toThrow("Percentage results in zero amount");
   });
 
@@ -120,7 +120,7 @@ describe("trade amount helpers share validation", () => {
         formatToken: () => "",
         applySolFeeBuffer: true,
         solFeeBufferLamports,
-      })
+      }),
     ).toThrow(/Insufficient SOL balance for this purchase/);
   });
 
@@ -139,7 +139,7 @@ describe("trade amount helpers share validation", () => {
         formatToken: () => "",
         applySolFeeBuffer: true,
         solFeeBufferLamports,
-      })
+      }),
     ).toThrow(/Not enough SOL to cover purchase and fees \(keep ~/);
   });
 
@@ -159,10 +159,8 @@ describe("trade amount helpers share validation", () => {
         solFeeBufferLamports: solBalance,
         insufficientSolForFeesMessage: "Swaps under ~$10 need 0.01 SOL",
         omitSolFeeBufferHint: true,
-      })
-    ).toThrow(
-      "Swaps under ~$10 need 0.01 SOL"
-    );
+      }),
+    ).toThrow("Swaps under ~$10 need 0.01 SOL");
   });
 
   test("max SOL respects additional user buffer", () => {
@@ -201,7 +199,7 @@ describe("trade amount helpers share validation", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports: 0,
         userSolBufferLamports: userBuffer,
-      })
+      }),
     ).toThrow(/Not enough SOL to keep/);
   });
 });

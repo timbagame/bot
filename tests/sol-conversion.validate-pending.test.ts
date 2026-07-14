@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createSolConversionUtilities } from "../src/bot/flows/sol-conversion";
-import {
-  storePendingTransaction,
-  getPendingTransaction,
-} from "../src/utils/user-state";
+import { storePendingTransaction, getPendingTransaction } from "../src/utils/user-state";
 
 describe("validatePendingTransaction", () => {
   const utilities = createSolConversionUtilities({
@@ -37,19 +34,11 @@ describe("validatePendingTransaction", () => {
       address: "HhEWJstpJE6vvrYGS3BaK5ZJbdVAXqGmQ2MBM8FyiPvy",
     });
 
-    const unauthorized = validatePendingTransaction(
-      { from: { id: 777 } } as any,
-      txId,
-      "send"
-    );
+    const unauthorized = validatePendingTransaction({ from: { id: 777 } } as any, txId, "send");
     expect(unauthorized.status).toBe("unauthorized");
     expect(getPendingTransaction(txId, false)).toBeDefined();
 
-    const authorized = validatePendingTransaction(
-      { from: { id: 555 } } as any,
-      txId,
-      "send"
-    );
+    const authorized = validatePendingTransaction({ from: { id: 555 } } as any, txId, "send");
     expect(authorized.status).toBe("success");
     if (authorized.status === "success") {
       expect(authorized.transaction.userId).toBe("555");
@@ -89,11 +78,7 @@ describe("validatePendingTransaction", () => {
 
       current += 16 * 60 * 1000; // advance beyond INPUT_TIMEOUT_MS (15 min default)
 
-      const expired = validatePendingTransaction(
-        { from: { id: 123 } } as any,
-        txId,
-        "send"
-      );
+      const expired = validatePendingTransaction({ from: { id: 123 } } as any, txId, "send");
 
       expect(expired.status).toBe("expired");
       expect(getPendingTransaction(txId, false)).toBeUndefined();

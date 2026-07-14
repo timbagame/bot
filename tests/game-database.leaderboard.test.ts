@@ -55,15 +55,45 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Create 3 games, player wins 1 (33.33% win rate)
-    gameDb.saveGame("GAME1_WINRATE", playerId, 1000000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "GAME1_WINRATE",
+      playerId,
+      1000000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GAME1_WINRATE", "333", "PK333");
     gameDb.completeGame("GAME1_WINRATE", playerPk); // Player wins
 
-    gameDb.saveGame("GAME2_WINRATE", playerId, 1000000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "GAME2_WINRATE",
+      playerId,
+      1000000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GAME2_WINRATE", "444", "PK444");
     gameDb.completeGame("GAME2_WINRATE", "PK444"); // Player loses
 
-    gameDb.saveGame("GAME3_WINRATE", playerId, 1000000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "GAME3_WINRATE",
+      playerId,
+      1000000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GAME3_WINRATE", "555", "PK555");
     gameDb.completeGame("GAME3_WINRATE", "PK555"); // Player loses
 
@@ -83,7 +113,17 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Create a game where player participates but doesn't win
-    gameDb.saveGame("GAME1_NOVICTORY", playerId, 1000000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "GAME1_NOVICTORY",
+      playerId,
+      1000000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GAME1_NOVICTORY", "444", "PK444");
     gameDb.completeGame("GAME1_NOVICTORY", "PK444"); // Other player wins
 
@@ -103,7 +143,17 @@ describe("GameDatabase Leaderboard", () => {
 
     gameDb.savePlayerMapping(playerPk, playerId);
 
-    gameDb.saveGame("CANCEL_TEST", playerId, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "CANCEL_TEST",
+      playerId,
+      2_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("CANCEL_TEST", "555", "PK555");
     gameDb.completeGame("CANCEL_TEST", "cancelled");
 
@@ -121,12 +171,32 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Cancelled game (should be ignored)
-    gameDb.saveGame("CANCELLED_VOL", playerId, 9_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "CANCELLED_VOL",
+      playerId,
+      9_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("CANCELLED_VOL", "666", "PK666");
     gameDb.completeGame("CANCELLED_VOL", "cancelled");
 
     // Completed win that should count
-    gameDb.saveGame("WIN_VOL", playerId, 5_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "WIN_VOL",
+      playerId,
+      5_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("WIN_VOL", "777", "PK777");
     gameDb.completeGame("WIN_VOL", playerPk);
 
@@ -147,13 +217,33 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Win 1000 TIMBA (2 players: creator + other)
-    gameDb.saveGame("NET_WIN1", playerId, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "NET_WIN1",
+      playerId,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("NET_WIN1", playerId, playerPk, { status: "confirmed" }); // Creator as participant
     gameDb.saveGameParticipant("NET_WIN1", "OTHER1", "PKOTHER1", { status: "confirmed" });
     gameDb.completeGame("NET_WIN1", playerPk);
 
     // Lose 500 TIMBA (other player wins), 2 players
-    gameDb.saveGame("NET_LOSE1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "NET_LOSE1",
+      playerId,
+      500_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("NET_LOSE1", playerId, playerPk, { status: "confirmed" }); // Creator as participant
     gameDb.saveGameParticipant("NET_LOSE1", "OTHER2", "PKOTHER2", { status: "confirmed" });
     gameDb.savePlayerMapping("PKOTHER2", "OTHER2");
@@ -179,19 +269,49 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Win 100 TIMBA (2 players)
-    gameDb.saveGame("MULTI_WIN_TIMBA", playerId, 100_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "MULTI_WIN_TIMBA",
+      playerId,
+      100_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("MULTI_WIN_TIMBA", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("MULTI_WIN_TIMBA", "OTH1", "PKOTH1", { status: "confirmed" });
     gameDb.completeGame("MULTI_WIN_TIMBA", playerPk);
 
     // Win 0.5 SOL (no token_mint = SOL), 2 players
-    gameDb.saveGame("MULTI_WIN_SOL", playerId, 500_000_000, "coinflip", undefined, "SOL", 2, 2, chatId);
+    gameDb.saveGame(
+      "MULTI_WIN_SOL",
+      playerId,
+      500_000_000,
+      "coinflip",
+      undefined,
+      "SOL",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("MULTI_WIN_SOL", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("MULTI_WIN_SOL", "OTH2", "PKOTH2", { status: "confirmed" });
     gameDb.completeGame("MULTI_WIN_SOL", playerPk);
 
     // Lose 200 TIMBA (2 players)
-    gameDb.saveGame("MULTI_LOSE_TIMBA", playerId, 200_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "MULTI_LOSE_TIMBA",
+      playerId,
+      200_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", "OTH3", "PKOTH3", { status: "confirmed" });
     gameDb.savePlayerMapping("PKOTH3", "OTH3");
@@ -218,13 +338,33 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Giveaway game (should be EXCLUDED from stats)
-    gameDb.saveGame("GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGame(
+      "GIVEAWAY1",
+      playerId,
+      1_000_000,
+      "giveaway",
+      "TIMBA_MINT",
+      "TIMBA",
+      10,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GIVEAWAY1", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("GIVEAWAY1", "GA_OTHER", "PKGA_OTHER", { status: "confirmed" });
     gameDb.completeGame("GIVEAWAY1", playerPk);
 
     // Coinflip game (should be INCLUDED), 2 players
-    gameDb.saveGame("COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "COINFLIP1",
+      playerId,
+      500_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("COINFLIP1", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("COINFLIP1", "CF_OTHER", "PKCF_OTHER", { status: "confirmed" });
     gameDb.completeGame("COINFLIP1", playerPk);
@@ -248,7 +388,17 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(giveawayOnlyPk, giveawayOnlyPlayer);
 
     // Only giveaway games - player should not appear on leaderboard
-    gameDb.saveGame("GIVEAWAY_ONLY1", giveawayOnlyPlayer, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGame(
+      "GIVEAWAY_ONLY1",
+      giveawayOnlyPlayer,
+      1_000_000,
+      "giveaway",
+      "TIMBA_MINT",
+      "TIMBA",
+      10,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GIVEAWAY_ONLY1", "PART1", "PKPART1");
     gameDb.completeGame("GIVEAWAY_ONLY1", giveawayOnlyPk);
 
@@ -269,7 +419,17 @@ describe("GameDatabase Leaderboard", () => {
       gameDb.savePlayerMapping(playerPk, playerId);
 
       const gameAddr = `LIMIT_GAME_${i}`;
-      gameDb.saveGame(gameAddr, playerId, 1_000_000 * i, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+      gameDb.saveGame(
+        gameAddr,
+        playerId,
+        1_000_000 * i,
+        "coinflip",
+        "TIMBA_MINT",
+        "TIMBA",
+        2,
+        2,
+        chatId,
+      );
       gameDb.saveGameParticipant(gameAddr, `OTH_${i}`, `PKOTH_${i}`);
       gameDb.completeGame(gameAddr, playerPk); // Each player wins their game
     }
@@ -306,7 +466,7 @@ describe("GameDatabase Leaderboard", () => {
       3,
       2,
       chatId,
-      30
+      30,
     );
 
     gameDb.saveGameParticipant(gameAddress, creatorId, "PK_CREATOR", { status: "confirmed" });
@@ -324,12 +484,12 @@ describe("GameDatabase Leaderboard", () => {
 
     const stats = gameDb.getLeaderboardStats(chatId);
 
-    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    const creatorStats = stats.find((s) => s.telegramId === creatorId);
     expect(creatorStats).toBeDefined();
     expect(creatorStats!.gamesWon).toBe(1);
     expect(creatorStats!.netAmountByToken["SOL"]).toBe(2000);
 
-    const p2Stats = stats.find(s => s.telegramId === player2Id);
+    const p2Stats = stats.find((s) => s.telegramId === player2Id);
     expect(p2Stats!.netAmountByToken["SOL"]).toBe(-1000);
   });
 
@@ -340,17 +500,7 @@ describe("GameDatabase Leaderboard", () => {
     const player2Id = "LEGACY_P2";
     const gameAddress = "LEGACY_GAME";
 
-    gameDb.saveGame(
-      gameAddress,
-      creatorId,
-      ticketAmount,
-      "coinflip",
-      "SOL",
-      "SOL",
-      2,
-      2,
-      chatId
-    );
+    gameDb.saveGame(gameAddress, creatorId, ticketAmount, "coinflip", "SOL", "SOL", 2, 2, chatId);
 
     gameDb.saveGameParticipant(gameAddress, creatorId, "PK_L_CREATOR", { status: "confirmed" });
     gameDb.saveGameParticipant(gameAddress, player2Id, "PK_L_P2", { status: "confirmed" });
@@ -364,7 +514,7 @@ describe("GameDatabase Leaderboard", () => {
     const stats = gameDb.getLeaderboardStats(chatId);
 
     // Expected profit: (ticket * 2) - ticket = ticket
-    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    const creatorStats = stats.find((s) => s.telegramId === creatorId);
     expect(creatorStats).toBeDefined();
     expect(creatorStats!.netAmountByToken["SOL"]).toBe(ticketAmount);
   });
@@ -379,27 +529,63 @@ describe("GameDatabase Leaderboard", () => {
     const player1 = "GLOBAL_P1";
     const player1Pk = "PK_GLOBAL_P1";
     gameDb.savePlayerMapping(player1Pk, player1, "@Player1");
-    gameDb.saveGame("GLOBAL_GAME_A1", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGame(
+      "GLOBAL_GAME_A1",
+      player1,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatA,
+    );
     gameDb.saveGameParticipant("GLOBAL_GAME_A1", player1, player1Pk, { status: "confirmed" });
-    gameDb.saveGameParticipant("GLOBAL_GAME_A1", "OTHER_A1", "PK_OTHER_A1", { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_A1", "OTHER_A1", "PK_OTHER_A1", {
+      status: "confirmed",
+    });
     gameDb.completeGame("GLOBAL_GAME_A1", player1Pk);
 
     // Player 2 plays in chat B
     const player2 = "GLOBAL_P2";
     const player2Pk = "PK_GLOBAL_P2";
     gameDb.savePlayerMapping(player2Pk, player2, "@Player2");
-    gameDb.saveGame("GLOBAL_GAME_B1", player2, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGame(
+      "GLOBAL_GAME_B1",
+      player2,
+      2_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatB,
+    );
     gameDb.saveGameParticipant("GLOBAL_GAME_B1", player2, player2Pk, { status: "confirmed" });
-    gameDb.saveGameParticipant("GLOBAL_GAME_B1", "OTHER_B1", "PK_OTHER_B1", { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_B1", "OTHER_B1", "PK_OTHER_B1", {
+      status: "confirmed",
+    });
     gameDb.completeGame("GLOBAL_GAME_B1", player2Pk);
 
     // Player 3 plays in chat C
     const player3 = "GLOBAL_P3";
     const player3Pk = "PK_GLOBAL_P3";
     gameDb.savePlayerMapping(player3Pk, player3, "@Player3");
-    gameDb.saveGame("GLOBAL_GAME_C1", player3, 3_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatC);
+    gameDb.saveGame(
+      "GLOBAL_GAME_C1",
+      player3,
+      3_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatC,
+    );
     gameDb.saveGameParticipant("GLOBAL_GAME_C1", player3, player3Pk, { status: "confirmed" });
-    gameDb.saveGameParticipant("GLOBAL_GAME_C1", "OTHER_C1", "PK_OTHER_C1", { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_C1", "OTHER_C1", "PK_OTHER_C1", {
+      status: "confirmed",
+    });
     gameDb.completeGame("GLOBAL_GAME_C1", player3Pk);
 
     // Global leaderboard should include all players from all chats
@@ -429,7 +615,17 @@ describe("GameDatabase Leaderboard", () => {
       const playerId = `GB_LIMIT_${i}`;
       const playerPk = `PKGB_LIMIT_${i}`;
       gameDb.savePlayerMapping(playerPk, playerId);
-      gameDb.saveGame(`GB_LIMIT_GAME_${i}`, playerId, 100_000 * i, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+      gameDb.saveGame(
+        `GB_LIMIT_GAME_${i}`,
+        playerId,
+        100_000 * i,
+        "coinflip",
+        "TIMBA_MINT",
+        "TIMBA",
+        2,
+        2,
+        chatId,
+      );
       gameDb.saveGameParticipant(`GB_LIMIT_GAME_${i}`, `GB_OTH_${i}`, `PK_GB_OTH_${i}`);
       gameDb.completeGame(`GB_LIMIT_GAME_${i}`, playerPk);
     }
@@ -447,15 +643,37 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, playerId);
 
     // Giveaway (excluded)
-    gameDb.saveGame("GB_GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGame(
+      "GB_GIVEAWAY1",
+      playerId,
+      1_000_000,
+      "giveaway",
+      "TIMBA_MINT",
+      "TIMBA",
+      10,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GB_GIVEAWAY1", playerId, playerPk, { status: "confirmed" });
     gameDb.saveGameParticipant("GB_GIVEAWAY1", "GB_GA_OTH", "PK_GB_GA_OTH");
     gameDb.completeGame("GB_GIVEAWAY1", playerPk);
 
     // Coinflip (included)
-    gameDb.saveGame("GB_COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      "GB_COINFLIP1",
+      playerId,
+      500_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant("GB_COINFLIP1", playerId, playerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant("GB_COINFLIP1", "GB_CF_OTH", "PK_GB_CF_OTH", { status: "confirmed" });
+    gameDb.saveGameParticipant("GB_COINFLIP1", "GB_CF_OTH", "PK_GB_CF_OTH", {
+      status: "confirmed",
+    });
     gameDb.completeGame("GB_COINFLIP1", playerPk);
 
     const globalStats = gameDb.getGlobalLeaderboardStats(100);
@@ -485,13 +703,33 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(player1Pk, player1, "@CrossChatPlayer1");
 
     // Game in Chat A (player1 is creator and winner)
-    gameDb.saveGame("CROSS_GAME_A1", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGame(
+      "CROSS_GAME_A1",
+      player1,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatA,
+    );
     gameDb.saveGameParticipant("CROSS_GAME_A1", player1, player1Pk, { status: "confirmed" });
     gameDb.saveGameParticipant("CROSS_GAME_A1", "OTHER_A1", "PK_OTHER_A1", { status: "confirmed" });
     gameDb.completeGame("CROSS_GAME_A1", player1Pk);
 
     // Game in Chat B (player1 is creator and winner)
-    gameDb.saveGame("CROSS_GAME_B1", player1, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGame(
+      "CROSS_GAME_B1",
+      player1,
+      2_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatB,
+    );
     gameDb.saveGameParticipant("CROSS_GAME_B1", player1, player1Pk, { status: "confirmed" });
     gameDb.saveGameParticipant("CROSS_GAME_B1", "OTHER_B1", "PK_OTHER_B1", { status: "confirmed" });
     gameDb.completeGame("CROSS_GAME_B1", player1Pk);
@@ -514,7 +752,17 @@ describe("GameDatabase Leaderboard", () => {
     const player1 = "CHATONLY_P1";
     const player1Pk = "PK_CHATONLY_P1";
     gameDb.savePlayerMapping(player1Pk, player1);
-    gameDb.saveGame("CHATONLY_GAME_A", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGame(
+      "CHATONLY_GAME_A",
+      player1,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatA,
+    );
     gameDb.saveGameParticipant("CHATONLY_GAME_A", player1, player1Pk, { status: "confirmed" });
     gameDb.saveGameParticipant("CHATONLY_GAME_A", "OTHER1", "PK_OTHER1", { status: "confirmed" });
     gameDb.completeGame("CHATONLY_GAME_A", player1Pk);
@@ -523,7 +771,17 @@ describe("GameDatabase Leaderboard", () => {
     const player2 = "CHATONLY_P2";
     const player2Pk = "PK_CHATONLY_P2";
     gameDb.savePlayerMapping(player2Pk, player2);
-    gameDb.saveGame("CHATONLY_GAME_B", player2, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGame(
+      "CHATONLY_GAME_B",
+      player2,
+      2_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatB,
+    );
     gameDb.saveGameParticipant("CHATONLY_GAME_B", player2, player2Pk, { status: "confirmed" });
     gameDb.saveGameParticipant("CHATONLY_GAME_B", "OTHER2", "PK_OTHER2", { status: "confirmed" });
     gameDb.completeGame("CHATONLY_GAME_B", player2Pk);
@@ -559,15 +817,39 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(creatorPk, creatorPlayer);
 
     // Creator makes a game in Chat A, joiner joins
-    gameDb.saveGame("JOIN_TEST_GAME_A", creatorPlayer, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
-    gameDb.saveGameParticipant("JOIN_TEST_GAME_A", creatorPlayer, creatorPk, { status: "confirmed" });
+    gameDb.saveGame(
+      "JOIN_TEST_GAME_A",
+      creatorPlayer,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatA,
+    );
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_A", creatorPlayer, creatorPk, {
+      status: "confirmed",
+    });
     gameDb.saveGameParticipant("JOIN_TEST_GAME_A", joinerPlayer, joinerPk, { status: "confirmed" });
     gameDb.completeGame("JOIN_TEST_GAME_A", joinerPk); // Joiner wins
 
     // Joiner also plays in Chat B (to have cross-chat stats)
-    gameDb.saveGame("JOIN_TEST_GAME_B", joinerPlayer, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGame(
+      "JOIN_TEST_GAME_B",
+      joinerPlayer,
+      500_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatB,
+    );
     gameDb.saveGameParticipant("JOIN_TEST_GAME_B", joinerPlayer, joinerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant("JOIN_TEST_GAME_B", "OTHER_B", "PK_OTHER_B", { status: "confirmed" });
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_B", "OTHER_B", "PK_OTHER_B", {
+      status: "confirmed",
+    });
     gameDb.completeGame("JOIN_TEST_GAME_B", joinerPk);
 
     // Chat A leaderboard should include joiner (they joined a game there)
@@ -589,15 +871,39 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.savePlayerMapping(playerPk, player);
 
     // Win 1000 TIMBA in Chat A
-    gameDb.saveGame("NET_GLOBAL_WIN_A", player, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGame(
+      "NET_GLOBAL_WIN_A",
+      player,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatA,
+    );
     gameDb.saveGameParticipant("NET_GLOBAL_WIN_A", player, playerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant("NET_GLOBAL_WIN_A", "LOSER_A", "PK_LOSER_A", { status: "confirmed" });
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_A", "LOSER_A", "PK_LOSER_A", {
+      status: "confirmed",
+    });
     gameDb.completeGame("NET_GLOBAL_WIN_A", playerPk);
 
     // Win 2000 TIMBA in Chat B
-    gameDb.saveGame("NET_GLOBAL_WIN_B", player, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGame(
+      "NET_GLOBAL_WIN_B",
+      player,
+      2_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatB,
+    );
     gameDb.saveGameParticipant("NET_GLOBAL_WIN_B", player, playerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant("NET_GLOBAL_WIN_B", "LOSER_B", "PK_LOSER_B", { status: "confirmed" });
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_B", "LOSER_B", "PK_LOSER_B", {
+      status: "confirmed",
+    });
     gameDb.completeGame("NET_GLOBAL_WIN_B", playerPk);
 
     // Get Chat A leaderboard - net amount should include BOTH wins
@@ -630,17 +936,7 @@ describe("GameDatabase Leaderboard", () => {
     const gameAddress = "MULTI_NO_TOTAL_GAME";
 
     // 4-player game WITHOUT total_amount (simulating legacy game)
-    gameDb.saveGame(
-      gameAddress,
-      creatorId,
-      ticketAmount,
-      "coinflip",
-      "SOL",
-      "SOL",
-      4,
-      4,
-      chatId
-    );
+    gameDb.saveGame(gameAddress, creatorId, ticketAmount, "coinflip", "SOL", "SOL", 4, 4, chatId);
 
     // Add all 4 participants
     gameDb.saveGameParticipant(gameAddress, creatorId, "PK_MNT_CREATOR", { status: "confirmed" });
@@ -659,12 +955,12 @@ describe("GameDatabase Leaderboard", () => {
     const stats = gameDb.getLeaderboardStats(chatId);
 
     // Winner profit: (4 * 1000) - 1000 = 3000 (uses actual 4 participants, not 2)
-    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    const creatorStats = stats.find((s) => s.telegramId === creatorId);
     expect(creatorStats).toBeDefined();
     expect(creatorStats!.netAmountByToken["SOL"]).toBe(3000);
 
     // Losers each lose their ticket amount
-    const p2Stats = stats.find(s => s.telegramId === player2Id);
+    const p2Stats = stats.find((s) => s.telegramId === player2Id);
     expect(p2Stats!.netAmountByToken["SOL"]).toBe(-1000);
   });
 
@@ -678,13 +974,17 @@ describe("GameDatabase Leaderboard", () => {
     // 3-player game in Chat A (no total_amount)
     gameDb.saveGame("GLOBAL_MULTI_A", player, 500, "coinflip", "TIMBA_MINT", "TIMBA", 3, 3, chatA);
     gameDb.saveGameParticipant("GLOBAL_MULTI_A", player, playerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A1", "PK_OTHER_GM_A1", { status: "confirmed" });
-    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A2", "PK_OTHER_GM_A2", { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A1", "PK_OTHER_GM_A1", {
+      status: "confirmed",
+    });
+    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A2", "PK_OTHER_GM_A2", {
+      status: "confirmed",
+    });
     gameDb.completeGame("GLOBAL_MULTI_A", playerPk); // No total_amount
 
     // Get global stats - should use 3 participants
     const globalStats = gameDb.getGlobalLeaderboardStats(10);
-    const playerStats = globalStats.find(s => s.telegramId === player);
+    const playerStats = globalStats.find((s) => s.telegramId === player);
 
     expect(playerStats).toBeDefined();
     // Profit = (3 * 500) - 500 = 1000
@@ -698,17 +998,7 @@ describe("GameDatabase Leaderboard", () => {
 
     // Create game but DON'T add any participants to game_participants table
     // This simulates very old legacy games that might not have participant records
-    gameDb.saveGame(
-      gameAddress,
-      creatorId,
-      1000,
-      "coinflip",
-      "SOL",
-      "SOL",
-      2,
-      2,
-      chatId
-    );
+    gameDb.saveGame(gameAddress, creatorId, 1000, "coinflip", "SOL", "SOL", 2, 2, chatId);
 
     // Complete game directly (no participants added)
     gameDb.savePlayerMapping("PK_NP_CREATOR", creatorId);
@@ -717,7 +1007,7 @@ describe("GameDatabase Leaderboard", () => {
     const stats = gameDb.getLeaderboardStats(chatId);
 
     // Should fallback to 2 participants: (2 * 1000) - 1000 = 1000
-    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    const creatorStats = stats.find((s) => s.telegramId === creatorId);
     expect(creatorStats).toBeDefined();
     expect(creatorStats!.netAmountByToken["SOL"]).toBe(1000);
   });

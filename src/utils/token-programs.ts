@@ -16,12 +16,13 @@ type AccountInfoLoader = Pick<Connection, "getAccountInfo">;
 export async function detectTokenProgram(
   connection: AccountInfoLoader,
   mint: string | PublicKey,
-  preloadedAccountInfo?: AccountInfoLike | null
+  preloadedAccountInfo?: AccountInfoLike | null,
 ): Promise<TokenProgramDetection | null> {
   try {
     const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
     const accountInfo =
-      preloadedAccountInfo ?? ((await connection.getAccountInfo(mintKey)) as AccountInfoLike | null);
+      preloadedAccountInfo ??
+      ((await connection.getAccountInfo(mintKey)) as AccountInfoLike | null);
 
     if (!accountInfo) {
       return null;
@@ -36,18 +37,18 @@ export async function detectTokenProgram(
     };
 
     const isToken2022 = Boolean(
-      owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID)
+      owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID),
     );
 
     if (!isToken2022) {
       const isLegacy = Boolean(
-        owner && typeof owner.equals === "function" && owner.equals(TOKEN_PROGRAM_ID)
+        owner && typeof owner.equals === "function" && owner.equals(TOKEN_PROGRAM_ID),
       );
 
       if (!isLegacy) {
         const ownerLabel = typeof owner.toBase58 === "function" ? owner.toBase58() : String(owner);
         throw new Error(
-          `Token mint ${mintKey.toBase58()} is owned by an unknown program (${ownerLabel})`
+          `Token mint ${mintKey.toBase58()} is owned by an unknown program (${ownerLabel})`,
         );
       }
     }
@@ -58,12 +59,7 @@ export async function detectTokenProgram(
     };
   } catch (error) {
     const mintAddress = typeof mint === "string" ? mint : mint.toBase58();
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-        ? error
-        : "";
+    const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
     if (
       message.toLowerCase().includes("could not find account") ||
       message.toLowerCase().includes("not found")

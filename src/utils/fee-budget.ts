@@ -49,7 +49,7 @@ type FeeBudgetConfig = {
 const parseEnvNumber = (
   value: string | undefined,
   fallback: number,
-  options: { min?: number; label?: string } = {}
+  options: { min?: number; label?: string } = {},
 ): number => {
   if (value === undefined) return fallback;
   const parsed = Number(value);
@@ -57,7 +57,7 @@ const parseEnvNumber = (
   if (!Number.isFinite(parsed)) {
     if (options.label) {
       console.warn(
-        `[FeeBudget] ${options.label} must be numeric. Received '${value}', using ${fallback}.`
+        `[FeeBudget] ${options.label} must be numeric. Received '${value}', using ${fallback}.`,
       );
     }
     return fallback;
@@ -66,7 +66,7 @@ const parseEnvNumber = (
   if (parsed < 0) {
     if (options.label) {
       console.warn(
-        `[FeeBudget] ${options.label} cannot be negative. Received ${parsed}, using ${fallback}.`
+        `[FeeBudget] ${options.label} cannot be negative. Received ${parsed}, using ${fallback}.`,
       );
     }
     return fallback;
@@ -75,7 +75,7 @@ const parseEnvNumber = (
   if (options.min !== undefined && parsed < options.min) {
     if (options.label) {
       console.warn(
-        `[FeeBudget] ${options.label} must be >= ${options.min}. Received ${parsed}, clamping to ${options.min}.`
+        `[FeeBudget] ${options.label} must be >= ${options.min}. Received ${parsed}, clamping to ${options.min}.`,
       );
     }
     return options.min;
@@ -87,9 +87,7 @@ const parseEnvNumber = (
 const normalizeCacheTtlMs = (value: number, source: string, fallback: number): number => {
   if (!Number.isFinite(value) || value <= 0) {
     const clamped = Math.max(1, fallback);
-    console.warn(
-      `[FeeBudget] ${source} must be > 0. Received ${value}, using ${clamped}.`
-    );
+    console.warn(`[FeeBudget] ${source} must be > 0. Received ${value}, using ${clamped}.`);
     return clamped;
   }
   return value;
@@ -100,58 +98,19 @@ const DEFAULT_CONFIG: FeeBudgetConfig = {
     min: 1,
     label: "FEE_CACHE_TTL_MS",
   }),
-  fallbackSingleTxLamports: parseEnvNumber(
-    process.env["FEE_FALLBACK_SINGLE_TX_LAMPORTS"],
-    10_000
-  ),
-  singleTxMultiplier: parseEnvNumber(
-    process.env["FEE_SINGLE_TX_MULTIPLIER"],
-    2
-  ),
-  singleTxExtraLamports: parseEnvNumber(
-    process.env["FEE_SINGLE_TX_EXTRA_LAMPORTS"],
-    20_000
-  ),
-  wrapBufferMultiplier: parseEnvNumber(
-    process.env["FEE_WRAP_BUFFER_MULTIPLIER"],
-    1
-  ),
-  wrapBufferExtraLamports: parseEnvNumber(
-    process.env["FEE_WRAP_BUFFER_EXTRA_LAMPORTS"],
-    25_000
-  ),
-  wrapBufferMinLamports: parseEnvNumber(
-    process.env["FEE_WRAP_BUFFER_MIN_LAMPORTS"],
-    25_000
-  ),
-  jitBufferMultiplier: parseEnvNumber(
-    process.env["FEE_JIT_BUFFER_MULTIPLIER"],
-    1.5
-  ),
-  jitBufferExtraLamports: parseEnvNumber(
-    process.env["FEE_JIT_BUFFER_EXTRA_LAMPORTS"],
-    120_000
-  ),
-  jitBufferMinLamports: parseEnvNumber(
-    process.env["FEE_JIT_BUFFER_MIN_LAMPORTS"],
-    200_000
-  ),
-  gameBufferMultiplier: parseEnvNumber(
-    process.env["FEE_GAME_BUFFER_MULTIPLIER"],
-    3
-  ),
-  gameBufferExtraLamports: parseEnvNumber(
-    process.env["FEE_GAME_BUFFER_EXTRA_LAMPORTS"],
-    220_000
-  ),
-  gameBufferMinLamports: parseEnvNumber(
-    process.env["FEE_GAME_BUFFER_MIN_LAMPORTS"],
-    400_000
-  ),
-  computeUnitLimit: parseEnvNumber(
-    process.env["FEE_COMPUTE_UNIT_LIMIT"],
-    200_000
-  ),
+  fallbackSingleTxLamports: parseEnvNumber(process.env["FEE_FALLBACK_SINGLE_TX_LAMPORTS"], 10_000),
+  singleTxMultiplier: parseEnvNumber(process.env["FEE_SINGLE_TX_MULTIPLIER"], 2),
+  singleTxExtraLamports: parseEnvNumber(process.env["FEE_SINGLE_TX_EXTRA_LAMPORTS"], 20_000),
+  wrapBufferMultiplier: parseEnvNumber(process.env["FEE_WRAP_BUFFER_MULTIPLIER"], 1),
+  wrapBufferExtraLamports: parseEnvNumber(process.env["FEE_WRAP_BUFFER_EXTRA_LAMPORTS"], 25_000),
+  wrapBufferMinLamports: parseEnvNumber(process.env["FEE_WRAP_BUFFER_MIN_LAMPORTS"], 25_000),
+  jitBufferMultiplier: parseEnvNumber(process.env["FEE_JIT_BUFFER_MULTIPLIER"], 1.5),
+  jitBufferExtraLamports: parseEnvNumber(process.env["FEE_JIT_BUFFER_EXTRA_LAMPORTS"], 120_000),
+  jitBufferMinLamports: parseEnvNumber(process.env["FEE_JIT_BUFFER_MIN_LAMPORTS"], 200_000),
+  gameBufferMultiplier: parseEnvNumber(process.env["FEE_GAME_BUFFER_MULTIPLIER"], 3),
+  gameBufferExtraLamports: parseEnvNumber(process.env["FEE_GAME_BUFFER_EXTRA_LAMPORTS"], 220_000),
+  gameBufferMinLamports: parseEnvNumber(process.env["FEE_GAME_BUFFER_MIN_LAMPORTS"], 400_000),
+  computeUnitLimit: parseEnvNumber(process.env["FEE_COMPUTE_UNIT_LIMIT"], 200_000),
 };
 
 const globalInstances = new Map<string, FeeBudgetManager>();
@@ -169,7 +128,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     const normalizedCacheTtl = normalizeCacheTtlMs(
       mergedConfig.cacheTtlMs,
       "FeeBudgetManager.cacheTtlMs",
-      DEFAULT_CONFIG.cacheTtlMs
+      DEFAULT_CONFIG.cacheTtlMs,
     );
     this.config = { ...mergedConfig, cacheTtlMs: normalizedCacheTtl };
     this.cache = createExpiringCache<number>(normalizedCacheTtl);
@@ -178,7 +137,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
   public static getInstance(
     connection: Connection,
-    config?: Partial<FeeBudgetConfig>
+    config?: Partial<FeeBudgetConfig>,
   ): FeeBudgetManager {
     const key = connection.rpcEndpoint ?? "default";
     const existing = globalInstances.get(key);
@@ -193,7 +152,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
   public static createForTest(
     connection: Connection,
-    config?: Partial<FeeBudgetConfig>
+    config?: Partial<FeeBudgetConfig>,
   ): FeeBudgetManager {
     return new FeeBudgetManager(connection, config);
   }
@@ -202,10 +161,9 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     return Math.max(
       DEFAULT_CONFIG.fallbackSingleTxLamports,
       Math.ceil(
-        DEFAULT_CONFIG.fallbackSingleTxLamports *
-          DEFAULT_CONFIG.singleTxMultiplier +
-          DEFAULT_CONFIG.singleTxExtraLamports
-      )
+        DEFAULT_CONFIG.fallbackSingleTxLamports * DEFAULT_CONFIG.singleTxMultiplier +
+          DEFAULT_CONFIG.singleTxExtraLamports,
+      ),
     );
   }
 
@@ -214,14 +172,11 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     const wrap = Math.max(
       DEFAULT_CONFIG.wrapBufferMinLamports,
       Math.ceil(
-        single * DEFAULT_CONFIG.wrapBufferMultiplier +
-          DEFAULT_CONFIG.wrapBufferExtraLamports
-      )
+        single * DEFAULT_CONFIG.wrapBufferMultiplier + DEFAULT_CONFIG.wrapBufferExtraLamports,
+      ),
     );
     const game = Math.ceil(
-      single * DEFAULT_CONFIG.gameBufferMultiplier +
-        DEFAULT_CONFIG.gameBufferExtraLamports +
-        wrap
+      single * DEFAULT_CONFIG.gameBufferMultiplier + DEFAULT_CONFIG.gameBufferExtraLamports + wrap,
     );
     return Math.max(game, DEFAULT_CONFIG.gameBufferMinLamports);
   }
@@ -229,8 +184,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
   public static getDefaultWrapFeeBufferLamports(): number {
     const single = this.getDefaultSingleTransactionLamports();
     const wrap = Math.ceil(
-      single * DEFAULT_CONFIG.wrapBufferMultiplier +
-        DEFAULT_CONFIG.wrapBufferExtraLamports
+      single * DEFAULT_CONFIG.wrapBufferMultiplier + DEFAULT_CONFIG.wrapBufferExtraLamports,
     );
     return Math.max(wrap, DEFAULT_CONFIG.wrapBufferMinLamports);
   }
@@ -238,31 +192,21 @@ export class FeeBudgetManager implements FeeBudgetProvider {
   public static getDefaultJitSwapFeeBufferLamports(): number {
     const single = this.getDefaultSingleTransactionLamports();
     const jit = Math.ceil(
-      single * DEFAULT_CONFIG.jitBufferMultiplier +
-        DEFAULT_CONFIG.jitBufferExtraLamports
+      single * DEFAULT_CONFIG.jitBufferMultiplier + DEFAULT_CONFIG.jitBufferExtraLamports,
     );
     return Math.max(jit, DEFAULT_CONFIG.jitBufferMinLamports);
   }
 
   public getCachedSingleTransactionLamports(): number {
-    return (
-      this.cache.peek("single") ??
-      FeeBudgetManager.getDefaultSingleTransactionLamports()
-    );
+    return this.cache.peek("single") ?? FeeBudgetManager.getDefaultSingleTransactionLamports();
   }
 
   public getCachedWrapFeeBufferLamports(): number {
-    return (
-      this.cache.peek("wrap") ??
-      FeeBudgetManager.getDefaultWrapFeeBufferLamports()
-    );
+    return this.cache.peek("wrap") ?? FeeBudgetManager.getDefaultWrapFeeBufferLamports();
   }
 
   public getCachedGameSafetyBufferLamports(): number {
-    return (
-      this.cache.peek("game") ??
-      FeeBudgetManager.getDefaultGameSafetyBufferLamports()
-    );
+    return this.cache.peek("game") ?? FeeBudgetManager.getDefaultGameSafetyBufferLamports();
   }
 
   public getDefaultSingleTransactionLamports(): number {
@@ -285,8 +229,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     return this.getOrCompute("wrap", async () => {
       const single = await this.getSingleTransactionLamports();
       const candidate = Math.ceil(
-        single * this.config.wrapBufferMultiplier +
-          this.config.wrapBufferExtraLamports
+        single * this.config.wrapBufferMultiplier + this.config.wrapBufferExtraLamports,
       );
       return Math.max(candidate, this.config.wrapBufferMinLamports);
     });
@@ -296,8 +239,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     return this.getOrCompute("jit", async () => {
       const single = await this.getSingleTransactionLamports();
       const candidate = Math.ceil(
-        single * this.config.jitBufferMultiplier +
-          this.config.jitBufferExtraLamports
+        single * this.config.jitBufferMultiplier + this.config.jitBufferExtraLamports,
       );
       return Math.max(candidate, this.config.jitBufferMinLamports);
     });
@@ -310,18 +252,13 @@ export class FeeBudgetManager implements FeeBudgetProvider {
         this.getWrapFeeBufferLamports(),
       ]);
       const candidate = Math.ceil(
-        single * this.config.gameBufferMultiplier +
-          this.config.gameBufferExtraLamports +
-          wrap
+        single * this.config.gameBufferMultiplier + this.config.gameBufferExtraLamports + wrap,
       );
       return Math.max(candidate, this.config.gameBufferMinLamports);
     });
   }
 
-  private async getOrCompute(
-    key: CacheKey,
-    compute: () => Promise<number>
-  ): Promise<number> {
+  private async getOrCompute(key: CacheKey, compute: () => Promise<number>): Promise<number> {
     const cached = this.cache.get(key);
     if (cached !== undefined) {
       return cached;
@@ -363,21 +300,18 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       case "wrap":
         return Math.max(
           this.config.wrapBufferMinLamports,
-          this.config.fallbackSingleTxLamports +
-            this.config.wrapBufferExtraLamports
+          this.config.fallbackSingleTxLamports + this.config.wrapBufferExtraLamports,
         );
       case "jit":
         return Math.max(
           this.config.jitBufferMinLamports,
-          this.config.fallbackSingleTxLamports +
-            this.config.jitBufferExtraLamports
+          this.config.fallbackSingleTxLamports + this.config.jitBufferExtraLamports,
         );
       case "game":
         return Math.max(
           this.config.gameBufferMinLamports,
-          this.config.fallbackSingleTxLamports *
-            this.config.gameBufferMultiplier +
-            this.config.gameBufferExtraLamports
+          this.config.fallbackSingleTxLamports * this.config.gameBufferMultiplier +
+            this.config.gameBufferExtraLamports,
         );
       default:
         return this.config.fallbackSingleTxLamports;
@@ -399,9 +333,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       const priorityFee = await this.estimatePriorityFee();
 
       const candidate = Math.ceil(
-        baseFee * this.config.singleTxMultiplier +
-          this.config.singleTxExtraLamports +
-          priorityFee
+        baseFee * this.config.singleTxMultiplier + this.config.singleTxExtraLamports + priorityFee,
       );
 
       return Math.max(candidate, this.config.fallbackSingleTxLamports);
@@ -411,26 +343,19 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     }
   }
 
-  private async estimateFee(
-    instructions: TransactionInstruction[]
-  ): Promise<number> {
+  private async estimateFee(instructions: TransactionInstruction[]): Promise<number> {
     if (process.env.NODE_ENV === "test") {
       return this.config.fallbackSingleTxLamports;
     }
     try {
-      const latestBlockhash = await this.connection.getLatestBlockhash(
-        "confirmed"
-      );
+      const latestBlockhash = await this.connection.getLatestBlockhash("confirmed");
       const message = new TransactionMessage({
         payerKey: this.stubPayer,
         recentBlockhash: latestBlockhash.blockhash,
         instructions,
       }).compileToV0Message();
       const fee = await this.connection.getFeeForMessage(message);
-      const lamports =
-        typeof fee === "number"
-          ? fee
-          : fee?.value ?? null;
+      const lamports = typeof fee === "number" ? fee : (fee?.value ?? null);
 
       if (typeof lamports === "number" && Number.isFinite(lamports) && lamports > 0) {
         return lamports;
@@ -461,16 +386,10 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
       microLamports.sort((a, b) => a - b);
 
-      const desiredPercentileIndex =
-        Math.ceil(microLamports.length * PRIORITY_FEE_PERCENTILE) - 1;
+      const desiredPercentileIndex = Math.ceil(microLamports.length * PRIORITY_FEE_PERCENTILE) - 1;
       const highestAllowedIndex =
-        microLamports.length > 2
-          ? microLamports.length - 2
-          : microLamports.length - 1;
-      const percentileIndex = Math.max(
-        0,
-        Math.min(highestAllowedIndex, desiredPercentileIndex)
-      );
+        microLamports.length > 2 ? microLamports.length - 2 : microLamports.length - 1;
+      const percentileIndex = Math.max(0, Math.min(highestAllowedIndex, desiredPercentileIndex));
 
       const selectedMicroLamports = microLamports[percentileIndex];
       if (selectedMicroLamports === undefined) {
@@ -478,8 +397,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       }
 
       const lamports = Math.ceil(
-        (selectedMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) *
-          this.config.computeUnitLimit
+        (selectedMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) * this.config.computeUnitLimit,
       );
 
       if (!Number.isFinite(lamports) || lamports <= 0) {

@@ -12,8 +12,7 @@ if (originalToken === undefined) {
   process.env.TELEGRAM_TOKEN = "test-token";
 }
 if (originalMnemonic === undefined) {
-  process.env.MNEMONIC =
-    "test test test test test test test test test test test junk";
+  process.env.MNEMONIC = "test test test test test test test test test test test junk";
 }
 if (originalSolanaNetwork === undefined) {
   process.env.SOLANA_NETWORK = "http://localhost:8899";
@@ -54,10 +53,7 @@ describe("/default command formatting", () => {
   });
 
   test("success message escapes ticker and mint", () => {
-    const message = formatDefaultTokenSetMessage(
-      "<b>OWNED</b>",
-      "mint<script>"
-    );
+    const message = formatDefaultTokenSetMessage("<b>OWNED</b>", "mint<script>");
 
     expect(message).toContain("✅ Default token set to &lt;b&gt;OWNED&lt;/b&gt;");
     expect(message).toContain("<code>mint&lt;script&gt;</code>");

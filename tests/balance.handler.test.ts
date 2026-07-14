@@ -1,9 +1,6 @@
 import { test, expect, mock } from "bun:test";
 import { onBalance } from "../src/handlers/wallet";
-import {
-  getTelegramId,
-  MISSING_TELEGRAM_ID_MESSAGE,
-} from "../src/utils/context-helpers";
+import { getTelegramId, MISSING_TELEGRAM_ID_MESSAGE } from "../src/utils/context-helpers";
 
 function makeCtx(privateChat: boolean) {
   const calls: any[] = [];

@@ -17,7 +17,10 @@ function makeWalletStub() {
     getTokenMetadata: async (_mint: string) => ({ decimals: 6 }),
     formatTokenBalance: (amount: number, decimals: number) => {
       const v = amount / Math.pow(10, decimals);
-      return v.toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+      return v
+        .toFixed(6)
+        .replace(/\.0+$/, "")
+        .replace(/(\.\d*?)0+$/, "$1");
     },
     formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
     getConnection: () => ({}) as any,
@@ -40,4 +43,3 @@ test("getAllChatTokenConfigs returns stored chat defaults", () => {
   const configs = tm.getAllChatTokenConfigs();
   expect(configs.some((cfg) => cfg.chat_id === 123 && cfg.token_ticker === "TOK")).toBe(true);
 });
-

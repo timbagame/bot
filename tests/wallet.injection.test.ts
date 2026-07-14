@@ -56,10 +56,7 @@ function makeMockConnection() {
 
     ataCache.clear();
 
-    const populate = async (
-      accounts: any[],
-      programId: PublicKey
-    ) => {
+    const populate = async (accounts: any[], programId: PublicKey) => {
       for (const entry of accounts) {
         const parsed = entry.account?.data?.parsed;
         if (!parsed) continue;
@@ -68,12 +65,7 @@ function makeMockConnection() {
         const tokenAmount = info?.tokenAmount;
         if (!mint || !tokenAmount) continue;
 
-        const ata = await getAssociatedTokenAddress(
-          new PublicKey(mint),
-          owner!,
-          false,
-          programId
-        );
+        const ata = await getAssociatedTokenAddress(new PublicKey(mint), owner!, false, programId);
 
         ataCache.set(ata.toBase58(), {
           programId,
@@ -146,7 +138,7 @@ function makeMockConnection() {
             closeAuthorityOption: 0,
             closeAuthority: owner!,
           } as any,
-          buffer
+          buffer,
         );
 
         return {
@@ -172,7 +164,7 @@ function makeMockConnection() {
 
 describe("WalletManager dependency injection", () => {
   test("getLatestBlockhash uses cache within duration", async () => {
-    let now = 1000;
+    const now = 1000;
     const conn = makeMockConnection();
     const wm = WalletManager.createForTest("test mnemonic", {
       connection: conn,

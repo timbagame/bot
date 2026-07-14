@@ -22,15 +22,13 @@ describe("wrap rent reserve refresh concurrency", () => {
     const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
     const successValue = 300_000;
     let callCount = 0;
-    const wrapSpy = vi
-      .spyOn(feeBudget, "getWrapFeeBufferLamports")
-      .mockImplementation(() => {
-        callCount += 1;
-        if (callCount === 1) {
-          return Promise.reject(new Error("boom"));
-        }
-        return new Promise((resolve) => setTimeout(() => resolve(successValue), 0));
-      });
+    const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.reject(new Error("boom"));
+      }
+      return new Promise((resolve) => setTimeout(() => resolve(successValue), 0));
+    });
     const defaultSpy = vi
       .spyOn(feeBudget, "getDefaultWrapFeeBufferLamports")
       .mockReturnValue(250_000);

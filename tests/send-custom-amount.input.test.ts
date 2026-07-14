@@ -22,9 +22,7 @@ type MockCtxOptions = {
 const TELEGRAM_NUMERIC_ID = 9_876_543;
 const TELEGRAM_ID = BigInt(TELEGRAM_NUMERIC_ID);
 const DEFAULT_CHAT_ID = 777_001;
-const USER_WALLET_ADDRESS = wallet
-  .getKeyPair(TELEGRAM_ID)
-  .publicKey.toBase58();
+const USER_WALLET_ADDRESS = wallet.getKeyPair(TELEGRAM_ID).publicKey.toBase58();
 
 const baseWalletCache = {
   solBalance: 5_000_000_000, // 5 SOL
@@ -59,14 +57,11 @@ beforeAll(() => {
   wallet.getAllApprovedTokenBalances = async (
     telegramId: bigint,
     approvedTokens: Parameters<typeof originalGetAllApprovedTokenBalances>[1],
-    options?: Parameters<typeof originalGetAllApprovedTokenBalances>[2]
+    options?: Parameters<typeof originalGetAllApprovedTokenBalances>[2],
   ): Promise<ApprovedTokenBalance[]> => {
     if (telegramId === TELEGRAM_ID) {
       return baseWalletCache.tokenBalances.map((token): ApprovedTokenBalance => {
-        const lamports =
-          typeof token.rawBalance === "string"
-            ? BigInt(token.rawBalance)
-            : 0n;
+        const lamports = typeof token.rawBalance === "string" ? BigInt(token.rawBalance) : 0n;
         return {
           ...token,
           lamports,
@@ -100,7 +95,7 @@ const createMockCtx = (options: MockCtxOptions = {}) => {
         chatId: number,
         messageId: number,
         text: string,
-        opts: Record<string, unknown>
+        opts: Record<string, unknown>,
       ) => {
         calls.push({ type: "edit", chatId, messageId, text, opts });
         if (editError) {
@@ -238,8 +233,8 @@ describe("handleCustomAmountInput", () => {
       chatId: DEFAULT_CHAT_ID,
     };
 
-    await expect(
-      __test_handleCustomAmountInput(ctx, userState, "0.25")
-    ).rejects.toThrow("Token AAA not found in wallet");
+    await expect(__test_handleCustomAmountInput(ctx, userState, "0.25")).rejects.toThrow(
+      "Token AAA not found in wallet",
+    );
   });
 });

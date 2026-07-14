@@ -9,8 +9,7 @@ import {
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
-  process.env.MNEMONIC ||
-  "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 const previousPricesEnabled = process.env["PRICES_ENABLED"];
 process.env["PRICES_ENABLED"] = "false";
@@ -50,21 +49,23 @@ beforeAll(async () => {
   api.editMessageText = async () => ({ ok: true, result: true });
   api.deleteMessage = async () => ({ ok: true, result: true });
   api.answerCallbackQuery = async () => ({ ok: true, result: true });
-  api.config.use(async (prev: any, method: string, payload: any, signal: AbortSignal | undefined) => {
-    if (method === "sendMessage") {
-      sendMessagePayloads.push(payload);
-      return {
-        ok: true,
-        result: {
-          message_id: Math.trunc(Math.random() * 10_000) + 1,
-          chat: { id: payload.chat_id },
-          date: Math.floor(Date.now() / 1000),
-        },
-      };
-    }
+  api.config.use(
+    async (prev: any, method: string, payload: any, signal: AbortSignal | undefined) => {
+      if (method === "sendMessage") {
+        sendMessagePayloads.push(payload);
+        return {
+          ok: true,
+          result: {
+            message_id: Math.trunc(Math.random() * 10_000) + 1,
+            chat: { id: payload.chat_id },
+            date: Math.floor(Date.now() / 1000),
+          },
+        };
+      }
 
-    return prev(method, payload, signal);
-  });
+      return prev(method, payload, signal);
+    },
+  );
 });
 
 const clearInputSessions = () => {
@@ -114,7 +115,6 @@ test("rejects replies from non-initiators", async () => {
   expect(storedSession).toBeTruthy();
   expect(storedSession?.initiatorId).toBe(initiatorId);
 });
-
 
 test("ignores duplicate replies while another handler is processing", async () => {
   const chatId = 22345;

@@ -30,9 +30,12 @@ function dbStub(overrides: Partial<any> = {}, participants: string[] = []) {
     getGame: (_addr: string) => ({ token_mint: "MINT", token_ticker: "TOK", ...overrides }),
     getCreatorInfo: (_addr: string) => ({ telegramId: "777" }),
     getGameParticipants: () => participants,
-    getPlayerTelegramId: (pk: string) => ({
-      WINNER111: "999",
-    } as Record<string, string>)[pk] || null,
+    getPlayerTelegramId: (pk: string) =>
+      (
+        ({
+          WINNER111: "999",
+        }) as Record<string, string>
+      )[pk] || null,
     saveUsernameMapping: () => {},
     findTelegramIdByNormalizedUsername: () => null,
   } as any;
@@ -73,12 +76,14 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
       creator: new PublicKey("11111111111111111111111111111111"),
       gameType: { coinflip: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
+    const gm = GameManager.getInstance(
+      programStub(gameAcc),
+      walletStub({ blockTime: createdAt + 30 }),
+      dbStub(),
+    );
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
     expect(info).toContain("<b>🪙 Coinflip 🅴 • 1 TOK</b>");
-    expect(info).toContain(
-      `Creator: ${sanitizeTelegramDisplayNameWithoutMention("@user777")}`
-    );
+    expect(info).toContain(`Creator: ${sanitizeTelegramDisplayNameWithoutMention("@user777")}`);
     expect(info).toContain("1/2 tickets");
     expect(info).toContain("Status:");
     expect(info).toContain("⏰ Expires in:");
@@ -103,14 +108,14 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
       const gm = GameManager.getInstance(
         programStub(gameAcc),
         walletStub({ blockTime: createdAt + 30 }),
-        dbStub()
+        dbStub(),
       );
       const info = await gm.getGameInfo(
         ctxStub(),
-        new PublicKey("11111111111111111111111111111111")
+        new PublicKey("11111111111111111111111111111111"),
       );
       expect(info).toContain(
-        '<b>🪙 Coinflip <a href="https://solscan.io/account/11111111111111111111111111111111">🅴</a> • 1 TOK</b>'
+        '<b>🪙 Coinflip <a href="https://solscan.io/account/11111111111111111111111111111111">🅴</a> • 1 TOK</b>',
       );
     } finally {
       resetGM();
@@ -145,7 +150,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     const gm = GameManager.getInstance(
       programStub({}),
       walletStub(),
-      dbStub({ max_players: 10, min_players: 2 }, participants)
+      dbStub({ max_players: 10, min_players: 2 }, participants),
     );
     const ctx = ctxStub();
     const output = await gm.getCompletedGameInfo(ctx, {

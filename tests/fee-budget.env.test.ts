@@ -59,18 +59,24 @@ describe("fee budget environment parsing", () => {
   test("estimateFee logs fallback when RPC throws", async () => {
     const connection = {
       rpcEndpoint: "http://localhost:8899",
-      getLatestBlockhash: async () => { throw new Error("rpc down"); },
-      getFeeForMessage: async () => { throw new Error("rpc down"); },
+      getLatestBlockhash: async () => {
+        throw new Error("rpc down");
+      },
+      getFeeForMessage: async () => {
+        throw new Error("rpc down");
+      },
       getRecentPrioritizationFees: async () => [],
     } as any;
     const manager = FeeBudgetManager.createForTest(connection, {
       fallbackSingleTxLamports: 123_000,
     });
-    const value = await (manager as any).estimateFee(new PublicKey(SystemProgram.programId), [SystemProgram.transfer({
-      fromPubkey: new PublicKey(SystemProgram.programId),
-      toPubkey: new PublicKey(SystemProgram.programId),
-      lamports: 1,
-    })]);
+    const value = await (manager as any).estimateFee(new PublicKey(SystemProgram.programId), [
+      SystemProgram.transfer({
+        fromPubkey: new PublicKey(SystemProgram.programId),
+        toPubkey: new PublicKey(SystemProgram.programId),
+        lamports: 1,
+      }),
+    ]);
     expect(value).toBe(123_000);
   });
 });

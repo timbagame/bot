@@ -1,10 +1,7 @@
 /**
  * Network detection utility
  */
-import {
-  DEFAULT_MAINNET_ENDPOINT,
-  resolvePrimaryRpcEndpoint,
-} from "./rpc-endpoints";
+import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
 
 export type SolanaNetwork = "mainnet" | "devnet" | "testnet" | "localnet";
 
@@ -86,10 +83,7 @@ export class NetworkDetector {
    * Get current network from environment
    */
   static getCurrentNetwork(): SolanaNetwork {
-    const rpcUrl = resolvePrimaryRpcEndpoint(
-      process.env.SOLANA_NETWORK,
-      DEFAULT_MAINNET_ENDPOINT
-    );
+    const rpcUrl = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK, DEFAULT_MAINNET_ENDPOINT);
     return this.detectNetwork(rpcUrl);
   }
 
@@ -99,7 +93,7 @@ export class NetworkDetector {
    */
   static buildSolscanTxUrl(
     signature: string | undefined | null,
-    networkOverride?: string | null
+    networkOverride?: string | null,
   ): string | null {
     return this.buildSolscanResourceUrl("tx", signature, networkOverride);
   }
@@ -110,7 +104,7 @@ export class NetworkDetector {
    */
   static buildSolscanAccountUrl(
     address: string | undefined | null,
-    networkOverride?: string | null
+    networkOverride?: string | null,
   ): string | null {
     return this.buildSolscanResourceUrl("account", address, networkOverride);
   }
@@ -121,7 +115,7 @@ export class NetworkDetector {
    */
   static buildSolscanTokenUrl(
     mint: string | undefined | null,
-    networkOverride?: string | null
+    networkOverride?: string | null,
   ): string | null {
     return this.buildSolscanResourceUrl("token", mint, networkOverride);
   }
@@ -129,18 +123,16 @@ export class NetworkDetector {
   private static buildSolscanResourceUrl(
     resource: "tx" | "account" | "token",
     value: string | undefined | null,
-    networkOverride?: string | null
+    networkOverride?: string | null,
   ): string | null {
     if (!value) return null;
 
-    const network =
-      this.resolveNetworkInput(networkOverride) ?? this.getCurrentNetwork();
+    const network = this.resolveNetworkInput(networkOverride) ?? this.getCurrentNetwork();
     if (network === "localnet") {
       return null;
     }
 
-    const encodedValue =
-      resource === "account" ? encodeURIComponent(value) : value;
+    const encodedValue = resource === "account" ? encodeURIComponent(value) : value;
     const baseUrl = `https://solscan.io/${resource}/${encodedValue}`;
 
     if (network === "mainnet") {
@@ -154,9 +146,7 @@ export class NetworkDetector {
     return baseUrl;
   }
 
-  public static resolveNetworkInput(
-    input?: string | null
-  ): SolanaNetwork | undefined {
+  public static resolveNetworkInput(input?: string | null): SolanaNetwork | undefined {
     if (!input) {
       return undefined;
     }
@@ -222,10 +212,7 @@ export function buildTransactionLinkMessage({
     };
   }
 
-  const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-    signature,
-    networkOverride
-  );
+  const solscanUrl = NetworkDetector.buildSolscanTxUrl(signature, networkOverride);
   const normalizedLabel = label ?? "";
 
   if (solscanUrl) {

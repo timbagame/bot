@@ -24,9 +24,8 @@ type BuildLeaderboardMessageArgs = {
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
-export const sanitizeLeaderboardDisplayName = (
-  value: string | null | undefined
-): string => sanitizeTelegramDisplayNameWithoutMention(value);
+export const sanitizeLeaderboardDisplayName = (value: string | null | undefined): string =>
+  sanitizeTelegramDisplayNameWithoutMention(value);
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
@@ -40,12 +39,13 @@ export const buildEmptyGlobalLeaderboardMessage = (): string =>
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
-export const buildGlobalLeaderboardMessage = ({ players, allPlayers }: Omit<BuildLeaderboardMessageArgs, "chatTitle">): string => {
+export const buildGlobalLeaderboardMessage = ({
+  players,
+  allPlayers,
+}: Omit<BuildLeaderboardMessageArgs, "chatTitle">): string => {
   const heading = "🌐 <b>Global Leaderboard</b> [30D]";
 
-  const rows = players
-    .map((player, index) => formatLeaderboardRow(player, index))
-    .join("\n\n");
+  const rows = players.map((player, index) => formatLeaderboardRow(player, index)).join("\n\n");
 
   const highlightsSource = allPlayers ?? players;
   const champion = players[0];
@@ -54,14 +54,16 @@ export const buildGlobalLeaderboardMessage = ({ players, allPlayers }: Omit<Buil
   return [heading, rows, highlights].filter(Boolean).join("\n\n");
 };
 
-export const buildLeaderboardMessage = ({ chatTitle, players, allPlayers }: BuildLeaderboardMessageArgs): string => {
+export const buildLeaderboardMessage = ({
+  chatTitle,
+  players,
+  allPlayers,
+}: BuildLeaderboardMessageArgs): string => {
   const heading = chatTitle
     ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b> [30D]`
     : "🏆 <b>Leaderboard</b> [30D]";
 
-  const rows = players
-    .map((player, index) => formatLeaderboardRow(player, index))
-    .join("\n\n");
+  const rows = players.map((player, index) => formatLeaderboardRow(player, index)).join("\n\n");
 
   // Use allPlayers for highlights if provided, otherwise use displayed players
   const highlightsSource = allPlayers ?? players;
@@ -99,7 +101,7 @@ const formatLeaderboardRow = (player: LeaderboardPlayerDisplay, position: number
 
 const buildLeaderboardHighlights = (
   players: LeaderboardPlayerDisplay[],
-  champion?: LeaderboardPlayerDisplay
+  champion?: LeaderboardPlayerDisplay,
 ): string | null => {
   if (players.length < 2) {
     return null;
@@ -120,13 +122,13 @@ const buildLeaderboardHighlights = (
 
   if (highestWinRate.telegramId !== leaderboardChampion.telegramId) {
     highlights.push(
-      `• Best win rate: ${formatDisplayName(highestWinRate.displayName)} (${formatWinRate(highestWinRate.winRate)}%)`
+      `• Best win rate: ${formatDisplayName(highestWinRate.displayName)} (${formatWinRate(highestWinRate.winRate)}%)`,
     );
   }
 
   if (mostGames.telegramId !== leaderboardChampion.telegramId) {
     highlights.push(
-      `• Most games played: ${formatDisplayName(mostGames.displayName)} (${mostGames.totalGames})`
+      `• Most games played: ${formatDisplayName(mostGames.displayName)} (${mostGames.totalGames})`,
     );
   }
 
@@ -162,11 +164,12 @@ export const formatNetUsd = (value: number): string => {
   }
 
   const absValue = Math.abs(value);
-  const formatted = absValue >= 1000
-    ? `$${(absValue / 1000).toFixed(1)}k`
-    : absValue >= 1
-    ? `$${absValue.toFixed(2)}`
-    : `$${absValue.toFixed(4)}`;
+  const formatted =
+    absValue >= 1000
+      ? `$${(absValue / 1000).toFixed(1)}k`
+      : absValue >= 1
+        ? `$${absValue.toFixed(2)}`
+        : `$${absValue.toFixed(4)}`;
 
   return value > 0 ? `+${formatted}` : `-${formatted}`;
 };

@@ -12,9 +12,7 @@ export interface ParseDecimalAmountBigIntOptions {
   allowZero?: boolean;
 }
 
-type ParseDecimalAmountOptions =
-  | ParseDecimalAmountNumberOptions
-  | ParseDecimalAmountBigIntOptions;
+type ParseDecimalAmountOptions = ParseDecimalAmountNumberOptions | ParseDecimalAmountBigIntOptions;
 
 function assertDecimals(decimals: number): asserts decimals is number {
   if (!Number.isInteger(decimals) || decimals < 0) {
@@ -26,17 +24,17 @@ export function parseDecimalAmount(value: string, decimals: number): number;
 export function parseDecimalAmount(
   value: string,
   decimals: number,
-  options: ParseDecimalAmountNumberOptions
+  options: ParseDecimalAmountNumberOptions,
 ): number;
 export function parseDecimalAmount(
   value: string,
   decimals: number,
-  options: ParseDecimalAmountBigIntOptions
+  options: ParseDecimalAmountBigIntOptions,
 ): bigint;
 export function parseDecimalAmount(
   value: string,
   decimals: number,
-  options: ParseDecimalAmountOptions = {}
+  options: ParseDecimalAmountOptions = {},
 ): number | bigint {
   assertDecimals(decimals);
 
@@ -47,8 +45,7 @@ export function parseDecimalAmount(
 
   const [intPartRaw = "0", fracPartRaw = ""] = normalized.split(".");
   const intPart = intPartRaw === "" ? "0" : intPartRaw;
-  const fraction =
-    decimals > 0 ? (fracPartRaw + "0".repeat(decimals)).slice(0, decimals) : "";
+  const fraction = decimals > 0 ? (fracPartRaw + "0".repeat(decimals)).slice(0, decimals) : "";
 
   const base = 10n ** BigInt(decimals);
   const intComponent = BigInt(intPart) * base;
@@ -76,9 +73,7 @@ export type TradeAmountParseResult =
   | { kind: "percentage"; percentage: number }
   | { kind: "absolute"; normalized: string };
 
-export const parseTradeAmountInput = (
-  amount: string
-): TradeAmountParseResult => {
+export const parseTradeAmountInput = (amount: string): TradeAmountParseResult => {
   const trimmed = amount.trim();
 
   if (!trimmed) {
@@ -175,12 +170,9 @@ export const evaluateTradeAmount = ({
 
     if (spendable <= 0) {
       const bufferHint =
-        applySolFeeBuffer &&
-        solFeeBufferLamports > 0 &&
-        !omitSolFeeBufferHint
+        applySolFeeBuffer && solFeeBufferLamports > 0 && !omitSolFeeBufferHint
           ? ` (keep ~${
-              formatSol?.(solFeeBufferLamports) ??
-              `${solFeeBufferLamports} lamports`
+              formatSol?.(solFeeBufferLamports) ?? `${solFeeBufferLamports} lamports`
             } for fees)`
           : "";
       throw new Error(`${insufficientSolForFeesMessage}${bufferHint}`);
@@ -205,11 +197,10 @@ export const evaluateTradeAmount = ({
       const availableLamports = Math.max(0, spendableLamports - bufferLamports);
 
       if (bufferLamports >= spendableLamports || availableLamports <= 0) {
-        const formattedBuffer =
-          formatSol?.(bufferLamports) ?? `${bufferLamports} lamports`;
+        const formattedBuffer = formatSol?.(bufferLamports) ?? `${bufferLamports} lamports`;
         throw new Error(
           insufficientSolMaxBufferMessage ??
-            `Not enough SOL to keep ${formattedBuffer} as a safety buffer when using max amount`
+            `Not enough SOL to keep ${formattedBuffer} as a safety buffer when using max amount`,
         );
       }
 
@@ -322,39 +313,32 @@ export interface PresentedTradeAmountResult {
 }
 
 export const presentTradeAmount = (
-  params: EvaluateTradeAmountParams
+  params: EvaluateTradeAmountParams,
 ): PresentedTradeAmountResult => {
   const evaluation = evaluateTradeAmount(params);
 
   const decimalsForFallback =
     params.assetTicker === "SOL"
       ? params.decimals
-      : params.tokenBalance?.decimals ?? params.decimals;
+      : (params.tokenBalance?.decimals ?? params.decimals);
 
-  const fallbackFormatted = formatAmount(
-    evaluation.rawAmount,
-    decimalsForFallback,
-    {
-      maxFractionDigits: decimalsForFallback,
-      trim: true,
-    }
-  );
+  const fallbackFormatted = formatAmount(evaluation.rawAmount, decimalsForFallback, {
+    maxFractionDigits: decimalsForFallback,
+    trim: true,
+  });
 
   const normalizedAmount =
-    evaluation.normalizedAmount ??
-    (evaluation.kind === "max" ? "max" : fallbackFormatted);
+    evaluation.normalizedAmount ?? (evaluation.kind === "max" ? "max" : fallbackFormatted);
 
   let displayAmount = evaluation.displayAmount;
   if (!displayAmount) {
     if (evaluation.kind === "max" && normalizedAmount === "max") {
       displayAmount = "max";
     } else if (params.assetTicker === "SOL") {
-      displayAmount =
-        params.formatSol?.(evaluation.rawAmount) ?? fallbackFormatted;
+      displayAmount = params.formatSol?.(evaluation.rawAmount) ?? fallbackFormatted;
     } else {
       displayAmount =
-        params.formatToken?.(evaluation.rawAmount, decimalsForFallback) ??
-        fallbackFormatted;
+        params.formatToken?.(evaluation.rawAmount, decimalsForFallback) ?? fallbackFormatted;
     }
   }
 

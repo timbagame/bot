@@ -13,11 +13,7 @@ import {
 // ERROR HANDLING UTILITIES
 // ================================
 
-type TelegramContextLike =
-  | Pick<Context, "from">
-  | { from?: { id?: unknown } }
-  | null
-  | undefined;
+type TelegramContextLike = Pick<Context, "from"> | { from?: { id?: unknown } } | null | undefined;
 
 const DEFAULT_TELEGRAM_ID_FALLBACK = 0n;
 
@@ -30,7 +26,7 @@ const DEFAULT_TELEGRAM_ID_FALLBACK = 0n;
  */
 export const getTelegramId = (
   ctx: TelegramContextLike,
-  fallback: bigint = DEFAULT_TELEGRAM_ID_FALLBACK
+  fallback: bigint = DEFAULT_TELEGRAM_ID_FALLBACK,
 ): bigint => {
   const rawId = ctx?.from?.id;
 
@@ -88,14 +84,13 @@ export class MissingTelegramIdError extends Error {
 export const MISSING_TELEGRAM_ID_MESSAGE =
   "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
 
-const MISSING_TELEGRAM_ID_CALLBACK_MESSAGE =
-  "❌ Unable to resolve Telegram identity";
+const MISSING_TELEGRAM_ID_CALLBACK_MESSAGE = "❌ Unable to resolve Telegram identity";
 
 type MissingTelegramIdHandler = (message: string) => Promise<void> | void;
 
 const notifyMissingTelegramId = async (
   ctx: Pick<Context, "reply" | "api" | "chat" | "message"> | any,
-  message: string
+  message: string,
 ): Promise<void> => {
   try {
     if (typeof ctx?.reply === "function") {
@@ -120,7 +115,7 @@ const notifyMissingTelegramId = async (
 export const getRequiredTelegramIdForContext = async (
   ctx: Context,
   contextDescription: string,
-  options: { onMissing?: MissingTelegramIdHandler } = {}
+  options: { onMissing?: MissingTelegramIdHandler } = {},
 ): Promise<bigint | null> => {
   try {
     return requireTelegramId(ctx, contextDescription);
@@ -144,20 +139,16 @@ export const getRequiredTelegramIdForContext = async (
 
 export const requireTelegramId = (
   ctx: TelegramContextLike,
-  contextDescription: string = "operation"
+  contextDescription: string = "operation",
 ): bigint => {
   const id = getTelegramId(ctx);
   if (id === 0n) {
-    throw new MissingTelegramIdError(
-      `Missing Telegram user id for ${contextDescription}`
-    );
+    throw new MissingTelegramIdError(`Missing Telegram user id for ${contextDescription}`);
   }
   return id;
 };
 
-export const getTelegramIdString = (
-  ctx: TelegramContextLike
-): string | undefined => {
+export const getTelegramIdString = (ctx: TelegramContextLike): string | undefined => {
   const id = getTelegramId(ctx);
   return id === 0n ? undefined : id.toString();
 };
@@ -176,8 +167,7 @@ export const containsBalanceInfo = (text: string): boolean => {
     return true;
   }
 
-  const youHaveBalancePattern =
-    /you have\s+[0-9][\d.,]*\s+(?:sol|lamports?|tokens?|coins?)/i;
+  const youHaveBalancePattern = /you have\s+[0-9][\d.,]*\s+(?:sol|lamports?|tokens?|coins?)/i;
   if (youHaveBalancePattern.test(normalized)) {
     return true;
   }
@@ -187,10 +177,8 @@ export const containsBalanceInfo = (text: string): boolean => {
     return true;
   }
 
-  const hasNotEnoughPrefix =
-    normalized.includes("not enough") && /you have\s+[0-9]/i.test(text);
-  const hasNeedQualifier =
-    /you have\s+[0-9]/i.test(text) && /need/i.test(text);
+  const hasNotEnoughPrefix = normalized.includes("not enough") && /you have\s+[0-9]/i.test(text);
+  const hasNeedQualifier = /you have\s+[0-9]/i.test(text) && /need/i.test(text);
 
   return hasNotEnoughPrefix || hasNeedQualifier;
 };
@@ -202,7 +190,7 @@ export const containsBalanceInfo = (text: string): boolean => {
 export const createMessageEditAdapter = <T extends Context>(
   ctx: T,
   messageId: number,
-  chatId?: number
+  chatId?: number,
 ): T => {
   const targetChatId = chatId ?? ctx.chat?.id;
   if (typeof targetChatId !== "number") {
@@ -246,7 +234,7 @@ export const categorizeError = (error: any): CallbackError => {
 export const safeAnswerCallbackQuery = async (
   ctx: any,
   text?: string,
-  options: { useQueue?: boolean } = {}
+  options: { useQueue?: boolean } = {},
 ): Promise<void> => {
   const callbackId = ctx?.callbackQuery?.id;
   const chatId = ctx?.chat?.id;
@@ -263,7 +251,7 @@ export const safeAnswerCallbackQuery = async (
   if (chatId && rateLimiter.isLimited(chatId)) {
     const waitMs = rateLimiter.getWaitTimeMs(chatId);
     console.warn(
-      `⏳ Chat ${chatId} is rate limited, skipping callback answer (${Math.ceil(waitMs / 1000)}s remaining)`
+      `⏳ Chat ${chatId} is rate limited, skipping callback answer (${Math.ceil(waitMs / 1000)}s remaining)`,
     );
     return;
   }
@@ -298,9 +286,7 @@ export const safeAnswerCallbackQuery = async (
       const retryAfter = extractRetryAfter(error);
       if (retryAfter !== null && chatId) {
         rateLimiter.recordRateLimit(retryAfter, chatId);
-        console.warn(
-          `🚫 Chat ${chatId} rate limited for ${retryAfter}s on callback answer`
-        );
+        console.warn(`🚫 Chat ${chatId} rate limited for ${retryAfter}s on callback answer`);
       }
       return;
     }
@@ -308,8 +294,7 @@ export const safeAnswerCallbackQuery = async (
     // Handle expired callback queries gracefully
     if (isCallbackExpiredError(error)) {
       const rawText = text ?? "";
-      const preview =
-        rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
+      const preview = rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
       console.warn(`⚠️ Callback query timeout: ${preview}`);
       return;
     }
@@ -321,8 +306,7 @@ export const safeAnswerCallbackQuery = async (
       error?.error_code === 400
     ) {
       const rawText = text ?? "";
-      const preview =
-        rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
+      const preview = rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
       console.warn(`⚠️ Callback query timeout: ${preview}`);
       return;
     }
@@ -336,16 +320,13 @@ export const safeAnswerCallbackQuery = async (
  * Uses the callback queue to prevent burst of answers causing rate limits.
  * Falls back to immediate answer if queue is not initialized.
  */
-export const safeAnswerCallbackQueryThrottled = async (
-  ctx: any,
-  text?: string
-): Promise<void> => {
+export const safeAnswerCallbackQueryThrottled = async (ctx: any, text?: string): Promise<void> => {
   await safeAnswerCallbackQuery(ctx, text, { useQueue: true });
 };
 
 export const respondMissingIdentity = async (
   ctx: any,
-  options: { logMessage?: string } = {}
+  options: { logMessage?: string } = {},
 ): Promise<void> => {
   if (options.logMessage) {
     console.warn(options.logMessage);
@@ -362,18 +343,15 @@ export type ResolveTelegramIdOptions = {
 export const resolveTelegramIdOrRespond = async (
   ctx: Context,
   contextDescription: string,
-  options: ResolveTelegramIdOptions = {}
+  options: ResolveTelegramIdOptions = {},
 ): Promise<bigint | null> => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    contextDescription,
-    { onMissing: options.onMissing }
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, contextDescription, {
+    onMissing: options.onMissing,
+  });
 
   if (telegramId == null) {
     await respondMissingIdentity(ctx, {
-      logMessage:
-        options.logMessage ?? `Missing Telegram ID for ${contextDescription}`,
+      logMessage: options.logMessage ?? `Missing Telegram ID for ${contextDescription}`,
     });
     return null;
   }
@@ -388,7 +366,7 @@ export const handleCallbackErrorSafe = async (
   ctx: any,
   error: any,
   action: string,
-  options: ErrorHandlingOptions = {}
+  options: ErrorHandlingOptions = {},
 ): Promise<void> => {
   console.error(`Error in callback ${action}:`, error);
 

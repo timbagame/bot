@@ -1,19 +1,11 @@
 import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
-import {
-  Connection,
-  Keypair,
-  TransactionMessage,
-  VersionedTransaction,
-} from "@solana/web3.js";
+import { Connection, Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
 import type { JupiterUltraOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
-import {
-  calculateRouteCosts,
-  DEFAULT_ROUTE_LAMPORTS_PADDING,
-} from "../src/utils/swap/route-cost";
+import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "../src/utils/swap/route-cost";
 
 const buildBase64Tx = (payer: Keypair): string => {
   const message = new TransactionMessage({
@@ -37,7 +29,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     };
 
     await expect(
-      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", [user])
+      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", [user]),
     ).rejects.toThrow(/Failed to execute Jupiter transaction/);
   });
 
@@ -53,9 +45,9 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
       errorMessage: "Minimum $10 for gasless",
     });
 
-    await expect(
-      (sm as any).executeJupiterTransaction(base64Tx, "req-2", [user])
-    ).rejects.toThrow("Minimum $10 for gasless");
+    await expect((sm as any).executeJupiterTransaction(base64Tx, "req-2", [user])).rejects.toThrow(
+      "Minimum $10 for gasless",
+    );
   });
 });
 
@@ -64,7 +56,7 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
     (sm as any).createTokenAccountsIfNeeded = async () => [];
@@ -111,8 +103,8 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
           inputTicker: "SOL",
           outputTicker: "USDC",
         },
-        quote
-      )
+        quote,
+      ),
     ).resolves.toBe("SIG");
   });
 });
@@ -123,14 +115,14 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       getConnection: () =>
         ({
           getBalance: async () => balance,
-        } as unknown as Connection),
+        }) as unknown as Connection,
       formatSolBalance: (lamports: number) => `${lamports} lamports`,
     } as unknown as WalletManager;
     return new SwapManager({} as Connection, walletStub);
   };
 
   const buildBaseOrder = (
-    overrides?: Partial<JupiterUltraOrderResponse>
+    overrides?: Partial<JupiterUltraOrderResponse>,
   ): JupiterUltraOrderResponse => ({
     mode: "ExactIn",
     inputMint: "So11111111111111111111111111111111111111112",
@@ -169,8 +161,8 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey
-      )
+        Keypair.generate().publicKey,
+      ),
     ).resolves.toBeUndefined();
 
     const helperCosts = calculateRouteCosts(order, {
@@ -205,11 +197,9 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey
-      )
-    ).rejects.toThrow(
-      new RegExp(`${helperCosts.requiredLamports} lamports`)
-    );
+        Keypair.generate().publicKey,
+      ),
+    ).rejects.toThrow(new RegExp(`${helperCosts.requiredLamports} lamports`));
   });
 
   test("throws when admin balance is insufficient for rent-heavy padded requirement", async () => {
@@ -229,18 +219,14 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       requiredStrategy: "sum",
     });
 
-    const swapManager = buildSwapManagerWithBalance(
-      helperCosts.requiredLamports - 1
-    );
+    const swapManager = buildSwapManagerWithBalance(helperCosts.requiredLamports - 1);
 
     await expect(
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey
-      )
-    ).rejects.toThrow(
-      new RegExp(`${helperCosts.requiredLamports} lamports`)
-    );
+        Keypair.generate().publicKey,
+      ),
+    ).rejects.toThrow(new RegExp(`${helperCosts.requiredLamports} lamports`));
   });
 });

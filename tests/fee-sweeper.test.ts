@@ -11,16 +11,14 @@ import {
 import type { SwapRequest } from "../src/utils/swap/types";
 import { WSOL_MINT, parseEnableFeeSweeperFlag } from "../src/utils/constants";
 
-type TestPriceResolver = (input: {
-  tokenMint: string;
-  tokenTicker?: string;
-}) => Promise<{
+type TestPriceResolver = (input: { tokenMint: string; tokenTicker?: string }) => Promise<{
   price?: number;
   identifier?: string;
   resolvedAt?: number;
 } | null>;
 
-const buildPriceResolver = (price: number, identifier: string = "AAA") =>
+const buildPriceResolver =
+  (price: number, identifier: string = "AAA") =>
   async () => ({
     price,
     identifier,
@@ -28,7 +26,7 @@ const buildPriceResolver = (price: number, identifier: string = "AAA") =>
   });
 
 const createSwapManagerFactory = (swapRequests: SwapRequest[]) => () => ({
-  getQuote: async (request: SwapRequest) => ({ request } as any),
+  getQuote: async (request: SwapRequest) => ({ request }) as any,
   executeJupiterSwap: async (request: SwapRequest) => {
     swapRequests.push(request);
     return "sig";
@@ -50,8 +48,7 @@ const buildConnection = () =>
 
 describe("fee sweeper helpers", () => {
   const wallet = {
-    formatTokenBalance: (raw: number, decimals: number) =>
-      (raw / 10 ** decimals).toFixed(decimals),
+    formatTokenBalance: (raw: number, decimals: number) => (raw / 10 ** decimals).toFixed(decimals),
   } as any;
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
@@ -62,7 +59,7 @@ describe("fee sweeper helpers", () => {
       tokenConfig,
       2_000_000_000n,
       9,
-      priceResolver as any
+      priceResolver as any,
     );
 
     expect(result.shouldWithdraw).toBe(false);
@@ -77,7 +74,7 @@ describe("fee sweeper helpers", () => {
       tokenConfig,
       1_000_000_000n,
       9,
-      priceResolver as any
+      priceResolver as any,
     );
 
     expect(result.shouldWithdraw).toBe(true);
@@ -94,7 +91,7 @@ describe("token to SOL sweep helpers", () => {
       tokenConfig as any,
       2_000_000_000n,
       9,
-      priceResolver as any
+      priceResolver as any,
     );
 
     expect(result.shouldSwap).toBe(false);
@@ -107,7 +104,7 @@ describe("token to SOL sweep helpers", () => {
       tokenConfig as any,
       2_000_000_000n,
       9,
-      priceResolver as any
+      priceResolver as any,
     );
 
     expect(result.shouldSwap).toBe(true);
@@ -128,9 +125,7 @@ describe("WSOL unwrap helper", () => {
         !Number.isFinite(amountLamports) ||
         !Number.isSafeInteger(amountLamports)
       ) {
-        throw new Error(
-          "Invalid amountLamports: must be a finite, safe integer number"
-        );
+        throw new Error("Invalid amountLamports: must be a finite, safe integer number");
       }
       onUnwrap?.(amountLamports);
       return { signature: "sig", amountLamports, remainingLamports: 0 };
@@ -147,7 +142,7 @@ describe("WSOL unwrap helper", () => {
       owner.publicKey,
       payer,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(unwrapCalls).toHaveLength(0);
@@ -163,7 +158,7 @@ describe("WSOL unwrap helper", () => {
       owner.publicKey,
       payer,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(unwrapCalls).toHaveLength(0);
@@ -179,7 +174,7 @@ describe("WSOL unwrap helper", () => {
       owner.publicKey,
       payer,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(unwrapCalls).toEqual([6_000_000_000]);
@@ -195,7 +190,7 @@ describe("WSOL unwrap helper", () => {
       owner.publicKey,
       payer,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(unwrapCalls).toHaveLength(0);
@@ -226,11 +221,8 @@ describe("sweeping tokens to SOL", () => {
     const swapRequests: SwapRequest[] = [];
     const swapManagerFactory = createSwapManagerFactory(swapRequests);
     const priceResolver = buildPriceResolver(1);
-    const balanceFetcher = async (
-      _connection: any,
-      _owner: PublicKey,
-      mint: PublicKey
-    ) => balances[mint.toBase58()] ?? 0n;
+    const balanceFetcher = async (_connection: any, _owner: PublicKey, mint: PublicKey) =>
+      balances[mint.toBase58()] ?? 0n;
 
     await __test_sweepTokensToSol(
       wallet,
@@ -239,7 +231,7 @@ describe("sweeping tokens to SOL", () => {
       swapManagerFactory,
       15,
       priceResolver,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(swapRequests.map((r) => r.inputMint)).toEqual([tokenA.mint]);
@@ -247,9 +239,7 @@ describe("sweeping tokens to SOL", () => {
 
   test("skips swaps when SOL price is unavailable", async () => {
     const admin = Keypair.generate();
-    const tokens = [
-      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
-    ];
+    const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
       getAdminKeypair: () => admin,
@@ -273,7 +263,7 @@ describe("sweeping tokens to SOL", () => {
       swapManagerFactory,
       15,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(swapRequests).toHaveLength(0);
@@ -281,9 +271,7 @@ describe("sweeping tokens to SOL", () => {
 
   test("skips swaps when SOL balance meets USD threshold", async () => {
     const admin = Keypair.generate();
-    const tokens = [
-      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
-    ];
+    const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
       getAdminKeypair: () => admin,
@@ -307,7 +295,7 @@ describe("sweeping tokens to SOL", () => {
       swapManagerFactory,
       15,
       priceResolver as any,
-      balanceFetcher
+      balanceFetcher,
     );
 
     expect(swapRequests).toHaveLength(0);
@@ -322,12 +310,11 @@ describe("Jupiter referral sweep threshold", () => {
   } as any;
 
   test("returns 0 when no referral entries configured", async () => {
-    const result = await __test_runReferralSweep(
-      buildConnection(),
-      adminBundle,
-      [],
-      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() })
-    );
+    const result = await __test_runReferralSweep(buildConnection(), adminBundle, [], async () => ({
+      price: 100,
+      identifier: "test",
+      resolvedAt: Date.now(),
+    }));
 
     expect(result).toBe(0);
   });
@@ -337,7 +324,7 @@ describe("Jupiter referral sweep threshold", () => {
       buildConnection(),
       adminBundle,
       [{ mint: "test", referralAccount: undefined as any }],
-      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() })
+      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() }),
     );
 
     expect(result).toBe(0);
@@ -346,7 +333,7 @@ describe("Jupiter referral sweep threshold", () => {
   test("skips claim when total value is below $5 threshold", async () => {
     // We need to mock the ReferralProvider - since we can't easily do that,
     // we'll test via the integration hook instead
-    let claimAttempted = false;
+    const claimAttempted = false;
 
     const result = await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
@@ -416,12 +403,7 @@ describe("Jupiter referral sweep threshold", () => {
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
       tokenFeeProcessor: async () => false,
-      referralSweeper: async (
-        _connection,
-        _adminBundle,
-        _entries,
-        priceResolver
-      ) => {
+      referralSweeper: async (_connection, _adminBundle, _entries, priceResolver) => {
         receivedPriceResolver = priceResolver as TestPriceResolver;
         return 0;
       },
@@ -471,8 +453,7 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
       referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
-      priceResolver: async (_params: { tokenMint?: string }) =>
-        null, // No price data
+      priceResolver: async (_params: { tokenMint?: string }) => null, // No price data
       contextFactory: () =>
         ({
           provider: { connection: {} },
@@ -547,7 +528,7 @@ describe("sweepFees integration hooks", () => {
         _wallet,
         _adminBundle,
         _operatorBundle,
-        config
+        config,
       ) => {
         withdrawn.push(config.ticker);
         return config.ticker === "AAA";

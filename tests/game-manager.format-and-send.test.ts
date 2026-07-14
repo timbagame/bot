@@ -30,13 +30,38 @@ function ctxStub(options: { videoError?: any } = {}) {
 describe("GameManager.formatAndSendGameMessage", () => {
   test("uses video for coinflip and sets active message", async () => {
     resetGM();
-    const program = { account: { game: { fetch: async () => ({ ticketsCount: 0, maxTickets: 2, minTickets: 2, createdAt: 1_000_000, timeout: 60, gameType: { coinflip: {} } }) } } } as any;
-    const gm = GameManager.getInstance(program, { formatTokenBalance: (n: number) => String(n) } as any, {
-      saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
-    } as any);
+    const program = {
+      account: {
+        game: {
+          fetch: async () => ({
+            ticketsCount: 0,
+            maxTickets: 2,
+            minTickets: 2,
+            createdAt: 1_000_000,
+            timeout: 60,
+            gameType: { coinflip: {} },
+          }),
+        },
+      },
+    } as any;
+    const gm = GameManager.getInstance(
+      program,
+      { formatTokenBalance: (n: number) => String(n) } as any,
+      {
+        saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
+      } as any,
+    );
     const ctx = ctxStub();
     const pda = new PublicKey("BPFLoader1111111111111111111111111111111111");
-    await gm.formatAndSendGameMessage(ctx as any, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    await gm.formatAndSendGameMessage(
+      ctx as any,
+      pda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
     expect((ctx as any).__calls[0][0]).toBe("video");
     const saved = gm.getActiveGameMessages(pda.toBase58())?.get(1);
     expect(saved?.messageId).toBe(101);
@@ -45,13 +70,38 @@ describe("GameManager.formatAndSendGameMessage", () => {
 
   test("uses video for giveaway when configured and sets active message", async () => {
     resetGM();
-    const program = { account: { game: { fetch: async () => ({ ticketsCount: 0, maxTickets: 2, minTickets: 2, createdAt: 1_000_000, timeout: 60, gameType: { giveaway: {} } }) } } } as any;
-    const gm = GameManager.getInstance(program, { formatTokenBalance: (n: number) => String(n) } as any, {
-      saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
-    } as any);
+    const program = {
+      account: {
+        game: {
+          fetch: async () => ({
+            ticketsCount: 0,
+            maxTickets: 2,
+            minTickets: 2,
+            createdAt: 1_000_000,
+            timeout: 60,
+            gameType: { giveaway: {} },
+          }),
+        },
+      },
+    } as any;
+    const gm = GameManager.getInstance(
+      program,
+      { formatTokenBalance: (n: number) => String(n) } as any,
+      {
+        saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
+      } as any,
+    );
     const ctx = ctxStub();
     const pda = new PublicKey("BPFLoader2111111111111111111111111111111111");
-    await gm.formatAndSendGameMessage(ctx as any, pda, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
+    await gm.formatAndSendGameMessage(
+      ctx as any,
+      pda,
+      "giveaway",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
     expect((ctx as any).__calls[0][0]).toBe("video");
     const saved = gm.getActiveGameMessages(pda.toBase58())?.get(1);
     expect(saved?.messageId).toBe(101);
@@ -60,13 +110,40 @@ describe("GameManager.formatAndSendGameMessage", () => {
 
   test("falls back to text when coinflip video send fails", async () => {
     resetGM();
-    const program = { account: { game: { fetch: async () => ({ ticketsCount: 0, maxTickets: 2, minTickets: 2, createdAt: 1_000_000, timeout: 60, gameType: { coinflip: {} } }) } } } as any;
-    const gm = GameManager.getInstance(program, { formatTokenBalance: (n: number) => String(n) } as any, {
-      saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
-    } as any);
-    const ctx = ctxStub({ videoError: { description: "Bad Request: wrong file identifier/HTTP URL specified" } });
+    const program = {
+      account: {
+        game: {
+          fetch: async () => ({
+            ticketsCount: 0,
+            maxTickets: 2,
+            minTickets: 2,
+            createdAt: 1_000_000,
+            timeout: 60,
+            gameType: { coinflip: {} },
+          }),
+        },
+      },
+    } as any;
+    const gm = GameManager.getInstance(
+      program,
+      { formatTokenBalance: (n: number) => String(n) } as any,
+      {
+        saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
+      } as any,
+    );
+    const ctx = ctxStub({
+      videoError: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+    });
     const pda = new PublicKey("BPFLoader3111111111111111111111111111111111");
-    await gm.formatAndSendGameMessage(ctx as any, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    await gm.formatAndSendGameMessage(
+      ctx as any,
+      pda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("video");
     expect(calls[1][0]).toBe("text");

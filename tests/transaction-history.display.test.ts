@@ -1,5 +1,9 @@
 import { expect, test, beforeEach } from "bun:test";
-import { TransactionHistory, createTransactionRecord, formatTransactionForDisplay } from "../src/utils/transaction-history";
+import {
+  TransactionHistory,
+  createTransactionRecord,
+  formatTransactionForDisplay,
+} from "../src/utils/transaction-history";
 import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
@@ -17,7 +21,7 @@ test("formatTransactionForDisplay shows icons, link, and amounts", () => {
     "USDC",
     "0.25",
     "25.1",
-    "SUCCESS"
+    "SUCCESS",
   );
   tx.timestamp = now;
 
@@ -39,7 +43,7 @@ test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => 
     "USDC",
     "1",
     "25",
-    "SUCCESS"
+    "SUCCESS",
   );
   devnetTx.network = "devnet";
 
@@ -51,7 +55,7 @@ test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => 
     "BONK",
     "3",
     "9000",
-    "SUCCESS"
+    "SUCCESS",
   );
   testnetTx.network = "testnet";
 
@@ -63,7 +67,7 @@ test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => 
     "SOL",
     "100",
     "4",
-    "SUCCESS"
+    "SUCCESS",
   );
   mainnetTx.network = "mainnet";
 
@@ -79,7 +83,16 @@ test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => 
 
 test("TransactionHistory add + display roundtrip smoke", () => {
   const db = TransactionHistory.getInstance();
-  const rec = createTransactionRecord("u1", "DEPOSIT", "sig-x", "SOL", "SOL", "1.0", undefined, "PENDING");
+  const rec = createTransactionRecord(
+    "u1",
+    "DEPOSIT",
+    "sig-x",
+    "SOL",
+    "SOL",
+    "1.0",
+    undefined,
+    "PENDING",
+  );
   db.addTransaction(rec);
   const list = db.getUserHistory("u1", 1, 0);
   expect(list.length).toBe(1);

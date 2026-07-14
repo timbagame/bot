@@ -10,7 +10,7 @@ import { loadWalletMnemonic } from "../src/utils/secrets";
 async function getTotalTokenBalanceLamports(
   connection: ReturnType<WalletManager["getConnection"]>,
   owner: PublicKey,
-  mint: PublicKey
+  mint: PublicKey,
 ): Promise<bigint> {
   let total = 0n;
   // Fallback to parsed accounts to avoid manual decoding
@@ -30,20 +30,14 @@ async function main() {
   const connection = wallet.getConnection();
   const swapManager = new SwapManager(connection, wallet);
 
-  const tokens = getSupportedTokens().filter(
-    (t) => t.mint !== WSOL_MINT && t.ticker !== "SOL"
-  );
+  const tokens = getSupportedTokens().filter((t) => t.mint !== WSOL_MINT && t.ticker !== "SOL");
 
   console.log("💱 Sweeping eligible token balances to SOL (>$5 value)...\n");
 
   for (const token of tokens) {
     try {
       const mintPubkey = new PublicKey(token.mint);
-      const balance = await getTotalTokenBalanceLamports(
-        connection,
-        admin.publicKey,
-        mintPubkey
-      );
+      const balance = await getTotalTokenBalanceLamports(connection, admin.publicKey, mintPubkey);
       if (balance === 0n) {
         console.log(`ℹ️  No balance for ${token.ticker}; skipping.`);
         continue;
@@ -58,16 +52,16 @@ async function main() {
       if (usdValue < 5) {
         console.log(
           `ℹ️  ${token.ticker} balance ${amountDecimal.toFixed(6)} ≈ $${usdValue.toFixed(
-            2
-          )}; skipping (<$5).`
+            2,
+          )}; skipping (<$5).`,
         );
         continue;
       }
 
       console.log(
         `➡️  Swapping ${amountDecimal.toFixed(6)} ${token.ticker} (~$${usdValue.toFixed(
-          2
-        )}) to SOL`
+          2,
+        )}) to SOL`,
       );
 
       const swapRequest: SwapRequest = {
@@ -91,13 +85,7 @@ async function main() {
 
   console.log("\n🏁 Sweep complete.");
 
-  await unwrapWsolBalance(
-    wallet,
-    connection,
-    admin.publicKey,
-    admin,
-    getUsdPrice
-  );
+  await unwrapWsolBalance(wallet, connection, admin.publicKey, admin, getUsdPrice);
 }
 
 main().catch((error) => {

@@ -1,7 +1,7 @@
 import type { JupiterQuoteRequest, JupiterQuoteResponse } from "../../src/utils/jupiter";
 
 export const makeJupiterParams = (
-  overrides: Partial<JupiterQuoteRequest> = {}
+  overrides: Partial<JupiterQuoteRequest> = {},
 ): JupiterQuoteRequest => ({
   inputMint: "MintA",
   outputMint: "MintB",
@@ -11,7 +11,7 @@ export const makeJupiterParams = (
 
 export const makeJupiterQuote = (
   request: JupiterQuoteRequest,
-  overrides: Partial<JupiterQuoteResponse> = {}
+  overrides: Partial<JupiterQuoteResponse> = {},
 ): JupiterQuoteResponse => ({
   inputMint: request.inputMint,
   inAmount: request.amount,
@@ -29,7 +29,7 @@ export const makeJupiterQuote = (
 
 export const makeJupiterOrderResponse = (
   quote: JupiterQuoteRequest,
-  overrides: Partial<JupiterQuoteResponse> = {}
+  overrides: Partial<JupiterQuoteResponse> = {},
 ): Response => {
   const body = makeJupiterQuote(quote, overrides);
   return new Response(JSON.stringify(body), { status: 200, statusText: "OK" });

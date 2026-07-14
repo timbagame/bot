@@ -76,7 +76,7 @@ export class GameDatabase extends BaseDatabase {
           FOREIGN KEY (game_address) REFERENCES games(game_address)
         )`,
       ],
-      "Game"
+      "Game",
     );
 
     this.ensureGameParticipantSchema();
@@ -100,21 +100,16 @@ export class GameDatabase extends BaseDatabase {
     chatId?: number,
     timeoutSeconds?: number,
     expiresAtMs?: number,
-    createdAtMsOverride?: number
+    createdAtMsOverride?: number,
   ): void {
     const normalizedTimeoutSeconds =
-      typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds)
-        ? timeoutSeconds
-        : null;
+      typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds) ? timeoutSeconds : null;
 
     const normalizedExpiresAtMs =
-      typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)
-        ? expiresAtMs
-        : null;
+      typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs) ? expiresAtMs : null;
 
     const normalizedCreatedAtMs =
-      typeof createdAtMsOverride === "number" &&
-      Number.isFinite(createdAtMsOverride)
+      typeof createdAtMsOverride === "number" && Number.isFinite(createdAtMsOverride)
         ? createdAtMsOverride
         : Date.now();
 
@@ -147,7 +142,7 @@ export class GameDatabase extends BaseDatabase {
         normalizedTimeoutSeconds,
         normalizedExpiresAtMs,
       ],
-      "saving game"
+      "saving game",
     );
   }
 
@@ -155,7 +150,7 @@ export class GameDatabase extends BaseDatabase {
     return this.get<GameData>(
       "SELECT * FROM games WHERE game_address = ?",
       [gameAddress],
-      "getting game"
+      "getting game",
     );
   }
 
@@ -163,7 +158,7 @@ export class GameDatabase extends BaseDatabase {
     gameAddress: string,
     winnerAddress: string,
     completedAt?: number,
-    totalPot?: number
+    totalPot?: number,
   ): void {
     const timestamp = completedAt || Date.now();
     const params: any[] = [winnerAddress, timestamp, "completed"];
@@ -177,11 +172,7 @@ export class GameDatabase extends BaseDatabase {
     sql += " WHERE game_address = ?";
     params.push(gameAddress);
 
-    this.run(
-      sql,
-      params,
-      "completing game"
-    );
+    this.run(sql, params, "completing game");
   }
 
   public getAllGames(): GameData[] {
@@ -193,7 +184,10 @@ export class GameDatabase extends BaseDatabase {
    * @param daysOld Number of days old (default: 30)
    * @returns Object with counts of deleted games and participants
    */
-  public cleanupOldGames(daysOld: number = 30): { gamesDeleted: number; participantsDeleted: number } {
+  public cleanupOldGames(daysOld: number = 30): {
+    gamesDeleted: number;
+    participantsDeleted: number;
+  } {
     const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
 
     // First delete participants for old games (due to FK constraint)
@@ -203,14 +197,14 @@ export class GameDatabase extends BaseDatabase {
          SELECT game_address FROM games WHERE created_at < ?
        )`,
       [cutoffMs],
-      "deleting old game participants"
+      "deleting old game participants",
     );
 
     // Then delete the games themselves
     const gamesResult = this.run(
       "DELETE FROM games WHERE created_at < ?",
       [cutoffMs],
-      "deleting old games"
+      "deleting old games",
     );
 
     const participantsDeleted = participantsResult?.changes ?? 0;
@@ -218,7 +212,7 @@ export class GameDatabase extends BaseDatabase {
 
     if (gamesDeleted > 0 || participantsDeleted > 0) {
       console.log(
-        `🧹 Cleaned up ${gamesDeleted} games and ${participantsDeleted} participants older than ${daysOld} days`
+        `🧹 Cleaned up ${gamesDeleted} games and ${participantsDeleted} participants older than ${daysOld} days`,
       );
     }
 
@@ -228,7 +222,7 @@ export class GameDatabase extends BaseDatabase {
   public getGamesExpiringBefore(
     cutoffMs: number,
     limit = 25,
-    excludeAddresses: string[] = []
+    excludeAddresses: string[] = [],
   ): GameData[] {
     const expireClause = `status != 'completed' AND expires_at IS NOT NULL AND expires_at <= ?`;
     const excludeClause = excludeAddresses.length
@@ -241,7 +235,7 @@ export class GameDatabase extends BaseDatabase {
     const expiring = this.all<GameData>(
       `SELECT * FROM games WHERE ${expireClause} ${excludeClause} ORDER BY expires_at ASC LIMIT ?`,
       expiringParams,
-      "getting expiring games"
+      "getting expiring games",
     );
 
     if (expiring.length >= limit) {
@@ -264,7 +258,7 @@ export class GameDatabase extends BaseDatabase {
     const fallback = this.all<GameData>(
       `SELECT * FROM games WHERE status != 'completed' AND expires_at IS NULL ${fallbackExcludeClause} ORDER BY created_at ASC LIMIT ?`,
       fallbackParams,
-      "getting games missing expiration"
+      "getting games missing expiration",
     );
 
     return expiring.concat(fallback);
@@ -274,13 +268,13 @@ export class GameDatabase extends BaseDatabase {
     const result = this.get<{ creator_telegram_id: string }>(
       "SELECT creator_telegram_id FROM games WHERE game_address = ?",
       [gameAddress],
-      "getting creator telegram ID"
+      "getting creator telegram ID",
     );
     return result?.creator_telegram_id ?? null;
   }
 
   public getCreatorInfo(
-    gameAddress: string
+    gameAddress: string,
   ): { telegramId: string | null; publicKey: string | null } | null {
     const result = this.get<{
       creator_telegram_id: string;
@@ -293,7 +287,7 @@ export class GameDatabase extends BaseDatabase {
         WHERE g.game_address = ?
       `,
       [gameAddress],
-      "getting creator info"
+      "getting creator info",
     );
 
     if (!result) {
@@ -310,28 +304,24 @@ export class GameDatabase extends BaseDatabase {
     const result = this.get(
       "SELECT 1 FROM games WHERE game_address = ? LIMIT 1",
       [gameAddress],
-      "checking if game exists"
+      "checking if game exists",
     );
     return result !== null;
   }
 
-  public saveGameMessage(
-    gameAddress: string,
-    messageId: number,
-    chatId: number
-  ): void {
+  public saveGameMessage(gameAddress: string, messageId: number, chatId: number): void {
     // Legacy update - only update message_id, preserve origin chat_id
     this.run(
       "UPDATE games SET message_id = ? WHERE game_address = ?",
       [messageId, gameAddress],
-      "saving game message"
+      "saving game message",
     );
 
     // New table upsert
     this.run(
       "INSERT OR REPLACE INTO game_messages (game_address, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)",
       [gameAddress, chatId, messageId, Date.now()],
-      "saving game message to new table"
+      "saving game message to new table",
     );
   }
 
@@ -339,7 +329,7 @@ export class GameDatabase extends BaseDatabase {
     const rows = this.all<{ chat_id: number; message_id: number }>(
       "SELECT chat_id, message_id FROM game_messages WHERE game_address = ?",
       [gameAddress],
-      "getting game messages"
+      "getting game messages",
     );
     return rows.map((r) => ({ chatId: r.chat_id, messageId: r.message_id }));
   }
@@ -349,12 +339,12 @@ export class GameDatabase extends BaseDatabase {
     this.run(
       "UPDATE games SET message_id = NULL WHERE game_address = ?",
       [gameAddress],
-      "clearing game message"
+      "clearing game message",
     );
     this.run(
       "DELETE FROM game_messages WHERE game_address = ?",
       [gameAddress],
-      "clearing all game messages"
+      "clearing all game messages",
     );
   }
 
@@ -362,14 +352,12 @@ export class GameDatabase extends BaseDatabase {
   public savePlayerMapping(
     publicKey: string,
     telegramId: string,
-    displayName?: string | null
+    displayName?: string | null,
   ): void {
     const normalizedKey = typeof publicKey === "string" ? publicKey.trim() : "";
     const normalizedId = typeof telegramId === "string" ? telegramId.trim() : "";
     const normalizedDisplay =
-      typeof displayName === "string" && displayName.trim().length > 0
-        ? displayName.trim()
-        : null;
+      typeof displayName === "string" && displayName.trim().length > 0 ? displayName.trim() : null;
 
     if (!normalizedKey || !normalizedId) {
       return;
@@ -378,23 +366,20 @@ export class GameDatabase extends BaseDatabase {
     this.run(
       "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id, display_name) VALUES (?, ?, ?)",
       [normalizedKey, normalizedId, normalizedDisplay],
-      "saving player mapping"
+      "saving player mapping",
     );
   }
 
   public saveUsernameMapping(
     normalizedUsername: string,
     telegramId: string,
-    displayName?: string | null
+    displayName?: string | null,
   ): void {
-    const normalized = typeof normalizedUsername === "string"
-      ? normalizedUsername.trim().toLowerCase()
-      : "";
+    const normalized =
+      typeof normalizedUsername === "string" ? normalizedUsername.trim().toLowerCase() : "";
     const trimmedId = typeof telegramId === "string" ? telegramId.trim() : "";
     const trimmedDisplay =
-      typeof displayName === "string" && displayName.trim().length > 0
-        ? displayName.trim()
-        : null;
+      typeof displayName === "string" && displayName.trim().length > 0 ? displayName.trim() : null;
 
     if (!normalized || !/^\d+$/.test(trimmedId)) {
       return;
@@ -410,7 +395,7 @@ export class GameDatabase extends BaseDatabase {
           updated_at = excluded.updated_at
       `,
       [normalized, trimmedId, trimmedDisplay, Date.now()],
-      "saving username mapping"
+      "saving username mapping",
     );
   }
 
@@ -427,7 +412,7 @@ export class GameDatabase extends BaseDatabase {
     const mapping = this.get<{ telegram_id: string }>(
       "SELECT telegram_id FROM player_mappings WHERE public_key = ?",
       [trimmed],
-      "getting player telegram ID"
+      "getting player telegram ID",
     );
 
     if (mapping?.telegram_id) {
@@ -449,7 +434,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT 1
       `,
       [trimmed],
-      "getting player telegram ID from participants"
+      "getting player telegram ID from participants",
     );
 
     return participantFallback?.telegram_id ?? null;
@@ -459,7 +444,7 @@ export class GameDatabase extends BaseDatabase {
     const result = this.get<{ public_key: string }>(
       "SELECT public_key FROM player_mappings WHERE telegram_id = ?",
       [telegramId],
-      "getting player public key"
+      "getting player public key",
     );
     return result?.public_key ?? null;
   }
@@ -468,7 +453,7 @@ export class GameDatabase extends BaseDatabase {
     const result = this.get<{ display_name: string }>(
       "SELECT display_name FROM player_mappings WHERE telegram_id = ? AND display_name IS NOT NULL ORDER BY ROWID DESC LIMIT 1",
       [telegramId],
-      "getting player display name"
+      "getting player display name",
     );
     const name = result?.display_name?.trim();
     return name && name.length > 0 ? name : null;
@@ -487,7 +472,7 @@ export class GameDatabase extends BaseDatabase {
     const result = this.get<{ telegram_id: string }>(
       "SELECT telegram_id FROM username_mappings WHERE normalized_username = ? LIMIT 1",
       [trimmed],
-      "finding telegram id by normalized username"
+      "finding telegram id by normalized username",
     );
 
     return result?.telegram_id ?? null;
@@ -509,9 +494,7 @@ export class GameDatabase extends BaseDatabase {
       return null;
     }
 
-    const normalizedLookup = this.findTelegramIdByNormalizedUsername(
-      normalized
-    );
+    const normalizedLookup = this.findTelegramIdByNormalizedUsername(normalized);
     if (normalizedLookup) {
       return normalizedLookup;
     }
@@ -528,7 +511,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT 1
       `,
       [withAt],
-      "finding telegram id by username"
+      "finding telegram id by username",
     );
 
     return result?.telegram_id ?? null;
@@ -538,7 +521,7 @@ export class GameDatabase extends BaseDatabase {
     return this.all<PlayerMapping>(
       "SELECT * FROM player_mappings",
       [],
-      "getting all player mappings"
+      "getting all player mappings",
     );
   }
 
@@ -548,7 +531,7 @@ export class GameDatabase extends BaseDatabase {
       const columns = this.all<{ name: string }>(
         "PRAGMA table_info(game_participants)",
         [],
-        "reading game_participants schema"
+        "reading game_participants schema",
       );
       const columnNames = new Set(columns.map((col) => col.name));
 
@@ -556,7 +539,7 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE game_participants ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'",
           [],
-          "adding status column to game_participants"
+          "adding status column to game_participants",
         );
       }
 
@@ -564,7 +547,7 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE game_participants ADD COLUMN join_signature TEXT",
           [],
-          "adding join_signature column to game_participants"
+          "adding join_signature column to game_participants",
         );
       }
 
@@ -572,32 +555,32 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE game_participants ADD COLUMN last_verified_at INTEGER",
           [],
-          "adding last_verified_at column to game_participants"
+          "adding last_verified_at column to game_participants",
         );
       }
 
       this.run(
         "UPDATE game_participants SET status = 'confirmed' WHERE status IS NULL",
         [],
-        "normalizing participant status defaults"
+        "normalizing participant status defaults",
       );
 
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_game_participants_game_status ON game_participants (game_address, status)",
         [],
-        "ensuring game participants index on game and status"
+        "ensuring game participants index on game and status",
       );
 
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_game_participants_game_status_joined ON game_participants (game_address, status, joined_at)",
         [],
-        "ensuring game participants index on game, status, joined_at"
+        "ensuring game participants index on game, status, joined_at",
       );
 
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_game_participants_telegram_status ON game_participants (telegram_id, status)",
         [],
-        "ensuring game participants index on telegram and status"
+        "ensuring game participants index on telegram and status",
       );
     } catch (error) {
       console.error("Failed to ensure game_participants schema:", error);
@@ -609,7 +592,7 @@ export class GameDatabase extends BaseDatabase {
       const columns = this.all<{ name: string }>(
         "PRAGMA table_info(player_mappings)",
         [],
-        "reading player_mappings schema"
+        "reading player_mappings schema",
       );
       const columnNames = new Set(columns.map((col) => col.name));
 
@@ -617,7 +600,7 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE player_mappings ADD COLUMN display_name TEXT",
           [],
-          "adding display_name column to player_mappings"
+          "adding display_name column to player_mappings",
         );
       }
     } catch (error) {
@@ -635,12 +618,12 @@ export class GameDatabase extends BaseDatabase {
           updated_at INTEGER NOT NULL
         )`,
         [],
-        "ensuring username_mappings schema"
+        "ensuring username_mappings schema",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_username_mappings_telegram_id ON username_mappings (telegram_id)",
         [],
-        "creating username_mappings telegram_id index"
+        "creating username_mappings telegram_id index",
       );
     } catch (error) {
       console.error("Failed to ensure username_mappings schema:", error);
@@ -652,7 +635,7 @@ export class GameDatabase extends BaseDatabase {
       const columns = this.all<{ name: string }>(
         "PRAGMA table_info(games)",
         [],
-        "reading games schema"
+        "reading games schema",
       );
       const columnNames = new Set(columns.map((col) => col.name));
 
@@ -660,7 +643,7 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE games ADD COLUMN timeout_seconds INTEGER",
           [],
-          "adding timeout_seconds column to games"
+          "adding timeout_seconds column to games",
         );
       }
 
@@ -668,7 +651,7 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE games ADD COLUMN expires_at INTEGER",
           [],
-          "adding expires_at column to games"
+          "adding expires_at column to games",
         );
       }
 
@@ -676,34 +659,34 @@ export class GameDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE games ADD COLUMN total_amount INTEGER",
           [],
-          "adding total_amount column to games"
+          "adding total_amount column to games",
         );
       }
 
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_chat_id ON games (chat_id)",
         [],
-        "ensuring games chat_id index"
+        "ensuring games chat_id index",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_creator_id ON games (creator_telegram_id)",
         [],
-        "ensuring games creator index"
+        "ensuring games creator index",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_winner_address ON games (winner_address)",
         [],
-        "ensuring games winner address index"
+        "ensuring games winner address index",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_expires_at ON games (expires_at)",
         [],
-        "ensuring games expires_at index"
+        "ensuring games expires_at index",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_status_expires_created ON games (status, expires_at, created_at)",
         [],
-        "ensuring games status/expires_at/created_at index"
+        "ensuring games status/expires_at/created_at index",
       );
     } catch (error) {
       console.error("Failed to ensure games schema:", error);
@@ -716,7 +699,7 @@ export class GameDatabase extends BaseDatabase {
         this.get<{ count: number }>(
           "SELECT COUNT(*) as count FROM game_messages",
           [],
-          "counting game messages"
+          "counting game messages",
         )?.count ?? 0;
 
       if (count === 0) {
@@ -726,7 +709,7 @@ export class GameDatabase extends BaseDatabase {
            FROM games
            WHERE chat_id IS NOT NULL AND message_id IS NOT NULL`,
           [Date.now()],
-          "migrating game messages"
+          "migrating game messages",
         );
       }
     } catch (error) {
@@ -742,19 +725,19 @@ export class GameDatabase extends BaseDatabase {
       status?: "pending" | "confirmed";
       joinSignature?: string | null;
       lastVerifiedAt?: number | null;
-    }
+    },
   ): void {
     const status = options?.status ?? "confirmed";
     const joinSignature =
       options && Object.prototype.hasOwnProperty.call(options, "joinSignature")
-        ? options.joinSignature ?? null
+        ? (options.joinSignature ?? null)
         : null;
     const lastVerifiedAt =
       options && Object.prototype.hasOwnProperty.call(options, "lastVerifiedAt")
-        ? options.lastVerifiedAt ?? null
+        ? (options.lastVerifiedAt ?? null)
         : status === "confirmed"
-        ? Date.now()
-        : null;
+          ? Date.now()
+          : null;
 
     this.run(
       `
@@ -785,16 +768,8 @@ export class GameDatabase extends BaseDatabase {
             ELSE COALESCE(excluded.last_verified_at, game_participants.last_verified_at)
           END
       `,
-      [
-        gameAddress,
-        telegramId,
-        publicKey,
-        Date.now(),
-        status,
-        joinSignature,
-        lastVerifiedAt,
-      ],
-      "saving game participant"
+      [gameAddress, telegramId, publicKey, Date.now(), status, joinSignature, lastVerifiedAt],
+      "saving game participant",
     );
   }
 
@@ -807,7 +782,7 @@ export class GameDatabase extends BaseDatabase {
         ORDER BY joined_at ASC
       `,
       [gameAddress],
-      "getting game participants"
+      "getting game participants",
     );
     return results.map((r) => r.telegram_id);
   }
@@ -820,7 +795,7 @@ export class GameDatabase extends BaseDatabase {
         WHERE game_address = ? AND status = 'confirmed'
       `,
       [gameAddress],
-      "counting game participants"
+      "counting game participants",
     );
     return result?.count ?? 0;
   }
@@ -840,7 +815,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT ?
       `,
       [gameAddress, normalizedLimit],
-      "getting game participant preview"
+      "getting game participant preview",
     );
     return results.map((r) => r.telegram_id);
   }
@@ -854,7 +829,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT 1
       `,
       [gameAddress, telegramId],
-      "checking game participant membership"
+      "checking game participant membership",
     );
     return Boolean(result?.one);
   }
@@ -874,7 +849,7 @@ export class GameDatabase extends BaseDatabase {
         ORDER BY joined_at ASC
       `,
       [gameAddress],
-      "getting pending game participants"
+      "getting pending game participants",
     );
   }
 
@@ -886,7 +861,7 @@ export class GameDatabase extends BaseDatabase {
         WHERE telegram_id = ? AND status = 'confirmed'
       `,
       [telegramId],
-      "getting player participated games"
+      "getting player participated games",
     );
     return results.map((r) => r.game_address);
   }
@@ -895,7 +870,7 @@ export class GameDatabase extends BaseDatabase {
     this.run(
       "DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?",
       [gameAddress, telegramId],
-      "removing game participant"
+      "removing game participant",
     );
   }
 
@@ -911,7 +886,7 @@ export class GameDatabase extends BaseDatabase {
         AND (g.creator_telegram_id = ? OR gp.telegram_id = ?)
       `,
       [telegramId, telegramId],
-      "getting active games"
+      "getting active games",
     );
   }
 
@@ -926,7 +901,7 @@ export class GameDatabase extends BaseDatabase {
           g.created_at ASC
       `,
       [chatId],
-      "getting active games by chat"
+      "getting active games by chat",
     );
   }
 
@@ -941,7 +916,7 @@ export class GameDatabase extends BaseDatabase {
           g.created_at ASC
       `,
       [],
-      "getting all active public games"
+      "getting all active public games",
     );
   }
 
@@ -953,15 +928,12 @@ export class GameDatabase extends BaseDatabase {
         WHERE creator_telegram_id = ? AND status = 'active'
       `,
       [telegramId],
-      "counting active games by creator"
+      "counting active games by creator",
     );
     return result?.active_count ?? 0;
   }
 
-  public countRecentGamesByCreator(
-    telegramId: string,
-    createdAfter: number
-  ): number {
+  public countRecentGamesByCreator(telegramId: string, createdAfter: number): number {
     const result = this.get<{ recent_count: number }>(
       `
         SELECT COUNT(*) as recent_count
@@ -969,7 +941,7 @@ export class GameDatabase extends BaseDatabase {
         WHERE creator_telegram_id = ? AND created_at >= ?
       `,
       [telegramId, createdAfter],
-      "counting recent games by creator"
+      "counting recent games by creator",
     );
     return result?.recent_count ?? 0;
   }
@@ -987,7 +959,7 @@ export class GameDatabase extends BaseDatabase {
           LIMIT ?
         `,
         [telegramId, limit],
-        "getting recent games without player mapping"
+        "getting recent games without player mapping",
       );
     }
 
@@ -1003,7 +975,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT ?
       `,
       [telegramId, playerKey, telegramId, limit],
-      "getting recent games"
+      "getting recent games",
     );
   }
 
@@ -1013,7 +985,7 @@ export class GameDatabase extends BaseDatabase {
   public updateGameLastSlotWithTimestamp(
     gameAddress: string,
     lastSlot: string,
-    timestamp: number
+    timestamp: number,
   ): boolean {
     try {
       const result = this.run(
@@ -1028,13 +1000,13 @@ export class GameDatabase extends BaseDatabase {
             )
         `,
         [lastSlot, timestamp, gameAddress, timestamp, timestamp, lastSlot],
-        "updating game last slot timestamp"
+        "updating game last slot timestamp",
       );
 
       const didUpdate = typeof result?.changes === "number" && result.changes > 0;
       if (didUpdate && (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true") {
         console.log(
-          `🕐 Updated lastSlot for game ${gameAddress} to ${lastSlot} (timestamp: ${timestamp})`
+          `🕐 Updated lastSlot for game ${gameAddress} to ${lastSlot} (timestamp: ${timestamp})`,
         );
       }
       return didUpdate;
@@ -1057,7 +1029,7 @@ export class GameDatabase extends BaseDatabase {
       }>(
         "SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?",
         [gameAddress],
-        "getting game last slot with timestamp"
+        "getting game last slot with timestamp",
       );
       return {
         lastSlot: result?.last_slot ?? null,
@@ -1076,7 +1048,7 @@ export class GameDatabase extends BaseDatabase {
       const result = this.get<{ last_slot: string }>(
         "SELECT last_slot FROM games WHERE game_address = ?",
         [gameAddress],
-        "getting game last slot"
+        "getting game last slot",
       );
       return result?.last_slot ?? null;
     } catch {
@@ -1092,7 +1064,7 @@ export class GameDatabase extends BaseDatabase {
       return this.all<any>(
         "SELECT * FROM games WHERE creator_telegram_id = ? ORDER BY created_at DESC",
         [telegramId.toString()],
-        "getting games by creator"
+        "getting games by creator",
       );
     } catch {
       return [];
@@ -1114,7 +1086,7 @@ export class GameDatabase extends BaseDatabase {
           ORDER BY g.created_at DESC
         `,
         [telegramId.toString()],
-        "getting games by player"
+        "getting games by player",
       );
     } catch {
       return [];
@@ -1129,7 +1101,7 @@ export class GameDatabase extends BaseDatabase {
       return this.get<any>(
         "SELECT * FROM player_mappings WHERE telegram_id = ?",
         [telegramId],
-        "getting player"
+        "getting player",
       );
     } catch {
       return null;
@@ -1231,7 +1203,7 @@ export class GameDatabase extends BaseDatabase {
         FROM player_game_summary pgs
       `,
         [telegramId, telegramId, telegramId, playerKey ?? ""],
-        "getting player global stats"
+        "getting player global stats",
       );
 
       if (!aggregateRow || aggregateRow.total_games === 0) {
@@ -1330,7 +1302,7 @@ export class GameDatabase extends BaseDatabase {
         GROUP BY COALESCE(pgs.token_mint, 'SOL')
       `,
         [telegramId, telegramId, telegramId, playerKey ?? ""],
-        "getting player won/lost amounts per token"
+        "getting player won/lost amounts per token",
       );
 
       // Build wonAmountByToken and lostAmountByToken maps
@@ -1362,7 +1334,6 @@ export class GameDatabase extends BaseDatabase {
       return this.handleError("getting player global stats", error);
     }
   }
-
 
   /**
    * Get leaderboard statistics for players who have played in a specific chat,
@@ -1402,7 +1373,7 @@ export class GameDatabase extends BaseDatabase {
         )
       `,
         [chatId, chatId],
-        "getting chat member telegram ids"
+        "getting chat member telegram ids",
       );
 
       if (chatMembersRows.length === 0) {
@@ -1514,7 +1485,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT ?
       `,
         [...chatMemberIds, ...chatMemberIds, ...chatMemberIds, limit * 3],
-        "getting leaderboard aggregate stats (global for chat members)"
+        "getting leaderboard aggregate stats (global for chat members)",
       );
 
       if (aggregateRows.length === 0) {
@@ -1621,7 +1592,7 @@ export class GameDatabase extends BaseDatabase {
         GROUP BY pgs.telegram_id, COALESCE(pgs.token_mint, 'SOL')
       `,
         [...telegramIds],
-        "getting leaderboard net amounts per token (global)"
+        "getting leaderboard net amounts per token (global)",
       );
 
       // Build a map of telegram_id -> { token_mint -> net_amount }
@@ -1761,7 +1732,7 @@ export class GameDatabase extends BaseDatabase {
         LIMIT ?
       `,
         [limit * 3], // Fetch extra to ensure we have enough after USD conversion and re-sorting
-        "getting global leaderboard aggregate stats"
+        "getting global leaderboard aggregate stats",
       );
 
       if (aggregateRows.length === 0) {
@@ -1868,7 +1839,7 @@ export class GameDatabase extends BaseDatabase {
         GROUP BY pgs.telegram_id, COALESCE(pgs.token_mint, 'SOL')
       `,
         [...telegramIds],
-        "getting global leaderboard net amounts per token"
+        "getting global leaderboard net amounts per token",
       );
 
       // Build a map of telegram_id -> { token_mint -> net_amount }
@@ -1925,12 +1896,12 @@ export class GameDatabase extends BaseDatabase {
           PRIMARY KEY (chat_id, telegram_id)
         )`,
         [],
-        "ensuring membership cache schema"
+        "ensuring membership cache schema",
       );
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_membership_cache_checked_at ON chat_membership_cache (checked_at)",
         [],
-        "creating membership cache index"
+        "creating membership cache index",
       );
     } catch (error) {
       console.error("Failed to ensure membership cache schema:", error);
@@ -1947,7 +1918,7 @@ export class GameDatabase extends BaseDatabase {
   public getCachedMembership(
     chatId: number,
     telegramId: string,
-    maxAgeMs: number = 30 * 60 * 1000
+    maxAgeMs: number = 30 * 60 * 1000,
   ): boolean | null {
     try {
       const minCheckedAt = Date.now() - maxAgeMs;
@@ -1955,7 +1926,7 @@ export class GameDatabase extends BaseDatabase {
         `SELECT is_member FROM chat_membership_cache
          WHERE chat_id = ? AND telegram_id = ? AND checked_at >= ?`,
         [chatId, telegramId, minCheckedAt],
-        "getting cached membership"
+        "getting cached membership",
       );
       return row ? row.is_member === 1 : null;
     } catch (error) {
@@ -1970,17 +1941,13 @@ export class GameDatabase extends BaseDatabase {
    * @param telegramId The user's telegram ID
    * @param isMember Whether the user is a member
    */
-  public saveMembershipCache(
-    chatId: number,
-    telegramId: string,
-    isMember: boolean
-  ): void {
+  public saveMembershipCache(chatId: number, telegramId: string, isMember: boolean): void {
     try {
       this.run(
         `INSERT OR REPLACE INTO chat_membership_cache (chat_id, telegram_id, is_member, checked_at)
          VALUES (?, ?, ?, ?)`,
         [chatId, telegramId, isMember ? 1 : 0, Date.now()],
-        "saving membership cache"
+        "saving membership cache",
       );
     } catch (error) {
       console.error("Error saving membership cache:", error);
@@ -1997,7 +1964,7 @@ export class GameDatabase extends BaseDatabase {
   public getCachedMemberships(
     chatId: number,
     telegramIds: string[],
-    maxAgeMs: number = 30 * 60 * 1000
+    maxAgeMs: number = 30 * 60 * 1000,
   ): Map<string, boolean> {
     const result = new Map<string, boolean>();
     if (telegramIds.length === 0) return result;
@@ -2009,7 +1976,7 @@ export class GameDatabase extends BaseDatabase {
         `SELECT telegram_id, is_member FROM chat_membership_cache
          WHERE chat_id = ? AND telegram_id IN (${placeholders}) AND checked_at >= ?`,
         [chatId, ...telegramIds, minCheckedAt],
-        "getting cached memberships"
+        "getting cached memberships",
       );
       for (const row of rows) {
         result.set(row.telegram_id, row.is_member === 1);
@@ -2031,7 +1998,7 @@ export class GameDatabase extends BaseDatabase {
       const result = this.run(
         "DELETE FROM chat_membership_cache WHERE checked_at < ?",
         [cutoff],
-        "cleaning up membership cache"
+        "cleaning up membership cache",
       );
       return result.changes;
     } catch (error) {

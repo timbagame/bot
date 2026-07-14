@@ -32,11 +32,11 @@ export type MenuResponseResult = {
 const messageSupportsCaption = (message: any): boolean =>
   Boolean(
     message?.photo ||
-      message?.video ||
-      message?.animation ||
-      message?.document ||
-      message?.audio ||
-      message?.caption !== undefined
+    message?.video ||
+    message?.animation ||
+    message?.document ||
+    message?.audio ||
+    message?.caption !== undefined,
   );
 
 const buildMenuTextOptions = (payload: MenuPayload) => ({
@@ -67,9 +67,7 @@ type EditTarget = {
   attempts: EditTargetAttempt[];
 };
 
-const attemptEdit = async (
-  performEdit: () => Promise<unknown>
-): Promise<EditAttemptResult> => {
+const attemptEdit = async (performEdit: () => Promise<unknown>): Promise<EditAttemptResult> => {
   try {
     await performEdit();
     return { status: "edited" };
@@ -90,7 +88,7 @@ const attemptEdit = async (
 const editMenuMessage = async (
   ctx: Context,
   payload: MenuPayload,
-  kind: MenuEditKind
+  kind: MenuEditKind,
 ): Promise<EditAttemptResult> =>
   attemptEdit(async () => {
     if (kind === "caption") {
@@ -108,7 +106,7 @@ const editMenuMessage = async (
 export const respondWithMenu = async (
   ctx: Context,
   payload: MenuPayload,
-  options: MenuResponseOptions = {}
+  options: MenuResponseOptions = {},
 ): Promise<MenuResponseResult> => {
   const message = ctx.callbackQuery?.message;
   const {
@@ -140,7 +138,7 @@ export const respondWithMenu = async (
                 caption: payload.text,
                 parse_mode: payload.parseMode ?? "HTML",
                 reply_markup: payload.keyboard,
-              })
+              }),
             ),
           shouldContinue: shouldContinueOnMissingContent,
           onFailure: (result) => {
@@ -150,13 +148,13 @@ export const respondWithMenu = async (
             if (isMissingEditableContent(result.error)) {
               console.warn(
                 `${logLabel}: editMessageCaption failed (missing caption), attempting text edit:`,
-                result.error
+                result.error,
               );
               return;
             }
             console.warn(
               `${logLabel}: editMessageCaption failed for explicit target, replying instead:`,
-              result.error
+              result.error,
             );
           },
         });
@@ -169,15 +167,15 @@ export const respondWithMenu = async (
               targetChatId,
               targetMessageId,
               payload.text,
-              buildMenuTextOptions(payload)
-            )
+              buildMenuTextOptions(payload),
+            ),
           ),
         continueOnFailure: false,
         onFailure: (result) => {
           if (result.error) {
             console.warn(
               `${logLabel}: editMessageText failed for explicit target, replying instead:`,
-              result.error
+              result.error,
             );
           }
         },
@@ -202,8 +200,8 @@ export const respondWithMenu = async (
         typeof adapterTarget.chatId === "number"
           ? adapterTarget.chatId
           : typeof ctx.chat?.id === "number"
-          ? ctx.chat.id
-          : null;
+            ? ctx.chat.id
+            : null;
 
       const attempts: EditTargetAttempt[] = [];
 
@@ -214,7 +212,7 @@ export const respondWithMenu = async (
             if (result.error) {
               console.warn(
                 `${logLabel}: adapter editMessageCaption failed, attempting text edit:`,
-                result.error
+                result.error,
               );
             }
           },
@@ -228,7 +226,7 @@ export const respondWithMenu = async (
           if (result.error) {
             console.warn(
               `${logLabel}: adapter editMessageText failed, replying instead:`,
-              result.error
+              result.error,
             );
           }
         },
@@ -241,8 +239,7 @@ export const respondWithMenu = async (
       const supportsCaption = messageSupportsCaption(message);
       const messageId = typeof message?.message_id === "number" ? message.message_id : null;
       const chatId =
-        (message as any)?.chat?.id ??
-        (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
+        (message as any)?.chat?.id ?? (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
 
       const attempts: EditTargetAttempt[] = [];
 
@@ -253,7 +250,7 @@ export const respondWithMenu = async (
             if (result.error) {
               console.warn(
                 `${logLabel}: editMessageCaption failed, attempting text edit:`,
-                result.error
+                result.error,
               );
             }
           },
@@ -291,7 +288,7 @@ export const respondWithMenu = async (
           if (result.error) {
             console.warn(
               `${logLabel}: editMessage throttled, keeping current message`,
-              result.error
+              result.error,
             );
           }
 
@@ -318,25 +315,20 @@ export const respondWithMenu = async (
   }
 
   const replyToId =
-    options.replyToMessageId ??
-    ctx.message?.message_id ??
-    ctx.callbackQuery?.message?.message_id;
+    options.replyToMessageId ?? ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
 
   const sentMessage = await awaitTelegramRetry(() =>
     ctx.reply(payload.text, {
       ...buildMenuTextOptions(payload),
       reply_to_message_id: replyToId ?? undefined,
-    })
+    }),
   );
 
   return {
     messageId:
-      typeof (sentMessage as any)?.message_id === "number"
-        ? (sentMessage as any).message_id
-        : null,
+      typeof (sentMessage as any)?.message_id === "number" ? (sentMessage as any).message_id : null,
     chatId:
-      (sentMessage as any)?.chat?.id ??
-      (typeof ctx.chat?.id === "number" ? ctx.chat.id : null),
+      (sentMessage as any)?.chat?.id ?? (typeof ctx.chat?.id === "number" ? ctx.chat.id : null),
     respondedWithReply: true,
   };
 };

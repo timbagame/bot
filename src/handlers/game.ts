@@ -12,29 +12,20 @@ export type CoinflipDeps = {
   showInteractiveSetup: (
     ctx: Context & { message?: any },
     telegramId: bigint,
-    tokenOverride?: GameTokenOverride
+    tokenOverride?: GameTokenOverride,
   ) => Promise<void>;
   createGameViaCommand: (
     ctx: Context & { message?: any },
     args: string[],
-    telegramId: bigint
+    telegramId: bigint,
   ) => Promise<void>;
-  resolveTokenOverride: (
-    tokenInput: string,
-    chatId?: number
-  ) => Promise<GameTokenOverride | null>;
+  resolveTokenOverride: (tokenInput: string, chatId?: number) => Promise<GameTokenOverride | null>;
 };
 
-export async function handleCoinflipCommand(
-  ctx: Context & { message?: any },
-  deps: CoinflipDeps
-) {
+export async function handleCoinflipCommand(ctx: Context & { message?: any }, deps: CoinflipDeps) {
   // DM games are allowed but will be forced to public visibility
 
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "coinflip command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "coinflip command");
   if (telegramId == null) {
     return;
   }
@@ -48,10 +39,7 @@ export async function handleCoinflipCommand(
   if (args.length === 2) {
     const tokenCandidate = args[1]?.trim();
     if (tokenCandidate && !/^[0-9]+(?:\.[0-9]+)?$/.test(tokenCandidate)) {
-      const override = await deps.resolveTokenOverride(
-        tokenCandidate,
-        ctx.chat?.id
-      );
+      const override = await deps.resolveTokenOverride(tokenCandidate, ctx.chat?.id);
       if (override) {
         await deps.showInteractiveSetup(ctx, telegramId, override);
         return;

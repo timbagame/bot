@@ -2,10 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadOracleApiToken, loadWalletMnemonic, readProtectedSecretFile } from "../src/utils/secrets";
+import {
+  loadOracleApiToken,
+  loadWalletMnemonic,
+  readProtectedSecretFile,
+} from "../src/utils/secrets";
 
 const dirs: string[] = [];
-const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const mnemonic =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 function secretFile(value: string): string {
   const dir = mkdtempSync(join(tmpdir(), "timba-secret-"));
@@ -19,11 +24,15 @@ afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, f
 
 describe("protected secrets", () => {
   test("loads a valid mnemonic without changing derivation input", () => {
-    expect(loadWalletMnemonic({ MNEMONIC_FILE: secretFile(mnemonic) } as NodeJS.ProcessEnv)).toBe(mnemonic);
+    expect(loadWalletMnemonic({ MNEMONIC_FILE: secretFile(mnemonic) } as NodeJS.ProcessEnv)).toBe(
+      mnemonic,
+    );
   });
 
   test("loads the oracle token from a protected file", () => {
-    expect(loadOracleApiToken({ ORACLE_API_TOKEN_FILE: secretFile("token\n") } as NodeJS.ProcessEnv)).toBe("token");
+    expect(
+      loadOracleApiToken({ ORACLE_API_TOKEN_FILE: secretFile("token\n") } as NodeJS.ProcessEnv),
+    ).toBe("token");
   });
 
   test("rejects group-readable files", () => {
@@ -40,6 +49,8 @@ describe("protected secrets", () => {
   });
 
   test("rejects invalid BIP-39 mnemonics", () => {
-    expect(() => loadWalletMnemonic({ MNEMONIC_FILE: secretFile("not a mnemonic") } as NodeJS.ProcessEnv)).toThrow("not valid BIP-39");
+    expect(() =>
+      loadWalletMnemonic({ MNEMONIC_FILE: secretFile("not a mnemonic") } as NodeJS.ProcessEnv),
+    ).toThrow("not valid BIP-39");
   });
 });

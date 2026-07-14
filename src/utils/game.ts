@@ -18,10 +18,7 @@ import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
-import {
-  buildFriendlyShortfallMessage,
-  formatUserFriendlyError,
-} from "./errors";
+import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
   formatCompactTokenDisplay,
@@ -66,6 +63,7 @@ import type {
   GameMessageFormat,
   GameCategory,
   GameType,
+  ParsedAmount,
 } from "../types";
 import type { Timba } from "../../idl/idlType";
 import {
@@ -79,31 +77,18 @@ import {
   sanitizeTelegramDisplayName,
   sanitizeTelegramDisplayNameWithoutMention,
 } from "./telegram-display";
-import {
-  getUsdPrice,
-  rememberPriceLookup,
-  type CachedPriceLookup,
-} from "./price-service";
+import { getUsdPrice, rememberPriceLookup, type CachedPriceLookup } from "./price-service";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
-import {
-  confirmTransactionWithRecovery,
-  type TransactionProbe,
-} from "./transaction-runner";
+import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
-import {
-  DEFAULT_MAINNET_ENDPOINT,
-  resolvePrimaryRpcEndpoint,
-} from "./rpc-endpoints";
-import type { ParsedAmount } from "../types";
+import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
 
 const resolveGameMedia = (
   gameType: string,
   chatId?: number,
-):
-  | { fileId: string; mediaType: "photo" | "video" | "animation" }
-  | undefined => {
+): { fileId: string; mediaType: "photo" | "video" | "animation" } | undefined => {
   const lower = gameType.toLowerCase();
 
   // Check for chat-specific media first.
@@ -132,8 +117,7 @@ const resolveGameMedia = (
       }
 
       if (videoId && videoId.length > 0) {
-        const effectiveType =
-          (mediaType as "photo" | "video" | "animation") || "video";
+        const effectiveType = (mediaType as "photo" | "video" | "animation") || "video";
         return { fileId: videoId, mediaType: effectiveType };
       }
     }
@@ -170,12 +154,10 @@ const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
 // After game creation, the user's native account must retain at least this balance.
 const NATIVE_ACCOUNT_RENT_LAMPORTS = 890_880;
 
-const PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS =
-  process.env.NODE_ENV === "test" ? 1 : 40;
+const PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS = process.env.NODE_ENV === "test" ? 1 : 40;
 const PLAYER_TELEGRAM_ID_POLL_ATTEMPTS = 5;
 
-const isDebugLoggingEnabled =
-  (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true";
+const isDebugLoggingEnabled = (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true";
 
 const debugLog = (...args: unknown[]): void => {
   if (!isDebugLoggingEnabled) {
@@ -210,8 +192,7 @@ type GameTokenContextAccounts = {
 // UTILITY FUNCTIONS
 // ================================
 
-const DEFAULT_FRIENDLY_ERROR_MESSAGE =
-  "❌ Something went wrong. Please try again in a moment.";
+const DEFAULT_FRIENDLY_ERROR_MESSAGE = "❌ Something went wrong. Please try again in a moment.";
 
 const INTEGER_PATTERN = /^-?\d+$/;
 
@@ -310,10 +291,7 @@ const logAndFormatError = async (
   try {
     return await formatUserFriendlyError(error, walletManager);
   } catch (formatError) {
-    console.error(
-      `Failed to format user-friendly error for ${operation}:`,
-      formatError,
-    );
+    console.error(`Failed to format user-friendly error for ${operation}:`, formatError);
     return DEFAULT_FRIENDLY_ERROR_MESSAGE;
   }
 };
@@ -474,9 +452,8 @@ export class GameManager {
   );
   private readonly usernameToIdCacheKeys: string[] = [];
   private readonly messageRecreationLocks = new Set<string>();
-  private readonly gamePriceCache = createExpiringCache<CachedPriceLookup>(
-    TOKEN_PRICE_CACHE_TTL_MS,
-  );
+  private readonly gamePriceCache =
+    createExpiringCache<CachedPriceLookup>(TOKEN_PRICE_CACHE_TTL_MS);
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
@@ -508,10 +485,7 @@ export class GameManager {
     this.inFlightGameCreations.set(telegramId, current - 1);
   }
 
-  private prunePendingCreationRequests(
-    telegramId: string,
-    windowStartMs: number,
-  ): number {
+  private prunePendingCreationRequests(telegramId: string, windowStartMs: number): number {
     const existing = this.pendingCreationRequests.get(telegramId);
     if (!existing || existing.length === 0) {
       return 0;
@@ -531,10 +505,7 @@ export class GameManager {
     return filtered.length;
   }
 
-  private trackPendingCreationRequest(
-    telegramId: string,
-    timestampMs: number,
-  ): void {
+  private trackPendingCreationRequest(telegramId: string, timestampMs: number): void {
     const existing = this.pendingCreationRequests.get(telegramId);
     if (existing) {
       existing.push(timestampMs);
@@ -544,10 +515,7 @@ export class GameManager {
     this.pendingCreationRequests.set(telegramId, [timestampMs]);
   }
 
-  private clearPendingCreationRequest(
-    telegramId: string,
-    timestampMs: number,
-  ): void {
+  private clearPendingCreationRequest(telegramId: string, timestampMs: number): void {
     const existing = this.pendingCreationRequests.get(telegramId);
     if (!existing || existing.length === 0) {
       return;
@@ -573,11 +541,7 @@ export class GameManager {
       if (!current) {
         return true;
       }
-      return (
-        current.program !== program ||
-        current.wallet !== wallet ||
-        current.gameDb !== gameDb
-      );
+      return current.program !== program || current.wallet !== wallet || current.gameDb !== gameDb;
     })();
 
     if (!GameManager.instance || depsChanged) {
@@ -588,10 +552,7 @@ export class GameManager {
           ? maybeGetConnection.call(wallet)
           : ((wallet as any).connection ??
             new Connection(
-              resolvePrimaryRpcEndpoint(
-                process.env.SOLANA_NETWORK,
-                DEFAULT_MAINNET_ENDPOINT,
-              ),
+              resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK, DEFAULT_MAINNET_ENDPOINT),
               "confirmed",
             ));
       const feeBudget = FeeBudgetManager.getInstance(connection);
@@ -622,9 +583,7 @@ export class GameManager {
     GameManager.instanceDeps = undefined;
   }
 
-  public setGameMessageReadyListener(
-    listener: ((gameAddress: string) => void) | undefined,
-  ): void {
+  public setGameMessageReadyListener(listener: ((gameAddress: string) => void) | undefined): void {
     this.gameMessageReadyListener = listener ?? undefined;
   }
 
@@ -633,8 +592,7 @@ export class GameManager {
       return this.cachedConnection;
     }
 
-    const providerConnection = (this.program.provider as any)?.connection as
-      Connection | undefined;
+    const providerConnection = (this.program.provider as any)?.connection as Connection | undefined;
     if (providerConnection) {
       this.cachedConnection = providerConnection;
       return providerConnection;
@@ -684,9 +642,7 @@ export class GameManager {
 
   private setCachedUsername(key: string, value: string | null): void {
     const ttl =
-      value === null
-        ? Math.min(this.usernameCacheTtlMs, 30_000)
-        : this.usernameCacheTtlMs;
+      value === null ? Math.min(this.usernameCacheTtlMs, 30_000) : this.usernameCacheTtlMs;
 
     this.usernameCache.setWithTTL(key, value, ttl);
     this.trackUsernameCacheKey(key);
@@ -711,15 +667,8 @@ export class GameManager {
     }
   }
 
-  private setCachedTelegramIdForUsername(
-    key: string,
-    telegramId: string,
-  ): void {
-    this.normalizedUsernameToIdCache.setWithTTL(
-      key,
-      telegramId,
-      this.usernameCacheTtlMs,
-    );
+  private setCachedTelegramIdForUsername(key: string, telegramId: string): void {
+    this.normalizedUsernameToIdCache.setWithTTL(key, telegramId, this.usernameCacheTtlMs);
     this.trackUsernameToIdCacheKey(key);
   }
 
@@ -742,10 +691,7 @@ export class GameManager {
     return normalized;
   }
 
-  private cacheTelegramIdForUsername(
-    telegramId: string,
-    username: string,
-  ): void {
+  private cacheTelegramIdForUsername(telegramId: string, username: string): void {
     const normalized = this.normalizeUsernameForLookup(username);
     const trimmedId = telegramId.trim();
 
@@ -773,11 +719,7 @@ export class GameManager {
     this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
   }
 
-  public primeUsernameCache(
-    ctx: Context,
-    telegramId: string,
-    username: string | null,
-  ): void {
+  public primeUsernameCache(ctx: Context, telegramId: string, username: string | null): void {
     if (!username) {
       return;
     }
@@ -826,23 +768,16 @@ export class GameManager {
     },
   ): Promise<void> {
     const fallbackChatId =
-      options.chatId ??
-      ctx.chat?.id ??
-      this.gameDb.getGame(gameAddress)?.chat_id ??
-      null;
+      options.chatId ?? ctx.chat?.id ?? this.gameDb.getGame(gameAddress)?.chat_id ?? null;
 
     if (typeof fallbackChatId !== "number" || Number.isNaN(fallbackChatId)) {
-      console.warn(
-        `Unable to recreate Telegram message for ${gameAddress}: missing chat id`,
-      );
+      console.warn(`Unable to recreate Telegram message for ${gameAddress}: missing chat id`);
       return;
     }
 
     // Get the reply_to ID from callback context if not provided
     const replyToMessageId =
-      options.replyToMessageId ??
-      (ctx as any).callbackQuery?.message?.message_id ??
-      undefined;
+      options.replyToMessageId ?? (ctx as any).callbackQuery?.message?.message_id ?? undefined;
 
     try {
       const media = options.gameType
@@ -893,15 +828,9 @@ export class GameManager {
       const sentMessage: any = sendResult.result;
       const usesVideo = sendResult.usedVideo;
 
-      this.gameDb.saveGameMessage(
-        gameAddress,
-        sentMessage.message_id,
-        sentMessage.chat.id,
-      );
+      this.gameDb.saveGameMessage(gameAddress, sentMessage.message_id, sentMessage.chat.id);
 
-      const existing =
-        this.activeGameMessages.get(gameAddress) ??
-        new Map<number, GameMessage>();
+      const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
       existing.set(sentMessage.chat.id, {
         messageId: sentMessage.message_id,
         chatId: sentMessage.chat.id,
@@ -911,10 +840,7 @@ export class GameManager {
 
       this.gameMessageReadyListener?.(gameAddress);
     } catch (sendError) {
-      console.error(
-        `Failed to recreate Telegram message for game ${gameAddress}:`,
-        sendError,
-      );
+      console.error(`Failed to recreate Telegram message for game ${gameAddress}:`, sendError);
     }
   }
 
@@ -930,9 +856,7 @@ export class GameManager {
     return gameVaultPda;
   }
 
-  private async resolveTokenProgramId(
-    tokenMint: PublicKey,
-  ): Promise<PublicKey> {
+  private async resolveTokenProgramId(tokenMint: PublicKey): Promise<PublicKey> {
     const cacheKey = tokenMint.toBase58();
     const cached = this.tokenProgramCache.get(cacheKey);
     if (cached) {
@@ -954,12 +878,7 @@ export class GameManager {
     tokenProgram: PublicKey,
     allowOwnerOffCurve = false,
   ): Promise<PublicKey> {
-    return getAssociatedTokenAddress(
-      tokenMint,
-      owner,
-      allowOwnerOffCurve,
-      tokenProgram,
-    );
+    return getAssociatedTokenAddress(tokenMint, owner, allowOwnerOffCurve, tokenProgram);
   }
 
   private async resolveGameTokenAccounts(tokenMint: PublicKey): Promise<{
@@ -969,17 +888,9 @@ export class GameManager {
     gameTokenAccount: PublicKey;
   }> {
     const tokenProgram = await this.resolveTokenProgramId(tokenMint);
-    const gameToken = PDAManager.getGameTokenPDA(
-      tokenMint,
-      this.program.programId,
-    );
+    const gameToken = PDAManager.getGameTokenPDA(tokenMint, this.program.programId);
     const gameVault = this.getGameVaultPda(tokenMint);
-    const gameTokenAccount = await this.deriveAta(
-      tokenMint,
-      gameVault,
-      tokenProgram,
-      true,
-    );
+    const gameTokenAccount = await this.deriveAta(tokenMint, gameVault, tokenProgram, true);
 
     return {
       tokenProgram,
@@ -1020,16 +931,11 @@ export class GameManager {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
     const tokenAccounts = await this.resolveGameTokenAccounts(tokenMint);
     const gameTokenCtx = this.buildGameTokenContext(tokenMint, tokenAccounts);
-    const playerTokenAccount = await this.deriveAta(
-      tokenMint,
-      player,
-      tokenAccounts.tokenProgram,
-    );
+    const playerTokenAccount = await this.deriveAta(tokenMint, player, tokenAccounts.tokenProgram);
 
     const setupInstructions: TransactionInstruction[] = [];
     try {
-      const accountInfo =
-        await this.getConnection().getAccountInfo(playerTokenAccount);
+      const accountInfo = await this.getConnection().getAccountInfo(playerTokenAccount);
       if (!accountInfo) {
         setupInstructions.push(
           createAssociatedTokenAccountIdempotentInstruction(
@@ -1043,10 +949,7 @@ export class GameManager {
         );
       }
     } catch (error) {
-      console.warn(
-        "Failed to check player ATA existence, defaulting to creation:",
-        error,
-      );
+      console.warn("Failed to check player ATA existence, defaulting to creation:", error);
       setupInstructions.push(
         createAssociatedTokenAccountIdempotentInstruction(
           player,
@@ -1080,11 +983,7 @@ export class GameManager {
     player: PublicKey,
     authority: PublicKey,
   ): Promise<Record<string, unknown>> {
-    const { accounts } = await this.buildJoinAccounts(
-      gamePda,
-      gameAccount,
-      player,
-    );
+    const { accounts } = await this.buildJoinAccounts(gamePda, gameAccount, player);
     accounts["authority"] = authority;
     return accounts;
   }
@@ -1118,21 +1017,16 @@ export class GameManager {
   // ================================
 
   /** Check if a player is in a game via database records */
-  private async isPlayerInGame(
-    gamePda: PublicKey,
-    playerPubkey: PublicKey,
-  ): Promise<boolean> {
+  private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
     const gameAddress = gamePda.toBase58();
     const playerPubkeyStr = playerPubkey.toBase58();
 
     try {
-      const playerTelegramId =
-        this.gameDb.getPlayerTelegramId?.(playerPubkeyStr);
+      const playerTelegramId = this.gameDb.getPlayerTelegramId?.(playerPubkeyStr);
 
       if (playerTelegramId) {
-        const hasParticipant = (this.gameDb as any).isGameParticipant?.bind(
-          this.gameDb,
-        ) as ((game: string, telegramId: string) => boolean) | undefined;
+        const hasParticipant = (this.gameDb as any).isGameParticipant?.bind(this.gameDb) as
+          ((game: string, telegramId: string) => boolean) | undefined;
 
         if (typeof hasParticipant === "function") {
           if (hasParticipant(gameAddress, playerTelegramId)) {
@@ -1146,16 +1040,12 @@ export class GameManager {
         }
       }
     } catch (error) {
-      console.warn(
-        `⚠️ Failed to check local participant records for ${gameAddress}:`,
-        error,
-      );
+      console.warn(`⚠️ Failed to check local participant records for ${gameAddress}:`, error);
     }
 
     try {
       const accountInterface = this.program.account.game as any;
-      const fetchNullable =
-        accountInterface?.fetchNullable?.bind(accountInterface);
+      const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
 
       const gameAccount = fetchNullable
         ? await fetchNullable(gamePda)
@@ -1178,10 +1068,7 @@ export class GameManager {
         }
       });
     } catch (error) {
-      console.warn(
-        `⚠️ Failed to verify on-chain participants for ${gameAddress}:`,
-        error,
-      );
+      console.warn(`⚠️ Failed to verify on-chain participants for ${gameAddress}:`, error);
       return false;
     }
   }
@@ -1205,16 +1092,11 @@ export class GameManager {
 
       const isOnChain = await this.isPlayerInGame(gamePda, playerPubkey);
       if (isOnChain) {
-        this.gameDb.saveGameParticipant(
-          gameAddress,
-          telegramId,
-          playerPubkeyStr,
-          {
-            status: "confirmed",
-            joinSignature: options.joinSignature,
-            lastVerifiedAt: Date.now(),
-          },
-        );
+        this.gameDb.saveGameParticipant(gameAddress, telegramId, playerPubkeyStr, {
+          status: "confirmed",
+          joinSignature: options.joinSignature,
+          lastVerifiedAt: Date.now(),
+        });
         return true;
       }
     }
@@ -1225,12 +1107,8 @@ export class GameManager {
     return false;
   }
 
-  private async reconcilePendingParticipants(
-    gamePda: PublicKey,
-  ): Promise<void> {
-    const getPending = (this.gameDb as any).getPendingParticipants?.bind(
-      this.gameDb,
-    );
+  private async reconcilePendingParticipants(gamePda: PublicKey): Promise<void> {
+    const getPending = (this.gameDb as any).getPendingParticipants?.bind(this.gameDb);
     if (typeof getPending !== "function") {
       return;
     }
@@ -1247,10 +1125,7 @@ export class GameManager {
       joinedAt?: number;
     }>;
 
-    if (
-      !Array.isArray(pendingParticipants) ||
-      pendingParticipants.length === 0
-    ) {
+    if (!Array.isArray(pendingParticipants) || pendingParticipants.length === 0) {
       return;
     }
 
@@ -1258,14 +1133,12 @@ export class GameManager {
     const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
 
     for (const participant of pendingParticipants) {
-      const telegramId =
-        participant.telegram_id ?? participant.telegramId ?? null;
+      const telegramId = participant.telegram_id ?? participant.telegramId ?? null;
       if (!telegramId) {
         continue;
       }
 
-      let playerKeyStr =
-        participant.public_key ?? participant.publicKey ?? null;
+      let playerKeyStr = participant.public_key ?? participant.publicKey ?? null;
       if (!playerKeyStr) {
         playerKeyStr = this.gameDb.getPlayerPublicKey?.(telegramId) ?? null;
       }
@@ -1280,18 +1153,12 @@ export class GameManager {
         continue;
       }
 
-      const joinSignature =
-        participant.join_signature ?? participant.joinSignature ?? null;
+      const joinSignature = participant.join_signature ?? participant.joinSignature ?? null;
 
-      const verified = await this.verifyParticipantJoin(
-        gamePda,
-        playerPubkey,
-        telegramId,
-        {
-          joinSignature,
-          maxAttempts: 2,
-        },
-      );
+      const verified = await this.verifyParticipantJoin(gamePda, playerPubkey, telegramId, {
+        joinSignature,
+        maxAttempts: 2,
+      });
 
       if (!verified) {
         const joinedAt = participant.joined_at ?? participant.joinedAt ?? 0;
@@ -1402,13 +1269,8 @@ export class GameManager {
       );
     }
 
-    if (
-      unmatchedParticipants.size > 0 &&
-      initialUnmatched === unmatchedParticipants.size
-    ) {
-      console.warn(
-        `⚠️ Unable to match any on-chain participants for ${gamePda.toBase58()}`,
-      );
+    if (unmatchedParticipants.size > 0 && initialUnmatched === unmatchedParticipants.size) {
+      console.warn(`⚠️ Unable to match any on-chain participants for ${gamePda.toBase58()}`);
     } else if (unmatchedParticipants.size > 0) {
       console.warn(
         `⚠️ Unable to map ${unmatchedParticipants.size} participant(s) for ${gamePda.toBase58()}`,
@@ -1431,13 +1293,10 @@ export class GameManager {
     tokenMint?: string;
     isSol: boolean;
   }> {
-    const normalizedTicker =
-      typeof tokenTicker === "string" ? tokenTicker.toUpperCase() : "";
+    const normalizedTicker = typeof tokenTicker === "string" ? tokenTicker.toUpperCase() : "";
     const gameAddress = gamePda.toBase58();
     const storedGame =
-      typeof this.gameDb.getGame === "function"
-        ? this.gameDb.getGame(gameAddress)
-        : undefined;
+      typeof this.gameDb.getGame === "function" ? this.gameDb.getGame(gameAddress) : undefined;
     let tokenMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
 
     let isSolToken = normalizedTicker === "SOL" || tokenMint === "SOL";
@@ -1451,17 +1310,11 @@ export class GameManager {
           isSolToken = tokenMint === "SOL";
         }
       } catch (error) {
-        console.warn(
-          `Unable to fetch game account ${gameAddress} for token info:`,
-          error,
-        );
+        console.warn(`Unable to fetch game account ${gameAddress} for token info:`, error);
       }
     }
 
-    const buildFormatter = (options: {
-      decimals: number;
-      useSolFormatter: boolean;
-    }) => {
+    const buildFormatter = (options: { decimals: number; useSolFormatter: boolean }) => {
       const { decimals, useSolFormatter } = options;
       const formatWithWallet = (value: number): string => {
         if (useSolFormatter) {
@@ -1506,8 +1359,7 @@ export class GameManager {
     if (tokenMint) {
       try {
         const metadata = await this.wallet.getTokenMetadata(tokenMint);
-        const decimals =
-          typeof metadata?.decimals === "number" ? metadata.decimals : 6;
+        const decimals = typeof metadata?.decimals === "number" ? metadata.decimals : 6;
         return {
           formatBalance: buildFormatter({ decimals, useSolFormatter: false }),
           decimals,
@@ -1579,10 +1431,7 @@ export class GameManager {
 
     try {
       const hintToUse =
-        priceHint ??
-        (priceCacheKey
-          ? (this.gamePriceCache.get(priceCacheKey) ?? null)
-          : null);
+        priceHint ?? (priceCacheKey ? (this.gamePriceCache.get(priceCacheKey) ?? null) : null);
       const lookup = await getUsdPrice({
         tokenMint: reference,
         hint: hintToUse,
@@ -1627,8 +1476,7 @@ export class GameManager {
   private async confirmTransactionWithRecovery(
     signature: string,
     gamePda: PublicKey,
-    operationType:
-      "Game creation" | "Player join" | "Game close" | "Player unjoin",
+    operationType: "Game creation" | "Player join" | "Game close" | "Player unjoin",
     playerPubkey?: PublicKey,
     resubmit?: (attempt: number, previousSignature: string) => Promise<string>,
     options?: { retryDelays?: number[] },
@@ -1637,8 +1485,7 @@ export class GameManager {
     const fetchGameAccountNullable = async (): Promise<any | null> => {
       try {
         const accountInterface = this.program.account.game as any;
-        const fetchNullable =
-          accountInterface?.fetchNullable?.bind(accountInterface);
+        const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
         if (fetchNullable) {
           return await fetchNullable(gamePda);
         }
@@ -1720,16 +1567,11 @@ export class GameManager {
             );
           }
         } else if (
-          (operationType === "Player join" ||
-            operationType === "Player unjoin") &&
+          (operationType === "Player join" || operationType === "Player unjoin") &&
           playerPubkey
         ) {
-          const isInGame = await this.isPlayerInGame(
-            gamePda,
-            playerPubkey,
-          ).catch(() => false);
-          const violation =
-            operationType === "Player join" ? !isInGame : isInGame;
+          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey).catch(() => false);
+          const violation = operationType === "Player join" ? !isInGame : isInGame;
           if (violation && !hasCause) {
             (error as any).cause = new Error(
               operationType === "Player join"
@@ -1740,9 +1582,7 @@ export class GameManager {
         }
       } catch (probeError) {
         (error as any).cause =
-          probeError instanceof Error
-            ? probeError
-            : new Error(String(probeError));
+          probeError instanceof Error ? probeError : new Error(String(probeError));
       }
       throw error;
     }
@@ -1754,18 +1594,12 @@ export class GameManager {
     operationLabel: string,
     options?: { skipConfirmation?: boolean },
   ): Promise<string> {
-    const walletWithResubmits = (this.wallet as any)
-      .sendAndConfirmWithResubmits;
+    const walletWithResubmits = (this.wallet as any).sendAndConfirmWithResubmits;
     if (typeof walletWithResubmits === "function") {
-      return await walletWithResubmits.call(
-        this.wallet,
-        instructions,
-        signers,
-        {
-          operationLabel,
-          skipConfirmation: options?.skipConfirmation,
-        },
-      );
+      return await walletWithResubmits.call(this.wallet, instructions, signers, {
+        operationLabel,
+        skipConfirmation: options?.skipConfirmation,
+      });
     }
 
     const signature = await this.wallet.sendTransaction(instructions, signers);
@@ -1793,9 +1627,7 @@ export class GameManager {
    * - 4 bytes participants vec length
    * - 32 bytes per participant public key
    */
-  private async getGameCreationRentLamports(
-    maxTickets: number,
-  ): Promise<number> {
+  private async getGameCreationRentLamports(maxTickets: number): Promise<number> {
     // Calculate game account size dynamically
     const BASE_GAME_ACCOUNT_SIZE =
       8 + // discriminator
@@ -1812,17 +1644,14 @@ export class GameManager {
       8 + // total_amount
       4; // participants vec length prefix
 
-    const BYTES_PER_PARTICIPANT =
-      process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 32 : 8;
+    const BYTES_PER_PARTICIPANT = process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 32 : 8;
 
     const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
-    const accountSize =
-      BASE_GAME_ACCOUNT_SIZE + safeMaxTickets * BYTES_PER_PARTICIPANT;
+    const accountSize = BASE_GAME_ACCOUNT_SIZE + safeMaxTickets * BYTES_PER_PARTICIPANT;
 
     try {
       const connection = this.getConnection();
-      const rent =
-        await connection.getMinimumBalanceForRentExemption(accountSize);
+      const rent = await connection.getMinimumBalanceForRentExemption(accountSize);
       if (Number.isFinite(rent) && rent > 0) {
         return rent;
       }
@@ -1842,17 +1671,14 @@ export class GameManager {
     context: "create" | "join",
     solReserveOverrideLamports?: number,
   ): Promise<
-    | { success: true; tokenBalance: number; solBalance: number }
-    | { success: false; error: string }
+    { success: true; tokenBalance: number; solBalance: number } | { success: false; error: string }
   > {
     const [wrapFeeBuffer, defaultMinSolBuffer] = await Promise.all([
       this.feeBudget.getWrapFeeBufferLamports(),
       this.feeBudget.getGameSafetyBufferLamports(),
     ]);
     const minSolBuffer =
-      solReserveOverrideLamports !== undefined
-        ? solReserveOverrideLamports
-        : defaultMinSolBuffer;
+      solReserveOverrideLamports !== undefined ? solReserveOverrideLamports : defaultMinSolBuffer;
 
     debugLog(
       `🔍 WSOL wrap check (${context}): required=${this.wallet.formatSolBalance(
@@ -1891,24 +1717,19 @@ export class GameManager {
         error: this.buildSolShortfallMessage({
           currentLamports: currentSolBalance,
           requiredLamports: requiredReserve,
-          reason:
-            "Wrapping this amount would leave too little SOL for rent and fees",
+          reason: "Wrapping this amount would leave too little SOL for rent and fees",
           nextSteps: "Add more SOL or reduce the amount to continue.",
         }),
       };
     }
 
     debugLog(
-      `🔄 Wrapping ${this.wallet.formatSolBalance(
-        deficit,
-      )} SOL into WSOL for game ${context}...`,
+      `🔄 Wrapping ${this.wallet.formatSolBalance(deficit)} SOL into WSOL for game ${context}...`,
     );
 
     try {
       const wrapSignature = await this.wallet.wrapSol(telegramId, deficit);
-      debugLog(
-        `✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`,
-      );
+      debugLog(`✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`);
     } catch (error) {
       const friendly = await formatUserFriendlyError(error, this.wallet);
       console.error(
@@ -1956,9 +1777,7 @@ export class GameManager {
       console.error(
         `⚠️ Wrap completed but WSOL balance ${this.wallet.formatSolBalance(
           updatedTokenBalance,
-        )} still below required ${this.wallet.formatSolBalance(
-          requiredLamports,
-        )}`,
+        )} still below required ${this.wallet.formatSolBalance(requiredLamports)}`,
       );
       return {
         success: false,
@@ -2005,14 +1824,7 @@ export class GameManager {
     userKeypair: Keypair;
     logContext: string;
   }): Promise<{ success: true } | { success: false; reason: string }> {
-    const {
-      telegramId,
-      tokenMint,
-      tokenDecimals,
-      tokenTicker,
-      userKeypair,
-      logContext,
-    } = options;
+    const { telegramId, tokenMint, tokenDecimals, tokenTicker, userKeypair, logContext } = options;
 
     if (!telegramId) {
       return { success: false, reason: "Missing Telegram identifier" };
@@ -2039,11 +1851,9 @@ export class GameManager {
         };
       }
 
-      const tokenBalance = await this.wallet.getTokenBalance(
-        telegramBigInt,
-        tokenMint,
-        { createIfMissing: false },
-      );
+      const tokenBalance = await this.wallet.getTokenBalance(telegramBigInt, tokenMint, {
+        createIfMissing: false,
+      });
 
       if (tokenBalance <= 0) {
         return {
@@ -2065,9 +1875,7 @@ export class GameManager {
       if (!swapResult.swapped) {
         return {
           success: false,
-          reason:
-            swapResult.error ??
-            `Unable to swap ${tokenTicker.toUpperCase()} for SOL fees.`,
+          reason: swapResult.error ?? `Unable to swap ${tokenTicker.toUpperCase()} for SOL fees.`,
         };
       }
 
@@ -2082,8 +1890,7 @@ export class GameManager {
           reason: this.buildSolShortfallMessage({
             currentLamports: solBalance,
             requiredLamports: minSolBuffer,
-            reason:
-              "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
+            reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
             nextSteps: "Add more SOL to continue.",
           }),
         };
@@ -2092,10 +1899,7 @@ export class GameManager {
       return { success: true };
     } catch (error) {
       console.error(`Failed to prepare SOL balance for ${logContext}:`, error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : String(error ?? "unknown error");
+      const message = error instanceof Error ? error.message : String(error ?? "unknown error");
       return { success: false, reason: message };
     }
   }
@@ -2159,30 +1963,18 @@ export class GameManager {
         lookup = (async () => {
           try {
             const maybeNumericId = Number(trimmedId);
-            const targetId = Number.isSafeInteger(maybeNumericId)
-              ? maybeNumericId
-              : trimmedId;
-            const chatMember = await (ctx.api as any).getChatMember(
-              chatId,
-              targetId,
-            );
+            const targetId = Number.isSafeInteger(maybeNumericId) ? maybeNumericId : trimmedId;
+            const chatMember = await (ctx.api as any).getChatMember(chatId, targetId);
             const userRecord = chatMember.user ?? {};
             const handle =
-              typeof userRecord.username === "string" &&
-              userRecord.username.trim().length > 0
+              typeof userRecord.username === "string" && userRecord.username.trim().length > 0
                 ? `@${userRecord.username.trim()}`
                 : null;
             const firstName =
-              typeof userRecord.first_name === "string"
-                ? userRecord.first_name.trim()
-                : "";
+              typeof userRecord.first_name === "string" ? userRecord.first_name.trim() : "";
             const lastName =
-              typeof userRecord.last_name === "string"
-                ? userRecord.last_name.trim()
-                : "";
-            const fullName = [firstName, lastName]
-              .filter((name) => name.length > 0)
-              .join(" ");
+              typeof userRecord.last_name === "string" ? userRecord.last_name.trim() : "";
+            const fullName = [firstName, lastName].filter((name) => name.length > 0).join(" ");
             const resolved = handle || (fullName.length > 0 ? fullName : null);
             if (resolved) {
               this.rememberTelegramUsername(trimmedId, resolved);
@@ -2206,10 +1998,7 @@ export class GameManager {
 
       return await lookup;
     } catch (error) {
-      console.warn(
-        `Error getting username for Telegram ID ${telegramId}:`,
-        error,
-      );
+      console.warn(`Error getting username for Telegram ID ${telegramId}:`, error);
       return null;
     }
   }
@@ -2217,10 +2006,7 @@ export class GameManager {
   /**
    * Resolve display name for leaderboards with graceful fallback
    */
-  public async getLeaderboardDisplayName(
-    ctx: Context,
-    telegramId: string,
-  ): Promise<string> {
+  public async getLeaderboardDisplayName(ctx: Context, telegramId: string): Promise<string> {
     const username = await this.getUsernameFromTelegramId(ctx, telegramId);
     if (username) {
       return username;
@@ -2233,10 +2019,7 @@ export class GameManager {
    * Get game creator display name - optimized single method
    * Returns @username for Telegram users or formatted address for blockchain players
    */
-  public async getGameCreatorUsername(
-    ctx: Context,
-    gameAddress: string,
-  ): Promise<string> {
+  public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
     const creatorInfo = this.gameDb.getCreatorInfo(gameAddress);
     if (!creatorInfo) {
       return "Unknown";
@@ -2244,10 +2027,7 @@ export class GameManager {
 
     // If we have telegram ID, try to get username
     if (creatorInfo.telegramId && /^\d+$/.test(creatorInfo.telegramId.trim())) {
-      const username = await this.getUsernameFromTelegramId(
-        ctx,
-        creatorInfo.telegramId,
-      );
+      const username = await this.getUsernameFromTelegramId(ctx, creatorInfo.telegramId);
       if (username) {
         return username;
       }
@@ -2265,29 +2045,19 @@ export class GameManager {
    * Get player username with fallback to address display
    * Returns @username for Telegram users or formatted address for blockchain players
    */
-  public async getPlayerUsername(
-    ctx: Context,
-    publicKey: string,
-  ): Promise<string> {
+  public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
     debugLog(`🔍 Getting username for publicKey: ${publicKey}`);
 
     const playerTelegramId = await this.getPlayerTelegramIdWithRetry(publicKey);
-    debugLog(
-      `🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`,
-    );
+    debugLog(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
 
     if (!playerTelegramId) {
       debugLog(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
       return this.formatAddress(publicKey);
     }
 
-    const username = await this.getUsernameFromTelegramId(
-      ctx,
-      playerTelegramId,
-    );
-    debugLog(
-      `🔍 Found username: ${username} for telegramId: ${playerTelegramId}`,
-    );
+    const username = await this.getUsernameFromTelegramId(ctx, playerTelegramId);
+    debugLog(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
 
     if (!username) {
       debugLog(`⚠️ No username found for telegramId: ${playerTelegramId}`);
@@ -2297,22 +2067,14 @@ export class GameManager {
     return username;
   }
 
-  private async getPlayerTelegramIdWithRetry(
-    publicKey: string,
-  ): Promise<string | null> {
-    for (
-      let attempt = 0;
-      attempt < PLAYER_TELEGRAM_ID_POLL_ATTEMPTS;
-      attempt++
-    ) {
+  private async getPlayerTelegramIdWithRetry(publicKey: string): Promise<string | null> {
+    for (let attempt = 0; attempt < PLAYER_TELEGRAM_ID_POLL_ATTEMPTS; attempt++) {
       const candidate = this.gameDb.getPlayerTelegramId(publicKey);
       if (candidate) {
         return candidate;
       }
       if (attempt < PLAYER_TELEGRAM_ID_POLL_ATTEMPTS - 1) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS),
-        );
+        await new Promise((resolve) => setTimeout(resolve, PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS));
       }
     }
     return null;
@@ -2322,9 +2084,7 @@ export class GameManager {
   // GAME MESSAGE MANAGEMENT
   // ================================
 
-  public getActiveGameMessages(
-    gameAddress: string,
-  ): Map<number, GameMessage> | undefined {
+  public getActiveGameMessages(gameAddress: string): Map<number, GameMessage> | undefined {
     return this.activeGameMessages.get(gameAddress);
   }
 
@@ -2335,12 +2095,10 @@ export class GameManager {
   ) {
     const baseAmountLamports = coerceLamportValue(amountLamportsInput) ?? 0n;
     const providedTotalPot =
-      providedTotalPotInput !== undefined
-        ? coerceLamportValue(providedTotalPotInput)
-        : null;
+      providedTotalPotInput !== undefined ? coerceLamportValue(providedTotalPotInput) : null;
 
     try {
-      let gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAccount = await this.program.account.game.fetch(gamePda);
       const currentTickets = Number(gameAccount.ticketsCount ?? 0);
       const maxTickets = Number(gameAccount.maxTickets ?? 0);
       const minTickets = Number(gameAccount.minTickets ?? 0);
@@ -2348,9 +2106,7 @@ export class GameManager {
       // Calculate totalPot based on game type
       let totalPot = providedTotalPot ?? null;
       if (totalPot === null) {
-        const chainTotal = coerceLamportValue(
-          (gameAccount as any)?.totalAmount,
-        );
+        const chainTotal = coerceLamportValue((gameAccount as any)?.totalAmount);
         if (chainTotal !== null && chainTotal > 0n) {
           totalPot = chainTotal;
         } else {
@@ -2368,14 +2124,8 @@ export class GameManager {
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;
-      const expirationInfo = await formatExpirationTime(
-        expiresAt,
-        this.wallet,
-        "\n⏰ ",
-      );
-      const tokenMint = (
-        (gameAccount as any)?.tokenMint as PublicKey | undefined
-      )?.toBase58();
+      const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
+      const tokenMint = ((gameAccount as any)?.tokenMint as PublicKey | undefined)?.toBase58();
 
       return {
         currentTickets,
@@ -2386,10 +2136,7 @@ export class GameManager {
         tokenMint,
       };
     } catch (error) {
-      console.warn(
-        `Warning: Could not fetch game account for ${gamePda.toBase58()}:`,
-        error,
-      );
+      console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
       return {
         currentTickets: 0,
         maxTickets: 0,
@@ -2408,9 +2155,7 @@ export class GameManager {
   ) {
     const baseAmountLamports = coerceLamportValue(amountLamportsInput) ?? 0n;
     const providedTotalPot =
-      providedTotalPotInput !== undefined
-        ? coerceLamportValue(providedTotalPotInput)
-        : null;
+      providedTotalPotInput !== undefined ? coerceLamportValue(providedTotalPotInput) : null;
 
     const gameAddress = gamePda.toBase58();
     const gameData = this.gameDb.getGame(gameAddress);
@@ -2419,9 +2164,7 @@ export class GameManager {
 
     const parsedMax = Number(gameData?.max_players);
     const maxTickets =
-      Number.isFinite(parsedMax) && parsedMax > 0
-        ? parsedMax
-        : Math.max(currentTickets, 0);
+      Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : Math.max(currentTickets, 0);
 
     const parsedMin = Number(gameData?.min_players);
     let minTickets =
@@ -2474,10 +2217,7 @@ export class GameManager {
   ): Promise<string> {
     if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
 
-    if (
-      winnerAddress === "cancelled" ||
-      winnerAddress === DEFAULT_NULL_ADDRESS
-    ) {
+    if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
       return `\nStatus: Cancelled`;
     }
 
@@ -2487,9 +2227,7 @@ export class GameManager {
       ? sanitizeTelegramDisplayNameWithoutMention
       : sanitizeTelegramDisplayName;
     const safeWinner = escapeHtml(sanitize(winnerUsername));
-    const linkLine = solscanUrl
-      ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>`
-      : "";
+    const linkLine = solscanUrl ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>` : "";
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 
@@ -2568,10 +2306,7 @@ export class GameManager {
         usesVideo = true;
       } catch (error) {
         if (isRecoverableMediaError(error)) {
-          console.warn(
-            "Falling back to text announcement after media send failure:",
-            error,
-          );
+          console.warn("Falling back to text announcement after media send failure:", error);
           message = await sendText();
         } else {
           throw error;
@@ -2582,15 +2317,9 @@ export class GameManager {
     }
 
     // Save the game message to database and activeGameMessages for future updates
-    this.gameDb.saveGameMessage(
-      gameAddress,
-      message.message_id,
-      message.chat.id,
-    );
+    this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
 
-    const existing =
-      this.activeGameMessages.get(gameAddress) ??
-      new Map<number, GameMessage>();
+    const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
     existing.set(message.chat.id, {
       messageId: message.message_id,
       chatId: message.chat.id,
@@ -2628,8 +2357,7 @@ export class GameManager {
     const isCompleted = status.toLowerCase() === "completed";
     const gameCacheKey = gamePda.toBase58();
 
-    const amountLamports =
-      typeof amount === "bigint" ? amount : BigInt(Math.trunc(amount));
+    const amountLamports = typeof amount === "bigint" ? amount : BigInt(Math.trunc(amount));
 
     const coerceProvidedTotal =
       providedTotalPot !== undefined && providedTotalPot !== null
@@ -2637,32 +2365,18 @@ export class GameManager {
         : null;
 
     const gameStats = isCompleted
-      ? await this.getCompletedGameStats(
-          gamePda,
-          amountLamports,
-          coerceProvidedTotal ?? undefined,
-        )
-      : await this.getActiveGameStats(
-          gamePda,
-          amountLamports,
-          coerceProvidedTotal ?? undefined,
-        );
+      ? await this.getCompletedGameStats(gamePda, amountLamports, coerceProvidedTotal ?? undefined)
+      : await this.getActiveGameStats(gamePda, amountLamports, coerceProvidedTotal ?? undefined);
 
-    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } =
-      gameStats as any;
-    const tokenMintHint = (gameStats as { tokenMint?: string | null })
-      .tokenMint;
+    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats as any;
+    const tokenMintHint = (gameStats as { tokenMint?: string | null }).tokenMint;
 
     const {
       formatBalance: formatBalanceForDisplay,
       decimals,
       tokenMint,
       isSol,
-    } = await this.resolveTokenFormattingInfo(
-      gamePda,
-      tokenTicker,
-      tokenMintHint,
-    );
+    } = await this.resolveTokenFormattingInfo(gamePda, tokenTicker, tokenMintHint);
 
     const usdApproximation = await this.getUsdApproximation(
       amountLamports,
@@ -2682,9 +2396,7 @@ export class GameManager {
     );
 
     const formattedTicketAmount = formatBalanceForDisplay(amountLamports);
-    const explorerUrl = NetworkDetector.buildSolscanAccountUrl(
-      gamePda.toBase58(),
-    );
+    const explorerUrl = NetworkDetector.buildSolscanAccountUrl(gamePda.toBase58());
 
     const safeCreatorUsername = sanitizeDisplay(creatorUsername);
     const header = buildGameHeader(
@@ -2700,11 +2412,7 @@ export class GameManager {
     // Show current prize if different from base amount
     let prizeUsdApproximation: string | null = null;
     if (usdApproximation) {
-      prizeUsdApproximation = this.formatUsdValue(
-        totalPot,
-        decimals,
-        usdApproximation.price,
-      );
+      prizeUsdApproximation = this.formatUsdValue(totalPot, decimals, usdApproximation.price);
     } else if (currentTickets > 0 || totalPot !== amountLamports) {
       const computedPrizeUsd = await this.getUsdApproximation(
         totalPot,
@@ -2731,13 +2439,8 @@ export class GameManager {
     if (currentTickets > 0) {
       try {
         totalParticipants = Math.max(0, Number(currentTickets) || 0);
-        const previewLimit = Math.max(
-          0,
-          GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT,
-        );
-        const getPreview = (
-          this.gameDb as any
-        ).getGameParticipantsPreview?.bind(this.gameDb) as
+        const previewLimit = Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
+        const getPreview = (this.gameDb as any).getGameParticipantsPreview?.bind(this.gameDb) as
           ((game: string, limit: number) => string[]) | undefined;
         const previewIds =
           typeof getPreview === "function"
@@ -2751,11 +2454,9 @@ export class GameManager {
           GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
           async (telegramId) => {
             try {
-              const username = await this.getUsernameFromTelegramId(
-                ctx,
-                telegramId,
-                { allowNetworkLookup },
-              );
+              const username = await this.getUsernameFromTelegramId(ctx, telegramId, {
+                allowNetworkLookup,
+              });
               if (username) {
                 return sanitizeDisplay(username);
               }
@@ -2772,16 +2473,11 @@ export class GameManager {
     }
 
     const statusSection = !isCompleted
-      ? `\nStatus: ${buildGameStatus(
-          currentTickets,
-          minTickets,
-          maxTickets,
-        )}${expirationInfo}`
+      ? `\nStatus: ${buildGameStatus(currentTickets, minTickets, maxTickets)}${expirationInfo}`
       : "";
 
     const composeMessage = (names: string[], omittedCount: number): string => {
-      const participantsSection =
-        names.length > 0 ? buildParticipantsList(names) : "";
+      const participantsSection = names.length > 0 ? buildParticipantsList(names) : "";
       let message = baseBeforeParticipants + participantsSection;
       if (isCompleted && participantsSection.endsWith("\n")) {
         message = message.slice(0, -1);
@@ -2799,16 +2495,10 @@ export class GameManager {
       Math.max(0, totalParticipants - participantDisplayNames.length),
     );
 
-    if (
-      messageText.length > TELEGRAM_MESSAGE_CHAR_LIMIT &&
-      participantDisplayNames.length > 0
-    ) {
+    if (messageText.length > TELEGRAM_MESSAGE_CHAR_LIMIT && participantDisplayNames.length > 0) {
       for (let keep = participantDisplayNames.length; keep >= 0; keep -= 1) {
         const omitted = Math.max(0, totalParticipants - keep);
-        const candidate = composeMessage(
-          participantDisplayNames.slice(0, keep),
-          omitted,
-        );
+        const candidate = composeMessage(participantDisplayNames.slice(0, keep), omitted);
         if (candidate.length <= TELEGRAM_MESSAGE_CHAR_LIMIT || keep === 0) {
           messageText = candidate;
           break;
@@ -2865,10 +2555,7 @@ export class GameManager {
         params.options,
       ));
 
-    const media = resolveGameMedia(
-      params.gameType,
-      params.chatId ?? ctx.chat?.id,
-    );
+    const media = resolveGameMedia(params.gameType, params.chatId ?? ctx.chat?.id);
 
     return {
       text: formatResult.messageText,
@@ -2901,12 +2588,11 @@ export class GameManager {
       const resolvedMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
       const priceHint = this.gamePriceCache.get(gameAddress) ?? null;
 
-      const { formatBalance, decimals, tokenMint, isSol } =
-        await this.resolveTokenFormattingInfo(
-          gamePda,
-          resolvedTicker || "",
-          resolvedMint,
-        );
+      const { formatBalance, decimals, tokenMint, isSol } = await this.resolveTokenFormattingInfo(
+        gamePda,
+        resolvedTicker || "",
+        resolvedMint,
+      );
 
       const formattedAmount = formatBalance(totalPot);
       const usdApproximation = await this.getUsdApproximation(
@@ -2926,10 +2612,7 @@ export class GameManager {
         usdApproximation: usdApproximation?.text ?? null,
       };
     } catch (error) {
-      console.warn(
-        `Failed to compute prize display for ${gameAddress}:`,
-        error,
-      );
+      console.warn(`Failed to compute prize display for ${gameAddress}:`, error);
       return null;
     }
   }
@@ -2945,8 +2628,7 @@ export class GameManager {
     replyToMessageId?: number,
     options?: { priceHint?: CachedPriceLookup | null },
   ): Promise<number> {
-    const cachedPrice =
-      options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
+    const cachedPrice = options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
     const payload = await this.buildGameMessagePayload(ctx, {
       gameAddress,
       gameType,
@@ -2960,9 +2642,7 @@ export class GameManager {
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
     const replyMarkup =
-      payload.keyboard.length > 0
-        ? { inline_keyboard: payload.keyboard }
-        : undefined;
+      payload.keyboard.length > 0 ? { inline_keyboard: payload.keyboard } : undefined;
     const media = payload.media;
     const sendResult = await sendMediaWithFallback<any, any>({
       videoFileId: media?.fileId ?? null,
@@ -3005,15 +2685,9 @@ export class GameManager {
     const message: any = sendResult.result;
     const usesVideo = sendResult.usedVideo;
 
-    this.gameDb.saveGameMessage(
-      gameAddress,
-      message.message_id,
-      message.chat.id,
-    );
+    this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
 
-    const existing =
-      this.activeGameMessages.get(gameAddress) ??
-      new Map<number, GameMessage>();
+    const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
     existing.set(message.chat.id, {
       messageId: message.message_id,
       chatId: message.chat.id,
@@ -3058,10 +2732,7 @@ export class GameManager {
           );
         }
       } catch (dbError) {
-        console.warn(
-          `Error loading message targets from DB for ${gameAddress}:`,
-          dbError,
-        );
+        console.warn(`Error loading message targets from DB for ${gameAddress}:`, dbError);
       }
     }
 
@@ -3088,9 +2759,7 @@ export class GameManager {
       messageTextValue = formatted.messageText;
 
       const inlineKeyboard =
-        formatted.keyboard.length > 0
-          ? { inline_keyboard: formatted.keyboard }
-          : undefined;
+        formatted.keyboard.length > 0 ? { inline_keyboard: formatted.keyboard } : undefined;
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
 
@@ -3117,19 +2786,12 @@ export class GameManager {
           const supportsVideo = gameMessage.usesVideo !== false;
 
           const editAsText = () =>
-            ctx.api.editMessageText(
-              gameMessage.chatId,
-              gameMessage.messageId,
-              payload.text,
-              {
-                parse_mode: "HTML",
-                reply_markup: inlineKeyboard,
-              },
-            );
+            ctx.api.editMessageText(gameMessage.chatId, gameMessage.messageId, payload.text, {
+              parse_mode: "HTML",
+              reply_markup: inlineKeyboard,
+            });
 
-          const recreateMissingMessage = async (
-            err: unknown,
-          ): Promise<boolean> => {
+          const recreateMissingMessage = async (err: unknown): Promise<boolean> => {
             if (!messageTextValue || !isMessageMissing(err)) {
               return false;
             }
@@ -3172,8 +2834,7 @@ export class GameManager {
                       );
                       // Mark as not using video since we couldn't edit it
                       const current =
-                        this.activeGameMessages.get(gameAddress) ??
-                        new Map<number, GameMessage>();
+                        this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                       current.set(gameMessage.chatId, {
                         ...gameMessage,
                         usesVideo: false,
@@ -3185,8 +2846,7 @@ export class GameManager {
                   logLabel: `game media update (${gameMessage.chatId})`,
                   onFallback: () => {
                     const current =
-                      this.activeGameMessages.get(gameAddress) ??
-                      new Map<number, GameMessage>();
+                      this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                     current.set(gameMessage.chatId, {
                       ...gameMessage,
                       usesVideo: false,
@@ -3214,15 +2874,11 @@ export class GameManager {
                   )
                 : {
                     result: await runEditWithFallback(() =>
-                      ctx.api.editMessageCaption(
-                        gameMessage.chatId,
-                        gameMessage.messageId,
-                        {
-                          caption: payload.text,
-                          parse_mode: "HTML",
-                          reply_markup: inlineKeyboard,
-                        },
-                      ),
+                      ctx.api.editMessageCaption(gameMessage.chatId, gameMessage.messageId, {
+                        caption: payload.text,
+                        parse_mode: "HTML",
+                        reply_markup: inlineKeyboard,
+                      }),
                     ),
                     skipped: false,
                   };
@@ -3239,8 +2895,7 @@ export class GameManager {
 
               if (!usedFallback) {
                 const current =
-                  this.activeGameMessages.get(gameAddress) ??
-                  new Map<number, GameMessage>();
+                  this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                 current.set(gameMessage.chatId, {
                   ...gameMessage,
                   usesVideo: true,
@@ -3267,15 +2922,11 @@ export class GameManager {
             try {
               const { usedFallback, skipped } = await editMediaWithFallback({
                 edit: () =>
-                  ctx.api.editMessageCaption(
-                    gameMessage.chatId,
-                    gameMessage.messageId,
-                    {
-                      caption: payload.text,
-                      parse_mode: "HTML",
-                      reply_markup: inlineKeyboard,
-                    },
-                  ),
+                  ctx.api.editMessageCaption(gameMessage.chatId, gameMessage.messageId, {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: inlineKeyboard,
+                  }),
                 fallback: async () => {
                   // Caption failed - try text as last resort
                   try {
@@ -3288,8 +2939,7 @@ export class GameManager {
                     );
                     // Mark as not using video since we couldn't edit it
                     const current =
-                      this.activeGameMessages.get(gameAddress) ??
-                      new Map<number, GameMessage>();
+                      this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                     current.set(gameMessage.chatId, {
                       ...gameMessage,
                       usesVideo: false,
@@ -3301,8 +2951,7 @@ export class GameManager {
                 logLabel: `game caption update (${gameMessage.chatId})`,
                 onFallback: () => {
                   const current =
-                    this.activeGameMessages.get(gameAddress) ??
-                    new Map<number, GameMessage>();
+                    this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                   current.set(gameMessage.chatId, {
                     ...gameMessage,
                     usesVideo: false,
@@ -3317,8 +2966,7 @@ export class GameManager {
 
               if (!usedFallback) {
                 const current =
-                  this.activeGameMessages.get(gameAddress) ??
-                  new Map<number, GameMessage>();
+                  this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                 current.set(gameMessage.chatId, {
                   ...gameMessage,
                   usesVideo: true,
@@ -3340,43 +2988,37 @@ export class GameManager {
             }
           }
 
-          const { skipped, usedFallback: textUsedFallback } =
-            await editMediaWithFallback({
-              edit: () => editAsText(),
-              fallback: async () => {
-                // Text edit failed - try caption as fallback (message might actually be media)
-                try {
-                  return await ctx.api.editMessageCaption(
-                    gameMessage.chatId,
-                    gameMessage.messageId,
-                    {
-                      caption: payload.text,
-                      parse_mode: "HTML",
-                      reply_markup: inlineKeyboard,
-                    },
-                  );
-                } catch (captionError) {
-                  // Both text and caption failed - message might be deleted or inaccessible
-                  console.warn(
-                    `Both text and caption edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                    captionError,
-                  );
-                  return null;
-                }
-              },
-              logLabel: `game text update (${gameMessage.chatId})`,
-              onFallback: () => {
-                // Text failed but caption worked - message is actually media
-                const current =
-                  this.activeGameMessages.get(gameAddress) ??
-                  new Map<number, GameMessage>();
-                current.set(gameMessage.chatId, {
-                  ...gameMessage,
-                  usesVideo: true,
+          const { skipped, usedFallback: textUsedFallback } = await editMediaWithFallback({
+            edit: () => editAsText(),
+            fallback: async () => {
+              // Text edit failed - try caption as fallback (message might actually be media)
+              try {
+                return await ctx.api.editMessageCaption(gameMessage.chatId, gameMessage.messageId, {
+                  caption: payload.text,
+                  parse_mode: "HTML",
+                  reply_markup: inlineKeyboard,
                 });
-                this.activeGameMessages.set(gameAddress, current);
-              },
-            });
+              } catch (captionError) {
+                // Both text and caption failed - message might be deleted or inaccessible
+                console.warn(
+                  `Both text and caption edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                  captionError,
+                );
+                return null;
+              }
+            },
+            logLabel: `game text update (${gameMessage.chatId})`,
+            onFallback: () => {
+              // Text failed but caption worked - message is actually media
+              const current =
+                this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
+              current.set(gameMessage.chatId, {
+                ...gameMessage,
+                usesVideo: true,
+              });
+              this.activeGameMessages.set(gameAddress, current);
+            },
+          });
 
           if (textUsedFallback) {
             // Text failed but caption worked - already marked usesVideo: true
@@ -3408,10 +3050,7 @@ export class GameManager {
             }
             continue;
           }
-          console.error(
-            `Error in updateGameMessage for chat ${gameMessage.chatId}:`,
-            error,
-          );
+          console.error(`Error in updateGameMessage for chat ${gameMessage.chatId}:`, error);
         }
       }
     } catch (error) {
@@ -3438,13 +3077,9 @@ export class GameManager {
         return;
       }
 
-      const creatorUsername = await this.getGameCreatorUsername(
-        ctx,
-        gameAddress,
-      );
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
       const gameType = gameData.game_type
-        ? gameData.game_type.charAt(0).toUpperCase() +
-          gameData.game_type.slice(1)
+        ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1)
         : "Game";
 
       await this.updateGameMessage(
@@ -3470,7 +3105,7 @@ export class GameManager {
 
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
-      let gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAccount = await this.program.account.game.fetch(gamePda);
       const rawGameType = this.getGameType(gameAccount);
       const amount = this.getDisplayAmountFromAccount(gameAccount, rawGameType);
 
@@ -3483,14 +3118,9 @@ export class GameManager {
       const tokenTicker = gameData.token_ticker;
       const creatorPubkey = gameAccount.creator.toString();
 
-      const creatorUsername = await this.getGameCreatorUsername(
-        ctx,
-        gamePda.toBase58(),
-      );
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
       const creatorInfo =
-        creatorUsername !== "Unknown"
-          ? creatorUsername
-          : `<code>${creatorPubkey}</code>`;
+        creatorUsername !== "Unknown" ? creatorUsername : `<code>${creatorPubkey}</code>`;
 
       const status = gameData?.status ?? "active";
       const { messageText } = await this.formatGameMessage(
@@ -3522,22 +3152,17 @@ export class GameManager {
   }
 
   // Helper method to get game info for completed games from database
-  public async getCompletedGameInfo(
-    ctx: Context,
-    gameData: any,
-  ): Promise<string> {
+  public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
     try {
       const creatorUsername = await this.getUsernameFromTelegramId(
         ctx,
         gameData.creator_telegram_id,
       );
       const rawAmount = Number(gameData.amount);
-      const amount =
-        Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+      const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
       const gameAddress = gameData.game_address as string | undefined;
-      const getCount = (this.gameDb as any).getGameParticipantsCount?.bind(
-        this.gameDb,
-      ) as ((address: string) => number) | undefined;
+      const getCount = (this.gameDb as any).getGameParticipantsCount?.bind(this.gameDb) as
+        ((address: string) => number) | undefined;
 
       let currentTickets = 0;
 
@@ -3546,37 +3171,23 @@ export class GameManager {
           if (typeof getCount === "function") {
             currentTickets = Math.max(0, Math.trunc(getCount(gameAddress)));
           } else {
-            currentTickets = (
-              this.gameDb.getGameParticipants(gameAddress) ?? []
-            ).length;
+            currentTickets = (this.gameDb.getGameParticipants(gameAddress) ?? []).length;
           }
         } catch (participantError) {
-          console.error(
-            "Error retrieving participant count for completed game:",
-            participantError,
-          );
+          console.error("Error retrieving participant count for completed game:", participantError);
         }
       }
       const storedMax = Number(gameData.max_players);
       const maxTickets =
-        Number.isFinite(storedMax) && storedMax > 0
-          ? storedMax
-          : Math.max(currentTickets, 0);
+        Number.isFinite(storedMax) && storedMax > 0 ? storedMax : Math.max(currentTickets, 0);
       const playerCountDisplay =
-        maxTickets > 0
-          ? `${currentTickets}/${maxTickets}`
-          : `${currentTickets}`;
+        maxTickets > 0 ? `${currentTickets}/${maxTickets}` : `${currentTickets}`;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       const tokenTicker = gameData.token_ticker || "WSOL";
-      const explorerUrl = gameAddress
-        ? NetworkDetector.buildSolscanAccountUrl(gameAddress)
-        : null;
-      const gameExplorerIcon = explorerUrl
-        ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>`
-        : "🅴";
+      const explorerUrl = gameAddress ? NetworkDetector.buildSolscanAccountUrl(gameAddress) : null;
+      const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
       const gameLabel = `${escapeHtml(gameTypeText)} ${gameExplorerIcon}`;
-      let formatBalanceForDisplay = (value: number) =>
-        this.wallet.formatTokenBalance(value, 6);
+      let formatBalanceForDisplay = (value: number) => this.wallet.formatTokenBalance(value, 6);
       if (gameAddress) {
         try {
           const resolver = await this.resolveTokenFormattingInfo(
@@ -3586,10 +3197,7 @@ export class GameManager {
           );
           formatBalanceForDisplay = resolver.formatBalance;
         } catch (resolveError) {
-          console.error(
-            "Error resolving token formatting for completed game:",
-            resolveError,
-          );
+          console.error("Error resolving token formatting for completed game:", resolveError);
         }
       }
       const creatorLabel = creatorUsername
@@ -3604,19 +3212,12 @@ export class GameManager {
       ) {
         winnerLine = "";
       } else {
-        const winnerUsername = await this.getPlayerUsername(
-          ctx,
-          gameData.winner_address,
-        );
-        const safeWinner = escapeHtml(
-          sanitizeTelegramDisplayNameWithoutMention(winnerUsername),
-        );
+        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+        const safeWinner = escapeHtml(sanitizeTelegramDisplayNameWithoutMention(winnerUsername));
         winnerLine = `Winner: ${safeWinner}`;
       }
 
-      const amountDisplay = formatCompactTokenDisplay(
-        formatBalanceForDisplay(amount),
-      );
+      const amountDisplay = formatCompactTokenDisplay(formatBalanceForDisplay(amount));
       const safeAmountDisplay = escapeHtml(amountDisplay);
       const safeTicker = escapeHtml(tokenTicker);
       const safeCreator = escapeHtml(creatorLabel);
@@ -3644,12 +3245,7 @@ export class GameManager {
     gameType: GameType,
     parsedAmount: Pick<
       ParsedAmount,
-      | "amount"
-      | "tokenMint"
-      | "tokenTicker"
-      | "isSol"
-      | "requestedNativeSol"
-      | "priceLookup"
+      "amount" | "tokenMint" | "tokenTicker" | "isSol" | "requestedNativeSol" | "priceLookup"
     >,
     maxTickets: number,
     minTickets: number,
@@ -3676,8 +3272,7 @@ export class GameManager {
     const telegramIdStr = telegramId.toString();
     const isPrivate = options?.isPrivate ?? true;
     const inFlightCount = this.getInFlightCreations(telegramIdStr);
-    const activeGameCount =
-      this.gameDb.countActiveGamesByCreator(telegramIdStr);
+    const activeGameCount = this.gameDb.countActiveGamesByCreator(telegramIdStr);
 
     if (activeGameCount + inFlightCount >= MAX_ACTIVE_GAMES_PER_CREATOR) {
       return {
@@ -3700,21 +3295,13 @@ export class GameManager {
     );
     const pendingRequestTimestamp = Math.max(safeRequestTimestamp, nowMs);
 
-    const pendingCount = this.prunePendingCreationRequests(
-      telegramIdStr,
-      windowStart,
-    );
-    const recentCreationCount = this.gameDb.countRecentGamesByCreator(
-      telegramIdStr,
-      windowStart,
-    );
+    const pendingCount = this.prunePendingCreationRequests(telegramIdStr, windowStart);
+    const recentCreationCount = this.gameDb.countRecentGamesByCreator(telegramIdStr, windowStart);
 
     const totalWindowCreations = pendingCount + recentCreationCount;
 
     if (totalWindowCreations >= MAX_GAMES_PER_CREATOR_WINDOW) {
-      const windowLabel = formatRateLimitWindow(
-        GAME_CREATION_RATE_LIMIT_WINDOW_MS,
-      );
+      const windowLabel = formatRateLimitWindow(GAME_CREATION_RATE_LIMIT_WINDOW_MS);
       return {
         success: false,
         error: `Game creation rate limit reached. You have ${totalWindowCreations} game creation${
@@ -3730,8 +3317,7 @@ export class GameManager {
 
     try {
       const { tokenMint, tokenTicker, amount } = parsedAmount;
-      const requestedSol =
-        parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
+      const requestedSol = parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
@@ -3773,10 +3359,7 @@ export class GameManager {
           tokenBalance,
           metadata.decimals,
         );
-        const friendlyRequired = this.wallet.formatTokenBalance(
-          amount,
-          metadata.decimals,
-        );
+        const friendlyRequired = this.wallet.formatTokenBalance(amount, metadata.decimals);
         const friendlySolBalance = this.wallet.formatSolBalance(solBalance);
         console.warn(
           `⚠️ Token balance check failed (${tokenTicker}). have=${friendlyTokenBalance} ${tokenTicker}, need=${friendlyRequired}${tokenTicker}, detected SOL=${friendlySolBalance}`,
@@ -3809,8 +3392,7 @@ export class GameManager {
             currentLamports: solBalance,
             requiredLamports: requiredSolReserveLamports,
             reason: "Creating a game requires a SOL reserve for rent and fees",
-            nextSteps:
-              "Add more SOL or swap extra tokens for fees before trying again.",
+            nextSteps: "Add more SOL or swap extra tokens for fees before trying again.",
           });
 
           const safeStake = escapeHtml(formattedStake);
@@ -3840,27 +3422,18 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
           return {
             success: false,
-            error:
-              "Unable to top up SOL balance automatically. Add SOL manually and try again.",
+            error: "Unable to top up SOL balance automatically. Add SOL manually and try again.",
           };
         }
 
         tokenBalance = await this.wallet.getTokenBalance(telegramId, tokenMint);
 
         if (tokenBalance < amount) {
-          const remainingBalance = this.wallet.formatTokenBalance(
-            tokenBalance,
-            metadata.decimals,
-          );
-          const requiredBalance = this.wallet.formatTokenBalance(
-            amount,
-            metadata.decimals,
-          );
+          const remainingBalance = this.wallet.formatTokenBalance(tokenBalance, metadata.decimals);
+          const requiredBalance = this.wallet.formatTokenBalance(amount, metadata.decimals);
           return {
             success: false,
-            error: `Swap completed but only ${escapeHtml(
-              remainingBalance,
-            )} ${escapeHtml(
+            error: `Swap completed but only ${escapeHtml(remainingBalance)} ${escapeHtml(
               tokenTicker,
             )} remain, which is below the required ${escapeHtml(
               requiredBalance,
@@ -3879,8 +3452,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
             error: this.buildSolShortfallMessage({
               currentLamports: lamportsBalance,
               requiredLamports: requiredSolReserveLamports,
-              reason:
-                "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
+              reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
               nextSteps: "Add more SOL to continue.",
             }),
           };
@@ -3923,16 +3495,9 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       };
 
       const tokenMintPubkey = new PublicKey(tokenMint);
-      const gamePda = PDAManager.getGamePDA(
-        randomHashBuffer,
-        this.program.programId,
-      );
-      const tokenAccounts =
-        await this.resolveGameTokenAccounts(tokenMintPubkey);
-      const gameTokenCtx = this.buildGameTokenContext(
-        tokenMintPubkey,
-        tokenAccounts,
-      );
+      const gamePda = PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
+      const tokenAccounts = await this.resolveGameTokenAccounts(tokenMintPubkey);
+      const gameTokenCtx = this.buildGameTokenContext(tokenMintPubkey, tokenAccounts);
       const creatorTokenAccount = await this.deriveAta(
         tokenMintPubkey,
         playerKp.publicKey,
@@ -3961,8 +3526,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           feePayer: playerKp.publicKey,
           ...latestBlockhash,
         }).add(gameInstruction);
-        const oracleSigned =
-          await this.oracleClient.signGameTransaction(unsigned);
+        const oracleSigned = await this.oracleClient.signGameTransaction(unsigned);
         return this.wallet.sendPartiallySignedTransaction(
           oracleSigned,
           [playerKp],
@@ -4052,9 +3616,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
     gameType: string,
     chatId?: number,
   ): Promise<{ success: boolean; error?: string }> {
-    debugLog(
-      `🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`,
-    );
+    debugLog(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
     try {
       let gameAccount = await this.program.account.game.fetch(gamePda);
@@ -4066,11 +3628,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       if (gameAccount.isPrivate) {
         debugLog(`🔐 Game is private, using authorized join...`);
-        const result = await this.joinPrivateGame(
-          gamePda,
-          playerKp,
-          chatId || 0,
-        );
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
         if (!result.success) {
           return {
             success: false,
@@ -4078,16 +3636,11 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           };
         }
         joinTx = result.tx;
-        this.gameDb.saveGameParticipant(
-          gameAddress,
-          telegramIdStr,
-          creatorPubkey,
-          {
-            status: "pending",
-            joinSignature: joinTx ?? null,
-            lastVerifiedAt: null,
-          },
-        );
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
         pendingRecorded = true;
         joinConfirmed = true;
       } else {
@@ -4119,20 +3672,13 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               .instruction();
             joinInstructions = [...setupInstructions, joinInstruction];
 
-            joinTx = await this.wallet.sendTransaction(joinInstructions, [
-              playerKp,
-            ]);
+            joinTx = await this.wallet.sendTransaction(joinInstructions, [playerKp]);
 
-            this.gameDb.saveGameParticipant(
-              gameAddress,
-              telegramIdStr,
-              creatorPubkey,
-              {
-                status: "pending",
-                joinSignature: joinTx ?? null,
-                lastVerifiedAt: null,
-              },
-            );
+            this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
+              status: "pending",
+              joinSignature: joinTx ?? null,
+              lastVerifiedAt: null,
+            });
             pendingRecorded = true;
 
             joinTx = await this.confirmTransactionWithRecovery(
@@ -4151,16 +3697,11 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
                 const refreshedSignature = await resendJoinTransaction();
 
-                this.gameDb.saveGameParticipant(
-                  gameAddress,
-                  telegramIdStr,
-                  creatorPubkey,
-                  {
-                    status: "pending",
-                    joinSignature: refreshedSignature ?? null,
-                    lastVerifiedAt: null,
-                  },
-                );
+                this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
+                  status: "pending",
+                  joinSignature: refreshedSignature ?? null,
+                  lastVerifiedAt: null,
+                });
 
                 return refreshedSignature ?? joinTx;
               },
@@ -4178,18 +3719,16 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
                 normalized.includes("accountnotinitialized") ||
                 normalized.includes("uninitialized"));
             const isTimeout =
-              normalized.includes("timeout") ||
-              normalized.includes("not confirmed");
+              normalized.includes("timeout") || normalized.includes("not confirmed");
             const isExpiration =
               normalized.includes("expired before confirmation") ||
               normalized.includes("last valid block height");
             const isLastAttempt = attempt === maxJoinAttempts - 1;
 
             if ((isTimeout || isExpiration) && !isLastAttempt) {
-              const alreadyJoined = await this.isPlayerInGame(
-                gamePda,
-                playerKp.publicKey,
-              ).catch(() => false);
+              const alreadyJoined = await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
+                () => false,
+              );
 
               if (alreadyJoined) {
                 joinConfirmed = true;
@@ -4241,10 +3780,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       }
     } catch (joinError: any) {
       try {
-        this.gameDb.removeGameParticipant(
-          gamePda.toBase58(),
-          telegramId.toString(),
-        );
+        this.gameDb.removeGameParticipant(gamePda.toBase58(), telegramId.toString());
       } catch (_) {
         // ignore cleanup errors
       }
@@ -4298,8 +3834,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
     // - If expired and minimum tickets were NOT reached, close immediately (participants don't need refunds).
     // - If minimum tickets were reached, wait for oracle completion.
     if (gameType === "giveaway") {
-      const shouldCancel =
-        ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
+      const shouldCancel = ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
 
       if (shouldCancel) {
         try {
@@ -4317,9 +3852,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         }
       } else {
         if (!bufferElapsed) {
-          debugLog(
-            "⏳ Giveaway has participants; waiting for oracle to complete.",
-          );
+          debugLog("⏳ Giveaway has participants; waiting for oracle to complete.");
           return false;
         }
         debugLog("⌛ Giveaway buffer elapsed; awaiting oracle completion.");
@@ -4341,21 +3874,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           };
         }
       } catch (error) {
-        console.error(
-          `Error closing expired ${gameType} with zero tickets:`,
-          error,
-        );
+        console.error(`Error closing expired ${gameType} with zero tickets:`, error);
       }
       return false;
     }
 
     // If there are participants but not enough to complete, try to unjoin them.
     if (!hasEnoughTickets) {
-      const didCleanup = await this.handleExpiredCoinflip(
-        gamePda,
-        gameAccount,
-        gamePda.toBase58(),
-      );
+      const didCleanup = await this.handleExpiredCoinflip(gamePda, gameAccount, gamePda.toBase58());
       if (!didCleanup) return false;
 
       // After cleanup, check if game can now be closed
@@ -4391,16 +3917,10 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
     }
 
     // Buffer elapsed and oracle didn't complete -> force cleanup
-    debugLog(
-      `⏰ Buffer elapsed for ${gameType} with ${ticketsCount} tickets; forcing cleanup...`,
-    );
+    debugLog(`⏰ Buffer elapsed for ${gameType} with ${ticketsCount} tickets; forcing cleanup...`);
 
     if (gameType === "coinflip") {
-      const didCleanup = await this.handleExpiredCoinflip(
-        gamePda,
-        gameAccount,
-        gamePda.toBase58(),
-      );
+      const didCleanup = await this.handleExpiredCoinflip(gamePda, gameAccount, gamePda.toBase58());
       if (!didCleanup) return false;
 
       // After cleanup, check if game can now be closed
@@ -4420,9 +3940,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         }
       } catch (error: any) {
         if (error.message?.includes("Account does not exist")) {
-          debugLog(
-            "✅ Game account already closed successfully after buffer cleanup",
-          );
+          debugLog("✅ Game account already closed successfully after buffer cleanup");
         } else {
           console.error("Post-buffer cleanup close attempt failed:", error);
         }
@@ -4557,14 +4075,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       // Check if user has enough tokens to cover the game stake
       if (tokenBalance < gameAmount) {
-        const formattedBalance = this.wallet.formatTokenBalance(
-          tokenBalance,
-          metadata.decimals,
-        );
-        const formattedNeed = this.wallet.formatTokenBalance(
-          gameAmount,
-          metadata.decimals,
-        );
+        const formattedBalance = this.wallet.formatTokenBalance(tokenBalance, metadata.decimals);
+        const formattedNeed = this.wallet.formatTokenBalance(gameAmount, metadata.decimals);
         const safeTicker = escapeHtml(gameData.token_ticker);
 
         // Check if user has no token account at all (balance = 0)
@@ -4586,11 +4098,10 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       // For giveaway: reservedTicketAmount is always 0 because giveaways are free to join.
       // `availableTokenAmountRaw` is an upper bound only; the JIT swap targets `desiredLamports`
       // and should consume only what is needed to cover SOL fees.
-      const reservedTicketAmount =
-        currentGameType === "coinflip" ? gameAmount : 0;
+      const reservedTicketAmount = currentGameType === "coinflip" ? gameAmount : 0;
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
-      let lamportsBalance = solBalance;
+      const lamportsBalance = solBalance;
       if (lamportsBalance < minSolBuffer) {
         if (swapAllowanceRaw <= 0) {
           const shortfallMessage = this.buildSolShortfallMessage({
@@ -4601,10 +4112,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           });
 
           if (currentGameType === "coinflip") {
-            const formattedStake = this.wallet.formatTokenBalance(
-              gameAmount,
-              metadata.decimals,
-            );
+            const formattedStake = this.wallet.formatTokenBalance(gameAmount, metadata.decimals);
             return {
               success: false,
               error: `${shortfallMessage}
@@ -4634,10 +4142,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         }
 
         if (jitResult.swapped) {
-          tokenBalance = await this.wallet.getTokenBalance(
-            telegramId,
-            gameData.token_mint,
-          );
+          tokenBalance = await this.wallet.getTokenBalance(telegramId, gameData.token_mint);
 
           // Only check token balance after swap for coinflip (giveaway doesn't require tokens)
           if (currentGameType === "coinflip" && tokenBalance < gameAmount) {
@@ -4664,8 +4169,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               error: this.buildSolShortfallMessage({
                 currentLamports: refreshedLamports,
                 requiredLamports: minSolBuffer,
-                reason:
-                  "Just-in-time swap did not leave enough SOL for transaction fees",
+                reason: "Just-in-time swap did not leave enough SOL for transaction fees",
                 nextSteps: "Add more SOL to continue.",
               }),
             };
@@ -4689,11 +4193,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       let pendingRecorded = false;
 
       if (gameAccount.isPrivate) {
-        const result = await this.joinPrivateGame(
-          gamePda,
-          playerKp,
-          chatId || 0,
-        );
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
         if (!result.success) {
           return {
             success: false,
@@ -4701,25 +4201,16 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           };
         }
         joinTx = result.tx;
-        this.gameDb.saveGameParticipant(
-          gameAddress,
-          telegramIdStr,
-          playerPubkey,
-          {
-            status: "pending",
-            joinSignature: joinTx ?? null,
-            lastVerifiedAt: null,
-          },
-        );
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
         pendingRecorded = true;
         joinConfirmed = true;
       } else {
         const maxAttempts = 2;
-        for (
-          let attempt = 0;
-          attempt < maxAttempts && !joinConfirmed;
-          attempt++
-        ) {
+        for (let attempt = 0; attempt < maxAttempts && !joinConfirmed; attempt++) {
           let setupInstructions: TransactionInstruction[] = [];
           let joinInstructions: TransactionInstruction[] = [];
           try {
@@ -4739,19 +4230,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               .instruction();
             joinInstructions = [...setupInstructions, joinInstruction];
 
-            joinTx = await this.wallet.sendTransaction(joinInstructions, [
-              playerKp,
-            ]);
-            this.gameDb.saveGameParticipant(
-              gameAddress,
-              telegramIdStr,
-              playerPubkey,
-              {
-                status: "pending",
-                joinSignature: joinTx ?? null,
-                lastVerifiedAt: null,
-              },
-            );
+            joinTx = await this.wallet.sendTransaction(joinInstructions, [playerKp]);
+            this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
+              status: "pending",
+              joinSignature: joinTx ?? null,
+              lastVerifiedAt: null,
+            });
             pendingRecorded = true;
 
             joinTx = await this.confirmTransactionWithRecovery(
@@ -4770,16 +4254,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
                 const refreshedSignature = await resendJoinTransaction();
 
-                this.gameDb.saveGameParticipant(
-                  gameAddress,
-                  telegramIdStr,
-                  playerPubkey,
-                  {
-                    status: "pending",
-                    joinSignature: refreshedSignature ?? null,
-                    lastVerifiedAt: null,
-                  },
-                );
+                this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
+                  status: "pending",
+                  joinSignature: refreshedSignature ?? null,
+                  lastVerifiedAt: null,
+                });
 
                 return refreshedSignature ?? joinTx;
               },
@@ -4795,15 +4274,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                 normalized.includes("accountnotinitialized") ||
                 normalized.includes("uninitialized"));
             const isTimeout =
-              normalized.includes("timeout") ||
-              normalized.includes("not confirmed");
+              normalized.includes("timeout") || normalized.includes("not confirmed");
             const isLastAttempt = attempt === maxAttempts - 1;
 
             if (isTimeout && !isLastAttempt) {
-              const alreadyJoined = await this.isPlayerInGame(
-                gamePda,
-                playerKp.publicKey,
-              ).catch(() => false);
+              const alreadyJoined = await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
+                () => false,
+              );
 
               if (alreadyJoined) {
                 joinConfirmed = true;
@@ -4833,18 +4310,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         }
         return {
           success: false,
-          error:
-            "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
+          error: "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
         };
       }
 
       // Update database
       if (normalizedDisplayName) {
-        this.gameDb.savePlayerMapping(
-          playerPubkey,
-          telegramIdStr,
-          normalizedDisplayName,
-        );
+        this.gameDb.savePlayerMapping(playerPubkey, telegramIdStr, normalizedDisplayName);
       } else {
         this.gameDb.savePlayerMapping(playerPubkey, telegramIdStr);
       }
@@ -4864,8 +4336,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
 
       try {
-        const updatedGameAccount =
-          await this.program.account.game.fetch(gamePda);
+        const updatedGameAccount = await this.program.account.game.fetch(gamePda);
         const ticketsCount = Number(updatedGameAccount.ticketsCount ?? 0);
         const maxTickets = Number(updatedGameAccount.maxTickets ?? 0);
         const requestCompletion = this.oracleClient.requestGameCompletion;
@@ -4925,12 +4396,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
 
       // Execute unjoin
-      await this.unjoinPlayerFromGame(
-        gamePda,
-        playerKp,
-        playerKp.publicKey,
-        telegramId.toString(),
-      );
+      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey, telegramId.toString());
 
       return { success: true };
     } catch (error: any) {
@@ -4975,10 +4441,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     try {
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      const closeAccounts = await this.buildCloseGameAccounts(
-        gamePda,
-        gameAccount,
-      );
+      const closeAccounts = await this.buildCloseGameAccounts(gamePda, gameAccount);
       const closeInstruction = await this.program.methods
         .closeGame()
         .accounts(closeAccounts as any)
@@ -5008,14 +4471,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           ),
       );
 
-      const successMessage =
-        successPrefix ?? `✅ Successfully closed ${gameType} game`;
+      const successMessage = successPrefix ?? `✅ Successfully closed ${gameType} game`;
       debugLog(`${successMessage} ${address} with tx: ${tx}`);
 
       return { success: true, tx };
     } catch (error: any) {
-      const failureMessage =
-        failurePrefix ?? `❌ Failed to close ${gameType} game`;
+      const failureMessage = failurePrefix ?? `❌ Failed to close ${gameType} game`;
       console.error(`${failureMessage} ${address}:`, error?.message ?? error);
       return { success: false, error: error?.message ?? String(error) };
     }
@@ -5034,9 +4495,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
 
       if (!creatorTelegramId) {
-        debugLog(
-          `No telegram ID found for creator ${creatorPubkey}, cannot close game`,
-        );
+        debugLog(`No telegram ID found for creator ${creatorPubkey}, cannot close game`);
         return { success: false, error: "Creator not found in database" };
       }
 
@@ -5048,10 +4507,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         attemptLog: `Attempting to close ${gameType} game ${gameAddress} with cleanup`,
       });
     } catch (error: any) {
-      console.error(
-        `❌ Error closing ${gameType} game ${gamePda.toBase58()}:`,
-        error,
-      );
+      console.error(`❌ Error closing ${gameType} game ${gamePda.toBase58()}:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -5089,9 +4545,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       gameAccount = await this.program.account.game.fetch(gamePda);
     } catch (error: any) {
       throw new Error(
-        `Failed to fetch game account for ${gameAddress}: ${
-          error?.message ?? error
-        }`,
+        `Failed to fetch game account for ${gameAddress}: ${error?.message ?? error}`,
       );
     }
 
@@ -5103,10 +4557,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     try {
       this.recoverParticipantsFromChain(gamePda, gameAccount, knownIds);
     } catch (error) {
-      console.warn(
-        `⚠️ Unable to reconcile on-chain participants for ${gameAddress}:`,
-        error,
-      );
+      console.warn(`⚠️ Unable to reconcile on-chain participants for ${gameAddress}:`, error);
     }
 
     if (skipDbChecks && playerTelegramId) {
@@ -5131,8 +4582,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     if (skipDbChecks) {
       const isPlayerAuthority = authorityKp.publicKey.equals(playerPubkey);
       const isCreatorAuthority =
-        !!creatorPubkeyFromAccount &&
-        authorityKp.publicKey.equals(creatorPubkeyFromAccount);
+        !!creatorPubkeyFromAccount && authorityKp.publicKey.equals(creatorPubkeyFromAccount);
 
       if (!isPlayerAuthority && !isCreatorAuthority) {
         throw new Error(
@@ -5177,16 +4627,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     );
 
     const resolvedTelegramId =
-      playerTelegramId ??
-      this.gameDb.getPlayerTelegramId(playerPubkeyBase58) ??
-      null;
+      playerTelegramId ?? this.gameDb.getPlayerTelegramId(playerPubkeyBase58) ?? null;
 
     if (resolvedTelegramId) {
       try {
         this.gameDb.removeGameParticipant(gameAddress, resolvedTelegramId);
-        debugLog(
-          `Unjoined player ${resolvedTelegramId} from game participants tracking`,
-        );
+        debugLog(`Unjoined player ${resolvedTelegramId} from game participants tracking`);
       } catch (error) {
         console.warn(
           "⚠️ Failed to remove participant " +
@@ -5214,10 +4660,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     error?: string;
   }> {
     try {
-      const authResult = await this.oracleClient.authorizePlayer(
-        gamePda,
-        chatId,
-      );
+      const authResult = await this.oracleClient.authorizePlayer(gamePda, chatId);
 
       if (!authResult.authorized) {
         return {
@@ -5291,10 +4734,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             .instruction();
           joinInstructions = [...setupInstructions, joinInstruction];
 
-          lastSignature = await this.wallet.sendTransaction(joinInstructions, [
-            playerKp,
-            adminKp,
-          ]);
+          lastSignature = await this.wallet.sendTransaction(joinInstructions, [playerKp, adminKp]);
 
           lastSignature = await this.confirmTransactionWithRecovery(
             lastSignature!,
@@ -5332,19 +4772,16 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             (normalized.includes("associated token account") ||
               normalized.includes("accountnotinitialized") ||
               normalized.includes("uninitialized"));
-          const isTimeout =
-            normalized.includes("timeout") ||
-            normalized.includes("not confirmed");
+          const isTimeout = normalized.includes("timeout") || normalized.includes("not confirmed");
           const isExpiration =
             normalized.includes("expired before confirmation") ||
             normalized.includes("last valid block height");
           const isLastAttempt = attempt === maxAttempts - 1;
 
           if ((isTimeout || isExpiration) && !isLastAttempt) {
-            const alreadyJoined = await this.isPlayerInGame(
-              gamePda,
-              playerKp.publicKey,
-            ).catch(() => false);
+            const alreadyJoined = await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
+              () => false,
+            );
 
             if (alreadyJoined) {
               return { success: true, tx: lastSignature };
@@ -5369,8 +4806,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       return {
         success: false,
-        error:
-          "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
+        error: "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
         tx: lastSignature,
       };
     } catch (error: any) {
@@ -5407,10 +4843,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     ]);
 
     // Active games
-    const validActiveGames = await this.processActiveGames(
-      ctx,
-      activeGamesData,
-    );
+    const validActiveGames = await this.processActiveGames(ctx, activeGamesData);
     const activeGamesSection =
       validActiveGames.length > 0
         ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
@@ -5453,18 +4886,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
    * Get structured game history for the improved /games command.
    * Returns categorized games with amounts for summary calculation.
    */
-  public async getUserGamesHistory(
-    ctx: Context,
-    telegramId: bigint,
-  ): Promise<GameHistoryResult> {
+  public async getUserGamesHistory(ctx: Context, telegramId: bigint): Promise<GameHistoryResult> {
     const telegramIdStr = telegramId.toString();
     const playerKp = this.wallet.getKeyPair(telegramId);
     const playerPublicKey = playerKp.publicKey.toString();
 
-    const recentGamesData = await this.gameDb.getRecentGames(
-      telegramIdStr,
-      GAMES_HISTORY_LIMIT,
-    );
+    const recentGamesData = await this.gameDb.getRecentGames(telegramIdStr, GAMES_HISTORY_LIMIT);
 
     const entries: GameHistoryEntry[] = [];
     const tickerCounts = new Map<string, number>();
@@ -5476,19 +4903,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         const gameType = (gameData.game_type as string)?.toLowerCase();
         if (gameType === "giveaway") continue;
 
-        const category = categorizeGame(
-          gameData,
-          telegramIdStr,
-          playerPublicKey,
-        );
+        const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
 
         // Skip "created" games (not useful for history)
         if (category === "created") continue;
 
         const gameAddress = gameData.game_address as string;
         const rawAmount = Number(gameData.amount);
-        const amount =
-          Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+        const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
         const tokenTicker = gameData.token_ticker || "TOKENS";
         const tokenMint = gameData.token_mint || "";
         const completedAt = gameData.completed_at || Date.now();
@@ -5519,20 +4941,15 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         let ticketCount = 0;
         let maxTickets = 0;
         try {
-          const getCount = (this.gameDb as any).getGameParticipantsCount?.bind(
-            this.gameDb,
-          );
+          const getCount = (this.gameDb as any).getGameParticipantsCount?.bind(this.gameDb);
           if (typeof getCount === "function") {
             ticketCount = Math.max(0, Math.trunc(getCount(gameAddress)));
           } else {
-            ticketCount = (this.gameDb.getGameParticipants(gameAddress) ?? [])
-              .length;
+            ticketCount = (this.gameDb.getGameParticipants(gameAddress) ?? []).length;
           }
           const storedMax = Number(gameData.max_players);
           maxTickets =
-            Number.isFinite(storedMax) && storedMax > 0
-              ? storedMax
-              : Math.max(ticketCount, 0);
+            Number.isFinite(storedMax) && storedMax > 0 ? storedMax : Math.max(ticketCount, 0);
         } catch {
           // ignore
         }
@@ -5555,10 +4972,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         let opponentDisplay = "";
         if (category === "lost" && gameData.winner_address) {
           try {
-            const winnerUsername = await this.getPlayerUsername(
-              ctx,
-              gameData.winner_address,
-            );
+            const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
             opponentDisplay = winnerUsername
               ? sanitizeTelegramDisplayNameWithoutMention(winnerUsername)
               : "";
@@ -5638,9 +5052,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     // Convert won amounts to USD
     if (playerStats?.wonAmountByToken) {
-      for (const [tokenMint, wonAmount] of Object.entries(
-        playerStats.wonAmountByToken,
-      )) {
+      for (const [tokenMint, wonAmount] of Object.entries(playerStats.wonAmountByToken)) {
         if (wonAmount <= 0) continue;
         try {
           let decimals = 9;
@@ -5666,9 +5078,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     // Convert lost amounts to USD
     if (playerStats?.lostAmountByToken) {
-      for (const [tokenMint, lostAmount] of Object.entries(
-        playerStats.lostAmountByToken,
-      )) {
+      for (const [tokenMint, lostAmount] of Object.entries(playerStats.lostAmountByToken)) {
         if (lostAmount <= 0) continue;
         try {
           let decimals = 9;
@@ -5719,8 +5129,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
    * 🚫 14.0k TIMBA 🅴 • 0/2 • 19 Dec 00:44
    */
   public formatCompactGameLine(game: GameHistoryEntry): string {
-    const emoji =
-      game.category === "won" ? "✅" : game.category === "lost" ? "❌" : "🚫";
+    const emoji = game.category === "won" ? "✅" : game.category === "lost" ? "❌" : "🚫";
 
     const amountStr = formatCompactAmount(game.amount, game.tokenDecimals);
     const ticketsStr = `${game.ticketCount}/${game.maxTickets}`;
@@ -5742,9 +5151,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
 
     // Build explorer link with 🅴 emoji (like game messages)
-    const explorerIcon = game.explorerUrl
-      ? `<a href="${escapeHtml(game.explorerUrl)}">🅴</a>`
-      : "";
+    const explorerIcon = game.explorerUrl ? `<a href="${escapeHtml(game.explorerUrl)}">🅴</a>` : "";
 
     return `${emoji} ${escapeHtml(amountStr)} ${ticker} ${explorerIcon}• ${ticketsStr}${personPart} • ${dateStr}`;
   }
@@ -5756,10 +5163,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
    * Net: <code>+$13.00</code> (Won <code>$21.00</code> • Lost <code>$8.00</code>)
    * ────────
    */
-  public formatGamesHeader(
-    username: string,
-    result: GameHistoryResult,
-  ): string {
+  public formatGamesHeader(username: string, result: GameHistoryResult): string {
     const formatUsd = (value: number): string => {
       if (value >= 1000) {
         const k = value / 1000;
@@ -5782,11 +5186,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const totalGames = wins + losses;
     const winRate = totalGames > 0 ? (wins / totalGames) * 100 : 0;
     const winRateStr =
-      winRate > 0
-        ? Number.isInteger(winRate)
-          ? winRate.toFixed(0)
-          : winRate.toFixed(1)
-        : "0";
+      winRate > 0 ? (Number.isInteger(winRate) ? winRate.toFixed(0) : winRate.toFixed(1)) : "0";
 
     // Remove the $ from netStr since we'll add it with the sign
     const summaryLine = `Net: ${netSign}$${netStr.replace("$", "")} (Won ${wonUsd} • Lost ${lostUsd})`;
@@ -5832,11 +5232,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       case "all":
       default:
         // Merge all and sort by date
-        games = [
-          ...result.won.games,
-          ...result.lost.games,
-          ...result.cancelled.games,
-        ].sort((a, b) => b.completedAt - a.completedAt);
+        games = [...result.won.games, ...result.lost.games, ...result.cancelled.games].sort(
+          (a, b) => b.completedAt - a.completedAt,
+        );
         sectionTitle = `All (${games.length})`;
         break;
     }
@@ -5887,8 +5285,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       })
       .join("\n");
 
-    const pageInfo =
-      totalPages > 1 ? ` • Page ${safePage + 1}/${totalPages}` : "";
+    const pageInfo = totalPages > 1 ? ` • Page ${safePage + 1}/${totalPages}` : "";
 
     return `${header}\n${sectionTitle}${pageInfo}\n${gameLines}`;
   }
@@ -5912,18 +5309,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       {
         label: "All",
         tab: "all",
-        count:
-          result.won.games.length +
-          result.lost.games.length +
-          result.cancelled.games.length,
+        count: result.won.games.length + result.lost.games.length + result.cancelled.games.length,
       },
     ];
 
     const tabRow = tabs.map(({ label, tab, count }) => {
       const isActive = tab === currentTab;
-      const displayLabel = isActive
-        ? `[${label} (${count})]`
-        : `${label} (${count})`;
+      const displayLabel = isActive ? `[${label} (${count})]` : `${label} (${count})`;
       return {
         text: displayLabel,
         callback_data: `games_tab:${tab}:0:${telegramId}`,
@@ -6018,10 +5410,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           return null;
         }
 
-        const creatorUsername = await this.getGameCreatorUsername(
-          ctx,
-          gameData.game_address,
-        );
+        const creatorUsername = await this.getGameCreatorUsername(ctx, gameData.game_address);
 
         const { messageText, keyboard } = await this.formatGameMessage(
           ctx,
@@ -6049,10 +5438,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           maxTickets = stats?.maxTickets;
           minTickets = stats?.minTickets;
         } catch (statError) {
-          console.warn(
-            "Failed to fetch game stats for active list:",
-            statError,
-          );
+          console.warn("Failed to fetch game stats for active list:", statError);
         }
 
         return {
@@ -6066,9 +5452,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }),
     );
 
-    return formattedGames.filter(
-      (game): game is ActiveGameRow => game !== null,
-    );
+    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
   }
 
   public async getChatActiveGames(
@@ -6109,10 +5493,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const createdAt = Number(account?.createdAt ?? 0);
       const timeout = Number(account?.timeout ?? 0);
       const hasTiming =
-        Number.isFinite(createdAt) &&
-        createdAt > 0 &&
-        Number.isFinite(timeout) &&
-        timeout > 0;
+        Number.isFinite(createdAt) && createdAt > 0 && Number.isFinite(timeout) && timeout > 0;
 
       if (hasTiming && GameManager.isExpired(account)) {
         return false;
@@ -6124,11 +5505,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const getExpiryTimestamp = (account: any): number => {
       const createdAt = Number(account?.createdAt ?? 0);
       const timeout = Number(account?.timeout ?? 0);
-      if (
-        Number.isFinite(createdAt) &&
-        Number.isFinite(timeout) &&
-        timeout > 0
-      ) {
+      if (Number.isFinite(createdAt) && Number.isFinite(timeout) && timeout > 0) {
         return createdAt + timeout;
       }
 
@@ -6184,9 +5561,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
    * Ensure local DB contains minimal data for an on-chain game.
    * Used for /public joins where this bot may not have tracked the game yet.
    */
-  public async ensureGameDataFromChain(
-    gameAddress: string,
-  ): Promise<GameData | null> {
+  public async ensureGameDataFromChain(gameAddress: string): Promise<GameData | null> {
     const existing = this.gameDb.getGame(gameAddress);
     if (existing) {
       return existing;
@@ -6197,9 +5572,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const gamePda = new PublicKey(gameAddress);
       const accountApi = this.program.account.game as any;
       const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
-      gameAccount = fetchNullable
-        ? await fetchNullable(gamePda)
-        : await accountApi.fetch(gamePda);
+      gameAccount = fetchNullable ? await fetchNullable(gamePda) : await accountApi.fetch(gamePda);
     } catch (error: any) {
       const message = error?.message ?? "";
       if (message.includes("Account does not exist")) {
@@ -6248,17 +5621,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         : String(gameAccount.creator ?? "");
 
     const creatorTelegramId =
-      (creatorPubkey ? this.gameDb.getPlayerTelegramId(creatorPubkey) : null) ??
-      creatorPubkey;
+      (creatorPubkey ? this.gameDb.getPlayerTelegramId(creatorPubkey) : null) ?? creatorPubkey;
 
     if (creatorPubkey && creatorTelegramId) {
       try {
         this.gameDb.savePlayerMapping(creatorPubkey, creatorTelegramId);
       } catch (error) {
-        console.warn(
-          `Failed to persist creator mapping for hydrated game ${gameAddress}:`,
-          error,
-        );
+        console.warn(`Failed to persist creator mapping for hydrated game ${gameAddress}:`, error);
       }
     }
 
@@ -6268,9 +5637,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const minPlayers = Number(gameAccount.minTickets ?? 0) || undefined;
 
     const createdAtMs = hasTiming ? createdAtSeconds * 1000 : Date.now();
-    const expiresAtMs = hasTiming
-      ? (createdAtSeconds + timeoutSeconds) * 1000
-      : undefined;
+    const expiresAtMs = hasTiming ? (createdAtSeconds + timeoutSeconds) * 1000 : undefined;
 
     try {
       this.gameDb.saveGame(
@@ -6288,19 +5655,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         createdAtMs,
       );
     } catch (error) {
-      console.warn(
-        `Failed to hydrate game ${gameAddress} into local DB:`,
-        error,
-      );
+      console.warn(`Failed to hydrate game ${gameAddress} into local DB:`, error);
     }
 
     return this.gameDb.getGame(gameAddress);
   }
 
-  private async processActiveGames(
-    ctx: Context,
-    activeGamesData: any[],
-  ): Promise<string[]> {
+  private async processActiveGames(ctx: Context, activeGamesData: any[]): Promise<string[]> {
     const activeGames = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
@@ -6313,19 +5674,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           try {
             gamePda = new PublicKey(gameData.game_address);
           } catch (pkError) {
-            console.error(
-              "Invalid game address format:",
-              gameData.game_address,
-            );
+            console.error("Invalid game address format:", gameData.game_address);
             return null;
           }
 
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
-          console.error(
-            "Error fetching game " + gameData.game_address + ":",
-            error,
-          );
+          console.error("Error fetching game " + gameData.game_address + ":", error);
           return null;
         }
       }),
@@ -6343,18 +5698,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const recentGames = await Promise.all(
       recentGamesData.map(async (gameData) => {
         try {
-          const category = categorizeGame(
-            gameData,
-            telegramIdStr,
-            playerPublicKey,
-          );
+          const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
           const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
           return { category, gameInfo, completedAt: gameData.completed_at };
         } catch (error) {
-          console.error(
-            "Error processing game " + gameData.game_address + ":",
-            error,
-          );
+          console.error("Error processing game " + gameData.game_address + ":", error);
           return null;
         }
       }),
@@ -6388,11 +5736,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const remaining = games.length - limit;
       lines.push(
         "",
-        "<i>+" +
-          remaining +
-          " more game" +
-          (remaining === 1 ? "" : "s") +
-          " not shown</i>",
+        "<i>+" + remaining + " more game" + (remaining === 1 ? "" : "s") + " not shown</i>",
       );
     }
 
@@ -6433,13 +5777,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           count += messageMap.size;
         }
       }
-      debugLog(
-        "Reloaded " +
-          count +
-          " game messages for " +
-          allGames.length +
-          " games",
-      );
+      debugLog("Reloaded " + count + " game messages for " + allGames.length + " games");
     } catch (error) {
       console.error("Error reloading game messages:", error);
     }
@@ -6474,9 +5812,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
   }
 
-  private async findOrphanedGames(): Promise<
-    { address: string; account: any }[]
-  > {
+  private async findOrphanedGames(): Promise<{ address: string; account: any }[]> {
     const orphanedGames: { address: string; account: any }[] = [];
 
     try {
@@ -6536,9 +5872,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       );
 
       if (!bufferElapsed && ticketsCount >= minTickets && minTickets > 0) {
-        debugLog(
-          "⏳ Game has enough participants, waiting for oracle before cleanup",
-        );
+        debugLog("⏳ Game has enough participants, waiting for oracle before cleanup");
         return false;
       }
 
@@ -6550,10 +5884,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
   }
 
-  public static isExpired(
-    gameAccount: any,
-    currentTimeSeconds?: number,
-  ): boolean {
+  public static isExpired(gameAccount: any, currentTimeSeconds?: number): boolean {
     const currentTime = currentTimeSeconds ?? Math.floor(Date.now() / 1000);
     const createdAt = Number(gameAccount.createdAt ?? 0);
     const timeout = Number(gameAccount.timeout ?? 0);
@@ -6561,10 +5892,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     return currentTime > expiresAt;
   }
 
-  public static isExpiredWithBuffer(
-    gameAccount: any,
-    currentTimeSeconds?: number,
-  ): boolean {
+  public static isExpiredWithBuffer(gameAccount: any, currentTimeSeconds?: number): boolean {
     const currentTime = currentTimeSeconds ?? Math.floor(Date.now() / 1000);
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
@@ -6576,10 +5904,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     return GameManager.isExpiredWithBuffer(gameAccount);
   }
 
-  private getDisplayAmountFromAccount(
-    gameAccount: any,
-    gameTypeOverride?: string,
-  ): number {
+  private getDisplayAmountFromAccount(gameAccount: any, gameTypeOverride?: string): number {
     const gameType = gameTypeOverride ?? this.getGameType(gameAccount);
     const ticketAmount = Number(gameAccount?.ticketAmount ?? 0);
     const totalAmount = Number(gameAccount?.totalAmount ?? 0);
@@ -6611,10 +5936,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       debugLog("ℹ️ Orphaned game " + address + " was already closed");
       return true;
     } else {
-      console.error(
-        "❌ Error processing orphaned game " + address + ":",
-        error.message,
-      );
+      console.error("❌ Error processing orphaned game " + address + ":", error.message);
       return false;
     }
   }
@@ -6629,14 +5951,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const minTickets = Number(gameAccount.minTickets ?? 0);
     const hasEnoughTickets = ticketsCount >= minTickets;
 
-    const shouldCancelImmediately =
-      ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
+    const shouldCancelImmediately = ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
 
     if (shouldCancelImmediately) {
-      const immediateResult = await this.cancelGameWithPlayerKeys(
-        gamePda,
-        gameType,
-      );
+      const immediateResult = await this.cancelGameWithPlayerKeys(gamePda, gameType);
       if (immediateResult.success) {
         debugLog("✅ Successfully handled expired giveaway: " + address);
         return true;
@@ -6681,10 +5999,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const dbParticipantsSnapshot = this.gameDb.getGameParticipants(address);
     await this.reconcilePendingParticipants(gamePda);
     const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
-    const effectiveOnChainTickets =
-      playerKeyInfo.onChainTickets ?? onChainTickets;
-    const effectiveOnChainParticipants =
-      playerKeyInfo.onChainParticipants ?? onChainParticipants;
+    const effectiveOnChainTickets = playerKeyInfo.onChainTickets ?? onChainTickets;
+    const effectiveOnChainParticipants = playerKeyInfo.onChainParticipants ?? onChainParticipants;
     const effectiveDbParticipants =
       playerKeyInfo.dbParticipantCount ?? dbParticipantsSnapshot.length;
 
@@ -6782,14 +6098,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         })();
 
       if (!creatorTelegramId && creatorPubkey) {
-        creatorTelegramId =
-          this.gameDb.getPlayerTelegramId?.(creatorPubkey.toBase58()) ?? null;
+        creatorTelegramId = this.gameDb.getPlayerTelegramId?.(creatorPubkey.toBase58()) ?? null;
       }
 
-      if (
-        !creatorTelegramId &&
-        typeof this.gameDb.getCreatorInfo === "function"
-      ) {
+      if (!creatorTelegramId && typeof this.gameDb.getCreatorInfo === "function") {
         const info = this.gameDb.getCreatorInfo(address);
         if (info?.telegramId) {
           creatorTelegramId = info.telegramId;
@@ -6798,9 +6110,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       if (!creatorTelegramId) {
         console.warn(
-          "⚠️ Cannot cancel " +
-            address +
-            ": creator Telegram ID is missing from local data",
+          "⚠️ Cannot cancel " + address + ": creator Telegram ID is missing from local data",
         );
         return false;
       }
@@ -6816,28 +6126,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     // Strategy 1: Complete cleanup (unjoin all non-creators, then cancel)
     if (playerKeyInfo.canCompleteCleanup) {
-      return await this.executeCompleteCleanup(
-        gamePda,
-        gameAccount,
-        playerKeyInfo,
-        address,
-      );
+      return await this.executeCompleteCleanup(gamePda, gameAccount, playerKeyInfo, address);
     }
 
     // Strategy 2: Partial cleanup (unjoin available players only)
-    return await this.executePartialCleanup(
-      gamePda,
-      gameAccount,
-      playerKeyInfo,
-      address,
-    );
+    return await this.executePartialCleanup(gamePda, gameAccount, playerKeyInfo, address);
   }
 
-  private analyzePlayerKeys(
-    gamePda: PublicKey,
-    gameAccount: any,
-    gameAddress: string,
-  ) {
+  private analyzePlayerKeys(gamePda: PublicKey, gameAccount: any, gameAddress: string) {
     // Get players from database since contract no longer stores players array
     const dbParticipants = this.getGamePlayers(gameAddress);
     const participantTelegramIds = new Set(dbParticipants);
@@ -6856,21 +6152,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     if (creatorPubkey) {
       try {
-        creatorTelegramId =
-          this.gameDb.getPlayerTelegramId?.(creatorPubkey.toBase58()) ?? null;
+        creatorTelegramId = this.gameDb.getPlayerTelegramId?.(creatorPubkey.toBase58()) ?? null;
         if (creatorTelegramId) {
           participantTelegramIds.add(creatorTelegramId);
         } else {
-          console.warn(
-            "⚠️ Unable to resolve creator Telegram ID for orphaned game " +
-              gameAddress,
-          );
+          console.warn("⚠️ Unable to resolve creator Telegram ID for orphaned game " + gameAddress);
         }
       } catch (error) {
-        console.warn(
-          "⚠️ Failed to look up creator Telegram ID for " + gameAddress + ":",
-          error,
-        );
+        console.warn("⚠️ Failed to look up creator Telegram ID for " + gameAddress + ":", error);
       }
     }
 
@@ -6912,11 +6201,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
-    if (
-      !available.some((p) => p.isCreator) &&
-      creatorPubkey &&
-      creatorTelegramId
-    ) {
+    if (!available.some((p) => p.isCreator) && creatorPubkey && creatorTelegramId) {
       available.push({
         pubkey: creatorPubkey,
         telegramId: creatorTelegramId,
@@ -6941,8 +6226,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     const nonCreators = available.filter((p) => !p.isCreator);
     const creator = available.find((p) => p.isCreator);
-    const canCompleteCleanup =
-      unavailable.length === 0 && creator !== undefined;
+    const canCompleteCleanup = unavailable.length === 0 && creator !== undefined;
 
     return {
       available,
@@ -7079,13 +6363,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     if (tokenMintStr) {
       try {
         const metadata = await this.wallet.getTokenMetadata(tokenMintStr);
-        tokenDecimals =
-          typeof metadata.decimals === "number" ? metadata.decimals : 0;
+        tokenDecimals = typeof metadata.decimals === "number" ? metadata.decimals : 0;
       } catch (error) {
         console.warn(
-          "⚠️ Failed to load token metadata for " +
-            tokenMintStr +
-            " during unjoin cleanup:",
+          "⚠️ Failed to load token metadata for " + tokenMintStr + " during unjoin cleanup:",
           error,
         );
       }
@@ -7167,18 +6448,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             playerSucceeded = true;
           } catch (error) {
             console.error(
-              "Failed to unjoin " +
-                player.pubkey.toBase58() +
-                " with player authority:",
+              "Failed to unjoin " + player.pubkey.toBase58() + " with player authority:",
               error,
             );
           }
         }
       } else {
         console.error(
-          "Failed to unjoin " +
-            player.pubkey.toBase58() +
-            ": missing signing authority",
+          "Failed to unjoin " + player.pubkey.toBase58() + ": missing signing authority",
         );
       }
 
@@ -7214,18 +6491,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             player.telegramId,
             { skipDbCheck: true },
           );
-          debugLog(
-            "➡️ Unjoined player " +
-              player.pubkey.toBase58() +
-              " using creator authority",
-          );
+          debugLog("➡️ Unjoined player " + player.pubkey.toBase58() + " using creator authority");
           unjoinedCount++;
           continue;
         } catch (fallbackError) {
           console.error(
-            "Failed to unjoin " +
-              player.pubkey.toBase58() +
-              " using creator authority:",
+            "Failed to unjoin " + player.pubkey.toBase58() + " using creator authority:",
             fallbackError,
           );
         }
@@ -7247,8 +6518,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       gameAccount,
       creatorTelegramId,
       gameType,
-      attemptLog:
-        "🎁 Closing expired " + gameType + " " + address + " with cleanup",
+      attemptLog: "🎁 Closing expired " + gameType + " " + address + " with cleanup",
       successPrefix: "✅ Successfully closed expired " + gameType,
       failurePrefix: "❌ Failed to close expired " + gameType,
     });

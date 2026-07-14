@@ -37,11 +37,7 @@ export function makeProgramStub(gameAccount: any = {}): any {
 }
 
 export function makeWalletStub(options: WalletStubOptions = {}): any {
-  const {
-    blockTime = Math.floor(Date.now() / 1000),
-    tokenDecimals = 9,
-    tokenFormatter,
-  } = options;
+  const { blockTime = Math.floor(Date.now() / 1000), tokenDecimals = 9, tokenFormatter } = options;
 
   const formatTokenBalance =
     tokenFormatter ??
@@ -50,8 +46,8 @@ export function makeWalletStub(options: WalletStubOptions = {}): any {
         typeof amount === "bigint"
           ? Number(amount)
           : typeof amount === "string"
-          ? Number(amount)
-          : amount;
+            ? Number(amount)
+            : amount;
       return (numeric / Math.pow(10, decimals)).toFixed(6);
     });
 
@@ -59,8 +55,7 @@ export function makeWalletStub(options: WalletStubOptions = {}): any {
     getBlockchainTime: async () => blockTime,
     getTokenMetadata: async () => ({ decimals: tokenDecimals }),
     formatTokenBalance,
-    formatSolBalance: (amount: number | bigint | string) =>
-      formatTokenBalance(amount, 9),
+    formatSolBalance: (amount: number | bigint | string) => formatTokenBalance(amount, 9),
   } as any;
 }
 
@@ -96,7 +91,7 @@ export function makeDbStub(options: DbStubOptions = {}): any {
   const saveUsernameMapping = (
     normalizedUsername: string,
     telegramId: string,
-    displayName?: string | null
+    displayName?: string | null,
   ) => {
     if (!normalizedUsername || !/^\d+$/.test(telegramId)) {
       return;
@@ -113,9 +108,7 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     }
   };
 
-  const findTelegramIdByNormalizedUsername = (
-    normalizedUsername: string
-  ): string | null => {
+  const findTelegramIdByNormalizedUsername = (normalizedUsername: string): string | null => {
     if (!normalizedUsername) {
       return null;
     }
@@ -133,8 +126,7 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     }),
     getCreatorInfo: (_addr: string) => ({ telegramId: "777" }),
     getPlayerTelegramId: (pub: string) => playerTelegramByPub[pub] || null,
-    getPlayerDisplayName: (telegramId: string) =>
-      displayNameByTelegram[telegramId] ?? null,
+    getPlayerDisplayName: (telegramId: string) => displayNameByTelegram[telegramId] ?? null,
     saveGameMessage: (address: string, messageId: number, chatId: number) => {
       savedMessages.push({ address, messageId, chatId });
     },

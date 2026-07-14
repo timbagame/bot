@@ -12,23 +12,18 @@ describe("GameManager Username Resolution", () => {
   describe("getUsernameFromTelegramId", () => {
     test("returns null for invalid numeric ID", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
-      const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: {} }) } } as any;
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
+      const ctx = {
+        chat: { id: 1, type: "private" },
+        api: { getChatMember: async () => ({ user: {} }) },
+      } as any;
       const res = await gm.getUsernameFromTelegramId(ctx, "not-a-number");
       expect(res).toBeNull();
     });
 
     test("falls back to full name when username missing", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const ctx = {
         chat: { id: 1, type: "private" },
         api: {
@@ -43,11 +38,7 @@ describe("GameManager Username Resolution", () => {
 
     test("memoizes usernames per chat", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       let calls = 0;
       const ctx = {
         chat: { id: 99, type: "group" },
@@ -68,11 +59,7 @@ describe("GameManager Username Resolution", () => {
 
     test("trims whitespace around telegram id before lookup", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const received: Array<number | string> = [];
       const ctx = {
         chat: { id: 77, type: "group" },
@@ -91,11 +78,7 @@ describe("GameManager Username Resolution", () => {
 
     test("re-fetches after cache ttl", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const originalNow = Date.now;
       let now = 1_000;
       Date.now = (() => now) as typeof Date.now;
@@ -134,11 +117,7 @@ describe("GameManager Username Resolution", () => {
 
     test("caches failures for a short duration", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       let calls = 0;
       const ctx = {
         chat: { id: 77, type: "group" },
@@ -161,11 +140,7 @@ describe("GameManager Username Resolution", () => {
 
     test("evicts oldest cache entry when capacity exceeded", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       let calls = 0;
       const ctx = {
         chat: { id: 88, type: "group" },
@@ -207,11 +182,7 @@ describe("GameManager Username Resolution", () => {
           },
         },
       } as any;
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       gm.primeUsernameCache(ctx, "9999", "@callbackUser");
       const result = await gm.getUsernameFromTelegramId(ctx, "9999");
       expect(result).toBe("@callbackUser");
@@ -235,7 +206,7 @@ describe("GameManager Username Resolution", () => {
         makeWalletStub(),
         makeDbStub({
           displayNameByTelegram: { "424242": "@persistedUser" },
-        })
+        }),
       );
       const result = await gm.getUsernameFromTelegramId(ctx, "424242");
       expect(result).toBe("@persistedUser");
@@ -257,11 +228,7 @@ describe("GameManager Username Resolution", () => {
           },
         },
       } as any;
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
 
       const first = await gm.getUsernameFromTelegramId(ctx, "555");
       const second = await gm.getUsernameFromTelegramId(ctx, "555");
@@ -273,11 +240,7 @@ describe("GameManager Username Resolution", () => {
 
     test("uses string identifiers when Telegram ID exceeds safe integer range", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const bigId = "9007199254740993";
       const received: Array<number | string> = [];
       const ctx = {
@@ -291,17 +254,13 @@ describe("GameManager Username Resolution", () => {
       } as any;
 
       const res = await gm.getUsernameFromTelegramId(ctx, bigId);
-  expect(res).toBe("@huge");
+      expect(res).toBe("@huge");
       expect(received[0]).toBe(bigId);
     });
 
     test("coalesces concurrent lookups for the same user", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       let calls = 0;
       const resolvers: Array<(value: { user: { username: string } }) => void> = [];
       const ctx = {
@@ -323,8 +282,8 @@ describe("GameManager Username Resolution", () => {
       resolvers[0]?.({ user: { username: "coalesced" } });
 
       const [first, second] = await Promise.all([firstPromise, secondPromise]);
-  expect(first).toBe("@coalesced");
-  expect(second).toBe("@coalesced");
+      expect(first).toBe("@coalesced");
+      expect(second).toBe("@coalesced");
       expect(calls).toBe(1);
     });
   });
@@ -339,11 +298,7 @@ describe("GameManager Username Resolution", () => {
         calls.push(username);
         return originalFind(username);
       };
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        dbStub
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), dbStub);
 
       const first = gm.findTelegramIdByUsername("@Cached");
       expect(first).toBe("111");
@@ -362,13 +317,9 @@ describe("GameManager Username Resolution", () => {
         called = true;
         return null;
       };
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        dbStub
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), dbStub);
 
-      expect(gm.findTelegramIdByUsername("   " )).toBeNull();
+      expect(gm.findTelegramIdByUsername("   ")).toBeNull();
       expect(gm.findTelegramIdByUsername("")).toBeNull();
       expect(called).toBe(false);
     });
@@ -380,9 +331,12 @@ describe("GameManager Username Resolution", () => {
       const gm = GameManager.getInstance(
         makeProgramStub(),
         makeWalletStub(),
-        makeDbStub({ extra: { getPlayerTelegramId: () => "777" } })
+        makeDbStub({ extra: { getPlayerTelegramId: () => "777" } }),
       );
-      const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: { username: "alice" } }) } } as any;
+      const ctx = {
+        chat: { id: 1, type: "private" },
+        api: { getChatMember: async () => ({ user: { username: "alice" } }) },
+      } as any;
       const label = await gm.getPlayerUsername(ctx, "BPFLoader1111111111111111111111111111111111");
       expect(label).toBe("@alice");
     });
@@ -392,9 +346,12 @@ describe("GameManager Username Resolution", () => {
       const gm = GameManager.getInstance(
         makeProgramStub(),
         makeWalletStub(),
-        makeDbStub({ extra: { getPlayerTelegramId: () => null } })
+        makeDbStub({ extra: { getPlayerTelegramId: () => null } }),
       );
-      const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: {} }) } } as any;
+      const ctx = {
+        chat: { id: 1, type: "private" },
+        api: { getChatMember: async () => ({ user: {} }) },
+      } as any;
       const label = await gm.getPlayerUsername(ctx, "BPFLoader1111111111111111111111111111111111");
       expect(label).toBe("BPFLoader1111111111111111111111111111111111");
     });
@@ -418,11 +375,7 @@ describe("GameManager Username Resolution", () => {
           }),
         },
       } as any;
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        stubDb
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), stubDb);
       const label = await gm.getPlayerUsername(ctx, "LazyPublicKey");
       expect(label).toBe("@delayed");
       expect(attempts).toBeGreaterThan(1);
@@ -432,11 +385,7 @@ describe("GameManager Username Resolution", () => {
   describe("getLeaderboardDisplayName", () => {
     test("returns telegram handle when available", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const ctx = {
         chat: { id: 55, type: "group" },
         api: {
@@ -452,11 +401,7 @@ describe("GameManager Username Resolution", () => {
 
     test("prefers full name fallback without forcing @ prefix", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const ctx = {
         chat: { id: 10, type: "group" },
         api: {
@@ -472,11 +417,7 @@ describe("GameManager Username Resolution", () => {
 
     test("falls back to generic player label when username cannot be resolved", async () => {
       resetGM();
-      const gm = GameManager.getInstance(
-        makeProgramStub(),
-        makeWalletStub(),
-        makeDbStub()
-      );
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
       const ctx = { chat: { id: 5, type: "group" }, api: {} } as any;
 
       const result = await gm.getLeaderboardDisplayName(ctx, "INVALID_ID");

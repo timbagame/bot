@@ -43,10 +43,7 @@ const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
   },
 ];
 
-const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<
-  string,
-  BuiltinTokenMetadata
->();
+const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<string, BuiltinTokenMetadata>();
 const BUILTIN_TOKEN_METADATA_BY_MINT = new Map<string, BuiltinTokenMetadata>();
 
 for (const token of BUILTIN_TOKEN_METADATA) {
@@ -137,16 +134,13 @@ export function resolveDefaultToken(options?: {
   ticker?: string | null;
   network?: SolanaNetwork;
 }): TokenConfig {
-  const mintOverride =
-    options?.mint ?? process.env["DEFAULT_TOKEN_MINT"]?.trim();
-  const tickerOverride =
-    options?.ticker ?? process.env["DEFAULT_TOKEN_TICKER"]?.trim();
+  const mintOverride = options?.mint ?? process.env["DEFAULT_TOKEN_MINT"]?.trim();
+  const tickerOverride = options?.ticker ?? process.env["DEFAULT_TOKEN_TICKER"]?.trim();
 
   if (mintOverride && mintOverride.length > 0) {
     return {
       mint: mintOverride,
-      ticker:
-        tickerOverride && tickerOverride.length > 0 ? tickerOverride : "TOKEN",
+      ticker: tickerOverride && tickerOverride.length > 0 ? tickerOverride : "TOKEN",
     };
   }
 
@@ -158,19 +152,16 @@ export function resolveDefaultToken(options?: {
 
   return (
     REGISTERED_TOKENS.find(
-      (token) =>
-        normalizeTicker(token.ticker) === normalizeTicker(defaultTicker)
+      (token) => normalizeTicker(token.ticker) === normalizeTicker(defaultTicker),
     ) ?? TIMBA_MAINNET_TOKEN
   );
 }
 
-export function buildTokenList(
-  options: TokenRegistryOptions = {}
-): TokenConfig[] {
+export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[] {
   const network = options.network ?? NetworkDetector.getCurrentNetwork();
   const includeDefault = options.includeDefault ?? true;
   const defaultToken = includeDefault
-    ? options.defaultToken ?? resolveDefaultToken({ network })
+    ? (options.defaultToken ?? resolveDefaultToken({ network }))
     : null;
 
   const tokens = [...REGISTERED_TOKENS];
@@ -182,22 +173,16 @@ export function buildTokenList(
   return dedupeTokens(tokens);
 }
 
-export function getSupportedTokens(
-  options: TokenRegistryOptions = {}
-): TokenConfig[] {
+export function getSupportedTokens(options: TokenRegistryOptions = {}): TokenConfig[] {
   return buildTokenList(options);
 }
 
-export function getBuiltinTokenMetadataByTicker(
-  ticker: string
-): BuiltinTokenMetadata | undefined {
+export function getBuiltinTokenMetadataByTicker(ticker: string): BuiltinTokenMetadata | undefined {
   if (!ticker) return undefined;
   return BUILTIN_TOKEN_METADATA_BY_TICKER.get(ticker.trim().toUpperCase());
 }
 
-export function getBuiltinTokenMetadataByMint(
-  mint: string
-): BuiltinTokenMetadata | undefined {
+export function getBuiltinTokenMetadataByMint(mint: string): BuiltinTokenMetadata | undefined {
   if (!mint) return undefined;
   return BUILTIN_TOKEN_METADATA_BY_MINT.get(mint.trim());
 }
@@ -208,17 +193,15 @@ function normalizeTicker(ticker: string): string {
 
 export function getTokenByTicker(
   ticker: string,
-  options: TokenRegistryOptions = {}
+  options: TokenRegistryOptions = {},
 ): TokenConfig | undefined {
   const normalized = normalizeTicker(ticker);
-  return getSupportedTokens(options).find(
-    (token) => normalizeTicker(token.ticker) === normalized
-  );
+  return getSupportedTokens(options).find((token) => normalizeTicker(token.ticker) === normalized);
 }
 
 export function getTokenByMint(
   mint: string,
-  options: TokenRegistryOptions = {}
+  options: TokenRegistryOptions = {},
 ): TokenConfig | undefined {
   const normalized = mint.trim();
   return getSupportedTokens(options).find((token) => token.mint === normalized);
@@ -226,7 +209,7 @@ export function getTokenByMint(
 
 export function requireTokenByTicker(
   ticker: string,
-  options: TokenRegistryOptions = {}
+  options: TokenRegistryOptions = {},
 ): TokenConfig {
   const token = getTokenByTicker(ticker, options);
   if (!token) {
@@ -235,15 +218,10 @@ export function requireTokenByTicker(
   return token;
 }
 
-export function requireTokenByMint(
-  mint: string,
-  options: TokenRegistryOptions = {}
-): TokenConfig {
+export function requireTokenByMint(mint: string, options: TokenRegistryOptions = {}): TokenConfig {
   const token = getTokenByMint(mint, options);
   if (!token) {
-    throw new Error(
-      `Token mint ${mint} is not configured in the token registry.`
-    );
+    throw new Error(`Token mint ${mint} is not configured in the token registry.`);
   }
   return token;
 }
@@ -275,7 +253,7 @@ for (const entry of REFERRAL_TOKEN_ENTRIES) {
 }
 
 export function getReferralConfigForMint(
-  mint?: string | null
+  mint?: string | null,
 ): ReferralTokenConfigEntry | undefined {
   if (!mint) return undefined;
   return REFERRAL_CONFIG_MAP.get(mint.trim());

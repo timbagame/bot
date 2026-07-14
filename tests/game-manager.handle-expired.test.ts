@@ -11,7 +11,9 @@ function baseProgram() {
   return { account: { game: { fetch: async () => ({}) } } } as any;
 }
 
-function baseWallet() { return {} as any; }
+function baseWallet() {
+  return {} as any;
+}
 function baseDb(overrides: Partial<any> = {}) {
   return {
     getGameParticipants: (_: string) => [],
@@ -37,14 +39,22 @@ describe("GameManager.handleExpiredGame", () => {
       minTickets: 0,
       creator: new PublicKey("BPFLoader1111111111111111111111111111111111"),
     };
-    const res = await (gm as any).handleExpiredGame(new PublicKey("BPFLoader2111111111111111111111111111111111"), gameAccount);
+    const res = await (gm as any).handleExpiredGame(
+      new PublicKey("BPFLoader2111111111111111111111111111111111"),
+      gameAccount,
+    );
     expect(res).not.toBe(false);
   });
 
   test("coinflip chooses complete cleanup strategy when canCompleteCleanup", async () => {
     resetGM();
     const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
-    (gm as any).analyzePlayerKeys = () => ({ available: [1,2], total: 2, canCompleteCleanup: true, creator: { telegramId: "777" } });
+    (gm as any).analyzePlayerKeys = () => ({
+      available: [1, 2],
+      total: 2,
+      canCompleteCleanup: true,
+      creator: { telegramId: "777" },
+    });
     (gm as any).executeCompleteCleanup = async () => true;
     const now = Math.floor(Date.now() / 1000);
     const gameAccount = {
@@ -56,7 +66,10 @@ describe("GameManager.handleExpiredGame", () => {
       minTickets: 1,
       creator: new PublicKey("BPFLoader1111111111111111111111111111111111"),
     };
-    const res = await (gm as any).handleExpiredGame(new PublicKey("BPFLoader3111111111111111111111111111111111"), gameAccount);
+    const res = await (gm as any).handleExpiredGame(
+      new PublicKey("BPFLoader3111111111111111111111111111111111"),
+      gameAccount,
+    );
     expect(res).toBe(false); // handleExpiredGame returns false unless it closes; completeCleanup returns true but outer method returns false after cleanup path selection
   });
 
@@ -75,7 +88,10 @@ describe("GameManager.handleExpiredGame", () => {
       minTickets: 1,
       creator: new PublicKey("BPFLoader1111111111111111111111111111111111"),
     };
-    const res = await (gm as any).handleExpiredGame(new PublicKey("BPFLoader4111111111111111111111111111111111"), gameAccount);
+    const res = await (gm as any).handleExpiredGame(
+      new PublicKey("BPFLoader4111111111111111111111111111111111"),
+      gameAccount,
+    );
     expect(res).toBe(false);
   });
 
@@ -130,7 +146,7 @@ describe("GameManager.handleExpiredGame", () => {
 
     expect(cleanupCalled).toBe(true);
     expect(cancelArgs).not.toBeNull();
-  expect(fetchCalls).toBeGreaterThan(0);
+    expect(fetchCalls).toBeGreaterThan(0);
     expect(result).toEqual({
       cancelled: true,
       amount: 50,
@@ -168,7 +184,7 @@ describe("GameManager.handleExpiredGame", () => {
 
     const result = await (gm as any).handleExpiredGame(
       new PublicKey("BPFLoader6411111111111111111111111111111111"),
-      gameAccount
+      gameAccount,
     );
 
     expect(result).toBe(false);
@@ -220,7 +236,7 @@ describe("GameManager.handleExpiredGame", () => {
 
     const result = await (gm as any).handleExpiredGame(
       new PublicKey("BPFLoader6711111111111111111111111111111111"),
-      gameAccount
+      gameAccount,
     );
 
     expect(cleanupCalled).toBe(true);

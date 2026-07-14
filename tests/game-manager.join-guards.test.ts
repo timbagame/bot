@@ -1,10 +1,7 @@
 import { describe, test, expect, vi } from "bun:test";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
-import {
-  LAMPORTS_PER_SOL,
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
-} from "../src/utils/constants";
+import { LAMPORTS_PER_SOL, MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS } from "../src/utils/constants";
 
 function resetGM() {
   // @ts-ignore
@@ -23,15 +20,19 @@ function baseWallet(overrides: Partial<any> = {}) {
     getTokenMetadata: async () => ({ decimals: 9 }),
     getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
     formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
-    formatSolBalance: (lamports: number) =>
-      (lamports / LAMPORTS_PER_SOL).toFixed(6),
+    formatSolBalance: (lamports: number) => (lamports / LAMPORTS_PER_SOL).toFixed(6),
     ...overrides,
   } as any;
 }
 
 function baseDb(overrides: Partial<any> = {}) {
   return {
-    getGame: (_: string) => ({ status: "active", token_mint: "M", token_ticker: "TOK", amount: 1_000_000_000 }),
+    getGame: (_: string) => ({
+      status: "active",
+      token_mint: "M",
+      token_ticker: "TOK",
+      amount: 1_000_000_000,
+    }),
     ...overrides,
   } as any;
 }
@@ -42,9 +43,12 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       baseProgram({}),
       baseWallet(),
-      baseDb({ getGame: () => null })
+      baseDb({ getGame: () => null }),
     );
-    const res = await gm.joinGame(new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Game not found/i);
   });
@@ -84,7 +88,7 @@ describe("GameManager.joinGame guards", () => {
         chatId?: number,
         timeoutSeconds?: number,
         expiresAtMs?: number,
-        createdAtMsOverride?: number
+        createdAtMsOverride?: number,
       ) => {
         store.set(addr, {
           game_address: addr,
@@ -111,7 +115,7 @@ describe("GameManager.joinGame guards", () => {
       baseWallet({
         getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
       }),
-      gameDb
+      gameDb,
     );
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
@@ -156,7 +160,7 @@ describe("GameManager.joinGame guards", () => {
         chatId?: number,
         timeoutSeconds?: number,
         expiresAtMs?: number,
-        createdAtMsOverride?: number
+        createdAtMsOverride?: number,
       ) => {
         store.set(addr, {
           game_address: addr,
@@ -183,7 +187,7 @@ describe("GameManager.joinGame guards", () => {
       baseWallet({
         getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
       }),
-      gameDb
+      gameDb,
     );
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
@@ -219,11 +223,7 @@ describe("GameManager.joinGame guards", () => {
       getPlayerTelegramId: () => null,
     } as any;
 
-    const gm = GameManager.getInstance(
-      baseProgram(expiredAccount),
-      baseWallet(),
-      gameDb
-    );
+    const gm = GameManager.getInstance(baseProgram(expiredAccount), baseWallet(), gameDb);
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
@@ -256,11 +256,7 @@ describe("GameManager.joinGame guards", () => {
       getPlayerTelegramId: () => null,
     } as any;
 
-    const gm = GameManager.getInstance(
-      baseProgram(badAccount),
-      baseWallet(),
-      gameDb
-    );
+    const gm = GameManager.getInstance(baseProgram(badAccount), baseWallet(), gameDb);
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
@@ -329,7 +325,7 @@ describe("GameManager.joinGame guards", () => {
           token_mint: tokenMint.toBase58(),
           token_ticker: "TOK",
         }),
-      })
+      }),
     );
 
     vi.spyOn(gm as any, "formatGameMessage").mockImplementation(formatSpy);
@@ -349,9 +345,12 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       baseProgram({}),
       baseWallet(),
-      baseDb({ getGame: () => ({ status: "completed" }) })
+      baseDb({ getGame: () => ({ status: "completed" }) }),
     );
-    const res = await gm.joinGame(new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/no longer active/i);
   });
@@ -361,43 +360,72 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       baseProgram({}),
       baseWallet(),
-      baseDb({ getGame: () => ({ status: "active", token_mint: undefined, token_ticker: undefined }) })
+      baseDb({
+        getGame: () => ({ status: "active", token_mint: undefined, token_ticker: undefined }),
+      }),
     );
-    const res = await gm.joinGame(new PublicKey("BPFLoader3111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader3111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Game data incomplete/i);
   });
 
   test("returns error when already joined", async () => {
     resetGM();
-    const program = baseProgram({ ticketsCount: 0, maxTickets: 2, gameType: { coinflip: {} }, ticketAmount: 1_000_000_000 });
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 2,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+    });
     const gm = GameManager.getInstance(program, baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => true;
-    const res = await gm.joinGame(new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/already joined/i);
   });
 
   test("returns error when game full", async () => {
     resetGM();
-    const program = baseProgram({ ticketsCount: 2, maxTickets: 2, gameType: { coinflip: {} }, ticketAmount: 1_000_000_000 });
+    const program = baseProgram({
+      ticketsCount: 2,
+      maxTickets: 2,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+    });
     const gm = GameManager.getInstance(program, baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => false;
-    const res = await gm.joinGame(new PublicKey("BPFLoader5111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader5111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/already full/i);
   });
 
   test("returns error on insufficient balance for coinflip", async () => {
     resetGM();
-    const program = baseProgram({ ticketsCount: 0, maxTickets: 2, gameType: { coinflip: {} }, ticketAmount: 1_000_000_000 });
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 2,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+    });
     const gm = GameManager.getInstance(
       program,
       baseWallet({ getTokenBalance: async () => 100 }),
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) })
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
-    const res = await gm.joinGame(new PublicKey("BPFLoader6111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader6111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not enough TOK/i);
   });
@@ -417,7 +445,7 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       program,
       wallet,
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) })
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).swapManager = {
@@ -426,7 +454,10 @@ describe("GameManager.joinGame guards", () => {
       },
     };
 
-    const res = await gm.joinGame(new PublicKey("BPFLoader7111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader7111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not enough SOL to complete this/i);
     expect(res.error).toMatch(/no spare tokens to convert into SOL fees/i);
@@ -434,14 +465,22 @@ describe("GameManager.joinGame guards", () => {
 
   test("returns error on zero token balance with helpful message", async () => {
     resetGM();
-    const program = baseProgram({ ticketsCount: 0, maxTickets: 2, gameType: { coinflip: {} }, ticketAmount: 1_000_000_000 });
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 2,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+    });
     const gm = GameManager.getInstance(
       program,
       baseWallet({ getTokenBalance: async () => 0 }),
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) })
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
-    const res = await gm.joinGame(new PublicKey("BPFLoader8111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader8111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/don't have any TOK tokens/i);
     expect(res.error).toMatch(/\/balance/i);
@@ -450,14 +489,22 @@ describe("GameManager.joinGame guards", () => {
   test("returns error on insufficient balance for giveaway", async () => {
     resetGM();
     // Giveaway with ticketAmount > 0 (some giveaways require entry fee)
-    const program = baseProgram({ ticketsCount: 0, maxTickets: 10, gameType: { giveaway: {} }, ticketAmount: 500_000_000 });
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 10,
+      gameType: { giveaway: {} },
+      ticketAmount: 500_000_000,
+    });
     const gm = GameManager.getInstance(
       program,
       baseWallet({ getTokenBalance: async () => 100_000_000 }),
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT" }) })
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
-    const res = await gm.joinGame(new PublicKey("BPFLoader9111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoader9111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not enough GIFT/i);
   });
@@ -479,7 +526,14 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       program,
       wallet,
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+      baseDb({
+        getGame: () => ({
+          status: "active",
+          token_mint: "M",
+          token_ticker: "GIFT",
+          amount: 1_000_000_000,
+        }),
+      }),
     );
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).swapManager = {
@@ -488,7 +542,10 @@ describe("GameManager.joinGame guards", () => {
       },
     };
 
-    const res = await gm.joinGame(new PublicKey("BPFLoaderA111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoaderA111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not enough SOL/i);
     expect(res.error).toMatch(/transaction fees/i);
@@ -512,7 +569,14 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       program,
       wallet,
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+      baseDb({
+        getGame: () => ({
+          status: "active",
+          token_mint: "M",
+          token_ticker: "GIFT",
+          amount: 1_000_000_000,
+        }),
+      }),
     );
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).swapManager = {
@@ -522,7 +586,10 @@ describe("GameManager.joinGame guards", () => {
       },
     };
 
-    const res = await gm.joinGame(new PublicKey("BPFLoaderB111111111111111111111111111111111").toBase58(), 1n);
+    const res = await gm.joinGame(
+      new PublicKey("BPFLoaderB111111111111111111111111111111111").toBase58(),
+      1n,
+    );
     expect(jitSwapCalled).toBe(true);
     expect(res.success).toBe(false);
     expect(res.error).toBe("Test: swap failed");
@@ -546,7 +613,14 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       program,
       wallet,
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+      baseDb({
+        getGame: () => ({
+          status: "active",
+          token_mint: "M",
+          token_ticker: "GIFT",
+          amount: 1_000_000_000,
+        }),
+      }),
     );
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).swapManager = {
@@ -578,7 +652,14 @@ describe("GameManager.joinGame guards", () => {
     const gm = GameManager.getInstance(
       program,
       wallet,
-      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK", amount: 600_000_000 }) })
+      baseDb({
+        getGame: () => ({
+          status: "active",
+          token_mint: "M",
+          token_ticker: "TOK",
+          amount: 600_000_000,
+        }),
+      }),
     );
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).swapManager = {

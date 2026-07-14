@@ -27,8 +27,8 @@ describe("trade ui helpers", () => {
   });
 
   test("processing status rejects unknown kinds", () => {
-    expect(() =>
-      buildProcessingStatus("invalid" as any, 1, "SOL", "BONK")
-    ).toThrow(/Unsupported processing status kind/);
+    expect(() => buildProcessingStatus("invalid" as any, 1, "SOL", "BONK")).toThrow(
+      /Unsupported processing status kind/,
+    );
   });
 });

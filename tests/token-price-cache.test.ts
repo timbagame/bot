@@ -19,10 +19,7 @@ describe("token price cache", () => {
 
   test("uses cached token price instead of live lookup", async () => {
     const tokenMint = WSOL_MINT;
-    rememberPriceLookup(
-      { price: 5, identifier: tokenMint },
-      { tokenMint }
-    );
+    rememberPriceLookup({ price: 5, identifier: tokenMint }, { tokenMint });
 
     const priceSpy = vi
       .spyOn(priceModule, "resolveTokenPriceUSD")
@@ -39,10 +36,7 @@ describe("token price cache", () => {
 
   test("falls back to live price after cache is cleared", async () => {
     const tokenMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-    rememberPriceLookup(
-      { price: 1, identifier: tokenMint },
-      { tokenMint }
-    );
+    rememberPriceLookup({ price: 1, identifier: tokenMint }, { tokenMint });
 
     __test_clearPriceServiceCache();
 

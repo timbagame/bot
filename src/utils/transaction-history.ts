@@ -32,7 +32,7 @@ export class TransactionHistory extends BaseDatabase {
 
   static {
     const { getInstance, resetForTesting } = createDatabaseSingleton(
-      () => new TransactionHistory()
+      () => new TransactionHistory(),
     );
     TransactionHistory.getInstance = getInstance;
     TransactionHistory.resetForTesting = resetForTesting;
@@ -62,9 +62,9 @@ export class TransactionHistory extends BaseDatabase {
         )`,
         `CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature)`,
-        `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`
+        `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`,
       ],
-      "TransactionHistory"
+      "TransactionHistory",
     );
   }
 
@@ -92,11 +92,11 @@ export class TransactionHistory extends BaseDatabase {
           record.network || "mainnet",
           record.block_height || null,
         ],
-        "adding transaction record"
+        "adding transaction record",
       );
 
       console.log(
-        `📝 Added transaction record: ${record.transaction_type} ${record.from_token}→${record.to_token} for user ${record.user_id}`
+        `📝 Added transaction record: ${record.transaction_type} ${record.from_token}→${record.to_token} for user ${record.user_id}`,
       );
       return Number(result.lastInsertRowid ?? 0);
     } catch (error) {
@@ -111,7 +111,7 @@ export class TransactionHistory extends BaseDatabase {
   updateTransactionStatus(
     signature: string,
     status: "SUCCESS" | "FAILED",
-    blockHeight?: number
+    blockHeight?: number,
   ): void {
     try {
       this.run(
@@ -119,7 +119,7 @@ export class TransactionHistory extends BaseDatabase {
         SET status = ?, block_height = ?, updated_at = CURRENT_TIMESTAMP
         WHERE signature = ?`,
         [status, blockHeight || null, signature],
-        "updating transaction status"
+        "updating transaction status",
       );
       console.log(`🔄 Updated transaction ${signature} status to ${status}`);
     } catch (error) {
@@ -144,7 +144,7 @@ export class TransactionHistory extends BaseDatabase {
     }
 
     let query = `SELECT * FROM transaction_history WHERE ${whereClauses.join(
-      " AND "
+      " AND ",
     )} ORDER BY timestamp DESC LIMIT ?`;
     params.push(limit);
 
@@ -159,11 +159,7 @@ export class TransactionHistory extends BaseDatabase {
   /**
    * Get transaction history for a user
    */
-  getUserHistory(
-    userId: string,
-    limit: number = 20,
-    offset: number = 0
-  ): TransactionRecord[] {
+  getUserHistory(userId: string, limit: number = 20, offset: number = 0): TransactionRecord[] {
     try {
       return this.fetchTransactions({
         userId,
@@ -183,7 +179,7 @@ export class TransactionHistory extends BaseDatabase {
   getUserHistoryByType(
     userId: string,
     type: TransactionRecord["transaction_type"],
-    limit: number = 10
+    limit: number = 10,
   ): TransactionRecord[] {
     try {
       return this.fetchTransactions({
@@ -206,7 +202,7 @@ export class TransactionHistory extends BaseDatabase {
       const result = this.get<{ count: number }>(
         "SELECT COUNT(*) as count FROM transaction_history WHERE user_id = ?",
         [userId],
-        "getting transaction count"
+        "getting transaction count",
       );
       return result?.count ?? 0;
     } catch (error) {
@@ -226,7 +222,7 @@ export class TransactionHistory extends BaseDatabase {
         ORDER BY timestamp DESC
         LIMIT ?`,
         [limit],
-        "getting recent transactions"
+        "getting recent transactions",
       );
     } catch (error) {
       console.error("Error getting recent transactions:", error);
@@ -245,10 +241,10 @@ export class TransactionHistory extends BaseDatabase {
         `DELETE FROM transaction_history
         WHERE timestamp < ? AND status != 'PENDING'`,
         [cutoffTime],
-        "cleaning old transactions"
+        "cleaning old transactions",
       );
       console.log(
-        `🧹 Cleaned ${result.changes} old transaction records (older than ${daysToKeep} days)`
+        `🧹 Cleaned ${result.changes} old transaction records (older than ${daysToKeep} days)`,
       );
       return result.changes as number;
     } catch (error) {
@@ -280,8 +276,7 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
     minute: "2-digit",
   });
 
-  const statusIcon =
-    tx.status === "SUCCESS" ? "✅" : tx.status === "FAILED" ? "❌" : "⏳";
+  const statusIcon = tx.status === "SUCCESS" ? "✅" : tx.status === "FAILED" ? "❌" : "⏳";
   const typeIcon = getTransactionTypeIcon(tx.transaction_type);
 
   let amountText = `${tx.amount_in} ${tx.from_token}`;
@@ -289,25 +284,18 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
     amountText += ` → ${tx.amount_out} ${tx.to_token}`;
   }
 
-  const explorerUrl = NetworkDetector.buildSolscanTxUrl(
-    tx.signature,
-    tx.network
-  );
-  const fallbackUrl = tx.signature
-    ? `https://solscan.io/tx/${tx.signature}`
-    : null;
+  const explorerUrl = NetworkDetector.buildSolscanTxUrl(tx.signature, tx.network);
+  const fallbackUrl = tx.signature ? `https://solscan.io/tx/${tx.signature}` : null;
   const viewLink = explorerUrl
     ? `<a href="${explorerUrl}">${explorerUrl}</a>`
     : fallbackUrl
-    ? `<a href="${fallbackUrl}">${fallbackUrl}</a>`
-    : "View";
+      ? `<a href="${fallbackUrl}">${fallbackUrl}</a>`
+      : "View";
 
   return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • ${viewLink}`;
 }
 
-function getTransactionTypeIcon(
-  type: TransactionRecord["transaction_type"]
-): string {
+function getTransactionTypeIcon(type: TransactionRecord["transaction_type"]): string {
   switch (type) {
     case "BUY":
       return "🟢";
@@ -337,7 +325,7 @@ export function createTransactionRecord(
   toToken: string,
   amountIn: string,
   amountOut?: string,
-  status: "PENDING" | "SUCCESS" | "FAILED" = "PENDING"
+  status: "PENDING" | "SUCCESS" | "FAILED" = "PENDING",
 ): TransactionRecord {
   return {
     user_id: userId,

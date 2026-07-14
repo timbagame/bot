@@ -120,9 +120,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
         // Should not throw
         await safeAnswerCallbackQuery(ctx, "Expired query");
 
-        expect(warnings.some((w) => w.includes("Callback query timeout"))).toBe(
-          true
-        );
+        expect(warnings.some((w) => w.includes("Callback query timeout"))).toBe(true);
       } finally {
         console.warn = originalWarn;
       }
@@ -144,9 +142,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
       try {
         await safeAnswerCallbackQuery(ctx, "Invalid query");
 
-        expect(warnings.some((w) => w.includes("Callback query timeout"))).toBe(
-          true
-        );
+        expect(warnings.some((w) => w.includes("Callback query timeout"))).toBe(true);
       } finally {
         console.warn = originalWarn;
       }
@@ -295,9 +291,7 @@ describe("rate limiter state persistence across calls", () => {
       await safeAnswerCallbackQuery(ctx2, "Second call");
 
       expect(answerCalls).toHaveLength(0);
-      expect(
-        warnings.some((w) => w.includes("rate limited") && w.includes("888"))
-      ).toBe(true);
+      expect(warnings.some((w) => w.includes("rate limited") && w.includes("888"))).toBe(true);
     } finally {
       console.warn = originalWarn;
     }

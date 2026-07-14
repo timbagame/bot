@@ -8,13 +8,13 @@ describe("swap custom amount telegram id propagation", () => {
   beforeEach(() => {
     botModule.__test_resetPrepareTokenTradeQuote();
     botModule.__test_clearTransactionCache();
-  botModule.__test_clearWalletCache(TELEGRAM_ID);
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
   });
 
   afterEach(() => {
     botModule.__test_resetPrepareTokenTradeQuote();
     botModule.__test_clearTransactionCache();
-  botModule.__test_clearWalletCache(TELEGRAM_ID);
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
   });
 
   test("handleSwapCustomAmountInput forwards the caller telegram id", async () => {

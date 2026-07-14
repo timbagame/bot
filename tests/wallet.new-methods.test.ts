@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
 import * as tokenMetadata from "../src/utils/token-metadata";
 
@@ -41,7 +34,7 @@ const resolveTokenMetadataMock = vi.fn(async (params: any) => {
 beforeEach(() => {
   resolveTokenMetadataMock.mockClear();
   vi.spyOn(tokenMetadata, "resolveTokenMetadata").mockImplementation(
-    resolveTokenMetadataMock as any
+    resolveTokenMetadataMock as any,
   );
 });
 
@@ -75,34 +68,32 @@ describe("WalletManager New Methods", () => {
     test("returns friendly message for account not found", () => {
       const error = new Error("Account does not exist");
       expect(walletManager.getFriendlyErrorMessage(error)).toBe(
-        "Game account not found or has expired."
+        "Game account not found or has expired.",
       );
     });
 
     test("returns friendly message for insufficient funds", () => {
       const error = new Error("insufficient funds");
       expect(walletManager.getFriendlyErrorMessage(error)).toBe(
-        "Insufficient funds to join the game."
+        "Insufficient funds to join the game.",
       );
     });
 
     test("returns friendly message for slippage", () => {
       const error = new Error("custom program error: 0x1771");
-      expect(walletManager.getFriendlyErrorMessage(error)).toBe(
-        "Slippage tolerance exceeded."
-      );
+      expect(walletManager.getFriendlyErrorMessage(error)).toBe("Slippage tolerance exceeded.");
     });
 
     test("returns default message for unknown errors", () => {
       const error = new Error("Unknown error");
       expect(walletManager.getFriendlyErrorMessage(error)).toBe(
-        "An error occurred while joining the game. Please try again."
+        "An error occurred while joining the game. Please try again.",
       );
     });
 
     test("handles non-error objects", () => {
       expect(walletManager.getFriendlyErrorMessage("some string error")).toBe(
-        "An error occurred while joining the game. Please try again."
+        "An error occurred while joining the game. Please try again.",
       );
     });
   });

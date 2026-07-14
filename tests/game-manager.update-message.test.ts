@@ -9,7 +9,9 @@ import {
 } from "./helpers/game-manager";
 import { GameManager } from "../src/utils/game";
 
-function ctxStub(options: { failMedia?: any; failCaption?: any; failText?: any; sendMessageResult?: any } = {}) {
+function ctxStub(
+  options: { failMedia?: any; failCaption?: any; failText?: any; sendMessageResult?: any } = {},
+) {
   const calls: any[] = [];
   const base = makeCtxStub({
     apiOverrides: {
@@ -50,7 +52,6 @@ function ctxStub(options: { failMedia?: any; failCaption?: any; failText?: any; 
 }
 
 describe("GameManager.updateGameMessage routing", () => {
-
   test("coinflip active -> edits caption only", async () => {
     resetGM();
     const gameAcc = {
@@ -67,7 +68,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      makeDbStub()
+      makeDbStub(),
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111111").toBase58();
@@ -82,7 +83,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("caption");
@@ -106,7 +107,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      makeDbStub({ gameOverride: { game_type: "coinflip" } })
+      makeDbStub({ gameOverride: { game_type: "coinflip" } }),
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111112").toBase58();
@@ -121,7 +122,7 @@ describe("GameManager.updateGameMessage routing", () => {
       "@creator",
       "Completed",
       "TOK",
-      "SomeWinnerPubkey"
+      "SomeWinnerPubkey",
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("media");
@@ -145,7 +146,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      makeDbStub({ gameOverride: { game_type: "giveaway" } })
+      makeDbStub({ gameOverride: { game_type: "giveaway" } }),
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111113").toBase58();
@@ -159,7 +160,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("text");
@@ -181,7 +182,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      makeDbStub()
+      makeDbStub(),
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111114").toBase58();
@@ -195,7 +196,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("text");
@@ -219,9 +220,11 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      makeDbStub({ gameOverride: { game_type: "coinflip" } })
+      makeDbStub({ gameOverride: { game_type: "coinflip" } }),
     );
-    const ctx = ctxStub({ failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" } });
+    const ctx = ctxStub({
+      failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+    });
     const addr = new PublicKey("11111111111111111111111111111115").toBase58();
     const msgMap = new Map();
     msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
@@ -234,7 +237,7 @@ describe("GameManager.updateGameMessage routing", () => {
       "@creator",
       "Completed",
       "TOK",
-      "SomeWinner"
+      "SomeWinner",
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("media");
@@ -261,7 +264,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      database
+      database,
     );
     const missingError = {
       description: "Bad Request: message to edit not found",
@@ -282,7 +285,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     const calls = (ctx as any).__calls;
@@ -312,7 +315,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      database
+      database,
     );
     const missingError = {
       description: "Bad Request: message to edit not found",
@@ -340,7 +343,7 @@ describe("GameManager.updateGameMessage routing", () => {
         1_000_000_000,
         "@creator",
         "Active",
-        "TOK"
+        "TOK",
       ),
       gm.updateGameMessage(
         ctx as any,
@@ -349,7 +352,7 @@ describe("GameManager.updateGameMessage routing", () => {
         1_000_000_000,
         "@creator",
         "Active",
-        "TOK"
+        "TOK",
       ),
     ]);
 
@@ -399,7 +402,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      database
+      database,
     );
 
     const msgMap = new Map();
@@ -413,7 +416,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Should have attempted video first (text edit failed, then recreate with video)
@@ -470,7 +473,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      database
+      database,
     );
 
     const msgMap = new Map();
@@ -484,7 +487,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Find the send call and check it includes reply_to_message_id
@@ -537,7 +540,7 @@ describe("GameManager.updateGameMessage routing", () => {
       makeWalletStub({
         tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
       }),
-      database
+      database,
     );
 
     const msgMap = new Map();
@@ -551,7 +554,7 @@ describe("GameManager.updateGameMessage routing", () => {
       1_000_000_000,
       "@creator",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Should have tried to recreate the message (either video or text depending on config)

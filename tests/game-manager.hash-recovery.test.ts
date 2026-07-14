@@ -18,10 +18,7 @@ describe("GameManager participant recovery", () => {
 
     const dbStub = {
       participants: [] as string[],
-      publicKeysByTelegram: new Map<string, string>([[
-        telegramId,
-        playerPubkey.toBase58(),
-      ]]),
+      publicKeysByTelegram: new Map<string, string>([[telegramId, playerPubkey.toBase58()]]),
       getGameParticipants(this: any, address: string) {
         expect(address).toBe(gameAddress);
         return [...this.participants];
@@ -35,9 +32,7 @@ describe("GameManager participant recovery", () => {
         this.publicKeysByTelegram.set(id, pubkey);
       },
       getAllPlayerMappings() {
-        return [
-          { telegram_id: telegramId, public_key: playerPubkey.toBase58() },
-        ];
+        return [{ telegram_id: telegramId, public_key: playerPubkey.toBase58() }];
       },
     } as any;
 
@@ -48,7 +43,7 @@ describe("GameManager participant recovery", () => {
         creator: creatorPubkey,
         participants: [playerPubkey],
       },
-      gameAddress
+      gameAddress,
     );
 
     expect(info.available).toHaveLength(1);

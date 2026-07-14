@@ -39,4 +39,3 @@ describe("GameManager membership checks", () => {
     expect(isInGame).toBe(true);
   });
 });
-

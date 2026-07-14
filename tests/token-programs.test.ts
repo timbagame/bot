@@ -33,9 +33,7 @@ describe("detectTokenProgram", () => {
     const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn = new StubConnection({});
 
-    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(
-      /missing an owner/
-    );
+    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(/missing an owner/);
   });
 
   test("uses provided account info without RPC lookup", async () => {
@@ -46,11 +44,9 @@ describe("detectTokenProgram", () => {
       },
     };
 
-    const result = await detectTokenProgram(
-      throwingConn as any,
-      mint,
-      { owner: TOKEN_2022_PROGRAM_ID }
-    );
+    const result = await detectTokenProgram(throwingConn as any, mint, {
+      owner: TOKEN_2022_PROGRAM_ID,
+    });
 
     expect(result).not.toBeNull();
     expect(result!.isToken2022).toBe(true);
@@ -70,8 +66,6 @@ describe("detectTokenProgram", () => {
     const randomOwner = new PublicKey("11111111111111111111111111111111");
     const conn = new StubConnection({ [mint.toBase58()]: randomOwner });
 
-    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(
-      /unknown program/
-    );
+    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(/unknown program/);
   });
 });

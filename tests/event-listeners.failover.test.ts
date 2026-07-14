@@ -44,11 +44,7 @@ describe("program event listener management", () => {
 
   test("registers and unregisters program listeners", async () => {
     await __test_registerProgramEventListeners();
-    expect(addCalls).toEqual([
-      "gameCompleted",
-      "playerJoined",
-      "playerUnjoined",
-    ]);
+    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
     const state = __test_getProgramEventListenerState();
     expect(state.gameCompletedListenerId).toBe(1);
     expect(state.playerJoinedListenerId).toBe(2);
@@ -123,9 +119,7 @@ describe("program event listener management", () => {
     const callbacks: Array<(change: ActiveEndpointChange) => void> = [];
     let failCleanup = true;
 
-    (wallet as any).onRpcEndpointChange = (
-      listener: (change: ActiveEndpointChange) => void,
-    ) => {
+    (wallet as any).onRpcEndpointChange = (listener: (change: ActiveEndpointChange) => void) => {
       callbacks.push(listener);
       return () => {
         const index = callbacks.indexOf(listener);
@@ -136,11 +130,7 @@ describe("program event listener management", () => {
     };
 
     await __test_registerProgramEventListeners();
-    expect(addCalls).toEqual([
-      "gameCompleted",
-      "playerJoined",
-      "playerUnjoined",
-    ]);
+    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
     addCalls = [];
     removeCalls = [];
 
@@ -184,11 +174,7 @@ describe("program event listener management", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(removeCalls).toEqual([1, 1, 1, 2, 3, 1]);
-    expect(addCalls).toEqual([
-      "gameCompleted",
-      "playerJoined",
-      "playerUnjoined",
-    ]);
+    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
     const afterRecovery = __test_getProgramEventListenerState();
     expect(afterRecovery.gameCompletedListenerId).toBe(4);
     expect(afterRecovery.playerJoinedListenerId).toBe(5);
@@ -198,9 +184,7 @@ describe("program event listener management", () => {
 
   test("restarts listeners when RPC endpoint changes", async () => {
     const callbacks: Array<(change: ActiveEndpointChange) => void> = [];
-    (wallet as any).onRpcEndpointChange = (
-      listener: (change: ActiveEndpointChange) => void,
-    ) => {
+    (wallet as any).onRpcEndpointChange = (listener: (change: ActiveEndpointChange) => void) => {
       callbacks.push(listener);
       return () => {
         const index = callbacks.indexOf(listener);

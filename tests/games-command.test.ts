@@ -26,14 +26,16 @@ describe("formatDate", () => {
         getPlayerTelegramId: () => null,
         saveUsernameMapping: () => {},
         findTelegramIdByNormalizedUsername: () => null,
-      } as any
+      } as any,
     );
 
     // Access formatGameSection which uses formatDate
-    const games = [{
-      gameInfo: "Test game info",
-      completedAt: new Date("2025-12-18T22:30:00Z").getTime(),
-    }];
+    const games = [
+      {
+        gameInfo: "Test game info",
+        completedAt: new Date("2025-12-18T22:30:00Z").getTime(),
+      },
+    ];
 
     const result = (gm as any).formatGameSection(games, "Test Section");
 
@@ -91,7 +93,7 @@ describe("getCompletedGameInfo output format", () => {
     const gm = GameManager.getInstance(
       { account: { game: { fetch: async () => ({}) } } } as any,
       walletStub(),
-      dbStub(participants)
+      dbStub(participants),
     );
 
     const ctx = ctxStub();
@@ -124,7 +126,7 @@ describe("getCompletedGameInfo output format", () => {
     const gm = GameManager.getInstance(
       { account: { game: { fetch: async () => ({}) } } } as any,
       walletStub(),
-      dbStub(["101", "102", "103"])
+      dbStub(["101", "102", "103"]),
     );
 
     const ctx = ctxStub();
@@ -140,7 +142,7 @@ describe("getCompletedGameInfo output format", () => {
     });
 
     // Output should be compact - just game info, creator, tickets, and optionally winner
-    const lines = output.split("\n").filter(l => l.trim() !== "");
+    const lines = output.split("\n").filter((l) => l.trim() !== "");
     // Should be at most 2 lines (game header + creator/tickets line)
     // cancelled games don't show winner
     expect(lines.length).toBeLessThanOrEqual(2);
@@ -207,7 +209,7 @@ describe("/games command options", () => {
         getPlayerTelegramId: () => null,
         saveUsernameMapping: () => {},
         findTelegramIdByNormalizedUsername: () => null,
-      } as any
+      } as any,
     );
 
     // Call getUserGames to get the response

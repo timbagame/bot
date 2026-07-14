@@ -41,7 +41,13 @@ describe("formatTradeConfirmationSummary", () => {
       ...baseInput,
       quote: {
         ...defaultQuote,
-        integrator: { referralAccount: "dummy", referralFee: 130, payer: "a", closeAuthority: "b", payerKind: "admin" },
+        integrator: {
+          referralAccount: "dummy",
+          referralFee: 130,
+          payer: "a",
+          closeAuthority: "b",
+          payerKind: "admin",
+        },
       },
     });
     expect(summary.message).toContain("Fee:");

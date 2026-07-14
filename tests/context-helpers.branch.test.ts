@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-  handleCallbackErrorSafe,
-  safeAnswerCallbackQuery,
-} from "../src/utils/context-helpers";
+import { handleCallbackErrorSafe, safeAnswerCallbackQuery } from "../src/utils/context-helpers";
 import { truncateMessage } from "../src/utils/errors";
 
 test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no direct method", async () => {
@@ -31,8 +28,7 @@ test("safeAnswerCallbackQuery exits early when callback id missing", async () =>
     },
   };
 
-  await expect(safeAnswerCallbackQuery(ctx, "ignored"))
-    .resolves.toBeUndefined();
+  await expect(safeAnswerCallbackQuery(ctx, "ignored")).resolves.toBeUndefined();
   expect(called).toBe(false);
 });
 
@@ -54,14 +50,18 @@ test("safeAnswerCallbackQuery suppresses stale direct callback errors", async ()
     },
   };
 
-  await expect(safeAnswerCallbackQuery(ctx, "stale"))
-    .resolves.toBeUndefined();
+  await expect(safeAnswerCallbackQuery(ctx, "stale")).resolves.toBeUndefined();
   expect(fallbackCalled).toBe(false);
 });
 
 test("truncateMessage honors important prefix and first sentence", () => {
-  const msg = "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
-  const truncated = truncateMessage(msg, { maxLength: 60, preserveSentences: true, wordBoundary: true });
+  const msg =
+    "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
+  const truncated = truncateMessage(msg, {
+    maxLength: 60,
+    preserveSentences: true,
+    wordBoundary: true,
+  });
   // Should keep just the first sentence due to important prefix
   expect(truncated).toBe("❌ Failure: Something bad happened.");
 });

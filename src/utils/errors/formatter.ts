@@ -4,11 +4,7 @@
 
 import type { Connection } from "@solana/web3.js";
 import type { WalletManager } from "../wallet";
-import {
-  LAMPORTS_PER_SOL,
-  CALLBACK_MESSAGE_MAX_LENGTH,
-  SOL_BALANCE_PRECISION,
-} from "../constants";
+import { LAMPORTS_PER_SOL, CALLBACK_MESSAGE_MAX_LENGTH, SOL_BALANCE_PRECISION } from "../constants";
 import { FeeBudgetManager } from "../fee-budget";
 import {
   extractLamportsInfo,
@@ -18,15 +14,9 @@ import {
   extractSignature,
 } from "./parser";
 
-const RENT_INSUFFICIENT_FUNDS_PATTERNS = [
-  "insufficient funds for rent",
-  "rent-exempt",
-];
+const RENT_INSUFFICIENT_FUNDS_PATTERNS = ["insufficient funds for rent", "rent-exempt"];
 
-const formatSolAmount = (
-  lamports: number,
-  walletManager?: WalletManager
-): string => {
+const formatSolAmount = (lamports: number, walletManager?: WalletManager): string => {
   if (walletManager) {
     return walletManager.formatSolBalance(lamports);
   }
@@ -52,14 +42,11 @@ export interface FriendlyShortfallOptions {
   action?: string;
 }
 
-export const buildFriendlyShortfallMessage = (
-  options: FriendlyShortfallOptions
-): string => {
+export const buildFriendlyShortfallMessage = (options: FriendlyShortfallOptions): string => {
   const missingLamports = Math.max(options.missingLamports, 0);
   const amount = `${formatSolAmount(missingLamports, options.walletManager)} SOL`;
   const reasonSentence = sanitizeSentence(options.reason);
-  const actionSentence =
-    options.action ?? "Add SOL or reduce the amount and try again.";
+  const actionSentence = options.action ?? "Add SOL or reduce the amount and try again.";
 
   return (
     `💰 Not enough SOL to complete this.` +
@@ -72,7 +59,7 @@ export const buildFriendlyShortfallMessage = (
 const formatInsufficientFundsError = (
   currentLamports: number,
   neededLamports: number,
-  walletManager?: WalletManager
+  walletManager?: WalletManager,
 ): string => {
   const missingLamports = Math.max(neededLamports - currentLamports, 0);
 
@@ -125,12 +112,12 @@ type ErrorHandler = (ctx: ErrorContext) => string | null;
 const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: ErrorHandler }> = [
   {
     matcher: (ctx) =>
-      ctx.lowerMessage.includes("swaps under") &&
-      typeof ctx.originalMessage === "string",
+      ctx.lowerMessage.includes("swaps under") && typeof ctx.originalMessage === "string",
     handler: (ctx) => ctx.originalMessage ?? null,
   },
   {
-    matcher: (ctx) => RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) => ctx.lowerMessage.includes(pattern)),
+    matcher: (ctx) =>
+      RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) => ctx.lowerMessage.includes(pattern)),
     handler: (ctx) => {
       const minimum = ctx.recommendedMinimum ?? "the required amount";
       return (
@@ -144,8 +131,7 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
     handler: (ctx) => {
       const minimum = ctx.minimumSolForFees ?? "enough";
       return (
-        `💰 Not enough SOL for fees.\n` +
-        `Hold at least ${minimum} SOL or add more and try again.`
+        `💰 Not enough SOL for fees.\n` + `Hold at least ${minimum} SOL or add more and try again.`
       );
     },
   },
@@ -156,7 +142,9 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       `The requested percentage leaves nothing after fees. Try a larger percentage or type a custom amount.`,
   },
   {
-    matcher: (ctx) => ctx.lowerMessage.includes("account does not exist") || ctx.lowerMessage.includes("could not find account"),
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("account does not exist") ||
+      ctx.lowerMessage.includes("could not find account"),
     handler: (ctx) => {
       const minimum = ctx.minimumSolForFees ?? "enough";
       return (
@@ -181,7 +169,9 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       `Your wallet doesn't have enough tokens to complete this action. Use /balance to check your balance and add tokens before trying again.`,
   },
   {
-    matcher: (ctx) => ctx.lowerMessage.includes("simulation failed") || ctx.lowerMessage.includes("custom program error"),
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("simulation failed") ||
+      ctx.lowerMessage.includes("custom program error"),
     handler: () =>
       `❌ Transaction failed.\n` +
       `The network couldn't process this action. Try again shortly or contact an admin if it keeps happening.`,
@@ -210,21 +200,25 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
   },
   {
     matcher: (ctx) =>
-      ["unable to connect", "connectionrefused", "network request failed", "fetch failed"].some((p) =>
-        ctx.lowerMessage.includes(p)
+      ["unable to connect", "connectionrefused", "network request failed", "fetch failed"].some(
+        (p) => ctx.lowerMessage.includes(p),
       ),
     handler: () =>
       `🌐 Jupiter is temporarily unavailable.\n` +
       `We can't reach the quote service right now. Wait a moment or try a different token pair.`,
   },
   {
-    matcher: (ctx) => ctx.lowerMessage.includes("quote failed") || ctx.lowerMessage.includes("failed to get swap quote"),
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("quote failed") ||
+      ctx.lowerMessage.includes("failed to get swap quote"),
     handler: () =>
       `📋 Quote unavailable.\n` +
       `We couldn't price this swap. Try again shortly or pick a different token pair.`,
   },
   {
-    matcher: (ctx) => ctx.lowerMessage.includes("token_not_tradable") || ctx.lowerMessage.includes("is not tradable"),
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("token_not_tradable") ||
+      ctx.lowerMessage.includes("is not tradable"),
     handler: () =>
       `🚫 Token not tradable.\n` +
       `Jupiter can't swap this token yet. Try a more liquid pair like SOL, WSOL, or USDC.`,
@@ -251,7 +245,7 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
 export const parseTransactionError = async (
   error: unknown,
   walletManager?: WalletManager,
-  connection?: Connection
+  connection?: Connection,
 ): Promise<string> => {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
@@ -269,16 +263,9 @@ export const parseTransactionError = async (
   // Check for specific lamports info (insufficient funds with details)
   const lamportsInfo =
     extractLamportsInfo(errorMessage) ||
-    (await extractLamportsInfoFromError(
-      error,
-      connection ?? walletManager?.getConnection?.()
-    ));
+    (await extractLamportsInfoFromError(error, connection ?? walletManager?.getConnection?.()));
   if (lamportsInfo) {
-    return formatInsufficientFundsError(
-      lamportsInfo.current,
-      lamportsInfo.needed,
-      walletManager
-    );
+    return formatInsufficientFundsError(lamportsInfo.current, lamportsInfo.needed, walletManager);
   }
 
   // Resolve fee budget for common error messages
@@ -292,10 +279,12 @@ export const parseTransactionError = async (
     console.warn("Failed to resolve fee budget manager for error formatting:", budgetError);
   }
 
-  const singleTxLamports = feeBudget?.getCachedSingleTransactionLamports()
-    ?? FeeBudgetManager.getDefaultSingleTransactionLamports();
-  const gameBufferLamports = feeBudget?.getCachedGameSafetyBufferLamports()
-    ?? FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+  const singleTxLamports =
+    feeBudget?.getCachedSingleTransactionLamports() ??
+    FeeBudgetManager.getDefaultSingleTransactionLamports();
+  const gameBufferLamports =
+    feeBudget?.getCachedGameSafetyBufferLamports() ??
+    FeeBudgetManager.getDefaultGameSafetyBufferLamports();
 
   const recommendedMinimum = formatSolAmount(gameBufferLamports, walletManager);
   const minimumSolForFees = formatSolAmount(singleTxLamports, walletManager);
@@ -326,12 +315,12 @@ export const parseTransactionError = async (
 export const formatUserFriendlyError = async (
   error: unknown,
   walletManager?: WalletManager,
-  connection?: Connection
+  connection?: Connection,
 ): Promise<string> => {
   return parseTransactionError(
     error,
     walletManager,
-    connection ?? walletManager?.getConnection?.()
+    connection ?? walletManager?.getConnection?.(),
   );
 };
 
@@ -345,10 +334,7 @@ export interface TruncateOptions {
  * Truncates a message to fit within a maximum length with smart truncation strategies.
  * Supports preserving sentences and word boundaries for better readability.
  */
-export const truncateMessage = (
-  message: string,
-  options: TruncateOptions = {}
-): string => {
+export const truncateMessage = (message: string, options: TruncateOptions = {}): string => {
   const {
     maxLength = CALLBACK_MESSAGE_MAX_LENGTH,
     preserveSentences = false,
@@ -362,9 +348,7 @@ export const truncateMessage = (
   // Try to preserve important parts of the error message
   if (preserveSentences) {
     const importantPrefixes = ["❌", "⚠️", "Error:", "Failed:", "Invalid:"];
-    const hasImportantPrefix = importantPrefixes.some((prefix) =>
-      message.startsWith(prefix)
-    );
+    const hasImportantPrefix = importantPrefixes.some((prefix) => message.startsWith(prefix));
 
     if (hasImportantPrefix) {
       // Find the first sentence or important part

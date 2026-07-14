@@ -23,7 +23,7 @@ test("TokenDatabase: known tokens CRUD", () => {
 
   db.setTokenProgramId("mintY", "ProgramId111111111111111111111111111111111111");
   expect(db.getKnownTokenByMint("mintY")?.token_program_id).toBe(
-    "ProgramId111111111111111111111111111111111111"
+    "ProgramId111111111111111111111111111111111111",
   );
 
   // Removing one token shrinks list

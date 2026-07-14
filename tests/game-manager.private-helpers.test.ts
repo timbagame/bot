@@ -8,9 +8,15 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-function programStub() { return { account: { game: { fetch: async () => ({}) } } } as any; }
-function walletStub() { return {} as any; }
-function dbStub() { return { getGameParticipants: () => [] } as any; }
+function programStub() {
+  return { account: { game: { fetch: async () => ({}) } } } as any;
+}
+function walletStub() {
+  return {} as any;
+}
+function dbStub() {
+  return { getGameParticipants: () => [] } as any;
+}
 
 describe("GameManager private helpers", () => {
   test("isGameExpiredWithBuffer respects timeout and buffer", () => {
@@ -36,7 +42,9 @@ describe("GameManager private helpers", () => {
   test("handleGameProcessingError maps account missing to true, others to false", () => {
     resetGM();
     const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
-    expect((gm as any).handleGameProcessingError(new Error("Account does not exist"), "addr")).toBe(true);
+    expect((gm as any).handleGameProcessingError(new Error("Account does not exist"), "addr")).toBe(
+      true,
+    );
     expect((gm as any).handleGameProcessingError(new Error("boom"), "addr")).toBe(false);
   });
 });

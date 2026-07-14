@@ -8,7 +8,7 @@ import { formatDuration } from "./format-time";
 export function buildGameStatus(
   currentTickets: number,
   minTickets: number,
-  maxTickets: number
+  maxTickets: number,
 ): string {
   if (currentTickets < minTickets) {
     const neededForMin = minTickets - currentTickets;
@@ -32,18 +32,12 @@ export function buildGameHeader(
   currentTickets: number,
   maxTickets: number,
   usdApproximation?: string | null,
-  explorerUrl?: string | null
+  explorerUrl?: string | null,
 ): string {
-  const usdSegment = usdApproximation
-    ? ` (${escapeHtml(usdApproximation)})`
-    : "";
-  const gameExplorerIcon = explorerUrl
-    ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>`
-    : "🅴";
+  const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
+  const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
   const gameLabel = `${escapeHtml(gameTypeLabel)} ${gameExplorerIcon}`;
-  const amountDisplay = escapeHtml(
-    formatCompactTokenDisplay(amountFormatted)
-  );
+  const amountDisplay = escapeHtml(formatCompactTokenDisplay(amountFormatted));
   const tickerDisplay = escapeHtml(tokenTicker);
   const creatorDisplay = escapeHtml(creatorUsername);
   return (
@@ -59,15 +53,11 @@ export function buildPrizeLine(
   show: boolean,
   totalFormatted: string,
   tokenTicker: string,
-  usdApproximation?: string | null
+  usdApproximation?: string | null,
 ): string {
   if (!show) return "";
-  const usdSegment = usdApproximation
-    ? ` (${escapeHtml(usdApproximation)})`
-    : "";
-  const prizeDisplay = escapeHtml(
-    formatCompactTokenDisplay(totalFormatted)
-  );
+  const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
+  const prizeDisplay = escapeHtml(formatCompactTokenDisplay(totalFormatted));
   const safeTicker = escapeHtml(tokenTicker);
   return `\nCurrent Prize: ${prizeDisplay} ${safeTicker}${usdSegment}\n`;
 }
@@ -85,9 +75,6 @@ export function buildParticipantsList(usernames: string[]): string {
  * Format remaining time until expiration as a human-friendly string.
  * Examples: "⏰ Expires in: 45m", "⏰ Expires in: 1h 20m"
  */
-export function buildExpirationText(
-  secondsRemaining: number,
-  prefix: string = ""
-): string {
+export function buildExpirationText(secondsRemaining: number, prefix: string = ""): string {
   return `${prefix}Expires in: ${formatDuration(secondsRemaining)}`;
 }

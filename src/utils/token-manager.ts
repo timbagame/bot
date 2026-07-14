@@ -3,11 +3,7 @@ import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import {
-  TOKENS_LIST,
-  WSOL_MINT,
-  TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
-} from "./constants";
+import { TOKENS_LIST, WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -19,13 +15,10 @@ import { createSingleton } from "./singleton";
 import { getUsdPrice, type CachedPriceLookup } from "./price-service";
 
 type TokenMetadataResolverResult =
-  | { symbol?: string | null; decimals?: number | null }
-  | null
-  | undefined;
+  { symbol?: string | null; decimals?: number | null } | null | undefined;
 
 type TokenMetadataResolver = () =>
-  | TokenMetadataResolverResult
-  | Promise<TokenMetadataResolverResult>;
+  TokenMetadataResolverResult | Promise<TokenMetadataResolverResult>;
 
 export interface RegisterTokenIfNeededOptions {
   mint: string;
@@ -66,9 +59,7 @@ type ResolvedTokenMetadata = {
 type MetadataFailure = { reason: "invalid_decimals"; mint: string };
 
 const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
-const SUPPORTED_TOKEN_MINTS = new Set(
-  TOKENS_LIST.map((token) => token.mint.trim())
-);
+const SUPPORTED_TOKEN_MINTS = new Set(TOKENS_LIST.map((token) => token.mint.trim()));
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -76,39 +67,28 @@ const SUPPORTED_TOKEN_MINTS = new Set(
 
 export class TokenManager {
   private static readonly singleton = createSingleton(
-    (
-      wallet: WalletManager,
-      defaultTokenMint: string,
-      defaultTokenTicker: string
-    ) => new TokenManager(wallet, defaultTokenMint, defaultTokenTicker)
+    (wallet: WalletManager, defaultTokenMint: string, defaultTokenTicker: string) =>
+      new TokenManager(wallet, defaultTokenMint, defaultTokenTicker),
   );
   private chatDb: ChatDatabase;
   private tokenDb: TokenDatabase;
   private wallet: WalletManager;
   private defaultTokenMint: string;
   private defaultTokenTicker: string;
-  private approvedTokensCache:
-    | {
-        value: Array<{
-          token_mint: string;
-          token_ticker: string;
-          decimals: number;
-        }>;
-        expiresAt: number;
-      }
-    | null = null;
+  private approvedTokensCache: {
+    value: Array<{
+      token_mint: string;
+      token_ticker: string;
+      decimals: number;
+    }>;
+    expiresAt: number;
+  } | null = null;
   private approvedTokensCacheVersion: number | null = null;
-  private readonly approvedTokensCacheTtlMs =
-    TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
+  private readonly approvedTokensCacheTtlMs = TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
   private readonly maxSupportedDecimals = MAX_SUPPORTED_TOKEN_DECIMALS;
-  private lastMetadataFailure: { reason: "invalid_decimals"; mint: string } | null =
-    null;
+  private lastMetadataFailure: { reason: "invalid_decimals"; mint: string } | null = null;
 
-  private constructor(
-    wallet: WalletManager,
-    defaultTokenMint: string,
-    defaultTokenTicker: string
-  ) {
+  private constructor(wallet: WalletManager, defaultTokenMint: string, defaultTokenTicker: string) {
     this.chatDb = ChatDatabase.getInstance();
     this.tokenDb = TokenDatabase.getInstance();
     this.wallet = wallet;
@@ -119,7 +99,7 @@ export class TokenManager {
   public static getInstance(
     wallet?: WalletManager,
     defaultTokenMint?: string,
-    defaultTokenTicker?: string
+    defaultTokenTicker?: string,
   ): TokenManager {
     const existing = TokenManager.singleton.peek();
     if (existing) {
@@ -127,16 +107,10 @@ export class TokenManager {
     }
 
     if (!wallet || !defaultTokenMint || !defaultTokenTicker) {
-      throw new Error(
-        "TokenManager first initialization requires wallet and default token info"
-      );
+      throw new Error("TokenManager first initialization requires wallet and default token info");
     }
 
-    return TokenManager.singleton.getInstance(
-      wallet,
-      defaultTokenMint,
-      defaultTokenTicker
-    );
+    return TokenManager.singleton.getInstance(wallet, defaultTokenMint, defaultTokenTicker);
   }
 
   public static resetForTesting(): void {
@@ -163,7 +137,7 @@ export class TokenManager {
   private isTokenSupportedForGames(
     tokenMint: string,
     isSol?: boolean,
-    options?: { chatId?: number }
+    options?: { chatId?: number },
   ): boolean {
     if (isSol) {
       return true;
@@ -181,10 +155,7 @@ export class TokenManager {
 
     const normalizedChatMint = chatDefaultMint?.trim();
 
-    if (
-      normalizedMint === WSOL_MINT ||
-      normalizedMint === normalizedDefaultMint
-    ) {
+    if (normalizedMint === WSOL_MINT || normalizedMint === normalizedDefaultMint) {
       return true;
     }
 
@@ -195,22 +166,18 @@ export class TokenManager {
     return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
   }
 
-  private snapshotApprovedTokens(
-    tokens: KnownToken[]
-  ): Array<{
+  private snapshotApprovedTokens(tokens: KnownToken[]): Array<{
     token_mint: string;
     token_ticker: string;
     decimals: number;
     token_program_id?: string | null;
   }> {
-    return tokens.map(
-      ({ token_mint, token_ticker, decimals, token_program_id }) => ({
-        token_mint,
-        token_ticker,
-        decimals,
-        token_program_id: token_program_id ?? null,
-      })
-    );
+    return tokens.map(({ token_mint, token_ticker, decimals, token_program_id }) => ({
+      token_mint,
+      token_ticker,
+      decimals,
+      token_program_id: token_program_id ?? null,
+    }));
   }
 
   private invalidateApprovedTokensCache(): void {
@@ -220,7 +187,7 @@ export class TokenManager {
 
   private resolveBuiltinMintToken(
     metadata: ReturnType<typeof getBuiltinTokenMetadataByMint> | null,
-    userInput: string
+    userInput: string,
   ): (KnownToken & { isNativeSol?: boolean }) | null {
     if (!metadata) {
       return null;
@@ -254,7 +221,7 @@ export class TokenManager {
       tickerHint?: string;
       metadataResolvers?: TokenMetadataResolver[];
       metadataFailureSink?: { value: MetadataFailure | null };
-    } = {}
+    } = {},
   ): Promise<ResolvedTokenMetadata | null> {
     this.lastMetadataFailure = null;
     if (metadataFailureSink) {
@@ -263,11 +230,9 @@ export class TokenManager {
     const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
     const normalizedHint = tickerHint?.trim().toUpperCase();
     let resolvedTicker = normalizedHint;
-    let resolvedTickerSource:
-      | "hint"
-      | "builtin"
-      | "metadata"
-      | undefined = normalizedHint ? "hint" : undefined;
+    let resolvedTickerSource: "hint" | "builtin" | "metadata" | undefined = normalizedHint
+      ? "hint"
+      : undefined;
     let decimals = builtinMetadata?.decimals;
     const isNativeSol = builtinMetadata?.isNativeSol ?? false;
     const allowMetadataTickerOverride = !builtinMetadata?.isNativeSol;
@@ -282,7 +247,7 @@ export class TokenManager {
         source: "builtin" | "metadata";
         allowOverride?: boolean;
         requireEmpty?: boolean;
-      }
+      },
     ) => {
       if (!candidate) {
         return;
@@ -305,7 +270,7 @@ export class TokenManager {
 
     const applyDecimals = (
       value: number | null | undefined,
-      { allowOverride = false }: { allowOverride?: boolean } = {}
+      { allowOverride = false }: { allowOverride?: boolean } = {},
     ) => {
       const normalized = this.normalizeDecimals(value ?? undefined);
       if (normalized === null) {
@@ -326,9 +291,7 @@ export class TokenManager {
       applyTicker(builtinMetadata.ticker, { source: "builtin" });
     }
 
-    let fetchedMetadata:
-      | { symbol?: string | null; decimals?: number | null }
-      | null = null;
+    let fetchedMetadata: { symbol?: string | null; decimals?: number | null } | null = null;
     const ensureFullMetadata = async () => {
       if (fetchedMetadata) {
         return fetchedMetadata;
@@ -337,10 +300,7 @@ export class TokenManager {
       try {
         fetchedMetadata = await this.wallet.getFullTokenMetadata(mint);
       } catch (error) {
-        console.warn(
-          `[TokenManager] Failed to fetch full metadata for ${mint}:`,
-          error
-        );
+        console.warn(`[TokenManager] Failed to fetch full metadata for ${mint}:`, error);
         fetchedMetadata = null;
       }
 
@@ -371,10 +331,7 @@ export class TokenManager {
           break;
         }
       } catch (resolverError) {
-        console.warn(
-          `[TokenManager] Metadata resolver failed for ${mint}:`,
-          resolverError
-        );
+        console.warn(`[TokenManager] Metadata resolver failed for ${mint}:`, resolverError);
       }
     }
 
@@ -403,10 +360,7 @@ export class TokenManager {
         const metadata = await this.wallet.getTokenMetadata(mint);
         applyDecimals(metadata?.decimals);
       } catch (decimalsError) {
-        console.error(
-          `[TokenManager] Failed to fetch token metadata for ${mint}:`,
-          decimalsError
-        );
+        console.error(`[TokenManager] Failed to fetch token metadata for ${mint}:`, decimalsError);
       }
     }
 
@@ -439,14 +393,13 @@ export class TokenManager {
     };
   }
 
-
   // ================================
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
   public async resolveGameTokenContext(
     chatId?: number,
     explicitToken?: string,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ): Promise<
     | {
         success: true;
@@ -496,9 +449,7 @@ export class TokenManager {
             resolvedTokenTicker = resolvedToken.token_ticker;
 
             const requestedNativeSolByTicker =
-              resolvedToken.isNativeSol &&
-              candidateLooksLikeTicker &&
-              candidateUpper === "SOL";
+              resolvedToken.isNativeSol && candidateLooksLikeTicker && candidateUpper === "SOL";
 
             if (requestedNativeSolByTicker) {
               requestedNativeSol = true;
@@ -570,7 +521,7 @@ export class TokenManager {
     args: string[],
     argIndex: number = 1,
     chatId?: number,
-    context: "game" | "tip" = "game"
+    context: "game" | "tip" = "game",
   ): Promise<ParseAmountResult> {
     this.lastMetadataFailure = null;
 
@@ -612,7 +563,7 @@ export class TokenManager {
     const tokenResolution = await this.resolveGameTokenContext(
       chatId,
       isFiatHint || isNumericCandidate ? undefined : tokenCandidate,
-      context
+      context,
     );
 
     if (!tokenResolution.success) {
@@ -623,11 +574,9 @@ export class TokenManager {
       };
     }
 
-    const tokenWasSpecified =
-      tokenResolution.tokenWasSpecified || isFiatHint;
-    const { tokenMint, tokenTicker, decimals, isSol, requestedNativeSol } =
-      tokenResolution;
-    const targetDecimals = isSol ? 9 : decimals ?? 0;
+    const tokenWasSpecified = tokenResolution.tokenWasSpecified || isFiatHint;
+    const { tokenMint, tokenTicker, decimals, isSol, requestedNativeSol } = tokenResolution;
+    const targetDecimals = isSol ? 9 : (decimals ?? 0);
 
     const toRawAmountFromUsd = async (): Promise<
       | {
@@ -661,22 +610,9 @@ export class TokenManager {
       const USD_MICROS = 1_000_000n;
       const MAX_SAFE = Number.MAX_SAFE_INTEGER;
       const PRICE_SCALE_CANDIDATES = [
-        1_000_000_000_000_000,
-        100_000_000_000_000,
-        10_000_000_000_000,
-        1_000_000_000_000,
-        100_000_000_000,
-        10_000_000_000,
-        1_000_000_000,
-        100_000_000,
-        10_000_000,
-        1_000_000,
-        100_000,
-        10_000,
-        1_000,
-        100,
-        10,
-        1,
+        1_000_000_000_000_000, 100_000_000_000_000, 10_000_000_000_000, 1_000_000_000_000,
+        100_000_000_000, 10_000_000_000, 1_000_000_000, 100_000_000, 10_000_000, 1_000_000, 100_000,
+        10_000, 1_000, 100, 10, 1,
       ] as const;
 
       if (!priceLookup?.price || !Number.isFinite(price) || price <= 0) {
@@ -729,9 +665,7 @@ export class TokenManager {
       }
 
       const formattedAmount =
-        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) +
-        " " +
-        tokenTicker;
+        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) + " " + tokenTicker;
 
       return {
         success: true,
@@ -768,9 +702,7 @@ export class TokenManager {
       }
 
       const formattedAmount =
-        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) +
-        " " +
-        tokenTicker;
+        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) + " " + tokenTicker;
 
       return {
         success: true,
@@ -802,9 +734,7 @@ export class TokenManager {
           returnType: "number",
         });
         formattedAmount =
-          this.wallet.formatTokenBalance(amount, targetDecimals) +
-          " " +
-          tokenTicker;
+          this.wallet.formatTokenBalance(amount, targetDecimals) + " " + tokenTicker;
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes("too large")) {
@@ -833,11 +763,9 @@ export class TokenManager {
   // ================================
 
   public async resolveTokenForChat(
-    chatId?: number
+    chatId?: number,
   ): Promise<{ tokenMint: string; tokenTicker: string; decimals: number }> {
-    const chatConfig = chatId
-      ? this.chatDb.getChatDefaultToken(chatId) ?? null
-      : null;
+    const chatConfig = chatId ? (this.chatDb.getChatDefaultToken(chatId) ?? null) : null;
 
     const targetMint = chatConfig?.token_mint ?? this.defaultTokenMint;
     const targetTicker = chatConfig?.token_ticker ?? this.defaultTokenTicker;
@@ -869,14 +797,13 @@ export class TokenManager {
 
     if (chatConfig) {
       console.warn(
-        `[TokenManager] Failed to resolve metadata for chat token ${chatConfig.token_ticker} (${chatConfig.token_mint}), falling back to default token`
+        `[TokenManager] Failed to resolve metadata for chat token ${chatConfig.token_ticker} (${chatConfig.token_mint}), falling back to default token`,
       );
     }
 
-    const fallbackMetadata = await this.resolveMetadataForMint(
-      this.defaultTokenMint,
-      { tickerHint: this.defaultTokenTicker }
-    );
+    const fallbackMetadata = await this.resolveMetadataForMint(this.defaultTokenMint, {
+      tickerHint: this.defaultTokenTicker,
+    });
 
     return {
       tokenMint: this.defaultTokenMint,
@@ -895,7 +822,7 @@ export class TokenManager {
    */
   public async getBalanceWithMetadata(
     telegramId: bigint,
-    tokenInfo: { tokenMint: string; tokenTicker: string; decimals: number }
+    tokenInfo: { tokenMint: string; tokenTicker: string; decimals: number },
   ): Promise<{
     rawBalance: number;
     displayBalance: number;
@@ -904,10 +831,7 @@ export class TokenManager {
     decimals: number;
   }> {
     try {
-      const rawBalance = await this.wallet.getTokenBalance(
-        telegramId,
-        tokenInfo.tokenMint
-      );
+      const rawBalance = await this.wallet.getTokenBalance(telegramId, tokenInfo.tokenMint);
       const displayBalance = rawBalance / Math.pow(10, tokenInfo.decimals);
 
       return {
@@ -929,9 +853,7 @@ export class TokenManager {
     }
   }
 
-  public async resolveMintForTicker(
-    ticker: string
-  ): Promise<string | undefined> {
+  public async resolveMintForTicker(ticker: string): Promise<string | undefined> {
     if (!ticker) {
       return undefined;
     }
@@ -958,27 +880,19 @@ export class TokenManager {
   public async addToken(
     tokenMint: string,
     ticker: string,
-    decimalsOverride?: number
+    decimalsOverride?: number,
   ): Promise<boolean> {
     try {
       const decimalsCandidate =
         typeof decimalsOverride === "number"
           ? this.normalizeDecimals(decimalsOverride)
-          : this.normalizeDecimals(
-              (await this.wallet.getTokenMetadata(tokenMint)).decimals
-            );
+          : this.normalizeDecimals((await this.wallet.getTokenMetadata(tokenMint)).decimals);
 
       if (decimalsCandidate === null) {
-        throw new Error(
-          `Invalid token decimals received for ${ticker.toUpperCase()}`
-        );
+        throw new Error(`Invalid token decimals received for ${ticker.toUpperCase()}`);
       }
 
-      this.tokenDb.addKnownToken(
-        tokenMint,
-        ticker.toUpperCase(),
-        decimalsCandidate
-      );
+      this.tokenDb.addKnownToken(tokenMint, ticker.toUpperCase(), decimalsCandidate);
       this.invalidateApprovedTokensCache();
       return true;
     } catch (error) {
@@ -996,9 +910,7 @@ export class TokenManager {
     const logPrefix = source ? `[${source}]` : "[TokenManager]";
     const existing = this.getKnownTokenByMint(mint);
     if (existing) {
-      console.log(
-        `${logPrefix} Token already registered: ${existing.token_ticker} (${mint})`
-      );
+      console.log(`${logPrefix} Token already registered: ${existing.token_ticker} (${mint})`);
       return {
         status: "already_registered",
         token: existing,
@@ -1023,22 +935,16 @@ export class TokenManager {
       resolvedTicker = "WSOL";
     }
 
-    console.log(
-      `${logPrefix} Auto-registering token ${resolvedTicker} (${mint})`
-    );
+    console.log(`${logPrefix} Auto-registering token ${resolvedTicker} (${mint})`);
     const added = await this.addToken(mint, resolvedTicker, metadata.decimals);
     if (!added) {
-      console.log(
-        `${logPrefix} Failed to auto-register token ${resolvedTicker} (${mint})`
-      );
+      console.log(`${logPrefix} Failed to auto-register token ${resolvedTicker} (${mint})`);
       return { status: "failed", resolvedTicker };
     }
 
     const registered = this.getKnownTokenByMint(mint);
     if (registered) {
-      console.log(
-        `${logPrefix} Registered token ${registered.token_ticker} (${mint})`
-      );
+      console.log(`${logPrefix} Registered token ${registered.token_ticker} (${mint})`);
     }
 
     return {
@@ -1052,14 +958,9 @@ export class TokenManager {
     chatId: number,
     tokenMint: string,
     tokenTicker: string,
-    setByTelegramId: string
+    setByTelegramId: string,
   ): void {
-    this.chatDb.setChatDefaultToken(
-      chatId,
-      tokenMint,
-      tokenTicker,
-      setByTelegramId
-    );
+    this.chatDb.setChatDefaultToken(chatId, tokenMint, tokenTicker, setByTelegramId);
   }
 
   public getChatDefaultToken(chatId: number): ChatTokenConfig | null {
@@ -1077,7 +978,7 @@ export class TokenManager {
   public getSupportedGameTokens(): Array<{ mint: string; ticker: string }> {
     return [
       { mint: this.defaultTokenMint, ticker: this.defaultTokenTicker },
-      ...TOKENS_LIST.filter(t => t.mint !== this.defaultTokenMint),
+      ...TOKENS_LIST.filter((t) => t.mint !== this.defaultTokenMint),
     ];
   }
 
@@ -1130,11 +1031,7 @@ export class TokenManager {
     const now = Date.now();
     const tokenCount = this.tokenDb.getTokenCount();
     const cache = this.approvedTokensCache;
-    if (
-      cache &&
-      cache.expiresAt > now &&
-      this.approvedTokensCacheVersion === tokenCount
-    ) {
+    if (cache && cache.expiresAt > now && this.approvedTokensCacheVersion === tokenCount) {
       return cache.value;
     }
 
@@ -1179,17 +1076,14 @@ export class TokenManager {
   }
 
   public async autoDiscoverTokenInfo(
-    tokenMint: string
+    tokenMint: string,
   ): Promise<{ ticker: string; decimals: number } | null> {
     const metadata = await this.resolveMetadataForMint(tokenMint);
     if (!metadata) {
       return null;
     }
 
-    const ticker =
-      tokenMint === WSOL_MINT && metadata.isNativeSol
-        ? "WSOL"
-        : metadata.ticker;
+    const ticker = tokenMint === WSOL_MINT && metadata.isNativeSol ? "WSOL" : metadata.ticker;
 
     return {
       ticker,
@@ -1203,12 +1097,12 @@ export class TokenManager {
       allowAutoDiscover?: boolean;
       persistDiscovered?: boolean;
       metadataFailureSink?: { value: MetadataFailure | null };
-    } = {}
+    } = {},
   ): Promise<
-    (KnownToken & {
-      isNativeSol?: boolean;
-      newlyDiscovered?: boolean;
-    })
+    | (KnownToken & {
+        isNativeSol?: boolean;
+        newlyDiscovered?: boolean;
+      })
     | null
   > {
     const allowAutoDiscover = options.allowAutoDiscover ?? true;
@@ -1252,7 +1146,7 @@ export class TokenManager {
       }
       const builtinByMint = this.resolveBuiltinMintToken(
         getBuiltinTokenMetadataByMint(candidate),
-        candidate
+        candidate,
       );
       if (builtinByMint) {
         return builtinByMint;
@@ -1278,8 +1172,7 @@ export class TokenManager {
         tickerHint: registryMint.ticker,
         metadataFailureSink,
       });
-      metadataFailure =
-        metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+      metadataFailure = metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
       if (metadataFailureSink) {
         metadataFailureSink.value = metadataFailure;
       }
@@ -1287,11 +1180,7 @@ export class TokenManager {
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
         if (persistDiscovered) {
-          this.tokenDb.addKnownToken(
-            registryMint.mint,
-            ticker,
-            metadata.decimals
-          );
+          this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
           this.invalidateApprovedTokensCache();
         }
         return {
@@ -1307,7 +1196,7 @@ export class TokenManager {
 
     const builtinMint = this.resolveBuiltinMintToken(
       getBuiltinTokenMetadataByMint(normalizedMint),
-      tickerOrMint
+      tickerOrMint,
     );
     if (builtinMint) {
       return builtinMint;
@@ -1323,8 +1212,7 @@ export class TokenManager {
     }
 
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
-    metadataFailure =
-      metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+    metadataFailure = metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
     if (metadataFailureSink) {
       metadataFailureSink.value = metadataFailure;
     }
@@ -1347,13 +1235,9 @@ export class TokenManager {
       newlyDiscovered: true,
     };
   }
-
 }
 
-export function formatParseAmountError(
-  result: ParseAmountResult,
-  fallbackMessage: string
-): string {
+export function formatParseAmountError(result: ParseAmountResult, fallbackMessage: string): string {
   if (result.success) {
     return fallbackMessage;
   }

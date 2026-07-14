@@ -1,10 +1,6 @@
 import { expect, test } from "bun:test";
 import { PublicKey, Keypair } from "@solana/web3.js";
-import {
-  AccountLayout,
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-} from "@solana/spl-token";
+import { AccountLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 
 import { WalletManager } from "../src/utils/wallet";
 
@@ -46,7 +42,7 @@ test("getTokenBalance creates ATA with user as payer when missing", async () => 
   (wm as any).findOrCreateAssociatedTokenAccount = async (
     owner: PublicKey,
     mintPk: PublicKey,
-    payer: Keypair
+    payer: Keypair,
   ) => {
     creationCalls.push({ owner, payer, mint: mintPk });
     return { address: Keypair.generate().publicKey, instructions: ["ix"] };
@@ -65,14 +61,8 @@ test("getTokenBalance creates ATA with user as payer when missing", async () => 
   expect(creationCalls.length).toBe(1);
   expect(sendCalls.length).toBe(1);
 
-  expect(creationCalls[0]!.payer.publicKey.equals(userKeypair.publicKey)).toBe(
-    true
-  );
-  expect(
-    sendCalls[0]!.signers.some((kp) =>
-      kp.publicKey.equals(userKeypair.publicKey)
-    )
-  ).toBe(true);
+  expect(creationCalls[0]!.payer.publicKey.equals(userKeypair.publicKey)).toBe(true);
+  expect(sendCalls[0]!.signers.some((kp) => kp.publicKey.equals(userKeypair.publicKey))).toBe(true);
 });
 
 test("getTokenBalance waits for confirmation before returning new ATA balance", async () => {
@@ -81,7 +71,7 @@ test("getTokenBalance waits for confirmation before returning new ATA balance", 
 
   let expectedAta: PublicKey | null = null;
   let accountCreated = false;
-  let accountData = Buffer.alloc(AccountLayout.span);
+  const accountData = Buffer.alloc(AccountLayout.span);
 
   const connection = {
     async getAccountInfo(pubkey: PublicKey) {
@@ -120,13 +110,13 @@ test("getTokenBalance waits for confirmation before returning new ATA balance", 
       closeAuthorityOption: 0,
       closeAuthority: PublicKey.default,
     },
-    accountData
+    accountData,
   );
   expectedAta = await getAssociatedTokenAddress(
     mint,
     userKeypair.publicKey,
     false,
-    TOKEN_PROGRAM_ID
+    TOKEN_PROGRAM_ID,
   );
 
   (wm as any).findOrCreateAssociatedTokenAccount = async () => ({

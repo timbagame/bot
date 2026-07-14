@@ -15,7 +15,9 @@ describe("jupiter utils", () => {
     expect(getJupiterMint("SOL")).toBe("So11111111111111111111111111111111111111112");
     const wsol = "So11111111111111111111111111111111111111112";
     expect(getJupiterMint(wsol)).toBe(wsol);
-    expect(getJupiterMint("EPjFWd...".replace("...", "d5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"))).toContain("EPjF");
+    expect(
+      getJupiterMint("EPjFWd...".replace("...", "d5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")),
+    ).toContain("EPjF");
   });
 
   test("isPriceImpactTooHigh compares numeric percent", () => {
@@ -37,21 +39,25 @@ describe("JupiterClient helpers", () => {
     const ok = jc.validateSwapParams(
       "So11111111111111111111111111111111111111112",
       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "1000"
+      "1000",
     );
     expect(ok.valid).toBe(true);
 
     expect(jc.validateSwapParams("bad", "bad", "1000").valid).toBe(false);
-    expect(jc.validateSwapParams(
-      "So11111111111111111111111111111111111111112",
-      "So11111111111111111111111111111111111111112",
-      "1000"
-    ).valid).toBe(false);
-    expect(jc.validateSwapParams(
-      "So11111111111111111111111111111111111111112",
-      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "0"
-    ).valid).toBe(false);
+    expect(
+      jc.validateSwapParams(
+        "So11111111111111111111111111111111111111112",
+        "So11111111111111111111111111111111111111112",
+        "1000",
+      ).valid,
+    ).toBe(false);
+    expect(
+      jc.validateSwapParams(
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "0",
+      ).valid,
+    ).toBe(false);
   });
 
   test("formatQuoteForDisplay renders amounts, rate and route", () => {
@@ -66,7 +72,19 @@ describe("JupiterClient helpers", () => {
       slippageBps: 100,
       priceImpactPct: "0.25",
       routePlan: [
-        { swapInfo: { ammKey: "AMM", label: "JupiterAMM", inputMint: "", outputMint: "", inAmount: "0", outAmount: "0", feeAmount: "0", feeMint: "" }, percent: 100 }
+        {
+          swapInfo: {
+            ammKey: "AMM",
+            label: "JupiterAMM",
+            inputMint: "",
+            outputMint: "",
+            inAmount: "0",
+            outAmount: "0",
+            feeAmount: "0",
+            feeMint: "",
+          },
+          percent: 100,
+        },
       ],
       totalTime: 123,
     };
@@ -128,14 +146,14 @@ describe("JupiterClient referral URL params", () => {
         transaction: "AAAA",
         requestId: "req-portal",
         ...overrides,
-      }
+      },
     );
 
   test("falls back to payer for taker when missing", async () => {
     const capture: { url?: string } = {};
     const client = new JupiterClient(
       "https://api.jup.ag",
-      createJupiterFetchStub(capture, async () => makeSuccessResponse())
+      createJupiterFetchStub(capture, async () => makeSuccessResponse()),
     );
 
     await client.getQuote({
@@ -155,7 +173,7 @@ describe("JupiterClient referral URL params", () => {
     const explicitTaker = "2DxM4Qf7RZwzE9HyfYDp2mjNgS8RX5UCb7Yiz2ZGsY2Q";
     const client = new JupiterClient(
       "https://api.jup.ag",
-      createJupiterFetchStub(capture, async () => makeSuccessResponse())
+      createJupiterFetchStub(capture, async () => makeSuccessResponse()),
     );
 
     await client.getQuote({
@@ -188,7 +206,7 @@ describe("JupiterClient referral URL params", () => {
         }
 
         return makeSuccessResponse();
-      })
+      }),
     );
 
     const quote = await client.getQuote({
@@ -243,20 +261,21 @@ describe("JupiterClient error handling", () => {
   test("propagates gasless minimum error code 3 clearly", async () => {
     const client = new JupiterClient(
       "https://api.jup.ag",
-      async () => ({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: async () => ({
-          errorCode: 3,
-          errorMessage: "Minimum $10 for gasless",
-        }),
-        text: async () =>
-          JSON.stringify({
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
             errorCode: 3,
             errorMessage: "Minimum $10 for gasless",
           }),
-      } as unknown as Response)
+          text: async () =>
+            JSON.stringify({
+              errorCode: 3,
+              errorMessage: "Minimum $10 for gasless",
+            }),
+        }) as unknown as Response,
     );
 
     await expect(
@@ -265,23 +284,24 @@ describe("JupiterClient error handling", () => {
         outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         amount: "1000000",
         taker: "Taker",
-      })
+      }),
     ).rejects.toThrow("Minimum $10 for gasless");
   });
 
   test("does not expose raw Jupiter error JSON", async () => {
     const client = new JupiterClient(
       "https://api.jup.ag",
-      async () => ({
-        ok: false,
-        status: 400,
-        statusText: "Bad Request",
-        text: async () =>
-          JSON.stringify({
-            requestId: "109df427-11b0-75bc-8bee-0283dbcd2d1f",
-            error: "Failed to get quotes",
-          }),
-      } as unknown as Response)
+      async () =>
+        ({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          text: async () =>
+            JSON.stringify({
+              requestId: "109df427-11b0-75bc-8bee-0283dbcd2d1f",
+              error: "Failed to get quotes",
+            }),
+        }) as unknown as Response,
     );
 
     await expect(
@@ -290,9 +310,9 @@ describe("JupiterClient error handling", () => {
         outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         amount: "1000000",
         taker: "Taker",
-      })
+      }),
     ).rejects.toThrow(
-      "Failed to request Jupiter order: Jupiter order failed: 400 Bad Request - Failed to get quotes"
+      "Failed to request Jupiter order: Jupiter order failed: 400 Bad Request - Failed to get quotes",
     );
   });
 });

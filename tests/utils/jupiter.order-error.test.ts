@@ -18,11 +18,13 @@ const routePlan = [
 ];
 
 test("JupiterClient surfaces HTTP errors without error payload", async () => {
-  const client = new JupiterClient("https://api.jup.ag", async () =>
-    new Response("rate-limited", {
-      status: 429,
-      statusText: "Too Many Requests",
-    })
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      new Response("rate-limited", {
+        status: 429,
+        statusText: "Too Many Requests",
+      }),
   );
 
   try {
@@ -60,11 +62,13 @@ test("JupiterClient surfaces gasless order error message", async () => {
     errorMessage: "Minimum $10 for gasless",
   };
 
-  const client = new JupiterClient("https://api.jup.ag", async () =>
-    new Response(JSON.stringify(orderPayload), {
-      status: 200,
-      statusText: "OK",
-    })
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      new Response(JSON.stringify(orderPayload), {
+        status: 200,
+        statusText: "OK",
+      }),
   );
 
   try {
@@ -80,27 +84,29 @@ test("JupiterClient surfaces gasless order error message", async () => {
 });
 
 test("JupiterClient honors referralApplied returned by Jupiter", async () => {
-  const client = new JupiterClient("https://api.jup.ag", async () =>
-    new Response(
-      JSON.stringify({
-        inputMint: "MintA",
-        outputMint: "MintB",
-        inAmount: "1000",
-        outAmount: "2000",
-        otherAmountThreshold: "0",
-        swapMode: "ExactIn",
-        slippageBps: 50,
-        priceImpactPct: "0",
-        routePlan,
-        router: "pump",
-        requestId: "req-123",
-        quoteId: "quote-123",
-        totalTime: 1,
-        platformFee: null,
-        referralApplied: false,
-      }),
-      { status: 200, statusText: "OK" }
-    )
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      new Response(
+        JSON.stringify({
+          inputMint: "MintA",
+          outputMint: "MintB",
+          inAmount: "1000",
+          outAmount: "2000",
+          otherAmountThreshold: "0",
+          swapMode: "ExactIn",
+          slippageBps: 50,
+          priceImpactPct: "0",
+          routePlan,
+          router: "pump",
+          requestId: "req-123",
+          quoteId: "quote-123",
+          totalTime: 1,
+          platformFee: null,
+          referralApplied: false,
+        }),
+        { status: 200, statusText: "OK" },
+      ),
   );
 
   const quote = await client.getQuote({
@@ -116,13 +122,15 @@ test("JupiterClient honors referralApplied returned by Jupiter", async () => {
 test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
   const circular: any = { signature: "derp" };
   circular.self = circular;
-  const client = new JupiterClient("https://api.jup.ag", async () =>
-    ({
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      json: async () => circular,
-    } as any)
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => circular,
+      }) as any,
   );
 
   try {
@@ -138,14 +146,16 @@ test("Jupiter executeOrder surfaces stringify failures without crashing", async 
 });
 
 test("Jupiter build surfaces 200 error payloads", async () => {
-  const client = new JupiterClient("https://api.jup.ag", async () =>
-    new Response(
-      JSON.stringify({
-        error: "Failed to get quotes",
-        errorCode: 1,
-      }),
-      { status: 200, statusText: "OK" }
-    )
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: "Failed to get quotes",
+          errorCode: 1,
+        }),
+        { status: 200, statusText: "OK" },
+      ),
   );
 
   try {

@@ -39,4 +39,3 @@ test("createDmMessageAdapter preserves from/chat and targets given message id", 
   expect(last[0]).toBe("editMessageText");
   expect(last[2]).toBe(777);
 });
-

@@ -38,14 +38,12 @@ beforeEach(() => {
       },
       defaultWalletActionMenuDeps: {
         requireTelegramId: () => 99n,
-      getWalletAddress: () =>
-        "WALLET111111111111111111111111111111111111",
-      getWalletBalances: async () => ({
-        solBalance: 5_000_000_000,
-        tokenBalances: [],
-      }),
-        formatSolBalance: (lamports: number) =>
-          `${lamports / 1_000_000_000} SOL`,
+        getWalletAddress: () => "WALLET111111111111111111111111111111111111",
+        getWalletBalances: async () => ({
+          solBalance: 5_000_000_000,
+          tokenBalances: [],
+        }),
+        formatSolBalance: (lamports: number) => `${lamports / 1_000_000_000} SOL`,
         formatTokenBalance: (balance: number, decimals: number) =>
           (balance / Math.pow(10, decimals)).toString(),
       },
@@ -57,10 +55,7 @@ beforeEach(() => {
         approvedTokens: [],
       }),
       clearWalletCache: () => {},
-      wrapCallbackHandler:
-        (handler) =>
-        async (ctx, next) =>
-          await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getSolFeeBufferLamports: () => 0,
     });
     module.registerHandlers();
@@ -84,11 +79,7 @@ test("wrap amount handler gracefully rejects empty payloads", async () => {
     },
   };
 
-  await wrapAmountHandler?.(
-    ctx,
-    { raw: "wrap_amount_", payload: "" },
-    async () => {}
-  );
+  await wrapAmountHandler?.(ctx, { raw: "wrap_amount_", payload: "" }, async () => {});
 
   expect(answered).toHaveLength(1);
   expect(answered[0]).toBe("❌ Amount cannot be empty");

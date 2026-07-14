@@ -24,7 +24,7 @@ const SIGNATURE_PATTERNS = [
 ];
 
 export const extractLamportsInfo = (
-  errorMessage: string
+  errorMessage: string,
 ): { current: number; needed: number } | null => {
   const match = errorMessage.match(INSUFFICIENT_LAMPORTS_PATTERN);
   if (!match || !match[1] || !match[2]) return null;
@@ -34,7 +34,7 @@ export const extractLamportsInfo = (
 export const collectErrorLogs = async (
   error: unknown,
   visited: Set<any> = new Set(),
-  connection?: Connection
+  connection?: Connection,
 ): Promise<string[]> => {
   if (!error || typeof error !== "object") return [];
   if (visited.has(error)) return [];
@@ -108,7 +108,7 @@ export const collectErrorLogs = async (
 
 export const extractLamportsInfoFromError = async (
   error: unknown,
-  connection?: Connection
+  connection?: Connection,
 ): Promise<{ current: number; needed: number } | null> => {
   const logs = await collectErrorLogs(error, new Set(), connection);
   for (const log of logs) {

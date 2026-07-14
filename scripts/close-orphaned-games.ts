@@ -16,9 +16,7 @@ async function main(): Promise<void> {
   console.log("🧹 Starting orphaned game cleanup...\n");
 
   const mnemonic = loadWalletMnemonic();
-  const rpcEndpoint = resolvePrimaryRpcEndpoint(
-    requireEnvVar("SOLANA_NETWORK")
-  );
+  const rpcEndpoint = resolvePrimaryRpcEndpoint(requireEnvVar("SOLANA_NETWORK"));
 
   const { wallet, program } = loadProgramContext({
     mnemonic,

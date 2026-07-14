@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import {
-  createLegacyIdl,
-  resolveContractVersion,
-} from "../src/utils/contract-idl";
+import { createLegacyIdl, resolveContractVersion } from "../src/utils/contract-idl";
 
 describe("contract ABI compatibility", () => {
   it("defaults to 0.1.3 and accepts the upgrade target", () => {
@@ -17,11 +14,7 @@ describe("contract ABI compatibility", () => {
       name: "participant_hashes",
       type: { vec: "u64" },
     });
-    const complete = idl.instructions.find(
-      (value: any) => value.name === "complete_game",
-    );
-    expect(
-      complete.accounts.some((value: any) => value.name === "system_program"),
-    ).toBe(true);
+    const complete = idl.instructions.find((value: any) => value.name === "complete_game");
+    expect(complete.accounts.some((value: any) => value.name === "system_program")).toBe(true);
   });
 });

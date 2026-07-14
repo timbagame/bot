@@ -4,12 +4,14 @@ import { PublicKey, Keypair } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-function resetGM() { // reset singleton
+function resetGM() {
+  // reset singleton
   // @ts-ignore
   GameManager["instance"] = undefined;
 }
 
-const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 test("cancelGameWithCreator returns true on successful close", async () => {
   resetGM();
@@ -62,7 +64,7 @@ test("cancelGameWithCreator returns true on successful close", async () => {
     },
     "777",
     "ADDR",
-    "coinflip"
+    "coinflip",
   );
   expect(ok).toBe(true);
 
@@ -74,12 +76,8 @@ test("cancelGameWithCreator returns true on successful close", async () => {
   expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
   expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
   expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
-  expect(ctx.associatedTokenProgram.toBase58()).toBe(
-    ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
-  );
-  expect(accounts.creatorTokenAccount.toBase58()).toBe(
-    creatorTokenAccount.toBase58(),
-  );
+  expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
+  expect(accounts.creatorTokenAccount.toBase58()).toBe(creatorTokenAccount.toBase58());
   expect(accounts.tokenMint).toBeUndefined();
   expect(accounts.tokenProgram).toBeUndefined();
   expect(accounts.gameToken).toBeUndefined();
@@ -143,9 +141,13 @@ test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on 
     },
   } as any;
 
-  const gm = GameManager.getInstance(program, wallet as any, {
-    getGameParticipants: () => [],
-  } as any);
+  const gm = GameManager.getInstance(
+    program,
+    wallet as any,
+    {
+      getGameParticipants: () => [],
+    } as any,
+  );
 
   const creatorTelegramId = "777";
   const creatorKeypair = wallet.getKeyPair(BigInt(creatorTelegramId));
@@ -194,8 +196,7 @@ test("closeGameWithCreatorAuthority resubmits when helper is unavailable", async
   let sendCalls = 0;
   const wallet = {
     getKeyPair: (_: bigint) => creator,
-    sendTransaction: async () =>
-      signatures[Math.min(sendCalls++, signatures.length - 1)],
+    sendTransaction: async () => signatures[Math.min(sendCalls++, signatures.length - 1)],
     confirmTransaction: async (signature: string) => {
       if (signature === signatures[0]) {
         throw new Error("transaction confirmation timeout");

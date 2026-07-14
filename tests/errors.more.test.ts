@@ -9,7 +9,7 @@ describe("errors extras", () => {
   test("lamports error with wallet shows detailed balances", async () => {
     const msg = await parseTransactionError(
       new Error("insufficient lamports 100, need 200"),
-      walletStub
+      walletStub,
     );
     expect(msg).toContain("Not enough SOL to complete this");
     expect(msg).toContain("The action needs enough SOL for rent and fees");
@@ -29,16 +29,14 @@ describe("errors extras", () => {
 
   test("simulation failure maps to fee guidance", async () => {
     const msg = await parseTransactionError(
-      new Error("simulation failed: custom program error: 0x1")
+      new Error("simulation failed: custom program error: 0x1"),
     );
     expect(msg).toContain("Transaction failed");
     expect(msg).toContain("network couldn't process");
   });
 
   test("quote unavailable maps to friendly retry guidance", async () => {
-    const msg = await parseTransactionError(
-      new Error("Jupiter quote failed: quote failed")
-    );
+    const msg = await parseTransactionError(new Error("Jupiter quote failed: quote failed"));
     expect(msg).toContain("Quote unavailable.");
   });
 
@@ -50,7 +48,7 @@ describe("errors extras", () => {
 
   test("same token swap error explains restriction", async () => {
     const msg = await parseTransactionError(
-      new Error("Jupiter: input and output mints are not allowed to be equal")
+      new Error("Jupiter: input and output mints are not allowed to be equal"),
     );
     expect(msg).toContain("Cannot swap the same token.");
   });
@@ -63,7 +61,7 @@ describe("errors extras", () => {
 
   test("rent shortfall error explains SOL top up instead of dumping logs", async () => {
     const rentError = new Error(
-      "Transaction simulation failed: Transaction results in an account (0) with insufficient funds for rent."
+      "Transaction simulation failed: Transaction results in an account (0) with insufficient funds for rent.",
     ) as Error & { transactionLogs?: string[] };
     rentError.transactionLogs = [
       "Program log: Instruction: InitializeImmutableOwner",

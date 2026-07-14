@@ -10,20 +10,29 @@ import {
 import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-
 class ConnFailTime implements Partial<Connection> {
-  async getSlot(_cfg?: any): Promise<number> { throw new Error("rpc down"); }
-  async getBlockTime(_slot: number) { return null as any; }
+  async getSlot(_cfg?: any): Promise<number> {
+    throw new Error("rpc down");
+  }
+  async getBlockTime(_slot: number) {
+    return null as any;
+  }
 }
 
 class ConnATACheck implements Partial<Connection> {
-  async getAccountInfo(_pk: PublicKey) { return null as any; }
+  async getAccountInfo(_pk: PublicKey) {
+    return null as any;
+  }
 }
 
 test("getBlockchainTime falls back to system time on RPC failure", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: new ConnFailTime() as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    {
+      connection: new ConnFailTime() as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    },
   );
   const t = await wm.getBlockchainTime();
   const now = Math.floor(Date.now() / 1000);
@@ -33,7 +42,11 @@ test("getBlockchainTime falls back to system time on RPC failure", async () => {
 test("findOrCreateAssociatedTokenAccount returns create instruction when missing", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: new ConnATACheck() as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    {
+      connection: new ConnATACheck() as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    },
   );
   const owner = Keypair.generate();
   const payer = Keypair.generate();
@@ -45,7 +58,7 @@ test("findOrCreateAssociatedTokenAccount returns create instruction when missing
 test("wrapSol builds instructions and forwards to sendTransaction", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
   const ata = Keypair.generate().publicKey;
   const sendCalls: any[] = [];
@@ -72,7 +85,7 @@ test("wrapSol builds instructions and forwards to sendTransaction", async () => 
 test("wrapSol retries without ATA creation when account already exists", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
   const ata = Keypair.generate().publicKey;
   let planCalls = 0;
@@ -91,7 +104,7 @@ test("wrapSol retries without ATA creation when account already exists", async (
     attempt += 1;
     if (attempt === 1) {
       const err = new Error(
-        "failed to send transaction: Instruction 0: custom program error: 0x0 (already in use)"
+        "failed to send transaction: Instruction 0: custom program error: 0x0 (already in use)",
       ) as any;
       err.logs = ["Program log: account already in use"];
       throw err;
@@ -113,7 +126,7 @@ test("wrapSol retries without ATA creation when account already exists", async (
 test("wrapSol rejects non-positive amounts", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
   await expect(wm.wrapSol(1n, 0)).rejects.toThrow(/greater than zero/);
 });
@@ -121,7 +134,7 @@ test("wrapSol rejects non-positive amounts", async () => {
 test("unwrapSolWithKeypair skips admin signer when no loan is required", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const payer = Keypair.generate();
@@ -158,7 +171,7 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
 test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const payer = Keypair.generate();
@@ -194,7 +207,7 @@ test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
 test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const user = Keypair.generate();
@@ -207,14 +220,14 @@ test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", asy
       adminKeypair,
       adminTopUpLamports: 500,
       amountLamports: 1_000,
-    })
+    }),
   ).rejects.toThrow(/payer must match the wsol owner/i);
 });
 
 test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const payer = Keypair.generate();
@@ -266,7 +279,7 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
 test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const payer = Keypair.generate();
@@ -286,9 +299,7 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
     remainingLamports: 2_000,
   });
 
-  const sendSpy = vi
-    .spyOn(wm as any, "sendAndConfirmWithResubmits")
-    .mockResolvedValue("UNWRAP_TX");
+  const sendSpy = vi.spyOn(wm as any, "sendAndConfirmWithResubmits").mockResolvedValue("UNWRAP_TX");
 
   const result = await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
@@ -327,15 +338,15 @@ test("buildUnwrapWsolPlan throws when no WSOL account found", async () => {
   };
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const owner = Keypair.generate().publicKey;
   const payer = Keypair.generate();
 
-  await expect(
-    wm.buildUnwrapWsolPlan({ owner, payer })
-  ).rejects.toThrow("No WSOL account found to unwrap.");
+  await expect(wm.buildUnwrapWsolPlan({ owner, payer })).rejects.toThrow(
+    "No WSOL account found to unwrap.",
+  );
 });
 
 test("buildUnwrapWsolPlan throws when WSOL account is empty", async () => {
@@ -351,15 +362,15 @@ test("buildUnwrapWsolPlan throws when WSOL account is empty", async () => {
 
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const owner = Keypair.generate().publicKey;
   const payer = Keypair.generate();
 
-  await expect(
-    wm.buildUnwrapWsolPlan({ owner, payer })
-  ).rejects.toThrow("Your WSOL account is already empty.");
+  await expect(wm.buildUnwrapWsolPlan({ owner, payer })).rejects.toThrow(
+    "Your WSOL account is already empty.",
+  );
 });
 
 test("buildUnwrapWsolPlan throws when unwrap amount exceeds balance", async () => {
@@ -374,15 +385,15 @@ test("buildUnwrapWsolPlan throws when unwrap amount exceeds balance", async () =
 
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const owner = Keypair.generate().publicKey;
   const payer = Keypair.generate();
 
-  await expect(
-    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 2000 })
-  ).rejects.toThrow(/exceeds current balance/);
+  await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 2000 })).rejects.toThrow(
+    /exceeds current balance/,
+  );
 });
 
 test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
@@ -397,25 +408,25 @@ test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
 
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const owner = Keypair.generate().publicKey;
   const payer = Keypair.generate();
 
-  await expect(
-    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: -100 })
-  ).rejects.toThrow("Unwrap amount must be greater than zero.");
+  await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: -100 })).rejects.toThrow(
+    "Unwrap amount must be greater than zero.",
+  );
 
-  await expect(
-    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 1.5 })
-  ).rejects.toThrow("Unwrap amount must be a safe integer in lamports.");
+  await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 1.5 })).rejects.toThrow(
+    "Unwrap amount must be a safe integer in lamports.",
+  );
 });
 
 test("unwrapSolWithKeypair throws if admin lending is requested without admin keypair", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const owner = Keypair.generate().publicKey;
@@ -427,14 +438,14 @@ test("unwrapSolWithKeypair throws if admin lending is requested without admin ke
       payer,
       adminTopUpLamports: 1000,
       // No adminKeypair provided
-    })
+    }),
   ).rejects.toThrow("Admin keypair required when lending lamports");
 });
 
 test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const payer = Keypair.generate();
@@ -446,9 +457,7 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
   };
 
   (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
-  const sendSpy = vi
-    .spyOn(wm as any, "sendAndConfirmWithResubmits")
-    .mockResolvedValue("SIG");
+  const sendSpy = vi.spyOn(wm as any, "sendAndConfirmWithResubmits").mockResolvedValue("SIG");
 
   await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
@@ -472,7 +481,7 @@ test("transferSol preserves lamports for dust transfers", async () => {
   };
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const instructions: any[][] = [];
@@ -500,7 +509,7 @@ test("withdrawAllSol aborts when fees exceed balance", async () => {
   };
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   (wm as any).estimateFee = async () => 2000;
@@ -511,9 +520,9 @@ test("withdrawAllSol aborts when fees exceed balance", async () => {
     return "UNREACHABLE";
   };
 
-  await expect(
-    wm.withdrawAllSol(1n, Keypair.generate().publicKey)
-  ).rejects.toThrow(/Not enough SOL to cover the transaction fee/);
+  await expect(wm.withdrawAllSol(1n, Keypair.generate().publicKey)).rejects.toThrow(
+    /Not enough SOL to cover the transaction fee/,
+  );
 
   expect(balanceCalls).toBe(1);
   expect(sendCalled).toBe(false);
@@ -530,7 +539,7 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
 
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
   const telegramId = 1n;

@@ -95,9 +95,7 @@ class ExpiringCacheImpl<TValue> implements ExpiringCache<TValue> {
   }
 }
 
-export const createExpiringCache = <TValue>(
-  defaultTtlMs: number
-): ExpiringCache<TValue> => {
+export const createExpiringCache = <TValue>(defaultTtlMs: number): ExpiringCache<TValue> => {
   if (defaultTtlMs <= NO_TTL) {
     throw new Error("ExpiringCache requires a positive default TTL");
   }

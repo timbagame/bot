@@ -1,10 +1,7 @@
 import { PublicKey, type Keypair } from "@solana/web3.js";
 import { getAccount, getAssociatedTokenAddress } from "@solana/spl-token";
 
-import {
-  USER_SOL_MAX_BUFFER_LAMPORTS,
-  WSOL_MINT,
-} from "../constants";
+import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../constants";
 import type { IntegratorSwapParams } from "../integrator-fees";
 import type { WalletManager } from "../wallet";
 import { FeeBudgetManager } from "../fee-budget";
@@ -12,15 +9,13 @@ import type { SwapQuote, SwapRequest } from "./types";
 import { calculateRouteCosts, type RouteLikeCosts } from "./route-cost";
 
 export interface SwapBackend {
-  getQuote(
-    request: SwapRequest & { integrator?: IntegratorSwapParams | null }
-  ): Promise<SwapQuote>;
+  getQuote(request: SwapRequest & { integrator?: IntegratorSwapParams | null }): Promise<SwapQuote>;
   executeJupiterSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
   executeWrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
   executeUnwrapSwap(
     request: SwapRequest,
     quote: SwapQuote,
-    adminTopUpLamports?: bigint
+    adminTopUpLamports?: bigint,
   ): Promise<string>;
 }
 
@@ -40,19 +35,17 @@ const safeBigIntToNumber = (value: bigint): number => {
 export class SwapService {
   constructor(
     private readonly wallet: WalletManager,
-    private readonly backend: SwapBackend
+    private readonly backend: SwapBackend,
   ) {
     const connection = (wallet as any)?.getConnection?.();
-    this.feeBudget = connection
-      ? FeeBudgetManager.getInstance(connection)
-      : null;
+    this.feeBudget = connection ? FeeBudgetManager.getInstance(connection) : null;
   }
 
   private readonly feeBudget: FeeBudgetManager | null;
 
   async prepareSwap(
     request: SwapRequest,
-    integrator?: IntegratorSwapParams | null
+    integrator?: IntegratorSwapParams | null,
   ): Promise<SwapQuote> {
     const quote = await this.backend.getQuote({
       ...request,
@@ -68,10 +61,7 @@ export class SwapService {
     };
   }
 
-  async ensureUserSolBufferForSwap(
-    quote: SwapQuote,
-    userKeypair: Keypair
-  ): Promise<bigint> {
+  async ensureUserSolBufferForSwap(quote: SwapQuote, userKeypair: Keypair): Promise<bigint> {
     if (quote.inputMint !== WSOL_MINT && quote.inputMint !== "SOL") {
       return 0n;
     }
@@ -83,21 +73,13 @@ export class SwapService {
       return 0n;
     }
 
-    const userBalance = await this.wallet
-      .getConnection()
-      .getBalance(userKeypair.publicKey);
+    const userBalance = await this.wallet.getConnection().getBalance(userKeypair.publicKey);
 
     const amountLamports =
-      quote.provider === "unwrap"
-        ? 0n
-        : quote.inputAmountRaw
-          ? BigInt(quote.inputAmountRaw)
-          : 0n;
+      quote.provider === "unwrap" ? 0n : quote.inputAmountRaw ? BigInt(quote.inputAmountRaw) : 0n;
 
     if (amountLamports > 0 && userBalance < safeBigIntToNumber(amountLamports)) {
-      throw new Error(
-        `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
-      );
+      throw new Error(`Insufficient balance to attempt this swap. Add SOL or reduce the amount.`);
     }
 
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
@@ -107,7 +89,7 @@ export class SwapService {
       try {
         const wsolAta = await getAssociatedTokenAddress(
           new PublicKey(WSOL_MINT),
-          userKeypair.publicKey
+          userKeypair.publicKey,
         );
 
         if (isSyntheticSolWrap) {
@@ -127,8 +109,7 @@ export class SwapService {
 
         rentRebateLamports = BigInt(account.rentExemptReserve ?? 0n);
 
-        const willLeaveRemainingBalance =
-          BigInt(quote.inputAmountRaw) < currentBalance;
+        const willLeaveRemainingBalance = BigInt(quote.inputAmountRaw) < currentBalance;
 
         if (!willLeaveRemainingBalance) {
           return false;
@@ -141,37 +122,26 @@ export class SwapService {
     };
 
     if (this.feeBudget && (await shouldIncludeWrapRentBuffer())) {
-      const wrapLamports = await this.feeBudget
-        .getWrapFeeBufferLamports()
-        .catch(() => 0);
-      const fallbackWrapLamports = this.feeBudget
-        .getDefaultWrapFeeBufferLamports()
-        .valueOf();
+      const wrapLamports = await this.feeBudget.getWrapFeeBufferLamports().catch(() => 0);
+      const fallbackWrapLamports = this.feeBudget.getDefaultWrapFeeBufferLamports().valueOf();
 
       const rentFeeLamports = Math.max(wrapLamports, fallbackWrapLamports);
       if (Number.isFinite(rentFeeLamports) && rentFeeLamports > 0) {
         providerCosts = {
-          rentFeeLamports: Math.max(
-            providerCosts?.rentFeeLamports ?? 0,
-            rentFeeLamports
-          ),
-          prioritizationFeeLamports:
-            providerCosts?.prioritizationFeeLamports ?? 0,
+          rentFeeLamports: Math.max(providerCosts?.rentFeeLamports ?? 0, rentFeeLamports),
+          prioritizationFeeLamports: providerCosts?.prioritizationFeeLamports ?? 0,
           signatureFeeLamports: providerCosts?.signatureFeeLamports ?? 0,
         };
       }
     }
 
-    const { routeLamports, requiredLamports } = calculateRouteCosts(
-      providerCosts,
-      {
-        paddingRatio: 0.25,
-        paddingExtraLamports: 200_000,
-        paddingRounding: "ceil",
-        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-        requiredStrategy: "max",
-      }
-    );
+    const { routeLamports, requiredLamports } = calculateRouteCosts(providerCosts, {
+      paddingRatio: 0.25,
+      paddingExtraLamports: 200_000,
+      paddingRounding: "ceil",
+      baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+      requiredStrategy: "max",
+    });
 
     if (requiredLamports <= 0) {
       return 0n;
@@ -190,20 +160,15 @@ export class SwapService {
     }
     const formattedRequired = this.wallet.formatSolBalance(requiredLamports);
     const formattedRoute = this.wallet.formatSolBalance(routeLamports);
-    const formattedDeficit = this.wallet.formatSolBalance(
-      safeBigIntToNumber(deficitLamports)
-    );
+    const formattedDeficit = this.wallet.formatSolBalance(safeBigIntToNumber(deficitLamports));
 
     throw new Error(
-      `This route (${quote.providerQuote?.router ?? quote.provider ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
+      `This route (${quote.providerQuote?.router ?? quote.provider ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`,
     );
   }
 
   async execute(quote: SwapQuote, userKeypair: Keypair): Promise<string> {
-    const adminTopUpLamports = await this.ensureUserSolBufferForSwap(
-      quote,
-      userKeypair
-    );
+    const adminTopUpLamports = await this.ensureUserSolBufferForSwap(quote, userKeypair);
 
     const request: SwapRequest = {
       inputMint: quote.inputMint,
@@ -222,11 +187,7 @@ export class SwapService {
     }
 
     if (quote.provider === "unwrap") {
-      return this.backend.executeUnwrapSwap(
-        request,
-        quote,
-        adminTopUpLamports
-      );
+      return this.backend.executeUnwrapSwap(request, quote, adminTopUpLamports);
     }
 
     return this.backend.executeJupiterSwap(request, quote);

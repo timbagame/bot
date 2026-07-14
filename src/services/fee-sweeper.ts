@@ -1,14 +1,6 @@
 import * as anchor from "@anchor-lang/core";
-import {
-  getAssociatedTokenAddressSync,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
-import {
-  PublicKey,
-  Keypair,
-  sendAndConfirmRawTransaction,
-  type Connection,
-} from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey, Keypair, sendAndConfirmRawTransaction, type Connection } from "@solana/web3.js";
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import type { Timba } from "../../idl/idlType";
 import { WalletManager } from "../utils/wallet";
@@ -148,8 +140,7 @@ const getSolBalanceUsdValue = async (
     priceResolver({ tokenMint: WSOL_MINT }),
   ]);
   const solPrice = solPriceData?.price ?? 0;
-  const usdValue =
-    lamports > 0 && solPrice > 0 ? (lamports / LAMPORTS_PER_SOL) * solPrice : 0;
+  const usdValue = lamports > 0 && solPrice > 0 ? (lamports / LAMPORTS_PER_SOL) * solPrice : 0;
   return { lamports, usdValue, solPrice, solPriceData };
 };
 
@@ -201,10 +192,7 @@ const shouldWithdrawToken = async (
   decimals: number,
   priceResolver: PriceResolver = getUsdPrice,
 ) => {
-  const formattedPending = wallet.formatTokenBalance(
-    Number(pendingFees),
-    decimals,
-  );
+  const formattedPending = wallet.formatTokenBalance(Number(pendingFees), decimals);
   const tokenAmount = Number(pendingFees) / 10 ** decimals;
   const priceData = await priceResolver({
     tokenMint: config.mint,
@@ -221,11 +209,7 @@ const shouldWithdrawToken = async (
   return { shouldWithdraw: true, formattedPending, tokenUsdValue };
 };
 
-const getTotalTokenBalanceLamports: TokenBalanceFetcher = async (
-  connection,
-  owner,
-  mint,
-) => {
+const getTotalTokenBalanceLamports: TokenBalanceFetcher = async (connection, owner, mint) => {
   let total = 0n;
   const parsed = await connection.getParsedTokenAccountsByOwner(owner, {
     mint,
@@ -291,17 +275,11 @@ const unwrapWsolBalance = async (
   }
 
   if (!Number.isSafeInteger(Number(wsolBalanceLamports))) {
-    console.warn(
-      "⚠️  WSOL balance exceeds safe integer range; skipping unwrap.",
-    );
+    console.warn("⚠️  WSOL balance exceeds safe integer range; skipping unwrap.");
     return;
   }
 
-  console.log(
-    `➡️  Unwrapping ${amountDecimal.toFixed(6)} WSOL (~$${usdValue.toFixed(
-      2,
-    )}) to SOL`,
-  );
+  console.log(`➡️  Unwrapping ${amountDecimal.toFixed(6)} WSOL (~$${usdValue.toFixed(2)}) to SOL`);
 
   const { signature, remainingLamports } = await wallet.unwrapSolWithKeypair({
     owner,
@@ -312,9 +290,7 @@ const unwrapWsolBalance = async (
   const remainingDecimal = remainingLamports / 10 ** SOL_DECIMALS;
 
   console.log(
-    `   ✅ Unwrapped WSOL. Remaining WSOL: ${remainingDecimal.toFixed(
-      6,
-    )}. Signature: ${signature}`,
+    `   ✅ Unwrapped WSOL. Remaining WSOL: ${remainingDecimal.toFixed(6)}. Signature: ${signature}`,
   );
 };
 
@@ -328,10 +304,7 @@ async function processTokenFee(
   priceResolver: PriceResolver,
 ): Promise<boolean> {
   const mint = new PublicKey(config.mint);
-  const [oraclePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("oracle")],
-    program.programId,
-  );
+  const [oraclePda] = PublicKey.findProgramAddressSync([Buffer.from("oracle")], program.programId);
   const [gameTokenPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
     program.programId,
@@ -343,9 +316,7 @@ async function processTokenFee(
 
   const gameTokenInfo = await connection.getAccountInfo(gameTokenPda);
   if (!gameTokenInfo) {
-    console.warn(
-      `⚠️  No game token configuration found for ${config.ticker}; skipping.`,
-    );
+    console.warn(`⚠️  No game token configuration found for ${config.ticker}; skipping.`);
     return false;
   }
 
@@ -409,11 +380,7 @@ async function processTokenFee(
   const instructions = [...operatorAtaInstructions, instruction];
 
   if (operatorAtaCreated) {
-    console.log(
-      `🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${
-        config.ticker
-      }`,
-    );
+    console.log(`🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${config.ticker}`);
   }
 
   const tx = await wallet.sendAndConfirmWithResubmits(
@@ -433,17 +400,13 @@ async function runReferralSweep(
   priceResolver: PriceResolver = getUsdPrice,
 ): Promise<number> {
   if (referralEntries.length === 0) {
-    console.log(
-      "ℹ️  No referral entries configured; skipping referral claims.",
-    );
+    console.log("ℹ️  No referral entries configured; skipping referral claims.");
     return 0;
   }
 
   const referralEntry = referralEntries[0];
   if (!referralEntry?.referralAccount) {
-    console.log(
-      "ℹ️  No referral account configured; skipping referral claims.",
-    );
+    console.log("ℹ️  No referral account configured; skipping referral claims.");
     return 0;
   }
 
@@ -477,9 +440,7 @@ async function runReferralSweep(
     if (!priceData?.price) continue;
 
     // Fetch decimals for this token
-    const mintInfo = await connection.getParsedAccountInfo(
-      tokenAccount.account.mint,
-    );
+    const mintInfo = await connection.getParsedAccountInfo(tokenAccount.account.mint);
     const decimals =
       mintInfo.value &&
       "parsed" in mintInfo.value.data &&
@@ -498,9 +459,7 @@ async function runReferralSweep(
     return 0;
   }
 
-  console.log(
-    `💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`,
-  );
+  console.log(`💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`);
 
   const transactions = await provider.claimAllV2({
     payerPubKey: adminBundle.anchor.publicKey,
@@ -512,9 +471,7 @@ async function runReferralSweep(
     return 0;
   }
 
-  console.log(
-    `🧾 Found ${transactions.length} referral transaction(s). Processing...`,
-  );
+  console.log(`🧾 Found ${transactions.length} referral transaction(s). Processing...`);
 
   let processedClaims = 0;
   for (let i = 0; i < transactions.length; i++) {
@@ -568,11 +525,7 @@ async function sweepTokensToSol(
   for (const token of sweepableTokens) {
     try {
       const mintPubkey = new PublicKey(token.mint);
-      const balanceLamports = await balanceFetcher(
-        connection,
-        admin.publicKey,
-        mintPubkey,
-      );
+      const balanceLamports = await balanceFetcher(connection, admin.publicKey, mintPubkey);
 
       if (balanceLamports === 0n) {
         console.log(`ℹ️  No balance for ${token.ticker}; skipping.`);
@@ -580,13 +533,12 @@ async function sweepTokensToSol(
       }
 
       const metadata = await wallet.getTokenMetadata(token.mint);
-      const { shouldSwap, amountDecimal, usdValue } =
-        await shouldSwapTokenBalance(
-          token,
-          balanceLamports,
-          metadata.decimals,
-          priceResolver,
-        );
+      const { shouldSwap, amountDecimal, usdValue } = await shouldSwapTokenBalance(
+        token,
+        balanceLamports,
+        metadata.decimals,
+        priceResolver,
+      );
 
       if (!shouldSwap) continue;
 
@@ -608,10 +560,7 @@ async function sweepTokensToSol(
       } as SwapRequest;
 
       const quote = await swapManager.getQuote(swapRequest as any);
-      const sig = await (swapManager as any).executeJupiterSwap(
-        swapRequest as any,
-        quote,
-      );
+      const sig = await (swapManager as any).executeJupiterSwap(swapRequest as any, quote);
       console.log(`   ✅ Swap submitted: ${sig}`);
     } catch (error) {
       console.error(`❌ Failed to sweep ${token.ticker}:`, error);
@@ -621,22 +570,17 @@ async function sweepTokensToSol(
   console.log("\n🏁 Sweep complete.\n");
 }
 
-export const sweepFees = async (
-  options: FeeSweepOptions = {},
-): Promise<FeeSweepResult> => {
+export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweepResult> => {
   console.log("💸 Collecting oracle fees for configured tokens...\n");
 
-  const wallet =
-    options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
+  const wallet = options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
   const adminRoot = wallet.getAdminKeypair();
   const adminBundle = bundleFromKeypair(adminRoot);
   const operatorBundle = resolveOracleOperatorBundle(adminRoot);
 
   const tokens = options.tokenConfigs ?? getSupportedTokens();
   const referralEntries = options.referralEntries ?? getReferralTokenEntries();
-  const rpcUrl = resolvePrimaryRpcEndpoint(
-    options.rpcUrl ?? process.env.SOLANA_NETWORK,
-  );
+  const rpcUrl = resolvePrimaryRpcEndpoint(options.rpcUrl ?? process.env.SOLANA_NETWORK);
   const priceResolver = options.priceResolver ?? getUsdPrice;
   const swapManagerFactory =
     options.swapManagerFactory ??
@@ -687,12 +631,7 @@ export const sweepFees = async (
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(
-      connection,
-      adminBundle,
-      referralEntries,
-      priceResolver,
-    );
+    referralClaims = await referralSweeper(connection, adminBundle, referralEntries, priceResolver);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }

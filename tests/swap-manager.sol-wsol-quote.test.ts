@@ -9,7 +9,7 @@ describe("SwapManager.getQuote SOL/WSOL handling", () => {
   const connection = new Connection("http://localhost:8899", "confirmed");
   const wallet = WalletManager.createForTest(
     "test walk nut penalty hip pave soap entry language right filter choice",
-    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
   const user = Keypair.generate();
   const baseRequest = {
@@ -104,19 +104,17 @@ describe("SwapManager.getQuote SOL/WSOL handling", () => {
   });
 
   test("still requests Jupiter quote for non wrap/unwrap pairs", async () => {
-    const jupiterSpy = vi
-      .spyOn((manager as any).jupiterClient, "getQuote")
-      .mockResolvedValue({
-        inputMint: WSOL_MINT,
-        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        inAmount: baseRequest.amount,
-        outAmount: "1000",
-        otherAmountThreshold: "0",
-        swapMode: "ExactIn",
-        slippageBps: 100,
-        priceImpactPct: "0",
-        routePlan: [],
-      });
+    const jupiterSpy = vi.spyOn((manager as any).jupiterClient, "getQuote").mockResolvedValue({
+      inputMint: WSOL_MINT,
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      inAmount: baseRequest.amount,
+      outAmount: "1000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+    });
 
     const quote = await manager.getQuote({
       ...baseRequest,

@@ -227,11 +227,7 @@ export class JupiterClient {
   private fetchFn: FetchLike;
   private apiKey?: string;
 
-  constructor(
-    baseUrl: string = "https://api.jup.ag",
-    fetchFn?: FetchLike,
-    apiKey?: string
-  ) {
+  constructor(baseUrl: string = "https://api.jup.ag", fetchFn?: FetchLike, apiKey?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.fetchFn = fetchFn ?? (globalThis.fetch as unknown as FetchLike);
     this.apiKey = apiKey ?? process.env.JUPITER_API_KEY;
@@ -249,15 +245,13 @@ export class JupiterClient {
     return `${this.baseUrl}/swap/v2/build`;
   }
 
-  private normalizeQuote(
-    data: JupiterUltraOrderResponse
-  ): JupiterQuoteResponse {
+  private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
     const priceImpactPct =
       typeof data.priceImpactPct === "string"
         ? data.priceImpactPct
         : typeof data.priceImpact === "number"
-        ? data.priceImpact.toString()
-        : "0";
+          ? data.priceImpact.toString()
+          : "0";
 
     return {
       inputMint: data.inputMint,
@@ -321,7 +315,7 @@ export class JupiterClient {
 
   private async fetchOrder(
     params: JupiterOrderParams,
-    allowReferralFallback = true
+    allowReferralFallback = true,
   ): Promise<JupiterOrderResult> {
     const effectiveParams: JupiterOrderParams = { ...params };
     if (!effectiveParams.taker && effectiveParams.payer) {
@@ -346,10 +340,10 @@ export class JupiterClient {
           params.referralAccount &&
           errorMessage.includes("Failed to get quotes")
         ) {
-          console.warn(
-            "Integrator order failed, retrying without referral params",
-            { url: url.toString(), errorText }
-          );
+          console.warn("Integrator order failed, retrying without referral params", {
+            url: url.toString(),
+            errorText,
+          });
           const fallbackParams: JupiterOrderParams = {
             inputMint: effectiveParams.inputMint,
             outputMint: effectiveParams.outputMint,
@@ -368,17 +362,15 @@ export class JupiterClient {
           return fallback;
         }
         throw new Error(
-          `Jupiter order failed: ${response.status} ${response.statusText} - ${errorMessage}`
+          `Jupiter order failed: ${response.status} ${response.statusText} - ${errorMessage}`,
         );
       }
 
       const data = (await response.json()) as JupiterUltraOrderResponse;
 
       if (data.error || data.errorMessage) {
-        const codeSuffix =
-          typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
-        const errorMessage =
-          data.errorMessage || data.error || "Unknown Jupiter error";
+        const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
       }
 
@@ -418,9 +410,7 @@ export class JupiterClient {
   /**
    * Get a swap transaction from Jupiter
    */
-  async getSwapTransaction(
-    request: JupiterSwapRequest
-  ): Promise<JupiterSwapResponse> {
+  async getSwapTransaction(request: JupiterSwapRequest): Promise<JupiterSwapResponse> {
     const { quoteResponse, userPublicKey } = request;
     const amount = request.amountOverride ?? quoteResponse.inAmount;
 
@@ -455,19 +445,14 @@ export class JupiterClient {
       quoteId: order.quoteId,
       router: order.router,
       expireAt: order.expireAt,
-      priceImpactPct:
-        typeof order.priceImpactPct === "string"
-          ? order.priceImpactPct
-          : undefined,
+      priceImpactPct: typeof order.priceImpactPct === "string" ? order.priceImpactPct : undefined,
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
       order,
     };
   }
 
-  async getBuildInstructions(
-    request: JupiterQuoteRequest
-  ): Promise<JupiterBuildResponse> {
+  async getBuildInstructions(request: JupiterQuoteRequest): Promise<JupiterBuildResponse> {
     const url = new URL(this.getBuildUrl());
     url.searchParams.set("inputMint", request.inputMint);
     url.searchParams.set("outputMint", request.outputMint);
@@ -503,18 +488,15 @@ export class JupiterClient {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Jupiter build failed: ${response.status} ${response.statusText} - ${extractJupiterErrorMessage(errorText)}`
+          `Jupiter build failed: ${response.status} ${response.statusText} - ${extractJupiterErrorMessage(errorText)}`,
         );
       }
 
-      const data = (await response.json()) as JupiterBuildResponse &
-        JupiterBuildErrorResponse;
+      const data = (await response.json()) as JupiterBuildResponse & JupiterBuildErrorResponse;
 
       if (data.error || data.errorMessage) {
-        const codeSuffix =
-          typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
-        const errorMessage =
-          data.errorMessage || data.error || "Unknown Jupiter error";
+        const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
         throw new Error(`Jupiter build error${codeSuffix}: ${errorMessage}`);
       }
 
@@ -525,9 +507,7 @@ export class JupiterClient {
     }
   }
 
-  async executeOrder(
-    request: JupiterExecuteRequest
-  ): Promise<JupiterExecuteResponse> {
+  async executeOrder(request: JupiterExecuteRequest): Promise<JupiterExecuteResponse> {
     try {
       const response = await this.fetchFn(this.getExecuteUrl(), {
         method: "POST",
@@ -545,23 +525,18 @@ export class JupiterClient {
       const data = (await response.json()) as JupiterExecuteResponse;
 
       const execLogPayload = JSON.stringify(data, null, 2);
-      const logExec = () =>
-        console.error("Jupiter execute response", execLogPayload);
+      const logExec = () => console.error("Jupiter execute response", execLogPayload);
 
       if (!response.ok) {
         logExec();
         const errorMessage =
-          data.errorMessage ||
-          data.error ||
-          `${response.status} ${response.statusText}`;
+          data.errorMessage || data.error || `${response.status} ${response.statusText}`;
         throw new Error(`Jupiter execute failed: ${errorMessage}`);
       }
 
       if (data.error || data.errorMessage) {
         logExec();
-        throw new Error(
-          data.errorMessage || data.error || "Jupiter execute error"
-        );
+        throw new Error(data.errorMessage || data.error || "Jupiter execute error");
       }
 
       if (data.status && data.status !== "Success") {
@@ -587,29 +562,21 @@ export class JupiterClient {
     inputDecimals: number,
     outputDecimals: number,
     inputTicker: string,
-    outputTicker: string
+    outputTicker: string,
   ): string {
-    const inputAmount =
-      parseFloat(quote.inAmount) / Math.pow(10, inputDecimals);
-    const outputAmount =
-      parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
+    const inputAmount = parseFloat(quote.inAmount) / Math.pow(10, inputDecimals);
+    const outputAmount = parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
     const priceImpact = parseFloat(quote.priceImpactPct);
     const slippage = quote.slippageBps / 100;
     const rate = inputAmount > 0 ? formatRate(outputAmount / inputAmount) : "0";
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
     const feeBps =
-      typeof quote.feeBps === "number"
-        ? quote.feeBps
-        : quote.platformFee?.feeBps ?? null;
+      typeof quote.feeBps === "number" ? quote.feeBps : (quote.platformFee?.feeBps ?? null);
 
     let message = `🔄 <b>Swap Preview</b>\n\n`;
-    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(
-      6
-    )} ${safeInputTicker}\n`;
-    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(
-      6
-    )} ${safeOutputTicker}\n`;
+    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(6)} ${safeInputTicker}\n`;
+    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(6)} ${safeOutputTicker}\n`;
     message += `💹 <b>Rate:</b> 1 ${safeInputTicker} = ${rate} ${safeOutputTicker}\n`;
     message += `📊 <b>Price Impact:</b> ${priceImpact.toFixed(2)}%\n`;
     message += `🎯 <b>Slippage:</b> ${slippage}%\n`;
@@ -620,20 +587,15 @@ export class JupiterClient {
     }
 
     if (quote.platformFee) {
-      const feeAmount =
-        parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
-      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(
-        6
-      )} ${safeInputTicker}\n`;
+      const feeAmount = parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
+      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(6)} ${safeInputTicker}\n`;
     }
 
     // Add route information
     if (quote.routePlan && quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
       if (mainRoute && mainRoute.swapInfo) {
-        message += `🛣️ <b>Route:</b> ${escapeHtml(
-          mainRoute.swapInfo.label || "Unknown"
-        )}\n`;
+        message += `🛣️ <b>Route:</b> ${escapeHtml(mainRoute.swapInfo.label || "Unknown")}\n`;
       }
     }
 
@@ -651,7 +613,7 @@ export class JupiterClient {
   validateSwapParams(
     inputMint: string,
     outputMint: string,
-    amount: string
+    amount: string,
   ): { valid: boolean; error?: string } {
     try {
       // Validate mint addresses
@@ -698,10 +660,7 @@ export function getJupiterMint(mint: string): string {
 /**
  * Check if price impact is too high
  */
-export function isPriceImpactTooHigh(
-  priceImpactPct: string,
-  maxImpact: number = 5
-): boolean {
+export function isPriceImpactTooHigh(priceImpactPct: string, maxImpact: number = 5): boolean {
   const impact = parseFloat(priceImpactPct);
   return impact > maxImpact;
 }
@@ -747,7 +706,7 @@ export interface JupiterTokenMetadata {
 
 export async function fetchJupiterTokenMetadata(
   query: string,
-  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
 ): Promise<JupiterTokenMetadata | null> {
   if (!query || !query.trim()) {
     return null;
@@ -780,15 +739,12 @@ export async function fetchJupiterTokenMetadata(
     const entries = data.filter((item) => item && typeof item === "object");
 
     const exactId = entries.find(
-      (item) =>
-        typeof item.id === "string" &&
-        item.id.trim().toLowerCase() === normalizedQuery
+      (item) => typeof item.id === "string" && item.id.trim().toLowerCase() === normalizedQuery,
     );
 
     const exactSymbol = entries.find(
       (item) =>
-        typeof item.symbol === "string" &&
-        item.symbol.trim().toLowerCase() === normalizedQuery
+        typeof item.symbol === "string" && item.symbol.trim().toLowerCase() === normalizedQuery,
     );
 
     const candidate = exactId ?? exactSymbol ?? entries[0];
@@ -797,8 +753,7 @@ export async function fetchJupiterTokenMetadata(
     }
 
     const decimals =
-      typeof candidate.decimals === "number" &&
-      Number.isFinite(candidate.decimals)
+      typeof candidate.decimals === "number" && Number.isFinite(candidate.decimals)
         ? candidate.decimals
         : 6;
 

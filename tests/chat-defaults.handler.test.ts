@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Bot } from "grammy";
-import { createChatDefaultsModule, __test_buildSettingsSummary } from "../src/handlers/chat-defaults";
+import {
+  createChatDefaultsModule,
+  __test_buildSettingsSummary,
+} from "../src/handlers/chat-defaults";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { GameDatabase } from "../src/utils/game-database";
 import { resetTestDatabase } from "./helpers/database";
@@ -41,7 +44,7 @@ const baseTokenManager = () => {
       chatId: number,
       tokenMint: string,
       tokenTicker: string,
-      setBy: string
+      setBy: string,
     ) => {
       chatDefault = {
         chat_id: chatId,
@@ -108,11 +111,11 @@ describe("chat defaults module", () => {
       chatDb,
       gameDb,
       getTokenManager: () => tokenManager,
-      getGameManager: () => ({
-        getUsernameFromTelegramId: async () => "alice",
-      }) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      getGameManager: () =>
+        ({
+          getUsernameFromTelegramId: async () => "alice",
+        }) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async () => {},
@@ -133,11 +136,11 @@ describe("chat defaults module", () => {
       chatDb,
       gameDb,
       getTokenManager: () => tokenManager,
-      getGameManager: () => ({
-        getUsernameFromTelegramId: async () => null,
-      }) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      getGameManager: () =>
+        ({
+          getUsernameFromTelegramId: async () => null,
+        }) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
@@ -176,8 +179,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async () => {},
@@ -200,8 +202,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async () => {},
@@ -221,8 +222,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async () => {},
@@ -243,8 +243,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
@@ -276,8 +275,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
@@ -312,8 +310,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
@@ -348,8 +345,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
@@ -368,9 +364,7 @@ describe("chat defaults module", () => {
     await module.handleSettingsInput(ctx as any, session, "AAA");
 
     expect(tokenManager.getChatDefaultToken()).toBeNull();
-    expect(
-      replies.some((text) => text.includes("prompt is no longer active"))
-    ).toBe(true);
+    expect(replies.some((text) => text.includes("prompt is no longer active"))).toBe(true);
   });
 
   test("handleSettingsInput requires initiator to be admin", async () => {
@@ -383,8 +377,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx, next) =>
-        await handler(ctx, next),
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => false,
       replyToMessage: async (_ctx, text) => {
@@ -403,9 +396,7 @@ describe("chat defaults module", () => {
     await module.handleSettingsInput(ctx as any, session, "AAA");
 
     expect(tokenManager.getChatDefaultToken()).toBeNull();
-    expect(
-      replies.some((text) => text.includes("Only group administrators"))
-    ).toBe(true);
+    expect(replies.some((text) => text.includes("Only group administrators"))).toBe(true);
   });
 
   test("privacy setting flow updates database and UI", async () => {
@@ -423,7 +414,7 @@ describe("chat defaults module", () => {
       _chatId: number,
       _msgId: number,
       text: string,
-      options: any
+      options: any,
     ) => {
       lastMenu = { text, options };
     };
@@ -449,9 +440,7 @@ describe("chat defaults module", () => {
     await mockBot.dispatch("chat_defaults_privacy_coinflip", ctx);
 
     expect(lastMenu.text).toContain("Choose the default privacy setting for new Coinflip games");
-    expect(JSON.stringify(lastMenu.options)).toContain(
-      "chat_defaults_set_privacy_coinflip_public"
-    );
+    expect(JSON.stringify(lastMenu.options)).toContain("chat_defaults_set_privacy_coinflip_public");
 
     // 2. Click "Public" for Coinflip
     ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_public";
@@ -671,7 +660,7 @@ describe("chat defaults module", () => {
       _chatId: number,
       _msgId: number,
       text: string,
-      options: any
+      options: any,
     ) => {
       lastMenu = { text, options };
     };
@@ -725,12 +714,12 @@ describe("chat defaults module", () => {
 
     // User sends "25"
     const session: InputSessionState = {
-        type: "chat_defaults",
-        chatId: 99,
-        messageId: 11,
-        target: "join_rate_custom",
-        initiatorId: "123", // matches ctx.from.id
-      } as any;
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      target: "join_rate_custom",
+      initiatorId: "123", // matches ctx.from.id
+    } as any;
 
     await module.handleSettingsInput(ctx, session, "25");
 
@@ -767,7 +756,7 @@ describe("chat defaults module", () => {
       _chatId: number,
       _msgId: number,
       text: string,
-      options: any
+      options: any,
     ) => {
       lastMenu = { text, options };
     };
@@ -817,16 +806,16 @@ describe("chat defaults module", () => {
     expect(lastMenu.text).toContain("Send a video, image, or GIF");
 
     const session: InputSessionState = {
-        type: "chat_defaults",
-        chatId: 99,
-        messageId: 11,
-        setting: "video_coinflip",
-        initiatorId: "123",
-      } as any;
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "video_coinflip",
+      initiatorId: "123",
+    } as any;
 
     // Simulate sending a video message
     ctx.message = {
-        video: { file_id: "VIDEO_123" }
+      video: { file_id: "VIDEO_123" },
     };
     await module.handleSettingsInput(ctx, session, ""); // text is empty, has attachment
 
@@ -870,23 +859,23 @@ describe("chat defaults module", () => {
 
     // List of restricted actions
     const restrictedActions = [
-        "chat_defaults_join_notifications",
-        "chat_defaults_set_join_external_on",
-        "chat_defaults_set_join_rate_5",
-        "chat_defaults_clear_join_notifications",
-        "chat_defaults_video_coinflip",
-        "chat_defaults_disable_video_coinflip",
-        "chat_defaults_clear_video_coinflip",
-        "chat_defaults_clear_timeout",
-        "chat_defaults_clear_coinflip",
+      "chat_defaults_join_notifications",
+      "chat_defaults_set_join_external_on",
+      "chat_defaults_set_join_rate_5",
+      "chat_defaults_clear_join_notifications",
+      "chat_defaults_video_coinflip",
+      "chat_defaults_disable_video_coinflip",
+      "chat_defaults_clear_video_coinflip",
+      "chat_defaults_clear_timeout",
+      "chat_defaults_clear_coinflip",
     ];
 
     for (const action of restrictedActions) {
-        ctx.callbackQuery.data = action;
-        await mockBot.dispatch(action, ctx);
-        expect(headers).toContain("Only admins can change chat defaults");
-        // Reset for next
-        while(headers.length > 0) headers.pop();
+      ctx.callbackQuery.data = action;
+      await mockBot.dispatch(action, ctx);
+      expect(headers).toContain("Only admins can change chat defaults");
+      // Reset for next
+      while (headers.length > 0) headers.pop();
     }
   });
 });

@@ -4,7 +4,8 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
 import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 
-const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 class ConnConfirmOk implements Partial<Connection> {
   calls = 0;
@@ -17,16 +18,18 @@ class ConnConfirmOk implements Partial<Connection> {
 class ConnConfirmErr implements Partial<Connection> {
   async getSignatureStatuses(_sig: string[]) {
     return {
-      value: [
-        { err: { Custom: 1 }, confirmationStatus: "processed" },
-      ],
+      value: [{ err: { Custom: 1 }, confirmationStatus: "processed" }],
     } as any;
   }
 }
 
 class ConnSendMock implements Partial<Connection> {
-  async getLatestBlockhash() { return { blockhash: "BH", lastValidBlockHeight: 1 } as any; }
-  async sendTransaction() { return "SIG123456"; }
+  async getLatestBlockhash() {
+    return { blockhash: "BH", lastValidBlockHeight: 1 } as any;
+  }
+  async sendTransaction() {
+    return "SIG123456";
+  }
 }
 
 describe("WalletManager confirmTransaction and sendTransaction", () => {
@@ -45,8 +48,7 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    await expect(wm.confirmTransaction("FAKESIG"))
-      .rejects.toThrow(/Transaction failed/);
+    await expect(wm.confirmTransaction("FAKESIG")).rejects.toThrow(/Transaction failed/);
   });
 
   test("sendTransaction throws without signers", async () => {
@@ -65,11 +67,7 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       timeNow: () => Date.now(),
     });
     (wm as any).sendAndConfirmWithResubmits = async () => "ABCDEF12";
-    const sig = await wm.transferSol(
-      1n,
-      Keypair.generate().publicKey,
-      LAMPORTS_PER_SOL / 2
-    );
+    const sig = await wm.transferSol(1n, Keypair.generate().publicKey, LAMPORTS_PER_SOL / 2);
     expect(sig).toBe("ABCDEF12");
   });
 
@@ -109,9 +107,7 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       recordedAt: Date.now() - 10_000,
     });
 
-    await expect(wm.confirmTransaction("EXPIREME")).rejects.toThrow(
-      /expired before confirmation/
-    );
+    await expect(wm.confirmTransaction("EXPIREME")).rejects.toThrow(/expired before confirmation/);
   });
 
   test("probeTransactionAfterTimeout accepts versioned transactions", async () => {
@@ -258,7 +254,7 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
 
     try {
       await expect(wm.confirmTransaction("MISSING_SIG")).rejects.toThrow(
-        /Transaction confirmation timeout/
+        /Transaction confirmation timeout/,
       );
     } finally {
       console.error = originalError;

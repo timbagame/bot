@@ -45,13 +45,10 @@ export const clampMinPlayers = (
   gameType: GameType,
   candidate: number | undefined,
   maxPlayers: number,
-  maxPlayersLimit?: number
+  maxPlayersLimit?: number,
 ): number => {
   const floor = getMinPlayersFloor(gameType);
-  const ceiling = Math.max(
-    floor,
-    Math.min(maxPlayers, maxPlayersLimit ?? maxPlayers)
-  );
+  const ceiling = Math.max(floor, Math.min(maxPlayers, maxPlayersLimit ?? maxPlayers));
 
   if (!Number.isFinite(candidate)) {
     return floor;
@@ -72,7 +69,7 @@ export const clampMinPlayers = (
  */
 export const resolveGamePrivacy = (
   gameType: GameType,
-  chatSettings?: ChatGameSettings | null
+  chatSettings?: ChatGameSettings | null,
 ): boolean => {
   const specificPrivacy =
     gameType === "coinflip"
@@ -112,19 +109,19 @@ export const resolveAdvancedOptions = (
   players: number,
   session?: SessionOptions,
   maxPlayersLimit?: number,
-  chatSettings?: ChatGameSettings | null
+  chatSettings?: ChatGameSettings | null,
 ): AdvancedGameOptions => {
   const maxPlayersCeil = Math.max(players, getMinPlayersFloor(gameType));
 
   const timeoutSeconds = clampTimeoutSeconds(
-    session?.timeoutSeconds ?? chatSettings?.timeout_seconds ?? undefined
+    session?.timeoutSeconds ?? chatSettings?.timeout_seconds ?? undefined,
   );
 
   const minPlayers = clampMinPlayers(
     gameType,
     session?.minPlayers,
     maxPlayersCeil,
-    maxPlayersLimit
+    maxPlayersLimit,
   );
 
   const defaultIsPrivate = resolveGamePrivacy(gameType, chatSettings);

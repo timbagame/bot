@@ -29,23 +29,15 @@ class FakeConnection {
 
 describe("parseRpcEndpointList", () => {
   test("parses comma-separated list", () => {
-    const endpoints = parseRpcEndpointList(
-      "https://rpc1.solana.com, https://rpc2.solana.com",
-    );
-    expect(endpoints).toEqual([
-      "https://rpc1.solana.com",
-      "https://rpc2.solana.com",
-    ]);
+    const endpoints = parseRpcEndpointList("https://rpc1.solana.com, https://rpc2.solana.com");
+    expect(endpoints).toEqual(["https://rpc1.solana.com", "https://rpc2.solana.com"]);
   });
 
   test("parses JSON array and deduplicates", () => {
     const endpoints = parseRpcEndpointList(
       '["https://rpc1.solana.com","https://rpc1.solana.com","https://rpc2.solana.com"]',
     );
-    expect(endpoints).toEqual([
-      "https://rpc1.solana.com",
-      "https://rpc2.solana.com",
-    ]);
+    expect(endpoints).toEqual(["https://rpc1.solana.com", "https://rpc2.solana.com"]);
   });
 
   test("falls back to default when missing", () => {
@@ -56,17 +48,13 @@ describe("parseRpcEndpointList", () => {
   });
 
   test("throws when empty and no fallback", () => {
-    expect(() => parseRpcEndpointList("   ")).toThrow(
-      "SOLANA_NETWORK is required",
-    );
+    expect(() => parseRpcEndpointList("   ")).toThrow("SOLANA_NETWORK is required");
   });
 });
 
 describe("resolvePrimaryRpcEndpoint", () => {
   test("returns first endpoint", () => {
-    const endpoint = resolvePrimaryRpcEndpoint(
-      "https://rpc1.solana.com,https://rpc2.solana.com",
-    );
+    const endpoint = resolvePrimaryRpcEndpoint("https://rpc1.solana.com,https://rpc2.solana.com");
     expect(endpoint).toBe("https://rpc1.solana.com");
   });
 

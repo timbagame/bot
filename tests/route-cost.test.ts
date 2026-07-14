@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { USER_SOL_MAX_BUFFER_LAMPORTS } from "../src/utils/constants";
-import {
-  calculateRouteCosts,
-  DEFAULT_ROUTE_LAMPORTS_PADDING,
-} from "../src/utils/swap/route-cost";
+import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "../src/utils/swap/route-cost";
 
 const buildCosts = (routeLamports: number) => ({
   rentFeeLamports: routeLamports,
@@ -28,13 +25,16 @@ describe("calculateRouteCosts", () => {
   });
 
   test("falls back to user SOL buffer when route has zero fees", () => {
-    const costs = calculateRouteCosts({}, {
-      paddingRatio: 0.25,
-      paddingExtraLamports: 200_000,
-      paddingRounding: "ceil",
-      baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-      requiredStrategy: "max",
-    });
+    const costs = calculateRouteCosts(
+      {},
+      {
+        paddingRatio: 0.25,
+        paddingExtraLamports: 200_000,
+        paddingRounding: "ceil",
+        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+        requiredStrategy: "max",
+      },
+    );
 
     expect(costs.routeLamports).toBe(0);
     expect(costs.paddingLamports).toBe(200_000);
@@ -55,7 +55,7 @@ describe("calculateRouteCosts", () => {
         minPaddingLamports: DEFAULT_ROUTE_LAMPORTS_PADDING,
         baseRequiredLamports: adminRequired,
         requiredStrategy: "sum",
-      }
+      },
     );
 
     expect(costs.routeLamports).toBe(1_355_000);

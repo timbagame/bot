@@ -1,12 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import {
-  Connection,
-  Keypair,
-  TransactionInstruction,
-} from "@solana/web3.js";
+import { Connection, Keypair, TransactionInstruction } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 
-const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 class ResubmitConnection implements Partial<Connection> {
   public sendCalls = 0;
@@ -41,7 +38,7 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
       observedSignatures.push(signature);
       if (confirmCalls === 1) {
         throw new Error(
-          `Transaction ${signature} expired before confirmation (last valid block height 100, current 105)`
+          `Transaction ${signature} expired before confirmation (last valid block height 100, current 105)`,
         );
       }
       expect(signature).toBe("SIG2");
@@ -53,9 +50,7 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
       data: Buffer.alloc(0),
     });
 
-    const finalSignature = await wallet.sendAndConfirmWithResubmits([
-      ix,
-    ], [Keypair.generate()], {
+    const finalSignature = await wallet.sendAndConfirmWithResubmits([ix], [Keypair.generate()], {
       operationLabel: "Test transaction",
     });
 
@@ -87,7 +82,7 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
       wallet.sendAndConfirmWithResubmits([ix], [Keypair.generate()], {
         operationLabel: "Failing transaction",
         maxResubmits: 1,
-      })
+      }),
     ).rejects.toThrow(/timed out/);
     expect(connection.sendCalls).toBeGreaterThanOrEqual(2);
   });

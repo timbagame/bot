@@ -13,17 +13,7 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   const db = GameDatabase.getInstance();
 
   // Save a game and basic getters
-  db.saveGame(
-    "gameA",
-    "tg_creator",
-    1000,
-    "coinflip",
-    "mintX",
-    "XXX",
-    8,
-    2,
-    12345
-  );
+  db.saveGame("gameA", "tg_creator", 1000, "coinflip", "mintX", "XXX", 8, 2, 12345);
   expect(db.gameExists("gameA")).toBe(true);
   const game = db.getGame("gameA")!;
   expect(game.creator_telegram_id).toBe("tg_creator");
@@ -62,10 +52,7 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator", "tg_p2"]);
   expect(db.getGameParticipantsCount("gameA")).toBe(2);
   expect(db.getGameParticipantsPreview("gameA", 1)).toEqual(["tg_creator"]);
-  expect(db.getGameParticipantsPreview("gameA", 100)).toEqual([
-    "tg_creator",
-    "tg_p2",
-  ]);
+  expect(db.getGameParticipantsPreview("gameA", 100)).toEqual(["tg_creator", "tg_p2"]);
   expect(db.isGameParticipant("gameA", "tg_creator")).toBe(true);
   expect(db.isGameParticipant("gameA", "tg_pending")).toBe(false);
   expect(db.getPlayerParticipatedGames("tg_p2")).toEqual(["gameA"]);
@@ -110,7 +97,17 @@ test("saveGameMessage preserves origin chat_id when message created in different
 
   // Create game in chat A (simulating game creation in group A)
   const originalChatId = -1001111111111;
-  db.saveGame("game_origin", "creator_origin", 100, "coinflip", "mint", "TOK", 4, 2, originalChatId);
+  db.saveGame(
+    "game_origin",
+    "creator_origin",
+    100,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    originalChatId,
+  );
 
   // Verify game appears in /active for chat A
   const activeInChatA = db.getActiveGamesByChat(originalChatId);
@@ -150,7 +147,7 @@ test("GameDatabase orders active game listings by earliest expiration first", ()
     2,
     chatId,
     undefined,
-    now + 10_000
+    now + 10_000,
   );
   db.saveGame(
     "gameLater",
@@ -163,7 +160,7 @@ test("GameDatabase orders active game listings by earliest expiration first", ()
     2,
     chatId,
     undefined,
-    now + 20_000
+    now + 20_000,
   );
   db.saveGame("gameNoExpiry", "creator_3", 300, "coinflip", "mint", "TOK", 4, 2, chatId);
 
@@ -185,7 +182,7 @@ test("GameDatabase orders active game listings by earliest expiration first", ()
     2,
     publicChatId,
     undefined,
-    now + 5_000
+    now + 5_000,
   );
   db.saveGame(
     "publicLater",
@@ -198,19 +195,9 @@ test("GameDatabase orders active game listings by earliest expiration first", ()
     2,
     publicChatId,
     undefined,
-    now + 15_000
+    now + 15_000,
   );
-  db.saveGame(
-    "publicNoExpiry",
-    "creator_6",
-    600,
-    "coinflip",
-    "mint",
-    "TOK",
-    4,
-    2,
-    publicChatId
-  );
+  db.saveGame("publicNoExpiry", "creator_6", 600, "coinflip", "mint", "TOK", 4, 2, publicChatId);
 
   const activePublic = db.getAllActivePublicGames();
   expect(activePublic.map((game) => game.game_address)).toEqual([
@@ -267,7 +254,7 @@ test("savePlayerMapping normalizes inputs and ignores blanks", () => {
 
   const stored = sqlite
     .prepare(
-      "SELECT public_key, telegram_id, display_name FROM player_mappings WHERE public_key = ?"
+      "SELECT public_key, telegram_id, display_name FROM player_mappings WHERE public_key = ?",
     )
     .get("pub_key");
   expect(stored.display_name).toBe("Astro");
@@ -297,7 +284,7 @@ test("getGamesExpiringBefore returns games with zero and large timeouts", () => 
     undefined,
     undefined,
     0,
-    now
+    now,
   );
 
   const hugeTimeoutSeconds = 1_000_000_000;
@@ -312,7 +299,7 @@ test("getGamesExpiringBefore returns games with zero and large timeouts", () => 
     undefined,
     undefined,
     hugeTimeoutSeconds,
-    now + hugeTimeoutSeconds * 1000
+    now + hugeTimeoutSeconds * 1000,
   );
 
   const immediate = db.getGamesExpiringBefore(now + 1000);
@@ -342,14 +329,14 @@ test("getGamesExpiringBefore can paginate large batches by excluding processed e
       undefined,
       undefined,
       10,
-      base
+      base,
     );
   }
 
   const seen = new Set<string>();
   const limit = 15;
   let batch: GameData[] = [];
-  let excludes: string[] = [];
+  const excludes: string[] = [];
   do {
     batch = db.getGamesExpiringBefore(base + 1000, limit, excludes);
     for (const game of batch) {
@@ -365,18 +352,38 @@ test("getGamesExpiringBefore honors excludes and fills with oldest non-expiring"
   const db = GameDatabase.getInstance();
   const now = Date.now();
 
-  db.saveGame("exp-1", "creator", 50, "coinflip", undefined, undefined, undefined, undefined, undefined, 15, now + 500);
-  db.saveGame("exp-2", "creator", 50, "coinflip", undefined, undefined, undefined, undefined, undefined, 15, now + 800);
+  db.saveGame(
+    "exp-1",
+    "creator",
+    50,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    15,
+    now + 500,
+  );
+  db.saveGame(
+    "exp-2",
+    "creator",
+    50,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    15,
+    now + 800,
+  );
   db.saveGame("no-exp-1", "creator", 50, "coinflip");
   db.saveGame("no-exp-2", "creator", 50, "coinflip");
 
   const results = db.getGamesExpiringBefore(now + 1_000, 3, ["exp-1"]);
 
-  expect(results.map((g) => g.game_address)).toEqual([
-    "exp-2",
-    "no-exp-1",
-    "no-exp-2",
-  ]);
+  expect(results.map((g) => g.game_address)).toEqual(["exp-2", "no-exp-1", "no-exp-2"]);
 });
 
 test("findTelegramIdByUsername normalizes usernames", () => {
@@ -455,7 +462,7 @@ test("saveGameParticipant preserves confirmed status when pending write races", 
 
   const row = sqlite
     .prepare(
-      "SELECT status, join_signature, last_verified_at FROM game_participants WHERE game_address = ? AND telegram_id = ?"
+      "SELECT status, join_signature, last_verified_at FROM game_participants WHERE game_address = ? AND telegram_id = ?",
     )
     .get("raceGame", "tg_race");
 
@@ -505,10 +512,7 @@ test("countRecentGamesByCreator respects rate-limit window boundaries", () => {
   const inclusiveCount = db.countRecentGamesByCreator(creator, windowStart);
   expect(inclusiveCount).toBe(2);
 
-  const afterWindowCount = db.countRecentGamesByCreator(
-    creator,
-    windowStart + 1
-  );
+  const afterWindowCount = db.countRecentGamesByCreator(creator, windowStart + 1);
   expect(afterWindowCount).toBe(1);
 });
 

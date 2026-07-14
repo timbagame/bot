@@ -1,18 +1,14 @@
-import {
-  describe,
-  test,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-} from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, vi } from "bun:test";
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS } from "../src/utils/constants";
 import {
   __test_registerReferralEntry,
   __test_resetReferralEntries,
   WSOL_MINT,
 } from "../src/utils/token-registry";
-import { resolveIntegratorSwapParams, calculateDynamicReferralFee } from "../src/utils/integrator-fees";
+import {
+  resolveIntegratorSwapParams,
+  calculateDynamicReferralFee,
+} from "../src/utils/integrator-fees";
 import * as priceService from "../src/utils/price-service";
 
 const REFERRAL_ACCOUNT = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
@@ -54,8 +50,7 @@ describe("Integrator fee calculations", () => {
       mint: ADMIN_REF_MINT1,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
-      adminCloseAuthority:
-        "AdminCloseAuthority2222222222222222222222222222",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
       baseFeeBps: 85,
       maxExtraFeeBps: 5,
     });
@@ -74,9 +69,9 @@ describe("Integrator fee calculations", () => {
         inputAmountRaw: 1,
         userPublicKey: "UserTiny",
         availableSolLamports: 0,
-      })
+      }),
     ).rejects.toThrow(
-      "Trade is too small to cover integrator gas payer reimbursement. Add SOL or increase trade size."
+      "Trade is too small to cover integrator gas payer reimbursement. Add SOL or increase trade size.",
     );
 
     expect(spy).toHaveBeenCalled();
@@ -87,8 +82,7 @@ describe("Integrator fee calculations", () => {
       mint: WSOL_MINT,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
-      adminCloseAuthority:
-        "AdminCloseAuthority2222222222222222222222222222",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
       baseFeeBps: 85,
     });
 
@@ -144,8 +138,7 @@ describe("Integrator fee calculations", () => {
       mint: WSOL_MINT,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
-      adminCloseAuthority:
-        "AdminCloseAuthority2222222222222222222222222222",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
       baseFeeBps: 85,
     });
 
@@ -168,9 +161,7 @@ describe("Integrator fee calculations", () => {
     expect(result).not.toBeNull();
     expect(result?.payerKind).toBe("admin");
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
-    expect(result?.closeAuthority).toBe(
-      "AdminCloseAuthority2222222222222222222222222222"
-    );
+    expect(result?.closeAuthority).toBe("AdminCloseAuthority2222222222222222222222222222");
   });
 
   test("treats WSOL output unwraps as SOL for admin surcharge calculations", async () => {
@@ -178,8 +169,7 @@ describe("Integrator fee calculations", () => {
       mint: WSOL_MINT,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
-      adminCloseAuthority:
-        "AdminCloseAuthority2222222222222222222222222222",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
       baseFeeBps: 85,
       maxExtraFeeBps: 100,
     });
@@ -203,9 +193,7 @@ describe("Integrator fee calculations", () => {
     expect(result?.payerKind).toBe("admin");
     expect(result?.referralFee).toBe(185);
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
-    expect(result?.closeAuthority).toBe(
-      "AdminCloseAuthority2222222222222222222222222222"
-    );
+    expect(result?.closeAuthority).toBe("AdminCloseAuthority2222222222222222222222222222");
   });
 
   test("uses admin top-up when provided SOL buffer is below minimum", async () => {
@@ -213,8 +201,7 @@ describe("Integrator fee calculations", () => {
       mint: ADMIN_REF_MINT1,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
-      adminCloseAuthority:
-        "AdminCloseAuthority2222222222222222222222222222",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
       baseFeeBps: 85,
     });
 
@@ -237,9 +224,7 @@ describe("Integrator fee calculations", () => {
     expect(priceSpy).toHaveBeenCalledTimes(2);
     expect(result?.payerKind).toBe("admin");
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
-    expect(result?.closeAuthority).toBe(
-      "AdminCloseAuthority2222222222222222222222222222"
-    );
+    expect(result?.closeAuthority).toBe("AdminCloseAuthority2222222222222222222222222222");
     expect(result?.referralFee).toBeGreaterThan(85);
   });
 
@@ -248,8 +233,7 @@ describe("Integrator fee calculations", () => {
       mint: ADMIN_REF_MINT2,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer22222222222222222222222222",
-      adminCloseAuthority:
-        "AdminCloseAuthority33333333333333333333333333",
+      adminCloseAuthority: "AdminCloseAuthority33333333333333333333333333",
       baseFeeBps: 85,
     });
 
@@ -269,9 +253,7 @@ describe("Integrator fee calculations", () => {
 
     expect(result).not.toBeNull();
     expect(result?.payer).toBe("AdminPayer22222222222222222222222222");
-    expect(result?.closeAuthority).toBe(
-      "AdminCloseAuthority33333333333333333333333333"
-    );
+    expect(result?.closeAuthority).toBe("AdminCloseAuthority33333333333333333333333333");
     expect(result?.payerKind).toBe("admin");
     expect(result?.referralFee).toBeGreaterThan(85);
   });
@@ -330,15 +312,13 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("calculates dynamic fee based on deficit/trade ratio", async () => {
-    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
-      async (opts: any) => {
-        const resolvedAt = Date.now();
-        if (opts?.tokenMint === WSOL_MINT) {
-          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
-        }
-        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) => {
+      const resolvedAt = Date.now();
+      if (opts?.tokenMint === WSOL_MINT) {
+        return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
       }
-    );
+      return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    });
 
     // Trade: 10 tokens @ $1 = $10, Shortfall: 0.01 SOL @ $200 = $2
     const result = await calculateDynamicReferralFee({
@@ -355,15 +335,13 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("scales fee proportionally for small shortfalls", async () => {
-    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
-      async (opts: any) => {
-        const resolvedAt = Date.now();
-        if (opts?.tokenMint === WSOL_MINT) {
-          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
-        }
-        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) => {
+      const resolvedAt = Date.now();
+      if (opts?.tokenMint === WSOL_MINT) {
+        return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
       }
-    );
+      return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    });
 
     // Trade: 100 tokens @ $1 = $100, Shortfall: 0.001 SOL @ $200 = $0.20
     const result = await calculateDynamicReferralFee({
@@ -380,15 +358,13 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("clamps fee to MAX_REFERRAL_FEE_BPS of 255", async () => {
-    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
-      async (opts: any) => {
-        const resolvedAt = Date.now();
-        if (opts?.tokenMint === WSOL_MINT) {
-          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
-        }
-        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) => {
+      const resolvedAt = Date.now();
+      if (opts?.tokenMint === WSOL_MINT) {
+        return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
       }
-    );
+      return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
+    });
 
     const result = await calculateDynamicReferralFee({
       inputMint: "SomeMint111111111111111111111111111111111",
@@ -431,7 +407,7 @@ describe("calculateDynamicReferralFee", () => {
         shortfallLamports: 5_000_000,
         baseFeeBps: 85,
         throwOnPriceFailure: true,
-      })
+      }),
     ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
   });
 
@@ -448,9 +424,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("returns base fee when price resolution throws", async () => {
-    vi.spyOn(priceService, "getUsdPrice").mockRejectedValue(
-      new Error("Network error")
-    );
+    vi.spyOn(priceService, "getUsdPrice").mockRejectedValue(new Error("Network error"));
 
     const result = await calculateDynamicReferralFee({
       inputMint: "SomeMint111111111111111111111111111111111",

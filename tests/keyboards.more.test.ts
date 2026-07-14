@@ -174,66 +174,43 @@ describe("keyboards: amount selection", () => {
     "amount_coinflip_5000",
   ];
 
-  const usdTargets = [
-    0.25,
-    0.5,
-    1,
-    2,
-    3,
-    5,
-    7.5,
-    10,
-    15,
-    20,
-    25,
-  ] as const;
+  const usdTargets = [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 25] as const;
 
   test("defaults to fixed contract minimum multiples when no balance", () => {
     const kb = createAmountSelectionKeyboard("coinflip");
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_coinflip_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("small balance still surfaces fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 3);
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_coinflip_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("sub-unit balances still show contract minimum first and keep ordering", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 1.2);
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_coinflip_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("balance under 50 still starts from contract minimum", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 40);
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_coinflip_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
     expect(callbacks[0]).toBe("amount_coinflip_20");
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("amount buttons render two per row", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 200);
-    const rows =
-      (kb && (kb as any).inline_keyboard) || (kb && (kb as any).rows) || [];
+    const rows = (kb && (kb as any).inline_keyboard) || (kb && (kb as any).rows) || [];
     const amountRows = rows.filter((row: any[]) =>
-      row.some((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_"))
+      row.some((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_")),
     );
     const flattened = amountRows
       .flat()
       .filter((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_"));
-    expect(flattened.map((btn: any) => btn.callback_data)).toEqual(
-      expectedDefaultCallbacks
-    );
+    expect(flattened.map((btn: any) => btn.callback_data)).toEqual(expectedDefaultCallbacks);
     expect(amountRows.every((row: any[]) => row.length === 2)).toBe(true);
   });
 
@@ -241,33 +218,21 @@ describe("keyboards: amount selection", () => {
     const kb = createAmountSelectionKeyboard("giveaway", 60, "999");
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("ga|"));
     expect(callbacks.length).toBeGreaterThan(0);
-    const decoded = callbacks
-      .map((cb) => decodeAmountSelectionPayload(cb))
-      .filter(Boolean);
+    const decoded = callbacks.map((cb) => decodeAmountSelectionPayload(cb)).filter(Boolean);
     expect(decoded.every((d) => d?.creatorId === "999")).toBe(true);
-    expect(
-      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
-    ).toBe(true);
+    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(true);
   });
 
   test("amount buttons omit token ticker and show USD when price is known", () => {
-    const kb = createAmountSelectionKeyboard(
-      "coinflip",
-      undefined,
-      undefined,
-      20,
-      {
-        decimals: 2,
-        tokenPriceUSD: 0.01,
-      }
-    );
+    const kb = createAmountSelectionKeyboard("coinflip", undefined, undefined, 20, {
+      decimals: 2,
+      tokenPriceUSD: 0.01,
+    });
     const texts = extractTexts(kb).filter((text) => /^\d/.test(text));
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
     expect(texts.every((text) => !text.includes("~"))).toBe(true);
-    expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(
-      true
-    );
+    expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(true);
   });
 
   test("amount callbacks stay within Telegram limits for large inputs", () => {
@@ -275,50 +240,35 @@ describe("keyboards: amount selection", () => {
       "coinflip",
       10_000_000_000_000,
       "123456789012345678901234567890",
-      20
+      20,
     );
     const callbacks = extractCallbacks(kb);
     expect(callbacks.length).toBeGreaterThan(0);
-    expect(
-      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
-    ).toBe(true);
+    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(true);
   });
 
   test("amount callbacks follow USD tiers when token price is known", () => {
     const tokenPriceUSD = 0.01;
-    const kb = createAmountSelectionKeyboard(
-      "coinflip",
-      5000,
-      undefined,
-      20,
-      {
-        decimals: 2,
-        tokenPriceUSD,
-      }
-    );
+    const kb = createAmountSelectionKeyboard("coinflip", 5000, undefined, 20, {
+      decimals: 2,
+      tokenPriceUSD,
+    });
 
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_coinflip_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
 
     const expected = [
       "amount_coinflip_20",
-      ...usdTargets.map((usd) =>
-        `amount_coinflip_${Number((usd / tokenPriceUSD).toFixed(6))}`
-      ),
+      ...usdTargets.map((usd) => `amount_coinflip_${Number((usd / tokenPriceUSD).toFixed(6))}`),
     ];
 
     expect(callbacks).toEqual(expected);
   });
 
   test("minimum bet button renders USD equivalent when price is provided", () => {
-    const kb = createAmountSelectionKeyboard(
-      "coinflip",
-      undefined,
-      undefined,
-      20,
-      { decimals: 2, tokenPriceUSD: 0.05 }
-    );
+    const kb = createAmountSelectionKeyboard("coinflip", undefined, undefined, 20, {
+      decimals: 2,
+      tokenPriceUSD: 0.05,
+    });
 
     const texts = extractTexts(kb);
     const minButton = texts.find((text) => text.startsWith("20"));
@@ -347,18 +297,14 @@ describe("keyboards: amount selection", () => {
 describe("keyboards: player selection and confirm", () => {
   test("player selection includes correct callbacks for coinflip", () => {
     const kb = createPlayerSelectionKeyboard("coinflip", "25");
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s?.startsWith("players_coinflip_25_")
-    );
+    const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("players_coinflip_25_"));
     expect(callbacks).toContain("players_coinflip_25_2");
     expect(callbacks).toContain("players_coinflip_25_3");
     expect(callbacks).toContain("players_coinflip_25_4");
     expect(callbacks).toContain("players_coinflip_25_5");
     expect(callbacks).toContain("players_coinflip_25_10");
     expect(callbacks).toContain("players_coinflip_25_20");
-    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(
-      true
-    );
+    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(true);
     // Also includes custom and back-to-amount
     const all = extractCallbacks(kb);
     expect(all).toContain("custom_players_coinflip_25");
@@ -368,16 +314,10 @@ describe("keyboards: player selection and confirm", () => {
   test("player selection for giveaway uses specific player options", () => {
     const kb = createPlayerSelectionKeyboard("giveaway", "10", "42");
     const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("gp|"));
-    const decoded = callbacks
-      .map((cb) => decodePlayersSelectionPayload(cb))
-      .filter(Boolean);
+    const decoded = callbacks.map((cb) => decodePlayersSelectionPayload(cb)).filter(Boolean);
     const playerCounts = decoded.map((d) => d?.players);
-    expect(playerCounts).toEqual(
-      expect.arrayContaining([1, 2, 3, 5, 10, 20])
-    );
-    expect(
-      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
-    ).toBe(true);
+    expect(playerCounts).toEqual(expect.arrayContaining([1, 2, 3, 5, 10, 20]));
+    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(true);
   });
 
   test("confirm keyboard includes confirm and back with creatorId", () => {
@@ -398,9 +338,7 @@ describe("keyboards: player selection and confirm", () => {
     const backToAmount =
       callbacks.find((s) => s.startsWith("ga|")) ??
       callbacks.find((s) => s.startsWith("amount_coinflip_"));
-    const decodedAmountPayload = backToAmount
-      ? decodeAmountSelectionPayload(backToAmount)
-      : null;
+    const decodedAmountPayload = backToAmount ? decodeAmountSelectionPayload(backToAmount) : null;
     expect(decodedAmountPayload?.gameType).toBe("coinflip");
     expect(decodedAmountPayload?.amount).toBe("30");
     expect(decodedAmountPayload?.creatorId).toBe("abc");

@@ -17,7 +17,7 @@ export interface TokenMetadataResolverContext {
 }
 
 export type TokenMetadataHook = (
-  context: TokenMetadataResolverContext
+  context: TokenMetadataResolverContext,
 ) => Promise<TokenMetadataResult | null>;
 
 export interface ResolveTokenMetadataParams {
@@ -29,30 +29,24 @@ export interface ResolveTokenMetadataParams {
   hooks?: TokenMetadataHook[];
 }
 
-const METAPLEX_PROGRAM_ID = new PublicKey(
-  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-);
+const METAPLEX_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 async function tryMetaplexMetadata(
   connection: Connection,
   mintAddress: string,
-  ensureDecimals: (value?: number | null) => Promise<number>
+  ensureDecimals: (value?: number | null) => Promise<number>,
 ): Promise<TokenMetadataResult | null> {
-    try {
-      const mint = new PublicKey(mintAddress);
-      const metadataPda = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("metadata"),
-          METAPLEX_PROGRAM_ID.toBuffer(),
-          mint.toBuffer(),
-        ],
-        METAPLEX_PROGRAM_ID
-      )[0];
+  try {
+    const mint = new PublicKey(mintAddress);
+    const metadataPda = PublicKey.findProgramAddressSync(
+      [Buffer.from("metadata"), METAPLEX_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+      METAPLEX_PROGRAM_ID,
+    )[0];
 
-      const metadataAccount = await connection.getAccountInfo(metadataPda);
-      if (!metadataAccount?.data) {
-        return null;
-      }
+    const metadataAccount = await connection.getAccountInfo(metadataPda);
+    if (!metadataAccount?.data) {
+      return null;
+    }
     const metadata = deserializeMetadata(metadataAccount as any);
     const rawSymbol = (metadata as any).symbol ?? "";
     const rawName = (metadata as any).name ?? "";
@@ -82,9 +76,7 @@ export async function resolveTokenMetadata({
   hooks = [],
 }: ResolveTokenMetadataParams): Promise<TokenMetadataResult> {
   let cachedDecimals: number | null = null;
-  const ensureDecimals = async (
-    value?: number | null
-  ): Promise<number> => {
+  const ensureDecimals = async (value?: number | null): Promise<number> => {
     if (typeof value === "number" && Number.isFinite(value)) {
       cachedDecimals = value;
       return value;
@@ -102,10 +94,7 @@ export async function resolveTokenMetadata({
           return resolved;
         }
       } catch (error) {
-        console.warn(
-          `Token metadata decimals resolver failed for ${mintAddress}:`,
-          error
-        );
+        console.warn(`Token metadata decimals resolver failed for ${mintAddress}:`, error);
       }
     }
 
@@ -113,14 +102,9 @@ export async function resolveTokenMetadata({
     return defaultDecimals;
   };
 
-  const fetchImpl: FetchLike =
-    fetch ?? ((globalThis.fetch as unknown) as FetchLike);
+  const fetchImpl: FetchLike = fetch ?? (globalThis.fetch as unknown as FetchLike);
 
-  const metaplexResult = await tryMetaplexMetadata(
-    connection,
-    mintAddress,
-    ensureDecimals
-  );
+  const metaplexResult = await tryMetaplexMetadata(connection, mintAddress, ensureDecimals);
   if (metaplexResult) {
     return metaplexResult;
   }
@@ -142,18 +126,12 @@ export async function resolveTokenMetadata({
         };
       }
     } catch (error) {
-      console.warn(
-        `Token metadata hook failed for ${mintAddress}:`,
-        error
-      );
+      console.warn(`Token metadata hook failed for ${mintAddress}:`, error);
     }
   }
 
   try {
-    const metadata = await fetchJupiterTokenMetadata(
-      mintAddress,
-      fetchImpl
-    );
+    const metadata = await fetchJupiterTokenMetadata(mintAddress, fetchImpl);
     if (metadata) {
       return {
         symbol: metadata.symbol,
@@ -162,11 +140,7 @@ export async function resolveTokenMetadata({
       };
     }
   } catch (error) {
-    console.log(
-      "Jupiter token search not available for",
-      mintAddress,
-      error
-    );
+    console.log("Jupiter token search not available for", mintAddress, error);
   }
 
   return {

@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  buildGameConfirmationMessage,
-} from "../src/handlers/game-callbacks/ui-builders";
+import { buildGameConfirmationMessage } from "../src/handlers/game-callbacks/ui-builders";
 
 const baseAdvancedState = {
   isPrivate: false,

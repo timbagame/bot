@@ -13,8 +13,7 @@ if (originalToken === undefined) {
   process.env.TELEGRAM_TOKEN = "test-token";
 }
 if (originalMnemonic === undefined) {
-  process.env.MNEMONIC =
-    "test test test test test test test test test test test junk";
+  process.env.MNEMONIC = "test test test test test test test test test test test junk";
 }
 if (originalSolanaNetwork === undefined) {
   process.env.SOLANA_NETWORK = "http://localhost:8899";
@@ -135,8 +134,7 @@ describe("/public command", () => {
     expect(text).toContain("Active Public Games (2)");
 
     const inlineKeyboard = options?.reply_markup?.inline_keyboard as
-      | InlineKeyboardButton[][]
-      | undefined;
+      InlineKeyboardButton[][] | undefined;
     expect(inlineKeyboard).toBeDefined();
     expect(inlineKeyboard?.length).toBe(4); // 2 headers + 2 action rows
 

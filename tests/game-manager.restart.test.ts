@@ -36,7 +36,7 @@ describe("GameManager restart fallback", () => {
       token_ticker: "TOK",
       token_mint: "MINT",
       creator_telegram_id: "777",
-      status: "active"
+      status: "active",
     }));
 
     const db = {
@@ -45,7 +45,7 @@ describe("GameManager restart fallback", () => {
       getGameParticipants: () => [],
       saveGameMessage: () => {},
       getPlayerDisplayName: () => "User777",
-      getPlayerUsername: () => "user777"
+      getPlayerUsername: () => "user777",
     } as any;
 
     // 2. Mock Bot Context / API
@@ -57,8 +57,8 @@ describe("GameManager restart fallback", () => {
         editMessageText: mockEditMessageText,
         editMessageCaption: mockEditMessageCaption,
         editMessageMedia: mock(async () => ({})),
-        getChatMember: async () => ({ user: { username: "user777" } })
-      }
+        getChatMember: async () => ({ user: { username: "user777" } }),
+      },
     } as any;
 
     const gm = GameManager.getInstance(programStub(), walletStub(), db);
@@ -76,7 +76,7 @@ describe("GameManager restart fallback", () => {
       1_000_000_000,
       "user777",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // 4. Verifications
@@ -89,14 +89,14 @@ describe("GameManager restart fallback", () => {
     expect(restoredMap?.get(chatId)).toEqual({
       chatId,
       messageId,
-      usesVideo: true
+      usesVideo: true,
     });
 
     // Check if message was edited (it should be caption because of usesVideo: true)
     expect(mockEditMessageCaption).toHaveBeenCalled();
     const calls = mockEditMessageCaption.mock.calls;
     if (calls.length > 0) {
-      const [calledChatId, calledMessageId] = (calls[0] as any) as [number, number, any];
+      const [calledChatId, calledMessageId] = calls[0] as any as [number, number, any];
       expect(calledChatId).toBe(chatId);
       expect(calledMessageId).toBe(messageId);
     }
@@ -118,7 +118,7 @@ describe("GameManager restart fallback", () => {
       token_ticker: "TOK",
       token_mint: "MINT",
       creator_telegram_id: "888",
-      status: "active"
+      status: "active",
     }));
 
     const db = {
@@ -127,7 +127,7 @@ describe("GameManager restart fallback", () => {
       getGameParticipants: () => [],
       saveGameMessage: () => {},
       getPlayerDisplayName: () => "User888",
-      getPlayerUsername: () => "user888"
+      getPlayerUsername: () => "user888",
     } as any;
 
     // Mock Bot Context / API - caption edit fails (simulating text-only message)
@@ -144,8 +144,8 @@ describe("GameManager restart fallback", () => {
         editMessageText: mockEditMessageText,
         editMessageCaption: mockEditMessageCaption,
         editMessageMedia: mock(async () => ({})),
-        getChatMember: async () => ({ user: { username: "user888" } })
-      }
+        getChatMember: async () => ({ user: { username: "user888" } }),
+      },
     } as any;
 
     const gm = GameManager.getInstance(programStub(), walletStub(), db);
@@ -157,7 +157,7 @@ describe("GameManager restart fallback", () => {
       1_000_000_000,
       "user888",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Caption edit was attempted first
@@ -187,7 +187,7 @@ describe("GameManager restart fallback", () => {
       token_ticker: "TOK",
       token_mint: "MINT",
       creator_telegram_id: "999",
-      status: "active"
+      status: "active",
     }));
 
     const db = {
@@ -196,7 +196,7 @@ describe("GameManager restart fallback", () => {
       getGameParticipants: () => [],
       saveGameMessage: () => {},
       getPlayerDisplayName: () => "User999",
-      getPlayerUsername: () => "user999"
+      getPlayerUsername: () => "user999",
     } as any;
 
     // Mock Bot Context / API - both caption AND text edits fail (simulating deleted message)
@@ -217,8 +217,8 @@ describe("GameManager restart fallback", () => {
         editMessageText: mockEditMessageText,
         editMessageCaption: mockEditMessageCaption,
         editMessageMedia: mock(async () => ({})),
-        getChatMember: async () => ({ user: { username: "user999" } })
-      }
+        getChatMember: async () => ({ user: { username: "user999" } }),
+      },
     } as any;
 
     const gm = GameManager.getInstance(programStub(), walletStub(), db);
@@ -231,7 +231,7 @@ describe("GameManager restart fallback", () => {
       1_000_000_000,
       "user999",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Caption edit was attempted first
@@ -261,7 +261,7 @@ describe("GameManager restart fallback", () => {
       token_ticker: "TOK",
       token_mint: "MINT",
       creator_telegram_id: "111",
-      status: "active"
+      status: "active",
     }));
 
     const db = {
@@ -270,7 +270,7 @@ describe("GameManager restart fallback", () => {
       getGameParticipants: () => [],
       saveGameMessage: () => {},
       getPlayerDisplayName: () => "User111",
-      getPlayerUsername: () => "user111"
+      getPlayerUsername: () => "user111",
     } as any;
 
     // Mock Bot Context / API - text edit fails (message has media), caption succeeds
@@ -287,8 +287,8 @@ describe("GameManager restart fallback", () => {
         editMessageText: mockEditMessageText,
         editMessageCaption: mockEditMessageCaption,
         editMessageMedia: mock(async () => ({})),
-        getChatMember: async () => ({ user: { username: "user111" } })
-      }
+        getChatMember: async () => ({ user: { username: "user111" } }),
+      },
     } as any;
 
     const gm = GameManager.getInstance(programStub(), walletStub(), db);
@@ -307,7 +307,7 @@ describe("GameManager restart fallback", () => {
       1_000_000_000,
       "user111",
       "Active",
-      "TOK"
+      "TOK",
     );
 
     // Text edit was attempted first (since usesVideo: false)

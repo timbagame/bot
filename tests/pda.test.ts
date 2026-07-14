@@ -4,10 +4,7 @@ import { PDAManager } from "../src/utils/pda";
 
 test("getOraclePDA derives expected address", () => {
   const programId = Keypair.generate().publicKey;
-  const expected = PublicKey.findProgramAddressSync(
-    [Buffer.from("oracle")],
-    programId
-  )[0];
+  const expected = PublicKey.findProgramAddressSync([Buffer.from("oracle")], programId)[0];
   const pda = PDAManager.getOraclePDA(programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
 });
@@ -17,7 +14,7 @@ test("getGamePDA derives expected address", () => {
   const randomHash = Buffer.from("seed123");
   const expected = PublicKey.findProgramAddressSync(
     [Buffer.from("game"), randomHash],
-    programId
+    programId,
   )[0];
   const pda = PDAManager.getGamePDA(randomHash, programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
@@ -28,7 +25,7 @@ test("getGameTokenPDA derives expected address", () => {
   const tokenMint = Keypair.generate().publicKey;
   const expected = PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), tokenMint.toBuffer()],
-    programId
+    programId,
   )[0];
   const pda = PDAManager.getGameTokenPDA(tokenMint, programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
@@ -39,17 +36,9 @@ test("getPlayerParticipationPDA derives expected address", () => {
   const gameAddress = Keypair.generate().publicKey;
   const playerPubkey = Keypair.generate().publicKey;
   const expected = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("player_participation"),
-      gameAddress.toBuffer(),
-      playerPubkey.toBuffer(),
-    ],
-    programId
+    [Buffer.from("player_participation"), gameAddress.toBuffer(), playerPubkey.toBuffer()],
+    programId,
   )[0];
-  const pda = PDAManager.getPlayerParticipationPDA(
-    gameAddress,
-    playerPubkey,
-    programId
-  );
+  const pda = PDAManager.getPlayerParticipationPDA(gameAddress, playerPubkey, programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
 });

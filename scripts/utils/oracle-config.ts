@@ -54,9 +54,7 @@ const toBN = (value: BNLike | bigint | number | undefined): BNLike => {
   throw new Error(`Unsupported BN conversion type: ${typeof value}`);
 };
 
-export const createOracleConfig = (
-  overrides: OracleConfigOverrides = {}
-): OracleConfig => {
+export const createOracleConfig = (overrides: OracleConfigOverrides = {}): OracleConfig => {
   return {
     feePercentage: overrides.feePercentage ?? DEFAULT_ORACLE_CONFIG.feePercentage,
     oracleBufferTime: overrides.oracleBufferTime
@@ -85,10 +83,7 @@ const secondsToMinutes = (value: BNLike): number => {
   }
 };
 
-export const logOracleConfig = (
-  config: OracleConfig,
-  options: LogOptions = {}
-): void => {
+export const logOracleConfig = (config: OracleConfig, options: LogOptions = {}): void => {
   const heading = options.heading ?? "Oracle configuration";
   const indent = options.indent ?? "-";
 
@@ -100,13 +95,13 @@ export const logOracleConfig = (
   console.log(`${indent} Fee Percentage: ${config.feePercentage}%`);
   console.log(
     `${indent} Min Timeout: ${minTimeoutSeconds} seconds (${secondsToMinutes(
-      config.minTimeout
-    )} minutes)`
+      config.minTimeout,
+    )} minutes)`,
   );
   console.log(
     `${indent} Max Timeout: ${maxTimeoutSeconds} seconds (${secondsToMinutes(
-      config.maxTimeout
-    )} minutes)`
+      config.maxTimeout,
+    )} minutes)`,
   );
   console.log(`${indent} Max Tickets: ${config.maxTickets}`);
   console.log(`${indent} Oracle Buffer Time: ${bufferSeconds} seconds`);

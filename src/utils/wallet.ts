@@ -46,10 +46,7 @@ import {
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
 import { resolveTokenMetadata } from "./token-metadata";
-import {
-  detectTokenProgram,
-  type TokenProgramDetection,
-} from "./token-programs";
+import { detectTokenProgram, type TokenProgramDetection } from "./token-programs";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
 import { TokenManager } from "./token-manager";
@@ -276,15 +273,10 @@ export class WalletManager {
   private signaturePollIntervalMs = 1000;
   private mintProgramCache = new Map<string, TokenProgramDetection | null>();
   private missingMintWarnings = new Map<string, number>();
-  private nativeBalanceCache = createExpiringCache<number>(
-    WALLET_RPC_CACHE_TTL_MS,
-  );
-  private approvedTokenBalanceCache = createExpiringCache<
-    ApprovedTokenBalance[]
-  >(WALLET_RPC_CACHE_TTL_MS);
-  private walletCacheListeners = new Set<
-    (telegramId: bigint | number | string) => void
-  >();
+  private nativeBalanceCache = createExpiringCache<number>(WALLET_RPC_CACHE_TTL_MS);
+  private approvedTokenBalanceCache =
+    createExpiringCache<ApprovedTokenBalance[]>(WALLET_RPC_CACHE_TTL_MS);
+  private walletCacheListeners = new Set<(telegramId: bigint | number | string) => void>();
 
   public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
     this.keypairCache = new KeypairCache(
@@ -304,8 +296,7 @@ export class WalletManager {
     };
 
     const isRetryableProbeError = (error: unknown): boolean => {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "");
+      const message = error instanceof Error ? error.message : String(error ?? "");
       const normalized = message.toLowerCase();
       return (
         normalized.includes("429") ||
@@ -315,11 +306,7 @@ export class WalletManager {
       );
     };
 
-    for (
-      let attempt = 1;
-      attempt <= this.postTimeoutProbeMaxAttempts;
-      attempt++
-    ) {
+    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
       try {
         const tx = await this.connection.getTransaction(signature, {
           commitment: "confirmed",
@@ -334,24 +321,16 @@ export class WalletManager {
             return "failed";
           }
 
-          console.log(
-            `🔎 Post-timeout getTransaction found confirmed signature ${signature}`,
-          );
+          console.log(`🔎 Post-timeout getTransaction found confirmed signature ${signature}`);
           return "found";
         }
 
         break;
       } catch (probeError: any) {
-        const message =
-          probeError instanceof Error ? probeError.message : String(probeError);
+        const message = probeError instanceof Error ? probeError.message : String(probeError);
 
-        if (
-          !isRetryableProbeError(probeError) ||
-          attempt === this.postTimeoutProbeMaxAttempts
-        ) {
-          console.warn(
-            `⚠️ getTransaction probe for ${signature} failed: ${message}`,
-          );
+        if (!isRetryableProbeError(probeError) || attempt === this.postTimeoutProbeMaxAttempts) {
+          console.warn(`⚠️ getTransaction probe for ${signature} failed: ${message}`);
           break;
         }
 
@@ -362,11 +341,7 @@ export class WalletManager {
       }
     }
 
-    for (
-      let attempt = 1;
-      attempt <= this.postTimeoutProbeMaxAttempts;
-      attempt++
-    ) {
+    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
       try {
         const status = await this.connection.getSignatureStatus(signature, {
           searchTransactionHistory: true,
@@ -393,18 +368,10 @@ export class WalletManager {
 
         break;
       } catch (statusError: any) {
-        const message =
-          statusError instanceof Error
-            ? statusError.message
-            : String(statusError);
+        const message = statusError instanceof Error ? statusError.message : String(statusError);
 
-        if (
-          !isRetryableProbeError(statusError) ||
-          attempt === this.postTimeoutProbeMaxAttempts
-        ) {
-          console.warn(
-            `⚠️ getSignatureStatus probe for ${signature} failed: ${message}`,
-          );
+        if (!isRetryableProbeError(statusError) || attempt === this.postTimeoutProbeMaxAttempts) {
+          console.warn(`⚠️ getSignatureStatus probe for ${signature} failed: ${message}`);
           break;
         }
 
@@ -451,10 +418,7 @@ export class WalletManager {
     this.loadAdminKeypair();
   }
 
-  public static getInstance(
-    mnemonic: string,
-    deps?: WalletDeps,
-  ): WalletManager {
+  public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
     if (!this.instance) {
       this.instance = new WalletManager(mnemonic, deps);
     } else if (deps?.tokenMetadataResolver) {
@@ -464,10 +428,7 @@ export class WalletManager {
   }
 
   // For tests: create a non-singleton instance with injected dependencies
-  public static createForTest(
-    mnemonic: string,
-    deps: WalletDeps,
-  ): WalletManager {
+  public static createForTest(mnemonic: string, deps: WalletDeps): WalletManager {
     return new WalletManager(mnemonic, deps);
   }
 
@@ -494,17 +455,20 @@ export class WalletManager {
 
   private loadAdminKeypair(): void {
     try {
-      const keypairPath = process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
+      const keypairPath =
+        process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
       if (fs.existsSync(keypairPath)) {
         const stats = fs.lstatSync(keypairPath);
         const mode = stats.mode & 0o777;
-        if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Admin keypair must be a regular file, not a symlink");
-        if ((mode & 0o077) !== 0) throw new Error(`Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`);
+        if (!stats.isFile() || stats.isSymbolicLink())
+          throw new Error("Admin keypair must be a regular file, not a symlink");
+        if ((mode & 0o077) !== 0)
+          throw new Error(
+            `Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
+          );
         const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
         this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-        console.log(
-          `Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`,
-        );
+        console.log(`Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`);
       }
     } catch (error) {
       console.error("Failed to load admin keypair:", error);
@@ -521,14 +485,10 @@ export class WalletManager {
   }
 
   private getUserCacheKey(telegramId: bigint | number | string): string {
-    return typeof telegramId === "bigint"
-      ? telegramId.toString()
-      : String(telegramId);
+    return typeof telegramId === "bigint" ? telegramId.toString() : String(telegramId);
   }
 
-  private cloneApprovedTokenBalances(
-    balances: ApprovedTokenBalance[],
-  ): ApprovedTokenBalance[] {
+  private cloneApprovedTokenBalances(balances: ApprovedTokenBalance[]): ApprovedTokenBalance[] {
     return balances.map((entry) => ({ ...entry }));
   }
 
@@ -595,44 +555,28 @@ export class WalletManager {
     }
 
     if (error instanceof SolanaJSONRPCError) {
-      return (
-        typeof error.message === "string" &&
-        error.message.includes("could not find account")
-      );
+      return typeof error.message === "string" && error.message.includes("could not find account");
     }
 
     if (error && typeof error === "object" && "message" in error) {
       const message = (error as { message?: unknown }).message;
-      return (
-        typeof message === "string" &&
-        message.includes("could not find account")
-      );
+      return typeof message === "string" && message.includes("could not find account");
     }
 
     return false;
   }
 
   private isAtaAlreadyExistsError(error: unknown): boolean {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : "";
+    const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
     const normalized = message.toLowerCase();
-    if (
-      normalized.includes("already in use") ||
-      normalized.includes("account exists")
-    ) {
+    if (normalized.includes("already in use") || normalized.includes("account exists")) {
       return true;
     }
 
     if (error instanceof SendTransactionError && Array.isArray(error.logs)) {
       return error.logs.some((log: string) => {
         const lower = log.toLowerCase();
-        return (
-          lower.includes("already in use") || lower.includes("account exists")
-        );
+        return lower.includes("already in use") || lower.includes("account exists");
       });
     }
 
@@ -664,7 +608,8 @@ export class WalletManager {
   public getAdminKeypair(): Keypair {
     if (this.adminKeypair) return this.adminKeypair;
 
-    const keypairPath = process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
+    const keypairPath =
+      process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
     if (!fs.existsSync(keypairPath)) {
       throw new Error("Admin keypair file not found at " + keypairPath);
     }
@@ -672,8 +617,12 @@ export class WalletManager {
     try {
       const stats = fs.lstatSync(keypairPath);
       const mode = stats.mode & 0o777;
-      if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Admin keypair must be a regular file, not a symlink");
-      if ((mode & 0o077) !== 0) throw new Error(`Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`);
+      if (!stats.isFile() || stats.isSymbolicLink())
+        throw new Error("Admin keypair must be a regular file, not a symlink");
+      if ((mode & 0o077) !== 0)
+        throw new Error(
+          `Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
+        );
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
       this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
       return this.adminKeypair;
@@ -696,9 +645,7 @@ export class WalletManager {
     listener: (change: ActiveEndpointChange) => void | Promise<void>,
   ): () => void {
     if (!this.rpcEndpointManager) {
-      console.warn(
-        "RPC endpoint manager is not available; listener registration ignored.",
-      );
+      console.warn("RPC endpoint manager is not available; listener registration ignored.");
       return () => {};
     }
 
@@ -709,15 +656,8 @@ export class WalletManager {
   // BALANCE METHODS
   // ================================
 
-  public async getBalance(
-    telegramId: bigint,
-    options: WalletFetchOptions = {},
-  ): Promise<number> {
-    const {
-      forceFresh = false,
-      allowStaleOnError = false,
-      cacheTtlMs,
-    } = options;
+  public async getBalance(telegramId: bigint, options: WalletFetchOptions = {}): Promise<number> {
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
     const cacheKey = this.getUserCacheKey(telegramId);
 
     if (!forceFresh) {
@@ -763,48 +703,32 @@ export class WalletManager {
       return 0;
     }
     const { programId } = programDetection;
-    const ata = await getAssociatedTokenAddress(
-      mintPubkey,
-      pubkey,
-      false,
-      programId,
-    );
+    const ata = await getAssociatedTokenAddress(mintPubkey, pubkey, false, programId);
 
     try {
-      const account = await getAccount(
-        this.connection,
-        ata,
-        "confirmed",
-        programId,
-      );
+      const account = await getAccount(this.connection, ata, "confirmed", programId);
       return Number(account.amount);
     } catch (error: unknown) {
       if (this.isMissingTokenAccountError(error)) {
-        console.log(
-          `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`,
-        );
+        console.log(`Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`);
 
         if (options.createIfMissing) {
-          console.log(
-            `Attempting to create token account ${ata.toBase58()} automatically...`,
-          );
+          console.log(`Attempting to create token account ${ata.toBase58()} automatically...`);
 
           const payer = this.getKeyPair(telegramId);
 
           try {
-            const refreshedDetection =
-              await this.resolveTokenProgram(mintPubkey);
+            const refreshedDetection = await this.resolveTokenProgram(mintPubkey);
             if (!refreshedDetection) {
               return 0;
             }
             const { programId: refreshedProgramId } = refreshedDetection;
-            const { instructions } =
-              await this.findOrCreateAssociatedTokenAccount(
-                pubkey,
-                mintPubkey,
-                payer,
-                refreshedProgramId,
-              );
+            const { instructions } = await this.findOrCreateAssociatedTokenAccount(
+              pubkey,
+              mintPubkey,
+              payer,
+              refreshedProgramId,
+            );
 
             if (instructions.length === 0) {
               const refreshed = await getAccount(
@@ -837,10 +761,7 @@ export class WalletManager {
           }
         }
       } else {
-        console.error(
-          `Error getting token balance for ${pubkey.toBase58()}:`,
-          error,
-        );
+        console.error(`Error getting token balance for ${pubkey.toBase58()}:`, error);
       }
       return 0;
     }
@@ -855,11 +776,7 @@ export class WalletManager {
     approvedTokens: ApprovedTokenDefinition[],
     options: WalletFetchOptions = {},
   ): Promise<ApprovedTokenBalance[]> {
-    const {
-      forceFresh = false,
-      allowStaleOnError = false,
-      cacheTtlMs,
-    } = options;
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
     const cacheKey = this.getUserCacheKey(telegramId);
 
     if (!forceFresh) {
@@ -882,9 +799,7 @@ export class WalletManager {
         `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`,
       );
 
-      const approvedTokensMap = new Map(
-        approvedTokens.map((token) => [token.token_mint, token]),
-      );
+      const approvedTokensMap = new Map(approvedTokens.map((token) => [token.token_mint, token]));
       const seenAccounts = new Set<string>();
       const metadataPrefetchMints = new Set<string>();
       const parsedAccounts: ParsedTokenAccount[] = [];
@@ -894,13 +809,8 @@ export class WalletManager {
         approvedTokens,
         approvedTokensMap,
       );
-      const ataResult = await this.loadApprovedTokenAccounts(
-        ataLookup,
-        seenAccounts,
-      );
-      ataResult.metadataPrefetchMints.forEach((mint) =>
-        metadataPrefetchMints.add(mint),
-      );
+      const ataResult = await this.loadApprovedTokenAccounts(ataLookup, seenAccounts);
+      ataResult.metadataPrefetchMints.forEach((mint) => metadataPrefetchMints.add(mint));
       parsedAccounts.push(...ataResult.accounts);
 
       const discoveryResult = await this.discoverAdditionalTokenAccounts(
@@ -909,9 +819,7 @@ export class WalletManager {
         parsedAccounts.length,
         seenAccounts,
       );
-      discoveryResult.metadataPrefetchMints.forEach((mint) =>
-        metadataPrefetchMints.add(mint),
-      );
+      discoveryResult.metadataPrefetchMints.forEach((mint) => metadataPrefetchMints.add(mint));
       parsedAccounts.push(...discoveryResult.accounts);
 
       if (parsedAccounts.length === 0) {
@@ -962,10 +870,7 @@ export class WalletManager {
         }
       }
 
-      console.error(
-        `Error getting all token balances for ${pubkey.toBase58()}:`,
-        error,
-      );
+      console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
       return [];
     }
   }
@@ -1101,18 +1006,13 @@ export class WalletManager {
             !(error instanceof TokenAccountNotFoundError) &&
             !(error instanceof TokenInvalidAccountOwnerError)
           ) {
-            console.error(
-              `❌ Error unpacking token account ${lookup.address.toBase58()}:`,
-              error,
-            );
+            console.error(`❌ Error unpacking token account ${lookup.address.toBase58()}:`, error);
           }
         }
       });
     }
 
-    console.log(
-      `📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`,
-    );
+    console.log(`📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`);
 
     return { accounts, metadataPrefetchMints };
   }
@@ -1130,13 +1030,10 @@ export class WalletManager {
     const discoveryKey = telegramId.toString();
     const lastDiscovery = this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
     const forceDiscovery = existingAccountCount === 0;
-    const shouldDiscover =
-      forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
+    const shouldDiscover = forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
 
     if (!shouldDiscover) {
-      console.log(
-        `⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`,
-      );
+      console.log(`⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`);
       return { accounts: [], metadataPrefetchMints: new Set<string>() };
     }
 
@@ -1188,10 +1085,7 @@ export class WalletManager {
           metadataPrefetchMints.add(mint);
         }
       } catch (error) {
-        console.error(
-          `❌ Error parsing token account for user ${telegramId}:`,
-          error,
-        );
+        console.error(`❌ Error parsing token account for user ${telegramId}:`, error);
       }
     }
 
@@ -1214,10 +1108,7 @@ export class WalletManager {
             return metadata ?? null;
           })
           .catch((metadataError) => {
-            console.error(
-              `❌ Error fetching metadata for ${mint}:`,
-              metadataError,
-            );
+            console.error(`❌ Error fetching metadata for ${mint}:`, metadataError);
             metadataCache.delete(mint);
             return null;
           })
@@ -1242,10 +1133,7 @@ export class WalletManager {
     try {
       return BigInt(rawAmount);
     } catch (error) {
-      console.error(
-        `❌ Invalid lamport amount for ${mint}: ${rawAmount}`,
-        error,
-      );
+      console.error(`❌ Invalid lamport amount for ${mint}: ${rawAmount}`, error);
       return null;
     }
   }
@@ -1270,9 +1158,7 @@ export class WalletManager {
       });
 
       if (!registration.token) {
-        console.log(
-          `❌ Failed to auto-register: ${registration.resolvedTicker ?? mint}`,
-        );
+        console.log(`❌ Failed to auto-register: ${registration.resolvedTicker ?? mint}`);
         return;
       }
 
@@ -1304,11 +1190,7 @@ export class WalletManager {
 
     let approvedToken = approvedTokensMap.get(mint);
     if (!approvedToken) {
-      await this.autoRegisterTokenForBalance(
-        mint,
-        approvedTokensMap,
-        metadataLoader,
-      );
+      await this.autoRegisterTokenForBalance(mint, approvedTokensMap, metadataLoader);
       approvedToken = approvedTokensMap.get(mint);
     }
 
@@ -1332,10 +1214,7 @@ export class WalletManager {
     approvedToken: ApprovedTokenDefinition,
     metadataLoader: MetadataLoader,
   ): Promise<ApprovedTokenBalance> {
-    const formattedBalance = this.formatTokenBalance(
-      lamports,
-      tokenAmount.decimals,
-    );
+    const formattedBalance = this.formatTokenBalance(lamports, tokenAmount.decimals);
     const decimalBalance = Number.parseFloat(
       formatAmount(lamports, tokenAmount.decimals, {
         maxFractionDigits: Math.min(tokenAmount.decimals, 12),
@@ -1383,25 +1262,13 @@ export class WalletManager {
     return this.nativeBalanceCache.peek(this.getUserCacheKey(telegramId));
   }
 
-  public peekCachedApprovedTokenBalances(
-    telegramId: bigint,
-  ): ApprovedTokenBalance[] | undefined {
-    const cached = this.approvedTokenBalanceCache.peek(
-      this.getUserCacheKey(telegramId),
-    );
+  public peekCachedApprovedTokenBalances(telegramId: bigint): ApprovedTokenBalance[] | undefined {
+    const cached = this.approvedTokenBalanceCache.peek(this.getUserCacheKey(telegramId));
     return cached ? this.cloneApprovedTokenBalances(cached) : undefined;
   }
 
-  public setCachedNativeBalance(
-    telegramId: bigint,
-    lamports: number,
-    ttlMs?: number,
-  ): void {
-    this.nativeBalanceCache.setWithTTL(
-      this.getUserCacheKey(telegramId),
-      lamports,
-      ttlMs,
-    );
+  public setCachedNativeBalance(telegramId: bigint, lamports: number, ttlMs?: number): void {
+    this.nativeBalanceCache.setWithTTL(this.getUserCacheKey(telegramId), lamports, ttlMs);
   }
 
   public setCachedApprovedTokenBalances(
@@ -1485,10 +1352,7 @@ export class WalletManager {
           return result;
         }
       } catch (resolverError) {
-        console.warn(
-          `Token metadata resolver failed for ${tokenMint}:`,
-          resolverError,
-        );
+        console.warn(`Token metadata resolver failed for ${tokenMint}:`, resolverError);
       }
       return null;
     };
@@ -1514,9 +1378,7 @@ export class WalletManager {
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
       throw new Error(
-        `Failed to get token metadata: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        `Failed to get token metadata: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     }
   }
@@ -1525,34 +1387,26 @@ export class WalletManager {
     const mintPublicKey = new PublicKey(tokenMint);
     let decimals: number | null = null;
 
-    const getParsedAccountInfo = (
-      this.connection as any
-    ).getParsedAccountInfo?.bind(this.connection);
+    const getParsedAccountInfo = (this.connection as any).getParsedAccountInfo?.bind(
+      this.connection,
+    );
 
     if (typeof getParsedAccountInfo === "function") {
       try {
         const parsedInfo = await getParsedAccountInfo(mintPublicKey);
-        const parsedDecimals =
-          parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
+        const parsedDecimals = parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
         if (typeof parsedDecimals === "number") {
           decimals = parsedDecimals;
         }
       } catch (parsedError) {
-        console.warn(
-          `Parsed account metadata unavailable for ${tokenMint}:`,
-          parsedError,
-        );
+        console.warn(`Parsed account metadata unavailable for ${tokenMint}:`, parsedError);
       }
     }
 
     if (decimals === null) {
-      const getAccountInfo = this.connection.getAccountInfo?.bind(
-        this.connection,
-      );
+      const getAccountInfo = this.connection.getAccountInfo?.bind(this.connection);
       if (typeof getAccountInfo !== "function") {
-        throw new Error(
-          "RPC connection does not support getAccountInfo for mint metadata",
-        );
+        throw new Error("RPC connection does not support getAccountInfo for mint metadata");
       }
 
       const accountInfo = await getAccountInfo(mintPublicKey);
@@ -1601,9 +1455,7 @@ export class WalletManager {
 
     try {
       await this.throttle();
-      const accountInfo = await this.connection.getAccountInfo(
-        associatedTokenAddress,
-      );
+      const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
       if (!accountInfo) {
         instructions.push(
           createAssociatedTokenAccountInstruction(
@@ -1616,9 +1468,7 @@ export class WalletManager {
         );
       }
     } catch (error) {
-      console.error(
-        `Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`,
-      );
+      console.error(`Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`);
       instructions.push(
         createAssociatedTokenAccountInstruction(
           payer.publicKey,
@@ -1651,13 +1501,12 @@ export class WalletManager {
     }
     const { programId, isToken2022 } = detection;
 
-    const { address, instructions } =
-      await this.findOrCreateAssociatedTokenAccount(
-        owner,
-        tokenMint,
-        payer,
-        programId,
-      );
+    const { address, instructions } = await this.findOrCreateAssociatedTokenAccount(
+      owner,
+      tokenMint,
+      payer,
+      programId,
+    );
 
     return {
       address,
@@ -1682,22 +1531,12 @@ export class WalletManager {
     remainingLamports: number;
   }> {
     const wsolMint = new PublicKey(WSOL_MINT);
-    const wsolAta = await getAssociatedTokenAddress(
-      wsolMint,
-      owner,
-      false,
-      TOKEN_PROGRAM_ID,
-    );
+    const wsolAta = await getAssociatedTokenAddress(wsolMint, owner, false, TOKEN_PROGRAM_ID);
 
     await this.throttle();
     let accountInfo;
     try {
-      accountInfo = await getAccount(
-        this.connection,
-        wsolAta,
-        "confirmed",
-        TOKEN_PROGRAM_ID,
-      );
+      accountInfo = await getAccount(this.connection, wsolAta, "confirmed", TOKEN_PROGRAM_ID);
     } catch (error) {
       throw new Error("No WSOL account found to unwrap.");
     }
@@ -1707,13 +1546,10 @@ export class WalletManager {
       throw new Error("Your WSOL account is already empty.");
     }
     if (!Number.isSafeInteger(availableLamports)) {
-      throw new Error(
-        "WSOL balance is too large to unwrap in a single transaction.",
-      );
+      throw new Error("WSOL balance is too large to unwrap in a single transaction.");
     }
 
-    const unwrapLamports =
-      amountLamports !== undefined ? amountLamports : availableLamports;
+    const unwrapLamports = amountLamports !== undefined ? amountLamports : availableLamports;
     if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
       throw new Error("Unwrap amount must be greater than zero.");
     }
@@ -1841,9 +1677,7 @@ export class WalletManager {
         : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
 
     if (loanLamports > 0 && !adminKeypair) {
-      throw new Error(
-        "Admin keypair required when lending lamports for WSOL unwrap.",
-      );
+      throw new Error("Admin keypair required when lending lamports for WSOL unwrap.");
     }
 
     if (!owner.equals(payer.publicKey)) {
@@ -1887,11 +1721,9 @@ export class WalletManager {
       );
     }
 
-    const signature = await this.sendAndConfirmWithResubmits(
-      instructions,
-      signers,
-      { operationLabel: "Unwrap WSOL" },
-    );
+    const signature = await this.sendAndConfirmWithResubmits(instructions, signers, {
+      operationLabel: "Unwrap WSOL",
+    });
 
     return {
       signature,
@@ -1911,10 +1743,7 @@ export class WalletManager {
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
     // Detect if this is a Token-2022 token
-    const detection = await detectTokenProgram(
-      this.connection,
-      tokenMintPubkey,
-    );
+    const detection = await detectTokenProgram(this.connection, tokenMintPubkey);
     if (!detection) {
       this.logMissingMintWarning(tokenMint);
       throw new Error(`Token mint ${tokenMint} was not found`);
@@ -1936,12 +1765,7 @@ export class WalletManager {
         fromKeypair,
         programId,
       ),
-      this.findOrCreateAssociatedTokenAccount(
-        toAddress,
-        tokenMintPubkey,
-        fromKeypair,
-        programId,
-      ),
+      this.findOrCreateAssociatedTokenAccount(toAddress, tokenMintPubkey, fromKeypair, programId),
     ]);
 
     const transferInstruction = createTransferCheckedInstruction(
@@ -1955,16 +1779,10 @@ export class WalletManager {
       programId,
     );
 
-    const allInstructions = [
-      ...fromInstructions,
-      ...toInstructions,
-      transferInstruction,
-    ];
-    return await this.sendAndConfirmWithResubmits(
-      allInstructions,
-      [fromKeypair],
-      { operationLabel: "Token transfer" },
-    );
+    const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
+    return await this.sendAndConfirmWithResubmits(allInstructions, [fromKeypair], {
+      operationLabel: "Token transfer",
+    });
   }
 
   public async transferSol(
@@ -1973,9 +1791,7 @@ export class WalletManager {
     amountLamports: number,
   ): Promise<string> {
     if (!Number.isSafeInteger(amountLamports) || amountLamports <= 0) {
-      throw new Error(
-        "Transfer amount must be a positive integer number of lamports",
-      );
+      throw new Error("Transfer amount must be a positive integer number of lamports");
     }
 
     const fromKeypair = this.getKeyPair(fromTelegramId);
@@ -1985,11 +1801,9 @@ export class WalletManager {
       lamports: amountLamports,
     });
 
-    return await this.sendAndConfirmWithResubmits(
-      [transferInstruction],
-      [fromKeypair],
-      { operationLabel: "SOL transfer" },
-    );
+    return await this.sendAndConfirmWithResubmits([transferInstruction], [fromKeypair], {
+      operationLabel: "SOL transfer",
+    });
   }
 
   public async withdrawAllSol(
@@ -2012,9 +1826,7 @@ export class WalletManager {
     const formatLamports = (lamports: number) =>
       `${lamports} lamports (${(lamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)`;
 
-    console.log(
-      `${debugPrefix} Native balance ${formatLamports(nativeLamports)}`,
-    );
+    console.log(`${debugPrefix} Native balance ${formatLamports(nativeLamports)}`);
 
     if (nativeLamports <= 0) {
       throw new Error("No SOL available to withdraw.");
@@ -2026,15 +1838,9 @@ export class WalletManager {
       lamports: 0,
     });
 
-    const feeWithTransfer = await this.estimateFee(payer, [
-      placeholderTransfer,
-    ]);
+    const feeWithTransfer = await this.estimateFee(payer, [placeholderTransfer]);
 
-    console.log(
-      `${debugPrefix} Estimated fee with transfer: ${formatLamports(
-        feeWithTransfer,
-      )}`,
-    );
+    console.log(`${debugPrefix} Estimated fee with transfer: ${formatLamports(feeWithTransfer)}`);
 
     if (nativeLamports <= feeWithTransfer) {
       throw new Error(
@@ -2044,9 +1850,7 @@ export class WalletManager {
 
     const transferLamports = nativeLamports - feeWithTransfer;
 
-    console.log(
-      `${debugPrefix} Transfer plan: native ${formatLamports(transferLamports)}`,
-    );
+    console.log(`${debugPrefix} Transfer plan: native ${formatLamports(transferLamports)}`);
 
     const transferInstruction = SystemProgram.transfer({
       fromPubkey: payer,
@@ -2054,11 +1858,9 @@ export class WalletManager {
       lamports: transferLamports,
     });
 
-    const signature = await this.sendAndConfirmWithResubmits(
-      [transferInstruction],
-      [userKeypair],
-      { operationLabel: "Withdraw SOL" },
-    );
+    const signature = await this.sendAndConfirmWithResubmits([transferInstruction], [userKeypair], {
+      operationLabel: "Withdraw SOL",
+    });
 
     console.log(`${debugPrefix} Sent withdraw-all transaction ${signature}`);
 
@@ -2086,9 +1888,9 @@ export class WalletManager {
     const trackedSignature = this.pendingSignatures.get(signature);
     let lastBlockHeightCheck = startTime;
 
-    const boundGetSignatureStatuses = (
-      this.connection as any
-    )?.getSignatureStatuses?.bind(this.connection);
+    const boundGetSignatureStatuses = (this.connection as any)?.getSignatureStatuses?.bind(
+      this.connection,
+    );
     const hasStatusesMethod = typeof boundGetSignatureStatuses === "function";
 
     const fetchStatus = async (useHistory: boolean) => {
@@ -2112,10 +1914,7 @@ export class WalletManager {
         return null;
       }
 
-      if (
-        !force &&
-        now - lastBlockHeightCheck < BLOCK_HEIGHT_CHECK_INTERVAL_MS
-      ) {
+      if (!force && now - lastBlockHeightCheck < BLOCK_HEIGHT_CHECK_INTERVAL_MS) {
         return null;
       }
 
@@ -2133,12 +1932,8 @@ export class WalletManager {
         }
       } catch (blockHeightError: any) {
         const errorMessage =
-          blockHeightError instanceof Error
-            ? blockHeightError.message
-            : String(blockHeightError);
-        console.warn(
-          `⚠️ Failed to check block height for ${signature}: ${errorMessage}`,
-        );
+          blockHeightError instanceof Error ? blockHeightError.message : String(blockHeightError);
+        console.warn(`⚠️ Failed to check block height for ${signature}: ${errorMessage}`);
       }
 
       return null;
@@ -2154,16 +1949,13 @@ export class WalletManager {
         const pollStart = Date.now();
         const elapsed = pollStart - startTime;
 
-        const enableHistorySearch =
-          elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
+        const enableHistorySearch = elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
 
         if (enableHistorySearch && !historySearchEnabled) {
           historySearchEnabled = true;
           if (hasStatusesMethod) {
             historyEnabledAt = elapsed;
-            console.log(
-              `🗂️ Transaction ${signature} history lookup enabled after ${elapsed}ms`,
-            );
+            console.log(`🗂️ Transaction ${signature} history lookup enabled after ${elapsed}ms`);
           }
         }
 
@@ -2201,9 +1993,7 @@ export class WalletManager {
         if (status) {
           const currentStatus = status.confirmationStatus || "unknown";
           const currentConfirmations =
-            typeof status.confirmations === "number"
-              ? status.confirmations
-              : null;
+            typeof status.confirmations === "number" ? status.confirmations : null;
 
           if (
             currentStatus !== lastConfirmationStatus ||
@@ -2212,9 +2002,7 @@ export class WalletManager {
           ) {
             console.log(
               `📊 Transaction ${signature} status update (poll ${pollCount}, ${elapsedAfterFetch}ms): ${currentStatus}${
-                currentConfirmations !== null
-                  ? ` (${currentConfirmations} confirmations)`
-                  : ""
+                currentConfirmations !== null ? ` (${currentConfirmations} confirmations)` : ""
               }`,
             );
             lastConfirmationStatus = currentStatus;
@@ -2223,21 +2011,15 @@ export class WalletManager {
 
           if (status.err) {
             console.error(`❌ Transaction ${signature} failed:`, status.err);
-            throw new Error(
-              `Transaction failed: ${JSON.stringify(status.err)}`,
-            );
+            throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
           }
 
           if (currentStatus === "confirmed" || currentStatus === "finalized") {
             console.log(
               `✅ Transaction ${signature} confirmed in ${elapsedAfterFetch}ms (${pollCount} polls, history=${
-                historyEnabledAt !== null
-                  ? `enabled@${historyEnabledAt}ms`
-                  : "not-used"
+                historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
               }, firstStatus=${
-                firstStatusObservedAt !== null
-                  ? `${firstStatusObservedAt}ms`
-                  : "none"
+                firstStatusObservedAt !== null ? `${firstStatusObservedAt}ms` : "none"
               }, networkRetries=${networkRetryCount})`,
             );
             return;
@@ -2261,9 +2043,7 @@ export class WalletManager {
         await this.sleep(pollInterval);
       }
 
-      console.log(
-        `🔄 Performing final status check for ${signature} after ${pollCount} polls`,
-      );
+      console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
       const finalStatus = await fetchStatus(true);
       const finalNow = Date.now();
 
@@ -2273,26 +2053,17 @@ export class WalletManager {
         }
         if (finalStatus.err) {
           console.error(`❌ Transaction ${signature} failed:`, finalStatus.err);
-          throw new Error(
-            `Transaction failed: ${JSON.stringify(finalStatus.err)}`,
-          );
+          throw new Error(`Transaction failed: ${JSON.stringify(finalStatus.err)}`);
         }
 
         const finalStatusLabel = finalStatus.confirmationStatus || "unknown";
         const finalConfirmations =
-          typeof finalStatus.confirmations === "number"
-            ? finalStatus.confirmations
-            : null;
+          typeof finalStatus.confirmations === "number" ? finalStatus.confirmations : null;
 
-        if (
-          finalStatusLabel === "confirmed" ||
-          finalStatusLabel === "finalized"
-        ) {
+        if (finalStatusLabel === "confirmed" || finalStatusLabel === "finalized") {
           console.log(
             `✅ Transaction ${signature} confirmed on final check (polls=${pollCount}, history=${
-              historyEnabledAt !== null
-                ? `enabled@${historyEnabledAt}ms`
-                : "not-used"
+              historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
             }, firstStatus=${`${firstStatusObservedAt}ms`}, networkRetries=${networkRetryCount})`,
           );
           return;
@@ -2300,13 +2071,9 @@ export class WalletManager {
 
         console.log(
           `📊 Final status for ${signature}: ${finalStatusLabel}${
-            finalConfirmations !== null
-              ? ` (${finalConfirmations} confirmations)`
-              : ""
+            finalConfirmations !== null ? ` (${finalConfirmations} confirmations)` : ""
           } (polls=${pollCount}, history=${
-            historyEnabledAt !== null
-              ? `enabled@${historyEnabledAt}ms`
-              : "not-used"
+            historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
           }, firstStatus=${`${firstStatusObservedAt}ms`}, networkRetries=${networkRetryCount})`,
         );
       }
@@ -2320,9 +2087,7 @@ export class WalletManager {
     }
 
     if (this.postTimeoutProbeBackoffMs > 0) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.postTimeoutProbeBackoffMs),
-      );
+      await new Promise((resolve) => setTimeout(resolve, this.postTimeoutProbeBackoffMs));
     }
 
     const probeResult = await this.probeTransactionAfterTimeout(signature);
@@ -2407,15 +2172,10 @@ export class WalletManager {
             console.error(logs.join("\n"));
             console.error("========================================\n");
           } else {
-            console.warn(
-              "⚠️ SendTransactionError caught but no logs returned from getLogs()",
-            );
+            console.warn("⚠️ SendTransactionError caught but no logs returned from getLogs()");
           }
         } catch (logError) {
-          console.error(
-            "❌ Failed to fetch transaction logs during error handling:",
-            logError,
-          );
+          console.error("❌ Failed to fetch transaction logs during error handling:", logError);
         }
       } else {
         console.log(
@@ -2443,14 +2203,11 @@ export class WalletManager {
   ): Promise<string> {
     if (signers.length === 0) throw new Error("No creator signer provided");
     transaction.partialSign(...signers);
-    const signature = await this.connection.sendRawTransaction(
-      transaction.serialize(),
-      {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-        maxRetries: 3,
-      },
-    );
+    const signature = await this.connection.sendRawTransaction(transaction.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+    });
     this.pendingSignatures.set(signature, {
       ...blockhash,
       recordedAt: Date.now(),
@@ -2469,9 +2226,7 @@ export class WalletManager {
     } = {},
   ): Promise<string> {
     if (instructions.length === 0) {
-      throw new Error(
-        "No instructions provided for sendAndConfirmWithResubmits",
-      );
+      throw new Error("No instructions provided for sendAndConfirmWithResubmits");
     }
 
     if (signers.length === 0) {
@@ -2560,10 +2315,7 @@ export class WalletManager {
         return fee;
       }
     } catch (error) {
-      console.warn(
-        "⚠️ Failed to estimate fee, falling back to default:",
-        error,
-      );
+      console.warn("⚠️ Failed to estimate fee, falling back to default:", error);
     }
 
     return 5_000; // conservative fallback (~0.000005 SOL)
@@ -2656,10 +2408,7 @@ export class WalletManager {
     lastValidBlockHeight: number;
   }> {
     const now = Date.now();
-    if (
-      this.blockhashCache &&
-      now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION
-    ) {
+    if (this.blockhashCache && now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION) {
       return {
         blockhash: this.blockhashCache.blockhash,
         lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight,
@@ -2676,18 +2425,12 @@ export class WalletManager {
     return formatAmount(lamports, 9, { trim: true });
   }
 
-  public formatTokenBalance(
-    amount: number | bigint | string,
-    decimals: number,
-  ): string {
+  public formatTokenBalance(amount: number | bigint | string, decimals: number): string {
     // Use shared formatter for consistent rounding and trimming
     return formatAmount(amount, decimals, { trim: true });
   }
 
-  public async wrapSol(
-    telegramId: bigint,
-    amountLamports: number,
-  ): Promise<string> {
+  public async wrapSol(telegramId: bigint, amountLamports: number): Promise<string> {
     const userKeypair = this.getKeyPair(telegramId);
 
     return this.wrapSolWithKeypair({

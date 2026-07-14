@@ -55,7 +55,8 @@ type ChatTokenInfo = {
   decimals: number;
 };
 
-type CreateAmountSelectionKeyboard = typeof import("../utils/keyboards").createAmountSelectionKeyboard;
+type CreateAmountSelectionKeyboard =
+  typeof import("../utils/keyboards").createAmountSelectionKeyboard;
 type GetSuggestedStakeAmounts = typeof import("../utils/keyboards").getSuggestedStakeAmounts;
 type SafeAnswerCallbackQuery = typeof import("../utils/context-helpers").safeAnswerCallbackQuery;
 type GetTelegramId = typeof import("../utils/context-helpers").getTelegramId;
@@ -68,18 +69,16 @@ type DefaultTokenMetadata = Awaited<ReturnType<WalletManager["getTokenMetadata"]
 
 type GetContractMinimumAmount = (
   tokenMint: string,
-  decimalsHint?: number
+  decimalsHint?: number,
 ) => Promise<{ formatted: number; raw: number; decimals: number }>;
 
-type FetchTokenPriceUSD = (input: {
-  tokenMint: string;
-}) => Promise<number | null>;
+type FetchTokenPriceUSD = (input: { tokenMint: string }) => Promise<number | null>;
 
 type GetDefaultTokenMetadata = () => Promise<DefaultTokenMetadata>;
 
 type CreatorCallbackHandler = (
   ctx: Context,
-  creatorCtx: CreatorCallbackContext
+  creatorCtx: CreatorCallbackContext,
 ) => Promise<void> | void;
 
 type CreatorResolver = (ctx: Context) => string | undefined;
@@ -120,36 +119,32 @@ export type GameSetupModule = {
     ctx: Context & { message?: any },
     telegramId: bigint,
     copy: GameSetupCopy,
-    tokenOverride?: GameTokenOverride
+    tokenOverride?: GameTokenOverride,
   ) => Promise<void>;
   resolveCommandTokenOverride: (
     tokenInput: string,
-    chatId?: number
+    chatId?: number,
   ) => Promise<GameTokenOverride | null>;
   buildTokenContext: (
     session: GameSetupSession | undefined,
-    chatId?: number
+    chatId?: number,
   ) => Promise<TokenContext>;
   withCreatorContext: (
     options: CreatorCallbackOptions,
-    handler: CreatorCallbackHandler
+    handler: CreatorCallbackHandler,
   ) => (ctx: Context) => Promise<void>;
   __test_startInteractiveGameSetup: (
     ctx: Context & { message?: any },
     telegramId: bigint,
     copy: GameSetupCopy,
-    tokenOverride?: GameTokenOverride
+    tokenOverride?: GameTokenOverride,
   ) => Promise<void>;
 };
 
-export const createGameSetupModule = (
-  deps: GameSetupModuleDeps
-): GameSetupModule => {
+export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModule => {
   const getDefaultTokenMetadata = deps.getDefaultTokenMetadata;
 
-  const resolveChatTokenInfo = async (
-    chatId?: number
-  ): Promise<ChatTokenInfo> => {
+  const resolveChatTokenInfo = async (chatId?: number): Promise<ChatTokenInfo> => {
     const manager = deps.getTokenManager();
     if (!manager) {
       const fallbackMetadata = await getDefaultTokenMetadata();
@@ -171,13 +166,10 @@ export const createGameSetupModule = (
       }
 
       console.warn(
-        `[GameSetup] Failed to resolve chat token ${resolved.unknownToken ?? "unknown"}, using default token`
+        `[GameSetup] Failed to resolve chat token ${resolved.unknownToken ?? "unknown"}, using default token`,
       );
     } catch (error) {
-      console.warn(
-        "⚠️ Could not resolve chat token configuration, using default token",
-        error
-      );
+      console.warn("⚠️ Could not resolve chat token configuration, using default token", error);
     }
 
     const fallbackMetadata = await getDefaultTokenMetadata();
@@ -192,7 +184,7 @@ export const createGameSetupModule = (
     ctx: Context & { message?: any },
     telegramId: bigint,
     copy: GameSetupCopy,
-    tokenOverride?: GameTokenOverride
+    tokenOverride?: GameTokenOverride,
   ): Promise<void> => {
     console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
 
@@ -207,10 +199,7 @@ export const createGameSetupModule = (
     let userBalance = 0;
 
     try {
-      const tokenBalance = await deps.wallet.getTokenBalance(
-        telegramId,
-        tokenInfo.tokenMint
-      );
+      const tokenBalance = await deps.wallet.getTokenBalance(telegramId, tokenInfo.tokenMint);
       userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
     } catch (error) {
       console.error("Error getting token balance:", error);
@@ -218,7 +207,7 @@ export const createGameSetupModule = (
 
     const { formatted: contractMin } = await deps.getContractMinimumAmount(
       tokenInfo.tokenMint,
-      tokenInfo.decimals
+      tokenInfo.decimals,
     );
 
     const tokenPriceUSD = await deps.fetchTokenPriceUSD({
@@ -228,7 +217,7 @@ export const createGameSetupModule = (
     const suggestedAmounts = deps.getSuggestedStakeAmounts(
       contractMin,
       userBalance,
-      tokenPriceUSD ?? undefined
+      tokenPriceUSD ?? undefined,
     );
 
     let message = `${copy.heading}\n\n`;
@@ -279,7 +268,7 @@ export const createGameSetupModule = (
         {
           decimals: tokenInfo.decimals,
           tokenPriceUSD: tokenPriceUSD ?? undefined,
-        }
+        },
       ),
       reply_to_message_id: ctx.message?.message_id,
     });
@@ -300,7 +289,7 @@ export const createGameSetupModule = (
 
   const resolveCommandTokenOverride = async (
     tokenInput: string,
-    chatId?: number
+    chatId?: number,
   ): Promise<GameTokenOverride | null> => {
     const manager = deps.getTokenManager();
     if (!manager) {
@@ -317,11 +306,7 @@ export const createGameSetupModule = (
     }
 
     try {
-      const resolved = await manager.resolveGameTokenContext(
-        chatId,
-        candidate,
-        "game"
-      );
+      const resolved = await manager.resolveGameTokenContext(chatId, candidate, "game");
       if (!resolved.success) {
         return null;
       }
@@ -339,7 +324,7 @@ export const createGameSetupModule = (
 
   const buildTokenContext = async (
     session: GameSetupSession | undefined,
-    chatId?: number
+    chatId?: number,
   ): Promise<TokenContext> => {
     if (session?.tokenMint) {
       const decimals =
@@ -365,7 +350,7 @@ export const createGameSetupModule = (
   const ensureCreator = (
     ctx: Context,
     creatorId: string,
-    failureText = "🚫 Only the game creator can modify this setup!"
+    failureText = "🚫 Only the game creator can modify this setup!",
   ): boolean => {
     const currentUserId = deps.getTelegramIdString(ctx);
 
@@ -377,17 +362,14 @@ export const createGameSetupModule = (
     return true;
   };
 
-  const withCreatorContext = (
-    options: CreatorCallbackOptions,
-    handler: CreatorCallbackHandler
-  ) => {
+  const withCreatorContext = (options: CreatorCallbackOptions, handler: CreatorCallbackHandler) => {
     return async (ctx: Context) => {
       const creatorId = options.resolveCreatorId(ctx);
       const currentUserId = deps.getTelegramIdString(ctx);
 
       console.log(`🔔 ${options.name} callback triggered:`, ctx.callbackQuery?.data);
       console.log(
-        `👤 Creator: ${creatorId ?? "unknown"}, Current user: ${currentUserId ?? "unknown"}`
+        `👤 Creator: ${creatorId ?? "unknown"}, Current user: ${currentUserId ?? "unknown"}`,
       );
 
       if (!creatorId) {
@@ -420,9 +402,7 @@ export const createGameSetupModule = (
         updateSession: (updates, keyOverride?: string) => {
           const keyToUse = keyOverride ?? sessionKey;
           const contractMinimum =
-            updates.contractMinimum ??
-            session?.contractMinimum ??
-            tokenContext.contractMinimum;
+            updates.contractMinimum ?? session?.contractMinimum ?? tokenContext.contractMinimum;
 
           const next = deps.upsertGameSetupSession(keyToUse, {
             ...updates,

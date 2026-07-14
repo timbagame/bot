@@ -3,11 +3,7 @@ import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
 import type { KeypairBundle } from "./utils/keypairs";
-import {
-  bundleFromKeypair,
-  resolveOracleOperatorBundle,
-  uniqueSigners,
-} from "./utils/keypairs";
+import { bundleFromKeypair, resolveOracleOperatorBundle, uniqueSigners } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import { loadWalletMnemonic } from "../src/utils/secrets";
@@ -23,23 +19,19 @@ async function disableToken(
   oracleOperator: KeypairBundle,
   mintAddress: string,
   ticker: string,
-  wallet: WalletManager
+  wallet: WalletManager,
 ): Promise<void> {
   const mint = new anchor.web3.PublicKey(mintAddress);
   const [gameTokenPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
 
-  console.log(
-    `\n🔌 Disabling ${ticker} (mint ${mintAddress}) — PDA ${gameTokenPda.toBase58()}`
-  );
+  console.log(`\n🔌 Disabling ${ticker} (mint ${mintAddress}) — PDA ${gameTokenPda.toBase58()}`);
 
   const accountInfo = await connection.getAccountInfo(gameTokenPda);
   if (!accountInfo) {
-    console.warn(
-      `⚠️  Game token account not found for ${ticker}. Skipping disable step.`
-    );
+    console.warn(`⚠️  Game token account not found for ${ticker}. Skipping disable step.`);
     return;
   }
 
@@ -52,7 +44,7 @@ async function disableToken(
 
   const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
-    program.programId
+    program.programId,
   );
 
   const config = {
@@ -73,7 +65,7 @@ async function disableToken(
   const tx = await wallet.sendAndConfirmWithResubmits(
     [instruction],
     uniqueSigners(admin.root, oracleOperator.root),
-    { operationLabel: `Disable ${ticker} token` }
+    { operationLabel: `Disable ${ticker} token` },
   );
 
   console.log(`🚫 ${ticker} disabled. Transaction: ${tx}`);
@@ -94,11 +86,9 @@ async function main() {
   });
 
   const connection = provider.connection;
-  const balanceLamports = await connection.getBalance(
-    adminBundle.anchor.publicKey
-  );
+  const balanceLamports = await connection.getBalance(adminBundle.anchor.publicKey);
   console.log(
-    `🔑 Admin signer: ${adminBundle.anchor.publicKey.toBase58()} — balance ${(balanceLamports / anchor.web3.LAMPORTS_PER_SOL).toFixed(4)} SOL`
+    `🔑 Admin signer: ${adminBundle.anchor.publicKey.toBase58()} — balance ${(balanceLamports / anchor.web3.LAMPORTS_PER_SOL).toFixed(4)} SOL`,
   );
 
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
@@ -111,7 +101,7 @@ async function main() {
       oracleOperatorBundle,
       token.mint,
       token.ticker,
-      wallet
+      wallet,
     );
   }
 

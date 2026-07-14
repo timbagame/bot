@@ -192,4 +192,3 @@ describe("Chat defaults video settings isolation", () => {
     expect(settings2?.giveaway_media_type).toBeNull();
   });
 });
-

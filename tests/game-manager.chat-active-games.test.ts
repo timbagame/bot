@@ -13,9 +13,7 @@ describe("GameManager.getChatActiveGames", () => {
   });
 
   test("returns chat-scoped active games with join callbacks", async () => {
-    const gameAddress = new PublicKey(
-      "BPFLoader1111111111111111111111111111111111"
-    ).toBase58();
+    const gameAddress = new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58();
 
     const gameDb = {
       getActiveGamesByChat: vi.fn(() => [

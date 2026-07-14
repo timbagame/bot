@@ -16,14 +16,8 @@ describe("Game completion announcements", () => {
 
     originalSendMessage = botModule.bot.api.sendMessage.bind(botModule.bot.api);
     originalGameManager = botModule.gameManager;
-    originalGetBlockchainTime = botModule.wallet.getBlockchainTime.bind(
-      botModule.wallet
-    );
-    (botModule.bot.api as any).sendMessage = async (
-      chatId: number,
-      text: string,
-      options: any
-    ) => {
+    originalGetBlockchainTime = botModule.wallet.getBlockchainTime.bind(botModule.wallet);
+    (botModule.bot.api as any).sendMessage = async (chatId: number, text: string, options: any) => {
       sendCalls.push({ chatId, text, options });
       return { ok: true, result: { message_id: 500 } } as any;
     };
@@ -68,7 +62,7 @@ describe("Game completion announcements", () => {
       "GAME_COMPLETED",
       Keypair.generate().publicKey.toBase58(),
       1_000,
-      "SIG_WINNER"
+      "SIG_WINNER",
     );
 
     expect(sendCalls.length).toBe(1);
@@ -101,7 +95,7 @@ describe("Game completion announcements", () => {
     (botModule.wallet as any).getBlockchainTime = async () => 321;
     await botModule.__test_processGameCompletion(
       "GIVEAWAY_COMPLETE",
-      Keypair.generate().publicKey.toBase58()
+      Keypair.generate().publicKey.toBase58(),
     );
 
     expect(sendCalls[0]?.text).toContain("won the giveaway!");
@@ -120,8 +114,7 @@ describe("Game completion announcements", () => {
         token_ticker: "SOL",
       }),
       completeGame: () => {},
-      getPlayerTelegramId: (pubkey: string) =>
-        pubkey === winnerPubkey ? "123" : null, // Winner's telegram ID
+      getPlayerTelegramId: (pubkey: string) => (pubkey === winnerPubkey ? "123" : null), // Winner's telegram ID
       getGameParticipantsCount: () => 2,
       getGameMessages: () => [],
     } as any);
@@ -138,12 +131,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 555;
-    await botModule.__test_processGameCompletion(
-      "GAME_WINNER_DM",
-      winnerPubkey,
-      500,
-      "SIG_WINNER"
-    );
+    await botModule.__test_processGameCompletion("GAME_WINNER_DM", winnerPubkey, 500, "SIG_WINNER");
 
     // Should have sent: 1 announcement only
     expect(sendCalls.length).toBe(1);
@@ -161,8 +149,7 @@ describe("Game completion announcements", () => {
         creator_telegram_id: "777", // Same as winner
       }),
       completeGame: () => {},
-      getPlayerTelegramId: (pubkey: string) =>
-        pubkey === creatorPubkey ? "777" : null, // Creator is the winner
+      getPlayerTelegramId: (pubkey: string) => (pubkey === creatorPubkey ? "777" : null), // Creator is the winner
       getGameParticipantsCount: () => 2,
       getGameMessages: () => [],
     } as any);
@@ -175,11 +162,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 666;
-    await botModule.__test_processGameCompletion(
-      "CREATOR_WINS",
-      creatorPubkey,
-      100
-    );
+    await botModule.__test_processGameCompletion("CREATOR_WINS", creatorPubkey, 100);
 
     // Should only have 1 call (announcement), no DM since creator always sees the game
     expect(sendCalls.length).toBe(1);
@@ -218,11 +201,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 100;
-    await botModule.__test_processGameCompletion(
-      "GAME_WITH_TOTAL_POT",
-      winnerPubkey,
-      1_000
-    );
+    await botModule.__test_processGameCompletion("GAME_WITH_TOTAL_POT", winnerPubkey, 1_000);
 
     expect(receivedPot).toBe(1_000);
   });
@@ -260,10 +239,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 100;
-    await botModule.__test_processGameCompletion(
-      "GAME_WITH_TOTAL_AMOUNT",
-      winnerPubkey
-    );
+    await botModule.__test_processGameCompletion("GAME_WITH_TOTAL_AMOUNT", winnerPubkey);
 
     expect(receivedPot).toBe(1_500);
   });
@@ -300,10 +276,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 100;
-    await botModule.__test_processGameCompletion(
-      "GAME_WITH_AMOUNT_ONLY",
-      winnerPubkey
-    );
+    await botModule.__test_processGameCompletion("GAME_WITH_AMOUNT_ONLY", winnerPubkey);
 
     expect(receivedPot).toBe(2_000);
   });
@@ -340,10 +313,7 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 100;
-    await botModule.__test_processGameCompletion(
-      "GIVEAWAY_WITH_AMOUNT_ONLY",
-      winnerPubkey
-    );
+    await botModule.__test_processGameCompletion("GIVEAWAY_WITH_AMOUNT_ONLY", winnerPubkey);
 
     expect(receivedPot).toBe(1_000);
   });

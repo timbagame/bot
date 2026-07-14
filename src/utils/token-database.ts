@@ -24,7 +24,7 @@ export class TokenDatabase extends BaseDatabase {
           token_program_id TEXT
         )`,
       ],
-      "Token"
+      "Token",
     );
 
     this.ensureKnownTokenSchema();
@@ -38,7 +38,7 @@ export class TokenDatabase extends BaseDatabase {
     tokenMint: string,
     tokenTicker: string,
     decimals: number,
-    tokenProgramId?: string | null
+    tokenProgramId?: string | null,
   ): void {
     this.run(
       `INSERT OR REPLACE INTO known_tokens (
@@ -49,7 +49,7 @@ export class TokenDatabase extends BaseDatabase {
         token_program_id
       ) VALUES (?, ?, ?, ?, ?)`,
       [tokenMint, tokenTicker, decimals, Date.now(), tokenProgramId ?? null],
-      "adding known token"
+      "adding known token",
     );
   }
 
@@ -57,7 +57,7 @@ export class TokenDatabase extends BaseDatabase {
     this.run(
       "UPDATE known_tokens SET token_program_id = ? WHERE token_mint = ?",
       [programId, tokenMint],
-      "setting known token program id"
+      "setting known token program id",
     );
   }
 
@@ -66,7 +66,7 @@ export class TokenDatabase extends BaseDatabase {
       const columns = this.all<{ name: string }>(
         "PRAGMA table_info(known_tokens)",
         [],
-        "reading known_tokens schema"
+        "reading known_tokens schema",
       );
       const columnNames = new Set(columns.map((col) => col.name));
 
@@ -74,7 +74,7 @@ export class TokenDatabase extends BaseDatabase {
         this.run(
           "ALTER TABLE known_tokens ADD COLUMN token_program_id TEXT",
           [],
-          "adding token_program_id column to known_tokens"
+          "adding token_program_id column to known_tokens",
         );
       }
     } catch (error) {
@@ -86,7 +86,7 @@ export class TokenDatabase extends BaseDatabase {
     return this.get<KnownToken>(
       "SELECT * FROM known_tokens WHERE UPPER(token_ticker) = UPPER(?)",
       [ticker],
-      "getting known token by ticker"
+      "getting known token by ticker",
     );
   }
 
@@ -94,7 +94,7 @@ export class TokenDatabase extends BaseDatabase {
     return this.get<KnownToken>(
       "SELECT * FROM known_tokens WHERE token_mint = ?",
       [tokenMint],
-      "getting known token by mint"
+      "getting known token by mint",
     );
   }
 
@@ -102,16 +102,12 @@ export class TokenDatabase extends BaseDatabase {
     return this.all<KnownToken>(
       "SELECT * FROM known_tokens ORDER BY token_ticker",
       [],
-      "getting all known tokens"
+      "getting all known tokens",
     );
   }
 
   public removeKnownToken(tokenMint: string): void {
-    this.run(
-      "DELETE FROM known_tokens WHERE token_mint = ?",
-      [tokenMint],
-      "removing known token"
-    );
+    this.run("DELETE FROM known_tokens WHERE token_mint = ?", [tokenMint], "removing known token");
   }
 
   // ================================
@@ -119,11 +115,6 @@ export class TokenDatabase extends BaseDatabase {
   // ================================
 
   public getTokenCount(): number {
-    return this.getCount(
-      "SELECT COUNT(*) as count FROM known_tokens",
-      [],
-      "getting token count"
-    );
+    return this.getCount("SELECT COUNT(*) as count FROM known_tokens", [], "getting token count");
   }
-
 }

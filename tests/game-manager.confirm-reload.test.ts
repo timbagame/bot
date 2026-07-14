@@ -4,12 +4,8 @@ import { PublicKey, Keypair } from "@solana/web3.js";
 import { formatUserFriendlyError } from "../src/utils/errors";
 import { TRANSACTION_RESUBMIT_ATTEMPTS } from "../src/utils/constants";
 
-const DEFAULT_GAME_PDA = new PublicKey(
-  "BPFLoader1111111111111111111111111111111111"
-);
-const DEFAULT_PLAYER_PUBKEY = new PublicKey(
-  "BPFLoader2111111111111111111111111111111111"
-);
+const DEFAULT_GAME_PDA = new PublicKey("BPFLoader1111111111111111111111111111111111");
+const DEFAULT_PLAYER_PUBKEY = new PublicKey("BPFLoader2111111111111111111111111111111111");
 
 function resetGM() {
   // @ts-ignore
@@ -67,7 +63,7 @@ describe("GameManager confirm/reload helpers", () => {
       "SIG123",
       DEFAULT_GAME_PDA,
       "Player join",
-      DEFAULT_PLAYER_PUBKEY
+      DEFAULT_PLAYER_PUBKEY,
     );
     expect(confirmed).toBe("SIG123");
   });
@@ -94,7 +90,7 @@ describe("GameManager confirm/reload helpers", () => {
           throw error;
         }
         return "SIG_SUCCESS";
-      }
+      },
     );
 
     expect(finalSignature).toBe("SIG_SUCCESS");
@@ -108,7 +104,7 @@ describe("GameManager confirm/reload helpers", () => {
     const wallet = {
       confirmTransaction: async () => {
         throw new Error(
-          "Transaction abc expired before confirmation (last valid block height 10, current 15)"
+          "Transaction abc expired before confirmation (last valid block height 10, current 15)",
         );
       },
     } as any;
@@ -124,7 +120,7 @@ describe("GameManager confirm/reload helpers", () => {
       "SIG-EXP",
       DEFAULT_GAME_PDA,
       "Player join",
-      DEFAULT_PLAYER_PUBKEY
+      DEFAULT_PLAYER_PUBKEY,
     );
     expect(confirmed).toBe("SIG-EXP");
   });
@@ -148,7 +144,7 @@ describe("GameManager confirm/reload helpers", () => {
     const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG-HISTORY",
       DEFAULT_GAME_PDA,
-      "Game creation"
+      "Game creation",
     );
 
     expect(confirmed).toBe("SIG-HISTORY");
@@ -167,7 +163,7 @@ describe("GameManager confirm/reload helpers", () => {
       "SIG-UNJOIN",
       DEFAULT_GAME_PDA,
       "Player unjoin",
-      DEFAULT_PLAYER_PUBKEY
+      DEFAULT_PLAYER_PUBKEY,
     );
 
     expect(confirmed).toBe("SIG-UNJOIN");
@@ -192,7 +188,7 @@ describe("GameManager confirm/reload helpers", () => {
     const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG-CLOSE",
       DEFAULT_GAME_PDA,
-      "Game close"
+      "Game close",
     );
 
     expect(confirmed).toBe("SIG-CLOSE");
@@ -220,7 +216,7 @@ describe("GameManager confirm/reload helpers", () => {
       "Player join",
       DEFAULT_PLAYER_PUBKEY,
       undefined,
-      { retryDelays: [0] }
+      { retryDelays: [0] },
     );
 
     expect(confirmed).toBe("SIG-EMPTY-RETRY");
@@ -245,8 +241,8 @@ describe("GameManager confirm/reload helpers", () => {
         "SIG-JOIN-PROBE",
         DEFAULT_GAME_PDA,
         "Player join",
-        DEFAULT_PLAYER_PUBKEY
-      )
+        DEFAULT_PLAYER_PUBKEY,
+      ),
     ).rejects.toThrow(/probe blew up/);
   });
 
@@ -268,9 +264,7 @@ describe("GameManager confirm/reload helpers", () => {
       },
       getConnection: () => ({
         getSignatureStatuses: async (signatures: string[]) => ({
-          value: signatures.map(
-            (sig) => (statusMap[sig]?.shift() as any) ?? null
-          ),
+          value: signatures.map((sig) => (statusMap[sig]?.shift() as any) ?? null),
         }),
       }),
     } as any;
@@ -288,9 +282,9 @@ describe("GameManager confirm/reload helpers", () => {
           signature,
           DEFAULT_GAME_PDA,
           "Player join",
-          DEFAULT_PLAYER_PUBKEY
-        )
-      )
+          DEFAULT_PLAYER_PUBKEY,
+        ),
+      ),
     );
 
     expect(sig1).toBe("SIG_CONC_1");
@@ -328,16 +322,14 @@ describe("GameManager confirm/reload helpers", () => {
           const err = new Error(`resubmit attempt ${attempts}`);
           throw err;
         },
-        { retryDelays: [] }
+        { retryDelays: [] },
       );
       throw new Error("Expected failure");
     } catch (error: any) {
       capturedError = error;
       expect(error.message).toMatch(/transaction confirmation timeout/);
       expect(error.cause).toBeInstanceOf(Error);
-      expect((error.cause as Error).message).toMatch(
-        /resubmit attempt/
-      );
+      expect((error.cause as Error).message).toMatch(/resubmit attempt/);
     }
 
     expect(attempts).toBe(TRANSACTION_RESUBMIT_ATTEMPTS);
@@ -347,9 +339,7 @@ describe("GameManager confirm/reload helpers", () => {
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     const wallet = {
       confirmTransaction: async () => {
-        const err = new Error(
-          "transaction confirmation timeout: RPC node did not respond"
-        );
+        const err = new Error("transaction confirmation timeout: RPC node did not respond");
         return Promise.reject(err);
       },
       getConnection: () => ({
@@ -370,16 +360,14 @@ describe("GameManager confirm/reload helpers", () => {
         "Game creation",
         undefined,
         undefined,
-        { retryDelays: [] }
+        { retryDelays: [] },
       );
       throw new Error("Expected transaction confirmation to fail");
     } catch (error: any) {
       expect(error).toBeInstanceOf(Error);
       expect(error.message).toContain("transaction confirmation timeout");
       expect(error.cause).toBeInstanceOf(Error);
-      expect((error.cause as Error).message).toContain(
-        "Game account not found after timeout"
-      );
+      expect((error.cause as Error).message).toContain("Game account not found after timeout");
       const friendly = await formatUserFriendlyError(error);
       expect(friendly).toContain("Transaction confirmation timed out");
     }
@@ -422,7 +410,7 @@ describe("GameManager confirm/reload helpers", () => {
         _game: string,
         _telegramId: string,
         _creatorPubkey: string,
-        participant: { joinSignature: string | null }
+        participant: { joinSignature: string | null },
       ) => {
         participantSaves.push({ signature: participant.joinSignature });
       },
@@ -446,7 +434,7 @@ describe("GameManager confirm/reload helpers", () => {
       confirmCalls += 1;
       if (confirmCalls === 1) {
         throw new Error(
-          "Transaction expired before confirmation (last valid block height 10, current 15)"
+          "Transaction expired before confirmation (last valid block height 10, current 15)",
         );
       }
       return "SIG_ATTEMPT_2";
@@ -460,7 +448,7 @@ describe("GameManager confirm/reload helpers", () => {
       123n,
       player.publicKey.toBase58(),
       "coinflip",
-      0
+      0,
     );
 
     expect(result.success).toBe(true);
@@ -479,11 +467,7 @@ describe("GameManager confirm/reload helpers", () => {
     } as any;
     const { gm } = setupGameManager({ wallet, program: {} as any, gameDb: createDefaultGameDb() });
     await expect(
-      (gm as any).confirmTransactionWithRecovery(
-        "SIG",
-        DEFAULT_GAME_PDA,
-        "Game creation"
-      )
+      (gm as any).confirmTransactionWithRecovery("SIG", DEFAULT_GAME_PDA, "Game creation"),
     ).rejects.toThrow(/boom/);
   });
 

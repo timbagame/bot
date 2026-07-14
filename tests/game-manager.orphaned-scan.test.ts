@@ -2,7 +2,8 @@ import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey } from "@solana/web3.js";
 
-function resetGM() { // reset singleton
+function resetGM() {
+  // reset singleton
   // @ts-ignore
   GameManager["instance"] = undefined;
 }

@@ -22,13 +22,13 @@ afterEach(() => {
 
 test("ChatDatabase manages chat token configs", () => {
   db = ChatDatabase.getInstance();
-  
+
   // Clear any existing data first
   const existingChats = (db as any).db.query("SELECT chat_id FROM chat_settings").all();
   for (const chat of existingChats) {
     db.removeChatDefaultToken(chat.chat_id);
   }
-  
+
   db.setChatDefaultToken(123, "mint", "TOK", "user1");
 
   const config = db.getChatDefaultToken(123);

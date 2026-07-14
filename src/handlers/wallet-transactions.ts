@@ -5,11 +5,7 @@ import {
   createSolConversionUtilities,
   type PendingSendTransaction,
 } from "../bot/flows/sol-conversion";
-import {
-  MIN_SOL_FOR_TX,
-  WSOL_MINT,
-  INPUT_TIMEOUT_HINT,
-} from "../utils/constants";
+import { MIN_SOL_FOR_TX, WSOL_MINT, INPUT_TIMEOUT_HINT } from "../utils/constants";
 import {
   createBackToWalletKeyboard,
   createCancelKeyboard,
@@ -39,10 +35,7 @@ import { presentTradeAmount, parseDecimalAmount } from "../utils/amount";
 import { escapeHtml } from "../utils/format-amount";
 import { formatUserFriendlyError } from "../utils/errors";
 import { buildTransactionLinkMessage, NetworkDetector } from "../utils/network-detector";
-import {
-  DEFAULT_MAINNET_ENDPOINT,
-  resolvePrimaryRpcEndpoint,
-} from "../utils/rpc-endpoints";
+import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "../utils/rpc-endpoints";
 import {
   storePendingTransaction,
   getPendingTransaction,
@@ -53,7 +46,10 @@ import type {
   WalletActionMenuHandlerConfig,
   WalletCacheSnapshot as CachedWalletData,
 } from "./wallet-menu";
-import type { RegisterCallbackPrefixHandler, WrapCallbackHandler } from "../utils/callback-registry";
+import type {
+  RegisterCallbackPrefixHandler,
+  WrapCallbackHandler,
+} from "../utils/callback-registry";
 import type { TokenBalanceLike } from "../types/wallet";
 import { generateTransactionId } from "../utils/transaction-id";
 
@@ -108,9 +104,7 @@ type WrapConfirmationResult = {
 export type WalletTransactionsModuleOptions = {
   bot: Bot;
   wallet: WalletManager;
-  registerWalletActionMenuHandler: (
-    config: WalletActionMenuHandlerConfig
-  ) => void;
+  registerWalletActionMenuHandler: (config: WalletActionMenuHandlerConfig) => void;
   registerCallbackPrefixHandler: RegisterCallbackPrefixHandler;
   defaultWalletActionMenuDeps: {
     requireTelegramId: typeof requireTelegramId;
@@ -139,21 +133,9 @@ export type WalletTransactionsModule = {
   };
   buildQuickAmountKeyboard: (config: QuickAmountKeyboardConfig) => InlineKeyboard;
   buildWrapConfirmation: (params: WrapConfirmationParams) => WrapConfirmationResult;
-  handleCustomAmountInput: (
-    ctx: Context,
-    userState: any,
-    amount: string
-  ) => Promise<void>;
-  handleAddressInput: (
-    ctx: Context,
-    userState: any,
-    address: string
-  ) => Promise<void>;
-  handleWrapAmountInput: (
-    ctx: Context,
-    userState: any,
-    amount: string
-  ) => Promise<void>;
+  handleCustomAmountInput: (ctx: Context, userState: any, amount: string) => Promise<void>;
+  handleAddressInput: (ctx: Context, userState: any, address: string) => Promise<void>;
+  handleWrapAmountInput: (ctx: Context, userState: any, amount: string) => Promise<void>;
   renderSolConversionSuccess: typeof renderSolConversionSuccess;
   buildSolscanSuccessMessage: typeof buildSolscanSuccessMessage;
 };
@@ -161,10 +143,7 @@ export type WalletTransactionsModule = {
 const toRawAmount = (value: string, decimals: number): number =>
   parseDecimalAmount(value, decimals, { returnType: "number" });
 
-const tryGetUserWalletAddress = (
-  wallet: WalletManager,
-  telegramId: bigint
-): string | undefined => {
+const tryGetUserWalletAddress = (wallet: WalletManager, telegramId: bigint): string | undefined => {
   if (telegramId === 0n) {
     return undefined;
   }
@@ -189,24 +168,23 @@ const buildSolscanSuccessMessage = ({
 }): { text: string; disablePreview: boolean } => {
   const lines: string[] = [title];
   const normalizedBody = bodyLines.filter(
-    (line) => typeof line === "string" && line.trim().length > 0
+    (line) => typeof line === "string" && line.trim().length > 0,
   );
 
   if (normalizedBody.length > 0) {
     lines.push("", ...normalizedBody);
   }
 
-  const { message, previewDisabled, solscanUrl } =
-    buildTransactionLinkMessage({
-      signature,
-      networkOverride: resolvePrimaryRpcEndpoint(
-        process.env["SOLANA_NETWORK"],
-        DEFAULT_MAINNET_ENDPOINT
-      ),
-      linkText,
-      format: "html",
-      fallbackToSignature: false,
-    });
+  const { message, previewDisabled, solscanUrl } = buildTransactionLinkMessage({
+    signature,
+    networkOverride: resolvePrimaryRpcEndpoint(
+      process.env["SOLANA_NETWORK"],
+      DEFAULT_MAINNET_ENDPOINT,
+    ),
+    linkText,
+    format: "html",
+    fallbackToSignature: false,
+  });
 
   let finalMessage = message;
   let disablePreview = previewDisabled;
@@ -228,7 +206,7 @@ const buildSolscanSuccessMessage = ({
 
 const assertSessionOwnership = (
   ctx: Context,
-  session: Pick<InputSessionState, "initiatorId">
+  session: Pick<InputSessionState, "initiatorId">,
 ): string => {
   const userId = getTelegramIdString(ctx);
 
@@ -292,17 +270,14 @@ const renderSendSuccessMessage = ({
 
   return buildSolscanSuccessMessage({
     title: "✅ <b>Transaction Completed</b>",
-    bodyLines: [
-      `Sent ${safeAmount} ${safeToken}`,
-      `To: <code>${safeAddress}</code>`,
-    ],
+    bodyLines: [`Sent ${safeAmount} ${safeToken}`, `To: <code>${safeAddress}</code>`],
     signature,
     linkText: "🔗 View transaction",
   });
 };
 
 export const createWalletTransactionsModule = (
-  options: WalletTransactionsModuleOptions
+  options: WalletTransactionsModuleOptions,
 ): WalletTransactionsModule => {
   const {
     bot,
@@ -343,11 +318,9 @@ export const createWalletTransactionsModule = (
         ? {
             solFeeBufferLamports,
             insufficientSolForFeesMessage:
-              insufficientSolForFeesMessage ??
-              "Not enough SOL to cover purchase and fees",
+              insufficientSolForFeesMessage ?? "Not enough SOL to cover purchase and fees",
             insufficientSolBalanceMessage:
-              insufficientSolBalanceMessage ??
-              "Insufficient SOL balance for this purchase",
+              insufficientSolBalanceMessage ?? "Insufficient SOL balance for this purchase",
           }
         : {}),
       ...(omitSolFeeBufferHint ? { omitSolFeeBufferHint } : {}),
@@ -444,17 +417,12 @@ export const createWalletTransactionsModule = (
     ];
 
     if (selectionLabel) {
-      lines.push(
-        `<b>Selection:</b> ${escapeHtml(selectionLabel)} of available SOL`,
-        ""
-      );
+      lines.push(`<b>Selection:</b> ${escapeHtml(selectionLabel)} of available SOL`, "");
     }
 
     lines.push(
       `⚠️ <b>Please confirm this transaction</b>`,
-      `This will convert ${escapeHtml(displayAmount)} SOL to ${escapeHtml(
-        displayAmount
-      )} WSOL.`
+      `This will convert ${escapeHtml(displayAmount)} SOL to ${escapeHtml(displayAmount)} WSOL.`,
     );
 
     return {
@@ -467,7 +435,7 @@ export const createWalletTransactionsModule = (
   const handleCustomAmountInput = async (
     ctx: Context,
     userState: any,
-    amount: string
+    amount: string,
   ): Promise<void> => {
     const initiatorId = assertSessionOwnership(ctx, userState);
     const token = userState.token;
@@ -475,9 +443,7 @@ export const createWalletTransactionsModule = (
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
     const isSol = token === "SOL";
-    const selectedToken = !isSol
-      ? tokenBalances.find((t) => t.ticker === token)
-      : undefined;
+    const selectedToken = !isSol ? tokenBalances.find((t) => t.ticker === token) : undefined;
 
     if (!isSol && !selectedToken) {
       throw new Error(`Token ${token} not found in wallet`);
@@ -518,14 +484,13 @@ export const createWalletTransactionsModule = (
   const handleAddressInput = async (
     ctx: Context,
     userState: any,
-    address: string
+    address: string,
   ): Promise<void> => {
     assertSessionOwnership(ctx, userState);
     const token = userState.token;
     const amount = userState.amount;
     const amountDisplay =
-      userState.amountDisplay ??
-      (amount === "max" ? `MAX ${token}` : `${amount} ${token}`);
+      userState.amountDisplay ?? (amount === "max" ? `MAX ${token}` : `${amount} ${token}`);
 
     if (address.length < 30 || address.length > 50) {
       throw new Error("Invalid wallet address format");
@@ -570,8 +535,8 @@ export const createWalletTransactionsModule = (
       typeof userState.chatId === "number"
         ? userState.chatId
         : typeof ctx.chat?.id === "number"
-        ? ctx.chat.id
-        : undefined;
+          ? ctx.chat.id
+          : undefined;
     const targetMessageId =
       typeof userState.messageId === "number" ? userState.messageId : undefined;
 
@@ -590,7 +555,7 @@ export const createWalletTransactionsModule = (
   const handleWrapAmountInput = async (
     ctx: Context,
     userState: any,
-    amount: string
+    amount: string,
   ): Promise<void> => {
     const initiatorId = assertSessionOwnership(ctx, userState);
     const trimmedAmount = amount.trim();
@@ -675,8 +640,7 @@ export const createWalletTransactionsModule = (
           bodyLines: ({ solBalance, tokenBalances }) => {
             const formattedSolBalance = wallet.formatSolBalance(solBalance);
             const wsolLamports =
-              tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ??
-              0;
+              tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
             const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
             return [
               `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
@@ -690,22 +654,22 @@ export const createWalletTransactionsModule = (
           quickActions: {
             type: "wrap",
             callbackPrefix: "wrap_amount_",
-        amounts: [
-          { label: "25%", value: "25%" },
-          { label: "50%", value: "50%" },
-          { label: "75%", value: "75%" },
-          { label: "MAX", value: "MAX" },
-        ],
-        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
-        insufficientLabel: "❌ Insufficient SOL balance",
-        minimumLamports: 10_000,
-      },
-      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
-      getBalances: async (telegramId) => {
-        const [solBalance, wsolBalance] = await Promise.all([
-          wallet.getBalance(telegramId),
-          wallet.getTokenBalance(telegramId, WSOL_MINT),
-        ]);
+            amounts: [
+              { label: "25%", value: "25%" },
+              { label: "50%", value: "50%" },
+              { label: "75%", value: "75%" },
+              { label: "MAX", value: "MAX" },
+            ],
+            customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
+            insufficientLabel: "❌ Insufficient SOL balance",
+            minimumLamports: 10_000,
+          },
+          backButton: { label: "← Back to Settings", callback: "wallet_settings" },
+          getBalances: async (telegramId) => {
+            const [solBalance, wsolBalance] = await Promise.all([
+              wallet.getBalance(telegramId),
+              wallet.getTokenBalance(telegramId, WSOL_MINT),
+            ]);
 
             return {
               solBalance,
@@ -743,8 +707,7 @@ export const createWalletTransactionsModule = (
             title: `🧼 <b>Unwrap WSOL</b>`,
             bodyLines: ({ solBalance, tokenBalances }) => {
               const wsolLamports =
-                tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ??
-                0;
+                tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
               const formattedSolBalance = wallet.formatSolBalance(solBalance);
               const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
 
@@ -756,13 +719,10 @@ export const createWalletTransactionsModule = (
               if (wsolLamports > 0) {
                 lines.push(
                   "",
-                  "Unwrap converts WSOL back to native SOL and closes the WSOL account."
+                  "Unwrap converts WSOL back to native SOL and closes the WSOL account.",
                 );
               } else {
-                lines.push(
-                  "",
-                  "You currently have no WSOL to unwrap."
-                );
+                lines.push("", "You currently have no WSOL to unwrap.");
               }
 
               return lines;
@@ -785,9 +745,7 @@ export const createWalletTransactionsModule = (
               ],
             }),
           },
-          successAck: hasBalance
-            ? "🧼 Ready to unwrap WSOL"
-            : "ℹ️ No WSOL balance found",
+          successAck: hasBalance ? "🧼 Ready to unwrap WSOL" : "ℹ️ No WSOL balance found",
         };
       },
     });
@@ -808,9 +766,7 @@ export const createWalletTransactionsModule = (
             ctx,
             userId,
             title: "✏️ <b>Custom Wrap Amount</b>",
-            instructions: [
-              "Reply to this message with the amount of SOL you want to wrap.",
-            ],
+            instructions: ["Reply to this message with the amount of SOL you want to wrap."],
             examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
             cancelCallback: "cmd_wrap",
             state: { type: "wrap_custom_amount" },
@@ -818,16 +774,13 @@ export const createWalletTransactionsModule = (
 
           await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
         },
-        { action: "wrap_custom", errorAck: "❌ Error processing custom amount" }
-      )
+        { action: "wrap_custom", errorAck: "❌ Error processing custom amount" },
+      ),
     );
 
     registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
       try {
-        const telegramId = await resolveTelegramIdOrRespond(
-          ctx,
-          "wrap amount selection"
-        );
+        const telegramId = await resolveTelegramIdOrRespond(ctx, "wrap amount selection");
         if (telegramId == null) {
           return;
         }
@@ -842,8 +795,7 @@ export const createWalletTransactionsModule = (
           decimals: 9,
           solBalance: availableSolLamports,
           formatSol: (lamports) => wallet.formatSolBalance(lamports),
-          formatToken: (value, decimals) =>
-            wallet.formatTokenBalance(value, decimals),
+          formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
         });
 
         const lamportsToWrap = spend.rawAmount;
@@ -857,8 +809,7 @@ export const createWalletTransactionsModule = (
           lamportsToWrap,
           availableSolLamports,
           currentWsolLamports: wsolBalance,
-          selectionLabel:
-            selection === "MAX" || selection.endsWith("%") ? selection : undefined,
+          selectionLabel: selection === "MAX" || selection.endsWith("%") ? selection : undefined,
         });
 
         await respondWithMenu(ctx, {
@@ -866,24 +817,17 @@ export const createWalletTransactionsModule = (
           keyboard: confirmation.keyboard,
         });
 
-        await safeAnswerCallbackQuery(
-          ctx,
-          `Wrap ${confirmation.displayAmount} SOL`
-        );
+        await safeAnswerCallbackQuery(ctx, `Wrap ${confirmation.displayAmount} SOL`);
       } catch (error) {
         console.error("Error in wrap amount selection:", error);
-        const message =
-          error instanceof Error ? error.message : "Error processing wrap amount";
+        const message = error instanceof Error ? error.message : "Error processing wrap amount";
         await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
       }
     });
 
     bot.callbackQuery("unwrap_confirm", async (ctx) => {
       try {
-        const telegramId = await resolveTelegramIdOrRespond(
-          ctx,
-          "unwrap confirmation"
-        );
+        const telegramId = await resolveTelegramIdOrRespond(ctx, "unwrap confirmation");
         if (telegramId == null) {
           return;
         }
@@ -892,7 +836,7 @@ export const createWalletTransactionsModule = (
           onProcessing: async (formattedAmount) => {
             await respondWithMenu(ctx, {
               text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${escapeHtml(
-                formattedAmount ?? "0"
+                formattedAmount ?? "0",
               )} WSOL to SOL...\n\n<i>Please wait...</i>`,
               keyboard: new InlineKeyboard(),
             });
@@ -918,10 +862,7 @@ export const createWalletTransactionsModule = (
           },
           onError: async (error) => {
             console.error("Error in unwrap confirmation:", error);
-            const userFriendlyError = await formatUserFriendlyError(
-              error,
-              wallet
-            );
+            const userFriendlyError = await formatUserFriendlyError(error, wallet);
             await respondWithMenu(ctx, {
               text: userFriendlyError,
               keyboard: createBackToWalletKeyboard(),
@@ -958,10 +899,7 @@ export const createWalletTransactionsModule = (
         }
 
         const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
-        const telegramId = await resolveTelegramIdOrRespond(
-          ctx,
-          "wrap confirmation"
-        );
+        const telegramId = await resolveTelegramIdOrRespond(ctx, "wrap confirmation");
         if (telegramId == null) {
           return;
         }
@@ -995,10 +933,7 @@ export const createWalletTransactionsModule = (
           },
           onError: async (error) => {
             console.error("Error in wrap confirmation:", error);
-            const userFriendlyError = await formatUserFriendlyError(
-              error,
-              wallet
-            );
+            const userFriendlyError = await formatUserFriendlyError(error, wallet);
             await respondWithMenu(ctx, {
               text: userFriendlyError,
               keyboard: createBackToWalletKeyboard(),
@@ -1007,10 +942,7 @@ export const createWalletTransactionsModule = (
         });
 
         if (result) {
-          await safeAnswerCallbackQuery(
-            ctx,
-            `✅ Wrap ${formattedAmount} SOL submitted`
-          );
+          await safeAnswerCallbackQuery(ctx, `✅ Wrap ${formattedAmount} SOL submitted`);
         }
       } catch (error) {
         console.error("Error in wrap confirmation:", error);
@@ -1025,43 +957,39 @@ export const createWalletTransactionsModule = (
 
     registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) => {
       try {
-        const { menu } = await buildWalletActionMenuForUser(
-          defaultWalletActionMenuDeps,
-          {
-            ctx,
-            title: `📤 <b>Send ${escapeHtml(token)}</b>`,
-            bodyLines: ({ solBalance, tokenBalances }) => {
-              let balanceDisplay = "0";
-              if (token === "SOL") {
-                balanceDisplay = wallet.formatSolBalance(solBalance);
-              } else {
-                const selectedToken = tokenBalances.find((t) => t.ticker === token);
-                if (selectedToken) {
-                  balanceDisplay = wallet.formatTokenBalance(
-                    selectedToken.balance,
-                    selectedToken.decimals
-                  );
-                }
+        const { menu } = await buildWalletActionMenuForUser(defaultWalletActionMenuDeps, {
+          ctx,
+          title: `📤 <b>Send ${escapeHtml(token)}</b>`,
+          bodyLines: ({ solBalance, tokenBalances }) => {
+            let balanceDisplay = "0";
+            if (token === "SOL") {
+              balanceDisplay = wallet.formatSolBalance(solBalance);
+            } else {
+              const selectedToken = tokenBalances.find((t) => t.ticker === token);
+              if (selectedToken) {
+                balanceDisplay = wallet.formatTokenBalance(
+                  selectedToken.balance,
+                  selectedToken.decimals,
+                );
               }
+            }
 
-              return [
-                `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-                `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
-                "",
-                `<b>Quick Send Amounts:</b>`,
-              ];
-            },
-            quickActions: {
-              type: "prebuilt",
-              keyboard: buildQuickAmountKeyboard({
-                baseCallback: (value) =>
-                  `send_amount_${token}_${value.toUpperCase()}`,
-                customLabel: "✏️ Custom Amount",
-                backCallback: "cmd_withdraw",
-              }),
-            },
-          }
-        );
+            return [
+              `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+              `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
+              "",
+              `<b>Quick Send Amounts:</b>`,
+            ];
+          },
+          quickActions: {
+            type: "prebuilt",
+            keyboard: buildQuickAmountKeyboard({
+              baseCallback: (value) => `send_amount_${token}_${value.toUpperCase()}`,
+              customLabel: "✏️ Custom Amount",
+              backCallback: "cmd_withdraw",
+            }),
+          },
+        });
 
         await respondWithMenu(ctx, menu);
         await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
@@ -1093,9 +1021,7 @@ export const createWalletTransactionsModule = (
             ctx,
             userId,
             title: `✏️ <b>Custom Amount - ${token}</b>`,
-            instructions: [
-              `Reply to this message with the amount you want to send.`,
-            ],
+            instructions: [`Reply to this message with the amount you want to send.`],
             examples,
             cancelCallback: `send_select_${token}`,
             state: {
@@ -1108,19 +1034,14 @@ export const createWalletTransactionsModule = (
           return;
         }
 
-        const telegramId = await resolveTelegramIdOrRespond(
-          ctx,
-          "send amount selection"
-        );
+        const telegramId = await resolveTelegramIdOrRespond(ctx, "send amount selection");
         if (telegramId == null) {
           return;
         }
         const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
         const isSol = token === "SOL";
-        const selectedToken = !isSol
-          ? tokenBalances.find((t) => t.ticker === token)
-          : undefined;
+        const selectedToken = !isSol ? tokenBalances.find((t) => t.ticker === token) : undefined;
 
         if (!isSol && !selectedToken) {
           throw new Error(`Token ${token} not found in wallet`);
@@ -1155,8 +1076,7 @@ export const createWalletTransactionsModule = (
         });
       } catch (error) {
         console.error("Error in send amount selection:", error);
-        const message =
-          error instanceof Error ? error.message : "Error processing amount";
+        const message = error instanceof Error ? error.message : "Error processing amount";
         await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
       }
     });
@@ -1166,11 +1086,7 @@ export const createWalletTransactionsModule = (
         const callbackData = ctx.callbackQuery?.data || "";
         const txId = callbackData.replace("confirm_send_", "");
 
-        const validation = validatePendingTransaction<PendingSendTransaction>(
-          ctx,
-          txId,
-          "send"
-        );
+        const validation = validatePendingTransaction<PendingSendTransaction>(ctx, txId, "send");
 
         if (validation.status === "expired") {
           await safeAnswerCallbackQuery(ctx, "❌ Transaction expired or not found");
@@ -1192,7 +1108,7 @@ export const createWalletTransactionsModule = (
 
         await respondWithMenu(ctx, {
           text: `🔄 <b>Processing Transaction</b>\n\nSending ${escapeHtml(
-            amountSummary
+            amountSummary,
           )}...\n\n<i>Please wait...</i>`,
           keyboard: new InlineKeyboard(),
         });
@@ -1206,9 +1122,7 @@ export const createWalletTransactionsModule = (
           const telegramId = BigInt(transaction.userId);
           let txSignature: string;
           let formattedAmount: string;
-          let withdrawAllResult:
-            | Awaited<ReturnType<typeof wallet.withdrawAllSol>>
-            | null = null;
+          let withdrawAllResult: Awaited<ReturnType<typeof wallet.withdrawAllSol>> | null = null;
 
           if (transaction.token === "SOL") {
             const balanceLamports = await wallet.getBalance(telegramId, {
@@ -1216,35 +1130,24 @@ export const createWalletTransactionsModule = (
               allowStaleOnError: true,
             });
             if (transaction.amount === "max") {
-              withdrawAllResult = await wallet.withdrawAllSol(
-                telegramId,
-                toPublicKey
-              );
+              withdrawAllResult = await wallet.withdrawAllSol(telegramId, toPublicKey);
 
               if (withdrawAllResult.totalLamportsSent <= 0) {
                 throw new Error(
-                  "Unable to withdraw SOL. Ensure you have enough balance to cover fees."
+                  "Unable to withdraw SOL. Ensure you have enough balance to cover fees.",
                 );
               }
 
               txSignature = withdrawAllResult.signature;
-              formattedAmount = wallet.formatSolBalance(
-                withdrawAllResult.totalLamportsSent
-              );
+              formattedAmount = wallet.formatSolBalance(withdrawAllResult.totalLamportsSent);
             } else {
               const lamportsToSend = toRawAmount(transaction.amount, 9);
-              if (
-                lamportsToSend + getSolFeeBufferLamports() > balanceLamports
-              ) {
+              if (lamportsToSend + getSolFeeBufferLamports() > balanceLamports) {
                 throw new Error("Insufficient SOL balance for this transfer");
               }
               formattedAmount = transaction.amount;
 
-              txSignature = await wallet.transferSol(
-                telegramId,
-                toPublicKey,
-                lamportsToSend
-              );
+              txSignature = await wallet.transferSol(telegramId, toPublicKey, lamportsToSend);
             }
           } else {
             if (!transaction.token) {
@@ -1252,9 +1155,7 @@ export const createWalletTransactionsModule = (
             }
 
             const { tokenBalances } = await getCachedWalletData(telegramId);
-            const tokenBalance = tokenBalances.find(
-              (t) => t.ticker === transaction.token
-            );
+            const tokenBalance = tokenBalances.find((t) => t.ticker === transaction.token);
 
             if (!tokenBalance) {
               throw new Error(`Token ${transaction.token} not found in wallet`);
@@ -1271,39 +1172,27 @@ export const createWalletTransactionsModule = (
               if (rawAmount <= 0) {
                 throw new Error(`No ${transaction.token} balance found`);
               }
-              formattedAmount = wallet.formatTokenBalance(
-                rawAmount,
-                tokenBalance.decimals
-              );
+              formattedAmount = wallet.formatTokenBalance(rawAmount, tokenBalance.decimals);
             } else {
-              rawAmount = toRawAmount(
-                transaction.amount,
-                tokenBalance.decimals
-              );
+              rawAmount = toRawAmount(transaction.amount, tokenBalance.decimals);
               if (rawAmount > tokenBalance.balance) {
                 throw new Error("Insufficient token balance for this transfer");
               }
               formattedAmount = transaction.amount;
             }
 
-            txSignature = await wallet.transferToken(
-              telegramId,
-              toPublicKey,
-              rawAmount,
-              tokenMint
-            );
+            txSignature = await wallet.transferToken(telegramId, toPublicKey, rawAmount, tokenMint);
           }
 
           await wallet.confirmTransaction(txSignature);
           clearWalletCache(telegramId);
 
-          const { text: successMessage, disablePreview } =
-            renderSendSuccessMessage({
-              formattedAmount,
-              token: transaction.token,
-              address: transaction.address,
-              signature: txSignature,
-            });
+          const { text: successMessage, disablePreview } = renderSendSuccessMessage({
+            formattedAmount,
+            token: transaction.token,
+            address: transaction.address,
+            signature: txSignature,
+          });
 
           await respondWithMenu(ctx, {
             text: successMessage,
@@ -1313,14 +1202,9 @@ export const createWalletTransactionsModule = (
           await safeAnswerCallbackQuery(ctx, "✅ Transaction submitted");
         } catch (txError) {
           console.error("Transaction failed:", txError);
-          const userFriendlyError = await formatUserFriendlyError(
-            txError,
-            wallet
-          );
+          const userFriendlyError = await formatUserFriendlyError(txError, wallet);
           await respondWithMenu(ctx, {
-            text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(
-              userFriendlyError
-            )}`,
+            text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
             keyboard: createBackToWalletKeyboard(),
           });
           await safeAnswerCallbackQuery(ctx, "❌ Send failed");

@@ -10,10 +10,10 @@ const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
   if (url.includes("api.jup.ag")) {
     const id = new URL(url).searchParams.get("ids")!;
-    return new Response(
-      JSON.stringify({ [id]: { id, usdPrice: price } }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ [id]: { id, usdPrice: price } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }
   return new Response("not used", { status: 404 });
 };
@@ -42,10 +42,10 @@ describe("prices util", () => {
       calls += 1;
       const url = typeof input === "string" ? input : input.toString();
       const id = new URL(url).searchParams.get("ids")!;
-      return new Response(
-        JSON.stringify({ [id]: { id, usdPrice: 1.23 } }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ [id]: { id, usdPrice: 1.23 } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }) as any;
 
     const tokenMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -61,9 +61,7 @@ describe("prices util", () => {
     process.env["PRICES_CACHE_TTL_MS"] = "0";
 
     try {
-      const module = await import(
-        `../src/utils/prices?ttl=${Date.now()}`
-      );
+      const module = await import(`../src/utils/prices?ttl=${Date.now()}`);
       const price = await module.getPriceUSD(WSOL_MINT, jupOkFetch(9.99) as any);
       expect(price).toBe(9.99);
     } finally {

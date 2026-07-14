@@ -50,11 +50,7 @@ export class CallbackAnswerQueue {
   private lastAnswerTime = 0;
   private readonly throttleMs: number;
   private readonly maxSize: number;
-  private readonly answerFn: (
-    id: string,
-    text?: string,
-    showAlert?: boolean
-  ) => Promise<boolean>;
+  private readonly answerFn: (id: string, text?: string, showAlert?: boolean) => Promise<boolean>;
 
   constructor(options: {
     answerFn: (id: string, text?: string, showAlert?: boolean) => Promise<boolean>;
@@ -260,7 +256,7 @@ export class TelegramRateLimiter {
   async throttle<T>(
     chatId: number | undefined,
     fn: () => Promise<T>,
-    options: { maxWait?: number } = {}
+    options: { maxWait?: number } = {},
   ): Promise<T> {
     const maxWait = options.maxWait ?? DEFAULT_RATE_LIMIT_TIMEOUT_MS;
     const waitTime = this.getWaitTimeMs(chatId);
@@ -268,7 +264,7 @@ export class TelegramRateLimiter {
     if (waitTime > 0) {
       if (waitTime > maxWait) {
         throw new Error(
-          `Rate limited for ${Math.ceil(waitTime / 1000)}s, exceeds max wait of ${Math.ceil(maxWait / 1000)}s`
+          `Rate limited for ${Math.ceil(waitTime / 1000)}s, exceeds max wait of ${Math.ceil(maxWait / 1000)}s`,
         );
       }
       await sleep(waitTime);
@@ -305,11 +301,7 @@ export class GameOperationQueue {
    * Execute a function with an exclusive lock on a game.
    * Concurrent calls for the same game will wait in queue.
    */
-  async withLock<T>(
-    gameAddress: string,
-    operation: string,
-    fn: () => Promise<T>
-  ): Promise<T> {
+  async withLock<T>(gameAddress: string, operation: string, fn: () => Promise<T>): Promise<T> {
     // Wait for any existing lock
     const existingLock = this.locks.get(gameAddress);
     if (existingLock) {
@@ -335,7 +327,7 @@ export class GameOperationQueue {
     const timeoutId = setTimeout(() => {
       const elapsedMs = Date.now() - lockState.timestamp;
       console.warn(
-        `Game operation lock timeout for ${gameAddress} (${operation}) after ${elapsedMs}ms`
+        `Game operation lock timeout for ${gameAddress} (${operation}) after ${elapsedMs}ms`,
       );
       this.release(gameAddress, lockState);
     }, this.timeoutMs);
@@ -392,7 +384,7 @@ export class GameOperationQueue {
  */
 export const createNextGuard = (
   next: () => Promise<void>,
-  label?: string
+  label?: string,
 ): (() => Promise<void>) => {
   let called = false;
 
@@ -477,8 +469,7 @@ export const isRateLimitError = (error: unknown): boolean => {
 // Sleep Helper
 // ================================
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ================================
 // Singleton Instances
@@ -513,7 +504,7 @@ export const getGameOperationQueue = (): GameOperationQueue => {
  * Must be called after bot is created.
  */
 export const initCallbackQueue = (
-  answerFn: (id: string, text?: string, showAlert?: boolean) => Promise<boolean>
+  answerFn: (id: string, text?: string, showAlert?: boolean) => Promise<boolean>,
 ): CallbackAnswerQueue => {
   globalCallbackQueue = new CallbackAnswerQueue({ answerFn });
   return globalCallbackQueue;
@@ -530,11 +521,7 @@ export const getCallbackQueue = (): CallbackAnswerQueue | null => {
  * Answer a callback query through the throttled queue.
  * Falls back to direct answering if queue not initialized.
  */
-export const enqueueCallbackAnswer = (
-  ctx: Context,
-  text?: string,
-  showAlert?: boolean
-): void => {
+export const enqueueCallbackAnswer = (ctx: Context, text?: string, showAlert?: boolean): void => {
   const callbackQueryId = ctx.callbackQuery?.id;
   if (!callbackQueryId) {
     return;

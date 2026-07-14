@@ -110,9 +110,9 @@ describe("TelegramRateLimiter", () => {
 
     it("throws when limit exceeds maxWait", async () => {
       limiter.recordRateLimit(10, 123);
-      await expect(
-        limiter.throttle(123, async () => "success", { maxWait: 100 })
-      ).rejects.toThrow(/exceeds max wait/);
+      await expect(limiter.throttle(123, async () => "success", { maxWait: 100 })).rejects.toThrow(
+        /exceeds max wait/,
+      );
     });
 
     it("waits when limited but within maxWait", async () => {

@@ -20,9 +20,11 @@ export interface SolConversionFlowConfig {
   ensureProceed: () => Promise<SolConversionValidationResult>;
   perform: () => Promise<{ signature: string; amountLamports?: number }>;
   onProcessing: (formattedAmount?: string) => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
+  onSuccess: (details: {
+    signature: string;
+    formattedAmount: string;
+    solscanUrl?: string | null;
+  }) => Promise<void>;
   onInsufficient?: (formattedAmount: string) => Promise<void>;
   onEmpty?: (formattedAmount?: string) => Promise<void>;
   onError?: (error: unknown, formattedAmount?: string) => Promise<void>;
@@ -40,9 +42,11 @@ export type WrapFlowResult = {
 
 export type WrapFlowHandlers = {
   onProcessing: (formattedAmount: string) => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
+  onSuccess: (details: {
+    signature: string;
+    formattedAmount: string;
+    solscanUrl?: string | null;
+  }) => Promise<void>;
   onInsufficientBalance: (formattedAmount: string) => Promise<void>;
   onError?: (error: unknown, formattedAmount: string) => Promise<void>;
 };
@@ -58,16 +62,16 @@ export type UnwrapFlowHandlers = {
   unwrapLamports?: number;
   onProcessing: (formattedAmount?: string) => Promise<void>;
   onNoBalance: () => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
+  onSuccess: (details: {
+    signature: string;
+    formattedAmount: string;
+    solscanUrl?: string | null;
+  }) => Promise<void>;
   onError?: (error: unknown) => Promise<void>;
 };
 
 export type PendingTransactionValidationResult<T> =
-  | { status: "success"; transaction: T }
-  | { status: "expired" }
-  | { status: "unauthorized" };
+  { status: "success"; transaction: T } | { status: "expired" } | { status: "unauthorized" };
 
 export type PendingSendTransaction = {
   type: "send";
@@ -135,9 +139,7 @@ export const createSolConversionUtilities = ({
 
     const processingAmount =
       validation.formattedAmount ??
-      (initialAmountLamports !== undefined
-        ? formatAmount(initialAmountLamports)
-        : undefined);
+      (initialAmountLamports !== undefined ? formatAmount(initialAmountLamports) : undefined);
 
     await onProcessing(processingAmount);
 
@@ -145,7 +147,7 @@ export const createSolConversionUtilities = ({
 
     try {
       const { signature, amountLamports } = await perform();
-      let normalizedAmount =
+      const normalizedAmount =
         amountLamports !== undefined ? amountLamports : initialAmountLamports;
 
       if (normalizedAmount === undefined) {
@@ -196,7 +198,7 @@ export const createSolConversionUtilities = ({
   const executeWrapFlow = async (
     telegramId: bigint,
     amountLamports: number,
-    handlers: WrapFlowHandlers
+    handlers: WrapFlowHandlers,
   ): Promise<WrapFlowResult> => {
     if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
       throw new Error("Wrap amount must be greater than zero");
@@ -222,17 +224,12 @@ export const createSolConversionUtilities = ({
         amountLamports,
       }),
       onProcessing: async (amount) =>
-        handlers.onProcessing(
-          amount ?? wallet.formatSolBalance(amountLamports)
-        ),
+        handlers.onProcessing(amount ?? wallet.formatSolBalance(amountLamports)),
       onSuccess: handlers.onSuccess,
       onInsufficient: handlers.onInsufficientBalance,
       onError: handlers.onError
         ? (error, formattedAmount) =>
-            handlers.onError!(
-              error,
-              formattedAmount ?? wallet.formatSolBalance(amountLamports)
-            )
+            handlers.onError!(error, formattedAmount ?? wallet.formatSolBalance(amountLamports))
         : undefined,
     });
 
@@ -253,7 +250,7 @@ export const createSolConversionUtilities = ({
 
   const executeUnwrapFlow = async (
     telegramId: bigint,
-    handlers: UnwrapFlowHandlers
+    handlers: UnwrapFlowHandlers,
   ): Promise<UnwrapFlowResult> => {
     const targetLamports = handlers.unwrapLamports ?? handlers.expectedAmountLamports;
 
@@ -282,8 +279,7 @@ export const createSolConversionUtilities = ({
       onError: handlers.onError ? (error) => handlers.onError!(error) : undefined,
       treatZeroAmountAsEmpty: true,
       handleEmptyError: (error) => {
-        const message =
-          error instanceof Error ? error.message ?? "" : String(error ?? "");
+        const message = error instanceof Error ? (error.message ?? "") : String(error ?? "");
         return (
           message.includes("already empty") ||
           message.includes("No WSOL account") ||
@@ -322,17 +318,12 @@ export const createSolConversionUtilities = ({
       removeFromCache?: boolean;
       timeoutMs?: number;
       now?: number;
-    } = {}
+    } = {},
   ): PendingTransactionValidationResult<T> => {
-    const {
-      removeFromCache = true,
-      timeoutMs = INPUT_TIMEOUT_MS,
-      now = Date.now(),
-    } = options;
+    const { removeFromCache = true, timeoutMs = INPUT_TIMEOUT_MS, now = Date.now() } = options;
 
     const entry = getPendingTransaction(txId, false) as
-      | (T & { type: string; userId: string; timestamp?: number })
-      | undefined;
+      (T & { type: string; userId: string; timestamp?: number }) | undefined;
 
     if (!entry || entry.type !== expectedType) {
       getPendingTransaction(txId, true);
@@ -341,9 +332,7 @@ export const createSolConversionUtilities = ({
 
     const { timestamp, ...transaction } = entry;
     const entryTimestamp =
-      typeof timestamp === "number" && Number.isFinite(timestamp)
-        ? timestamp
-        : undefined;
+      typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : undefined;
 
     if (
       entryTimestamp !== undefined &&

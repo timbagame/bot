@@ -49,10 +49,7 @@ export const isBotInitiationForbidden = (error: unknown): boolean => {
     return false;
   }
 
-  return (
-    matchesAny(error, ["bot can't initiate conversation"]) ||
-    isChatInaccessible(error)
-  );
+  return matchesAny(error, ["bot can't initiate conversation"]) || isChatInaccessible(error);
 };
 
 export const isMissingEditableContent = (error: unknown): boolean =>
@@ -85,9 +82,7 @@ export const getRetryAfterSeconds = (error: unknown): number | null => {
     (parameters && typeof parameters.retry_after === "number"
       ? parameters.retry_after
       : undefined) ??
-    (typeof (error as any).retry_after === "number"
-      ? (error as any).retry_after
-      : undefined);
+    (typeof (error as any).retry_after === "number" ? (error as any).retry_after : undefined);
 
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
     return Math.max(0, retryAfter);

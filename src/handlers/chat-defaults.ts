@@ -30,11 +30,7 @@ import {
   getTelegramIdString,
   safeAnswerCallbackQuery,
 } from "../utils/context-helpers";
-import {
-  clearInputSession,
-  setInputSession,
-  type InputSessionState,
-} from "../utils/user-state";
+import { clearInputSession, setInputSession, type InputSessionState } from "../utils/user-state";
 import type { ChatDatabase } from "../utils/chat-database";
 import type { TokenManager } from "../utils/token-manager";
 import type { GameManager } from "../utils/game";
@@ -50,11 +46,7 @@ const formatDefaultTokenSetMessage = (tokenTicker: string, tokenMint: string) =>
   );
 };
 
-const formatPlayersLine = (
-  label: string,
-  value: number | null,
-  fallback: number
-): string => {
+const formatPlayersLine = (label: string, value: number | null, fallback: number): string => {
   const displayValue = value ?? fallback;
   const suffix = value == null ? "(bot default)" : "(chat default)";
   return `${label}: ${displayValue} ${suffix}`;
@@ -66,7 +58,15 @@ const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string =
   return `⏱️ Game timeout: ${formatted} ${suffix}`;
 };
 
-type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy_coinflip" | "privacy_giveaway" | "video_coinflip" | "video_giveaway";
+type SettingsTarget =
+  | "token"
+  | "coinflip"
+  | "giveaway"
+  | "timeout"
+  | "privacy_coinflip"
+  | "privacy_giveaway"
+  | "video_coinflip"
+  | "video_giveaway";
 
 type ChatDefaultsModuleDeps = {
   bot: Bot;
@@ -85,7 +85,7 @@ export type ChatDefaultsModule = {
   handleSettingsInput: (
     ctx: Context,
     session: InputSessionState,
-    userMessage: string
+    userMessage: string,
   ) => Promise<boolean>;
 };
 
@@ -113,7 +113,7 @@ const buildMenuKeyboard = (): InlineKeyboard => {
 
 const buildSettingsSummary = async (
   chatId: number,
-  deps: ChatDefaultsModuleDeps
+  deps: ChatDefaultsModuleDeps,
 ): Promise<string> => {
   const tokenManager = deps.getTokenManager();
   const chatToken = tokenManager.getChatDefaultToken(chatId);
@@ -126,7 +126,9 @@ const buildSettingsSummary = async (
     // Look up display name from game database (username mappings)
     const setByDisplayName = deps.gameDb.getPlayerDisplayName(chatToken.set_by_telegram_id);
     const setByDisplay = setByDisplayName
-      ? (setByDisplayName.startsWith('@') ? escapeHtml(setByDisplayName) : `@${escapeHtml(setByDisplayName)}`)
+      ? setByDisplayName.startsWith("@")
+        ? escapeHtml(setByDisplayName)
+        : `@${escapeHtml(setByDisplayName)}`
       : `User ${chatToken.set_by_telegram_id}`;
     tokenLine =
       `🪙 Default token: ${escapeHtml(chatToken.token_ticker)} (set by ${setByDisplay})` +
@@ -141,24 +143,19 @@ const buildSettingsSummary = async (
     chatSettings,
     "coinflip",
     DEFAULT_COINFLIP_MAX_PLAYERS,
-    deps.getOracleMaxPlayers()
+    deps.getOracleMaxPlayers(),
   );
   const giveawayPlayers = resolveChatDefaultPlayers(
     chatSettings,
     "giveaway",
     DEFAULT_GIVEAWAY_MAX_PLAYERS,
-    deps.getOracleMaxPlayers()
+    deps.getOracleMaxPlayers(),
   );
 
-  const timeoutSeconds = resolveChatTimeout(
-    chatSettings,
-    DEFAULT_GAME_TIMEOUT
-  );
+  const timeoutSeconds = resolveChatTimeout(chatSettings, DEFAULT_GAME_TIMEOUT);
 
   const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
-  const isCoinflipPrivate = coinflipPrivacy
-    ? coinflipPrivacy !== "public"
-    : false;
+  const isCoinflipPrivate = coinflipPrivacy ? coinflipPrivacy !== "public" : false;
   const coinflipSuffix = coinflipPrivacy ? "(chat default)" : "(bot default)";
   const coinflipPrivacyLine = `👁️ Coinflip privacy: ${isCoinflipPrivate ? "Private 🔒" : "Public 🌍"} ${coinflipSuffix}`;
 
@@ -206,13 +203,18 @@ const buildSettingsSummary = async (
   const giveawayVideoLine = `🎬 Giveaway video: ${giveawayVideoDisplay} ${giveawayVideoSuffix}`;
 
   // Join notification settings
-  const joinNotificationsExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
-  const joinNotificationsPerMinute = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
-  const externalSuffix = chatSettings?.join_notifications_external != null ? "(chat default)" : "(bot default)";
-  const rateSuffix = chatSettings?.join_notifications_per_minute != null ? "(chat default)" : "(bot default)";
+  const joinNotificationsExternal =
+    chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+  const joinNotificationsPerMinute =
+    chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+  const externalSuffix =
+    chatSettings?.join_notifications_external != null ? "(chat default)" : "(bot default)";
+  const rateSuffix =
+    chatSettings?.join_notifications_per_minute != null ? "(chat default)" : "(bot default)";
 
   const externalDisplay = joinNotificationsExternal ? "✅ On" : "❌ Off";
-  const rateDisplay = joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
+  const rateDisplay =
+    joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
 
   const joinNotificationsLine = `📢 Join notifications: External ${externalDisplay} ${externalSuffix} | Rate: ${rateDisplay} ${rateSuffix}`;
 
@@ -223,12 +225,12 @@ const buildSettingsSummary = async (
     formatPlayersLine(
       "👥 Coinflip players",
       chatSettings?.coinflip_max_players ?? null,
-      coinflipPlayers
+      coinflipPlayers,
     ),
     formatPlayersLine(
       "🎁 Giveaway players",
       chatSettings?.giveaway_max_players ?? null,
-      giveawayPlayers
+      giveawayPlayers,
     ),
     formatTimeoutLine(timeoutSeconds, chatSettings?.timeout_seconds == null),
     coinflipPrivacyLine,
@@ -261,8 +263,10 @@ const checkCallbackAdmin = async (ctx: Context, deps: ChatDefaultsModuleDeps): P
 
 const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) => {
   const chatSettings = deps.chatDb.getChatGameSettings(ctx.chat!.id);
-  const currentExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
-  const currentRate = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+  const currentExternal =
+    chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+  const currentRate =
+    chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
 
   const externalLabel = currentExternal ? "✅ External: On" : "❌ External: Off";
   const rateLabel = currentRate === 0 ? "Disabled" : `${currentRate}/min`;
@@ -279,8 +283,12 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
     ].join("\n"),
     parseMode: "HTML" as const,
     keyboard: new InlineKeyboard()
-      .text(currentExternal ? "🔕 Disable External" : "🔔 Enable External",
-        currentExternal ? "chat_defaults_set_join_external_off" : "chat_defaults_set_join_external_on")
+      .text(
+        currentExternal ? "🔕 Disable External" : "🔔 Enable External",
+        currentExternal
+          ? "chat_defaults_set_join_external_off"
+          : "chat_defaults_set_join_external_on",
+      )
       .row()
       .text("0", "chat_defaults_set_join_rate_0")
       .text("1", "chat_defaults_set_join_rate_1")
@@ -298,14 +306,14 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
 const handleTokenChange = async (
   ctx: Context,
   tokenInput: string,
-  deps: ChatDefaultsModuleDeps
+  deps: ChatDefaultsModuleDeps,
 ): Promise<void> => {
   // Handle 'clear' command to remove chat default token
   if (/^(clear|remove)$/i.test(tokenInput.trim())) {
     deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
     await deps.replyToMessage(
       ctx,
-      "✅ Default token cleared for this chat. Using bot default token now."
+      "✅ Default token cleared for this chat. Using bot default token now.",
     );
     return;
   }
@@ -337,33 +345,33 @@ const handleTokenChange = async (
     ctx.chat!.id,
     knownToken.token_mint,
     knownToken.token_ticker,
-    getTelegramId(ctx).toString()
+    getTelegramId(ctx).toString(),
   );
 
   await deps.replyToMessage(
     ctx,
-    formatDefaultTokenSetMessage(knownToken.token_ticker, knownToken.token_mint)
+    formatDefaultTokenSetMessage(knownToken.token_ticker, knownToken.token_mint),
   );
 };
 
 const promptForSetting = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
-  target: SettingsTarget
+  target: SettingsTarget,
 ): Promise<void> => {
   const messageLines: string[] = [];
   if (target === "token") {
     messageLines.push(
       "Send the SPL token ticker you want to set as the chat default.",
       "",
-      INPUT_TIMEOUT_HINT
+      INPUT_TIMEOUT_HINT,
     );
   } else if (target === "timeout") {
     messageLines.push(
       "Send the default game timeout in seconds.",
       `Must be between ${MIN_GAME_TIMEOUT}-${MAX_GAME_TIMEOUT} seconds.`,
       "",
-      INPUT_TIMEOUT_HINT
+      INPUT_TIMEOUT_HINT,
     );
   } else if (target === "video_coinflip" || target === "video_giveaway") {
     const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
@@ -372,7 +380,7 @@ const promptForSetting = async (
       "",
       "Send the media directly (video, photo, or GIF).",
       "",
-      INPUT_TIMEOUT_HINT
+      INPUT_TIMEOUT_HINT,
     );
   } else {
     const minPlayers = target === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
@@ -380,7 +388,7 @@ const promptForSetting = async (
       "Send the default maximum players for new games.",
       `Must be between ${minPlayers}-${deps.getOracleMaxPlayers()} players.`,
       "",
-      INPUT_TIMEOUT_HINT
+      INPUT_TIMEOUT_HINT,
     );
   }
 
@@ -412,7 +420,7 @@ const handlePlayersUpdate = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
   input: string,
-  target: "coinflip" | "giveaway"
+  target: "coinflip" | "giveaway",
 ): Promise<void> => {
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
@@ -440,7 +448,7 @@ const handlePlayersUpdate = async (
   if (clamped === null || Number.isNaN(parsed)) {
     await deps.replyToMessage(
       ctx,
-      `❌ Invalid number. Please enter a value between ${minValue}-${maxLimit}.`
+      `❌ Invalid number. Please enter a value between ${minValue}-${maxLimit}.`,
     );
     return;
   }
@@ -460,14 +468,14 @@ const handlePlayersUpdate = async (
     ctx,
     target === "coinflip"
       ? `✅ Default coinflip players set to ${clamped}.`
-      : `✅ Default giveaway players set to ${clamped}.`
+      : `✅ Default giveaway players set to ${clamped}.`,
   );
 };
 
 const handleTimeoutUpdate = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
-  input: string
+  input: string,
 ): Promise<void> => {
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
@@ -494,17 +502,14 @@ const handleTimeoutUpdate = async (
     set_by_telegram_id: telegramId.toString(),
   });
 
-  await deps.replyToMessage(
-    ctx,
-    `✅ Default game timeout set to ${formatDuration(clamped)}.`
-  );
+  await deps.replyToMessage(ctx, `✅ Default game timeout set to ${formatDuration(clamped)}.`);
 };
 
 const handleVideoIdUpdate = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
   input: string,
-  target: "video_coinflip" | "video_giveaway"
+  target: "video_coinflip" | "video_giveaway",
 ): Promise<void> => {
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
@@ -530,10 +535,7 @@ const handleVideoIdUpdate = async (
 
   const videoId = input.trim();
   if (!videoId || videoId.length < 5) {
-    await deps.replyToMessage(
-      ctx,
-      "❌ Invalid file ID. Please send a valid Telegram file ID."
-    );
+    await deps.replyToMessage(ctx, "❌ Invalid file ID. Please send a valid Telegram file ID.");
     return;
   }
 
@@ -565,18 +567,17 @@ const handleVideoIdUpdate = async (
   }
   deps.chatDb.upsertChatGameSettings(chatId, updateData);
 
-  const mediaTypeLabel = mediaType === "photo" ? "image" : mediaType === "animation" ? "GIF" : "video";
+  const mediaTypeLabel =
+    mediaType === "photo" ? "image" : mediaType === "animation" ? "GIF" : "video";
   await deps.replyToMessage(
     ctx,
     target === "video_coinflip"
       ? `✅ Default coinflip ${mediaTypeLabel} set. New games will use this ${mediaTypeLabel}.`
-      : `✅ Default giveaway ${mediaTypeLabel} set. New games will use this ${mediaTypeLabel}.`
+      : `✅ Default giveaway ${mediaTypeLabel} set. New games will use this ${mediaTypeLabel}.`,
   );
 };
 
-export const createChatDefaultsModule = (
-  deps: ChatDefaultsModuleDeps
-): ChatDefaultsModule => {
+export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefaultsModule => {
   const renderMenu = async (ctx: Context) => {
     const chatId = ctx.chat?.id;
     if (chatId == null) return;
@@ -590,15 +591,9 @@ export const createChatDefaultsModule = (
     });
   };
 
-  const handleDefaultCommand = async (
-    ctx: Context,
-    args: string[] = []
-  ): Promise<void> => {
+  const handleDefaultCommand = async (ctx: Context, args: string[] = []): Promise<void> => {
     if (ctx.chat?.type === "private") {
-      await deps.replyToMessage(
-        ctx,
-        "🚫 Default tokens can only be set in groups or channels."
-      );
+      await deps.replyToMessage(ctx, "🚫 Default tokens can only be set in groups or channels.");
       return;
     }
 
@@ -616,14 +611,11 @@ export const createChatDefaultsModule = (
       return;
     }
 
-    if (
-      tokenInput.toUpperCase() === "CLEAR" ||
-      tokenInput.toUpperCase() === "REMOVE"
-    ) {
+    if (tokenInput.toUpperCase() === "CLEAR" || tokenInput.toUpperCase() === "REMOVE") {
       deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
       await deps.replyToMessage(
         ctx,
-        "✅ Default token cleared for this chat. Using bot default token now."
+        "✅ Default token cleared for this chat. Using bot default token now.",
       );
       return;
     }
@@ -636,12 +628,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const target = ctx.match?.[1] as
-        | "token"
-        | "coinflip"
-        | "giveaway"
-        | "timeout"
-        | "video_coinflip"
-        | "video_giveaway";
+        "token" | "coinflip" | "giveaway" | "timeout" | "video_coinflip" | "video_giveaway";
       if (!target) return;
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
@@ -683,13 +670,11 @@ export const createChatDefaultsModule = (
       }
 
       // Clear input session if any
-      clearInputSession(
-        `${ctx.chat.id}_${ctx.callbackQuery?.message?.message_id}`
-      );
+      clearInputSession(`${ctx.chat.id}_${ctx.callbackQuery?.message?.message_id}`);
 
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(ctx, "Setting reset to default");
-    })
+    }),
   );
 
   deps.bot.callbackQuery(
@@ -744,7 +729,7 @@ export const createChatDefaultsModule = (
         await promptForSetting(ctx, deps, action);
       }
       await safeAnswerCallbackQuery(ctx);
-    })
+    }),
   );
 
   deps.bot.callbackQuery(
@@ -758,7 +743,7 @@ export const createChatDefaultsModule = (
 
       await promptForSetting(ctx, deps, target);
       await safeAnswerCallbackQuery(ctx);
-    })
+    }),
   );
 
   deps.bot.callbackQuery(
@@ -770,10 +755,7 @@ export const createChatDefaultsModule = (
 
       const allowed = await ensureAdmin(ctx, deps);
       if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
+        await safeAnswerCallbackQuery(ctx, "Only admins can change chat defaults");
         return;
       }
 
@@ -795,11 +777,8 @@ export const createChatDefaultsModule = (
       deps.chatDb.upsertChatGameSettings(chatId, updateData);
 
       await renderMenu(ctx);
-      await safeAnswerCallbackQuery(
-        ctx,
-        `${gameType} media disabled - games will send text only`
-      );
-    })
+      await safeAnswerCallbackQuery(ctx, `${gameType} media disabled - games will send text only`);
+    }),
   );
 
   deps.bot.callbackQuery(
@@ -833,9 +812,9 @@ export const createChatDefaultsModule = (
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(
         ctx,
-        value === "clear" ? "Privacy setting reset" : "Privacy setting updated"
+        value === "clear" ? "Privacy setting reset" : "Privacy setting updated",
       );
-    })
+    }),
   );
 
   // Join notification external toggle handler
@@ -857,9 +836,9 @@ export const createChatDefaultsModule = (
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(
         ctx,
-        value ? "External notifications enabled" : "External notifications disabled"
+        value ? "External notifications enabled" : "External notifications disabled",
       );
-    })
+    }),
   );
 
   // Join notification rate limit handler (preset values)
@@ -882,7 +861,7 @@ export const createChatDefaultsModule = (
       const rateLabel = rate === 0 ? "disabled" : `${rate}/min`;
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(ctx, `Rate limit set to ${rateLabel}`);
-    })
+    }),
   );
 
   // Join notification custom rate handler - prompt for input
@@ -908,7 +887,7 @@ export const createChatDefaultsModule = (
         initiatorId: telegramIdStr,
       });
       await safeAnswerCallbackQuery(ctx);
-    })
+    }),
   );
 
   // Join notification clear/reset handler
@@ -929,7 +908,7 @@ export const createChatDefaultsModule = (
 
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(ctx, "Join notifications reset to defaults");
-    })
+    }),
   );
 
   deps.bot.callbackQuery(
@@ -939,18 +918,16 @@ export const createChatDefaultsModule = (
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
 
-      clearInputSession(
-        `${ctx.chat?.id || 0}_${ctx.callbackQuery?.message?.message_id}`
-      );
+      clearInputSession(`${ctx.chat?.id || 0}_${ctx.callbackQuery?.message?.message_id}`);
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(ctx);
-    })
+    }),
   );
 
   const handleSettingsInput = async (
     ctx: Context,
     session: InputSessionState,
-    userMessage: string
+    userMessage: string,
   ): Promise<boolean> => {
     if (session.type !== "chat_defaults") return false;
 
@@ -963,7 +940,7 @@ export const createChatDefaultsModule = (
     ) {
       await deps.replyToMessage(
         ctx,
-        "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue."
+        "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue.",
       );
       return true;
     }
@@ -971,10 +948,7 @@ export const createChatDefaultsModule = (
     const telegramId = getTelegramId(ctx);
     const admin = await deps.isUserGroupAdmin(ctx, Number(telegramId));
     if (!admin) {
-      await deps.replyToMessage(
-        ctx,
-        "🔒 Only group administrators can update chat defaults."
-      );
+      await deps.replyToMessage(ctx, "🔒 Only group administrators can update chat defaults.");
       return true;
     }
 
@@ -993,7 +967,7 @@ export const createChatDefaultsModule = (
       if (isNaN(rate) || rate < 0 || rate > MAX_JOIN_NOTIFICATIONS_PER_MINUTE) {
         await deps.replyToMessage(
           ctx,
-          `❌ Invalid rate. Please enter a number between 0 and ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE}.`
+          `❌ Invalid rate. Please enter a number between 0 and ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE}.`,
         );
         return true;
       }

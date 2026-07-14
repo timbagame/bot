@@ -9,10 +9,10 @@ import type { GameCallbacksModuleDeps } from "../../src/handlers/game-callbacks"
 
 const makeDeps = () => {
   const wrapCallbackHandler: GameCallbacksModuleDeps["wrapCallbackHandler"] =
-    (handler) => async (ctx, next) => handler(ctx, next);
-  const withCreatorContext =
-    ((_: any, handler: any) => async (ctx: any) =>
-      handler(ctx, {} as any)) as GameCallbacksModuleDeps["withCreatorContext"];
+    (handler) => async (ctx, next) =>
+      handler(ctx, next);
+  const withCreatorContext = ((_: any, handler: any) => async (ctx: any) =>
+    handler(ctx, {} as any)) as GameCallbacksModuleDeps["withCreatorContext"];
 
   const gameDb = {
     getGame: () => ({ token_ticker: "TOK", amount: 100 }),
@@ -74,9 +74,7 @@ const makeDeps = () => {
 const makeCtx = (username?: string) => ({
   chat: { id: 1, type: "private" },
   callbackQuery: { id: "q", message: { message_id: 42 } },
-  from: username
-    ? { username, first_name: "", last_name: "" }
-    : { first_name: "", last_name: "" },
+  from: username ? { username, first_name: "", last_name: "" } : { first_name: "", last_name: "" },
   api: {
     answerCallbackQuery: vi.fn(),
     sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
@@ -95,30 +93,25 @@ describe("Game Join Message Recreation", () => {
     // Mock getActiveGameMessages to return empty map (no message in chat 999)
     (gameManager.getActiveGameMessages as any).mockReturnValue(new Map());
 
-    await module.__test_handleJoinGame(
-      ctx as unknown as Context,
-      gamePda,
-      123n,
-      {
-        game_address: gameAddress,
-        status: "active",
-        chat_id: 111, // Created in chat 111
-        amount: 100,
-        game_type: "coinflip",
-        token_ticker: "TOK",
-      }
-    );
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 123n, {
+      game_address: gameAddress,
+      status: "active",
+      chat_id: 111, // Created in chat 111
+      amount: 100,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
 
     // Should have called createGameMessage with the callback message ID for reply
     expect(gameManager.createGameMessage).toHaveBeenCalledWith(
-        ctx,
-        gameAddress,
-        "Coinflip",
-        100,
-        "@creator",
-        "TOK",
-        "Active",
-        42 // The callback message ID from ctx.callbackQuery.message.message_id
+      ctx,
+      gameAddress,
+      "Coinflip",
+      100,
+      "@creator",
+      "TOK",
+      "Active",
+      42, // The callback message ID from ctx.callbackQuery.message.message_id
     );
   });
 
@@ -135,19 +128,14 @@ describe("Game Join Message Recreation", () => {
     activeMap.set(999, { messageId: 50, chatId: 999 });
     (gameManager.getActiveGameMessages as any).mockReturnValue(activeMap);
 
-    await module.__test_handleJoinGame(
-      ctx as unknown as Context,
-      gamePda,
-      123n,
-      {
-        game_address: gameAddress,
-        status: "active",
-        chat_id: 111,
-        amount: 100,
-        game_type: "coinflip",
-        token_ticker: "TOK",
-      }
-    );
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 123n, {
+      game_address: gameAddress,
+      status: "active",
+      chat_id: 111,
+      amount: 100,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
 
     // Should NOT have called createGameMessage
     expect(gameManager.createGameMessage).not.toHaveBeenCalled();
@@ -171,25 +159,16 @@ describe("Game Join Message Recreation", () => {
       error: "You have already joined this game!",
     });
 
-    await module.__test_handleJoinGame(
-      ctx as unknown as Context,
-      gamePda,
-      456n,
-      {
-        game_address: gameAddress,
-        status: "active",
-        chat_id: 999,
-        amount: 50,
-        game_type: "coinflip",
-        token_ticker: "TOK",
-      }
-    );
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 456n, {
+      game_address: gameAddress,
+      status: "active",
+      chat_id: 999,
+      amount: 50,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
 
-    expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(
-      ctx,
-      gameAddress,
-      "Active"
-    );
+    expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(ctx, gameAddress, "Active");
     expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", {
       text: "You have already joined this game!",
     });

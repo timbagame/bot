@@ -3,7 +3,8 @@ import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 
 describe("WalletManager.signAndSendSerializedTransaction", () => {
-  const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const mnemonic =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   let originalDeserialize: any;
   let connection: any;
   let wm: WalletManager;
@@ -38,10 +39,12 @@ describe("WalletManager.signAndSendSerializedTransaction", () => {
   });
 
   test("maps address table errors to friendly message", async () => {
-    connection.sendTransaction = async () => { throw new Error("address table account missing"); };
+    connection.sendTransaction = async () => {
+      throw new Error("address table account missing");
+    };
     const kp = Keypair.generate();
-    await expect(wm.signAndSendSerializedTransaction("ZmFrZQ==", kp))
-      .rejects.toThrow(/Address lookup table issue/i);
+    await expect(wm.signAndSendSerializedTransaction("ZmFrZQ==", kp)).rejects.toThrow(
+      /Address lookup table issue/i,
+    );
   });
 });
-

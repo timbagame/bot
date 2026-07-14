@@ -5,17 +5,26 @@ import { createAmountSelectionKeyboard } from "../src/utils/keyboards";
 function extractCallbacks(kb: any): string[] {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.callback_data).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.callback_data)
+        .filter(Boolean);
     }
   } catch {}
   return [];

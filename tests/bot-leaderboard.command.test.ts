@@ -15,12 +15,24 @@ describe("Leaderboard command membership filtering", () => {
     playerPk: string,
     gameAddress: string,
     chatId: number,
-    username?: string
+    username?: string,
   ) => {
     gameDb.savePlayerMapping(playerPk, playerId, username);
-    gameDb.saveGame(gameAddress, playerId, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGame(
+      gameAddress,
+      playerId,
+      1_000_000,
+      "coinflip",
+      "TIMBA_MINT",
+      "TIMBA",
+      2,
+      2,
+      chatId,
+    );
     gameDb.saveGameParticipant(gameAddress, playerId, playerPk, { status: "confirmed" });
-    gameDb.saveGameParticipant(gameAddress, `OTHER_${gameAddress}`, `PK_OTHER_${gameAddress}`, { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, `OTHER_${gameAddress}`, `PK_OTHER_${gameAddress}`, {
+      status: "confirmed",
+    });
     gameDb.completeGame(gameAddress, playerPk);
   };
 
@@ -29,7 +41,13 @@ describe("Leaderboard command membership filtering", () => {
 
     // Create two players who have played in this chat
     createPlayerWithGame("MEMBER_PLAYER", "PK_MEMBER", "MEMBER_GAME", chatId, "@memberuser");
-    createPlayerWithGame("NONMEMBER_PLAYER", "PK_NONMEMBER", "NONMEMBER_GAME", chatId, "@nonmemberuser");
+    createPlayerWithGame(
+      "NONMEMBER_PLAYER",
+      "PK_NONMEMBER",
+      "NONMEMBER_GAME",
+      chatId,
+      "@nonmemberuser",
+    );
 
     // Verify both appear in raw stats (database level)
     const rawStats = gameDb.getLeaderboardStats(chatId, 10);

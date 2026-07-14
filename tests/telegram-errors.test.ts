@@ -22,16 +22,12 @@ describe("telegram error helpers", () => {
   });
 
   test("message predicates are case-insensitive", () => {
-    expect(isMessageNotModified("MESSAGE IS NOT MODIFIED"))
-      .toBe(true);
+    expect(isMessageNotModified("MESSAGE IS NOT MODIFIED")).toBe(true);
     expect(isMessageMissing({ description: "Message to edit not found" })).toBe(true);
-    expect(isEditProhibited("Message CAN'T be edited"))
-      .toBe(true);
+    expect(isEditProhibited("Message CAN'T be edited")).toBe(true);
     expect(isChatInaccessible({ message: "Bot was blocked by the user" })).toBe(true);
-    expect(isMissingEditableContent("There is no caption in the message to edit"))
-      .toBe(true);
-    expect(isDuplicateContent("Message with the same content already exists"))
-      .toBe(true);
+    expect(isMissingEditableContent("There is no caption in the message to edit")).toBe(true);
+    expect(isDuplicateContent("Message with the same content already exists")).toBe(true);
   });
 
   test("predicates return false for unrelated errors", () => {
@@ -46,10 +42,8 @@ describe("telegram error helpers", () => {
   });
 
   test("shouldFallbackToReply aggregates individual predicates", () => {
-    expect(shouldFallbackToReply("Message to delete not found"))
-      .toBe(true);
-    expect(shouldFallbackToReply("some other error"))
-      .toBe(false);
+    expect(shouldFallbackToReply("Message to delete not found")).toBe(true);
+    expect(shouldFallbackToReply("some other error")).toBe(false);
   });
 
   test("isBotInitiationForbidden detects 403 initiation errors", () => {
@@ -57,13 +51,13 @@ describe("telegram error helpers", () => {
       isBotInitiationForbidden({
         error_code: 403,
         description: "Forbidden: bot can't initiate conversation with a user",
-      })
+      }),
     ).toBe(true);
     expect(
       isBotInitiationForbidden({
         error_code: 403,
         description: "Forbidden: bot was blocked by the user",
-      })
+      }),
     ).toBe(true);
   });
 

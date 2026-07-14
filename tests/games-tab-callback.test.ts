@@ -12,8 +12,7 @@ if (originalToken === undefined) {
   process.env.TELEGRAM_TOKEN = "test-token";
 }
 if (originalMnemonic === undefined) {
-  process.env.MNEMONIC =
-    "test test test test test test test test test test test junk";
+  process.env.MNEMONIC = "test test test test test test test test test test test junk";
 }
 if (originalSolanaNetwork === undefined) {
   process.env.SOLANA_NETWORK = "http://localhost:8899";
@@ -91,7 +90,9 @@ describe("handleGamesTabCallback", () => {
         cancelled: { games: [], totalAmount: 0 },
       })),
       formatGamesMessage: vi.fn(() => "Games message"),
-      buildGamesKeyboard: vi.fn(() => [[{ text: "Won (0)", callback_data: "games_tab:won:0:123" }]]),
+      buildGamesKeyboard: vi.fn(() => [
+        [{ text: "Won (0)", callback_data: "games_tab:won:0:123" }],
+      ]),
     } as any;
 
     botModule.__test_setGameManager(stubGameManager);
@@ -117,7 +118,9 @@ describe("handleGamesTabCallback", () => {
         cancelled: { games: [], totalAmount: 0 },
       })),
       formatGamesMessage: vi.fn(() => "Games message"),
-      buildGamesKeyboard: vi.fn(() => [[{ text: "Won (0)", callback_data: "games_tab:won:0:123" }]]),
+      buildGamesKeyboard: vi.fn(() => [
+        [{ text: "Won (0)", callback_data: "games_tab:won:0:123" }],
+      ]),
     } as any;
 
     botModule.__test_setGameManager(stubGameManager);
@@ -128,7 +131,9 @@ describe("handleGamesTabCallback", () => {
       editMessageTextResult: "other_error",
     });
 
-    await expect(botModule.__test_handleGamesTabCallback(ctx)).rejects.toThrow("some other edit error");
+    await expect(botModule.__test_handleGamesTabCallback(ctx)).rejects.toThrow(
+      "some other edit error",
+    );
   });
 
   test("rejects invalid callback data", async () => {
@@ -163,7 +168,9 @@ describe("handleGamesTabCallback", () => {
         cancelled: { games: [], totalAmount: 0 },
       })),
       formatGamesMessage: vi.fn(() => "Games message"),
-      buildGamesKeyboard: vi.fn(() => [[{ text: "Won (0)", callback_data: "games_tab:won:0:123" }]]),
+      buildGamesKeyboard: vi.fn(() => [
+        [{ text: "Won (0)", callback_data: "games_tab:won:0:123" }],
+      ]),
     } as any;
 
     botModule.__test_setGameManager(stubGameManager);

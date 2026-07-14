@@ -27,9 +27,7 @@ export type BuildWalletTokenLinesParams = {
   tokenBalances: WalletTokenBalance[];
   formatSolBalance: (lamports: number) => string;
   formatTokenBalance?: (balance: number, decimals: number) => string;
-  fetchPricesUSD?: (
-    references: string[]
-  ) => Promise<Record<string, number>>;
+  fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
 };
 
 export async function buildWalletTokenLines({
@@ -54,8 +52,7 @@ export async function buildWalletTokenLines({
   }
 
   const references = Array.from(priceReferences);
-  const resolvePrices =
-    fetchPricesUSD ?? ((ids: string[]) => getPricesUSD(ids));
+  const resolvePrices = fetchPricesUSD ?? ((ids: string[]) => getPricesUSD(ids));
   const priceRecord = await resolvePrices(references);
   const getPriceFor = (reference: string) => priceRecord?.[reference] ?? 0;
 
@@ -123,16 +120,11 @@ export async function buildWalletTokenLines({
  * Includes a token list where each line follows the format:
  * TICKER: amount [UNIT] ($usdValue)
  */
-export function buildWalletCaption(
-  walletAddress: string,
-  tokenLines: TokenDisplayLine[]
-): string {
+export function buildWalletCaption(walletAddress: string, tokenLines: TokenDisplayLine[]): string {
   const lines: string[] = [];
 
   const explorerUrl = NetworkDetector.buildSolscanAccountUrl(walletAddress);
-  const explorerIcon = explorerUrl
-    ? `<a href="${explorerUrl}">🅴</a>`
-    : "🅴";
+  const explorerIcon = explorerUrl ? `<a href="${explorerUrl}">🅴</a>` : "🅴";
 
   lines.push(`Solana Address · ${explorerIcon}`);
   lines.push("");
@@ -185,18 +177,12 @@ type TokenSelectQuickActions = {
     | boolean
     | {
         callback?: string;
-        label?: (
-          formattedBalance: string,
-          lamports: number
-        ) => string;
+        label?: (formattedBalance: string, lamports: number) => string;
         includeIf?: (lamports: number) => boolean;
       };
   limit?: number;
   filter?: (token: WalletActionMenuTokenBalance) => boolean;
-  tokenLabel?: (
-    token: WalletActionMenuTokenBalance,
-    formattedBalance: string
-  ) => string;
+  tokenLabel?: (token: WalletActionMenuTokenBalance, formattedBalance: string) => string;
   tokenCallback?: (token: WalletActionMenuTokenBalance) => string;
   emptyLabel?: string;
 };
@@ -216,9 +202,7 @@ type PrebuiltQuickActions = {
 };
 
 export type WalletActionQuickActions =
-  | TokenSelectQuickActions
-  | WrapQuickActions
-  | PrebuiltQuickActions;
+  TokenSelectQuickActions | WrapQuickActions | PrebuiltQuickActions;
 
 export type WalletActionMenuParams = {
   title: string;
@@ -242,9 +226,7 @@ export type WalletActionMenuContext = WalletMenuBalances & {
 export type BuildWalletActionMenuForUserDeps = {
   requireTelegramId: (ctx: Context, contextDescription: string) => bigint;
   getWalletAddress: (telegramId: bigint) => string | Promise<string>;
-  getWalletBalances: (
-    telegramId: bigint
-  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  getWalletBalances: (telegramId: bigint) => Promise<WalletMenuBalances> | WalletMenuBalances;
   formatSolBalance: (lamports: number) => string;
   formatTokenBalance: (balance: number, decimals: number) => string;
 };
@@ -255,9 +237,7 @@ export type BuildWalletActionMenuForUserOptions = {
   bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
   quickActions: WalletActionQuickActions;
   backButton?: { label?: string; callback: string };
-  getBalances?: (
-    telegramId: bigint
-  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  getBalances?: (telegramId: bigint) => Promise<WalletMenuBalances> | WalletMenuBalances;
   prepareBalances?: (balances: WalletMenuBalances) => WalletActionMenuBalances;
 };
 
@@ -287,9 +267,7 @@ const appendSection = (target: string[], lines: string[] | undefined) => {
     return;
   }
 
-  const filtered = lines.filter((line) =>
-    typeof line === "string" && line.trim().length > 0
-  );
+  const filtered = lines.filter((line) => typeof line === "string" && line.trim().length > 0);
 
   if (filtered.length === 0) {
     return;
@@ -327,9 +305,7 @@ export const showCustomAmountPrompt = async <State extends InputSessionState>({
     if (examplesHeading) {
       lines.push(examplesHeading);
     }
-    lines.push(
-      ...examples.filter((line) => typeof line === "string" && line.trim().length > 0)
-    );
+    lines.push(...examples.filter((line) => typeof line === "string" && line.trim().length > 0));
   }
 
   appendSection(lines, footerLines);
@@ -375,8 +351,7 @@ export const upsertWalletMenuMessage = async ({
   logLabel = "wallet-menu",
   allowContextEdit = false,
 }: WalletMenuUpsertOptions): Promise<WalletMenuUpsertResult> => {
-  const hasExplicitTarget =
-    typeof targetChatId === "number" && typeof targetMessageId === "number";
+  const hasExplicitTarget = typeof targetChatId === "number" && typeof targetMessageId === "number";
 
   const menuResult = await respondWithMenu(
     ctx,
@@ -388,7 +363,7 @@ export const upsertWalletMenuMessage = async ({
       targetMessageId,
       allowContextEdit,
       logLabel,
-    }
+    },
   );
 
   return {
@@ -427,10 +402,9 @@ export async function persistInputPrompt({
     typeof userState.chatId === "number"
       ? userState.chatId
       : typeof ctx.chat?.id === "number"
-      ? ctx.chat.id
-      : undefined;
-  const targetMessageId =
-    typeof userState.messageId === "number" ? userState.messageId : undefined;
+        ? ctx.chat.id
+        : undefined;
+  const targetMessageId = typeof userState.messageId === "number" ? userState.messageId : undefined;
 
   const menuResult = await upsertWalletMenuMessage({
     ctx,
@@ -439,8 +413,7 @@ export async function persistInputPrompt({
     parseMode,
     targetChatId,
     targetMessageId,
-    replyToMessageId:
-      replyToMessageId ?? ctx.message?.message_id ?? undefined,
+    replyToMessageId: replyToMessageId ?? ctx.message?.message_id ?? undefined,
     logLabel,
     allowContextEdit: true,
   });
@@ -492,23 +465,21 @@ export const persistInputPromptFromContext = async ({
     (typeof callbackMessage?.chat?.id === "number"
       ? callbackMessage.chat.id
       : typeof ctx.chat?.id === "number"
-      ? ctx.chat.id
-      : undefined);
+        ? ctx.chat.id
+        : undefined);
 
   const derivedMessageId =
     target?.messageId ??
-    (typeof callbackMessage?.message_id === "number"
-      ? callbackMessage.message_id
-      : undefined);
+    (typeof callbackMessage?.message_id === "number" ? callbackMessage.message_id : undefined);
 
   const resolvedReplyTo =
     typeof replyToMessageId === "number"
       ? replyToMessageId
       : typeof callbackMessage?.message_id === "number"
-      ? callbackMessage.message_id
-      : typeof ctx.message?.message_id === "number"
-      ? ctx.message.message_id
-      : undefined;
+        ? callbackMessage.message_id
+        : typeof ctx.message?.message_id === "number"
+          ? ctx.message.message_id
+          : undefined;
 
   return await persistInputPrompt({
     ctx,
@@ -517,11 +488,9 @@ export const persistInputPromptFromContext = async ({
     ...promptOptions,
     session: {
       ...promptOptions.session,
-      initiatorId:
-        promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
+      initiatorId: promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
     },
-    initiatorId:
-      promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
+    initiatorId: promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
   });
 };
 
@@ -537,7 +506,7 @@ export type QuickAmountValueButton = {
 
 export const buildQuickAmountRows = (
   buttons: QuickAmountKeyboardButton[],
-  columns = 2
+  columns = 2,
 ): QuickAmountKeyboardButton[][] => {
   if (!Number.isFinite(columns) || columns <= 0) {
     return [];
@@ -558,7 +527,7 @@ export const buildQuickAmountRows = (
 
 export const appendQuickAmountKeyboardRows = (
   keyboard: InlineKeyboard,
-  rows: QuickAmountKeyboardButton[][]
+  rows: QuickAmountKeyboardButton[][],
 ): InlineKeyboard => {
   for (const row of rows) {
     if (!row || row.length === 0) {
@@ -612,7 +581,7 @@ export const buildQuickAmountKeyboard = ({
         row.map(({ label, value }) => ({
           label,
           callback: baseCallback(value),
-        }))
+        })),
       );
     }
 
@@ -644,7 +613,7 @@ export const buildQuickAmountKeyboard = ({
 
 const shouldIncludeSol = (
   includeSol: TokenSelectQuickActions["includeSol"],
-  lamports: number
+  lamports: number,
 ): boolean => {
   if (!includeSol) {
     return false;
@@ -664,15 +633,13 @@ const shouldIncludeSol = (
 const buildTokenSelectKeyboard = (
   params: TokenSelectQuickActions,
   balances: WalletActionMenuBalances,
-  formatters: WalletActionMenuFormatters
+  formatters: WalletActionMenuFormatters,
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
   let hasEntries = false;
 
   if (shouldIncludeSol(params.includeSol, balances.solBalanceLamports)) {
-    const formattedSol = formatters.formatSolBalance(
-      balances.solBalanceLamports
-    );
+    const formattedSol = formatters.formatSolBalance(balances.solBalanceLamports);
     const solCallback =
       typeof params.includeSol === "object" && params.includeSol.callback
         ? params.includeSol.callback
@@ -694,10 +661,7 @@ const buildTokenSelectKeyboard = (
       continue;
     }
 
-    const formatted = formatters.formatTokenBalance(
-      token.balance,
-      token.decimals
-    );
+    const formatted = formatters.formatTokenBalance(token.balance, token.decimals);
     const label = params.tokenLabel
       ? params.tokenLabel(token, formatted)
       : `${token.ticker} (${formatted})`;
@@ -718,7 +682,7 @@ const buildTokenSelectKeyboard = (
 
 const buildWrapKeyboard = (
   params: WrapQuickActions,
-  balances: WalletActionMenuBalances
+  balances: WalletActionMenuBalances,
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
   const minimumLamports = params.minimumLamports ?? 10_000;
@@ -729,10 +693,7 @@ const buildWrapKeyboard = (
       callback: `${params.callbackPrefix}${amount.value}`,
     }));
 
-    appendQuickAmountKeyboardRows(
-      keyboard,
-      buildQuickAmountRows(wrapButtons)
-    );
+    appendQuickAmountKeyboardRows(keyboard, buildQuickAmountRows(wrapButtons));
 
     if (params.customAction) {
       appendQuickAmountKeyboardRows(keyboard, [
@@ -779,7 +740,7 @@ export const buildWalletActionMenu = ({
 
   const sanitizedAddress = escapeHtml(walletAddress);
   const processedBodyLines = bodyLines.map((line) =>
-    line.replace(/\{\{WALLET_ADDRESS\}\}/g, sanitizedAddress)
+    line.replace(/\{\{WALLET_ADDRESS\}\}/g, sanitizedAddress),
   );
   const lines = [title, "", ...processedBodyLines];
   const keyboard = (() => {
@@ -821,12 +782,10 @@ export const buildWalletActionMenuForUser = async (
     backButton,
     getBalances,
     prepareBalances,
-  }: BuildWalletActionMenuForUserOptions
+  }: BuildWalletActionMenuForUserOptions,
 ): Promise<BuildWalletActionMenuForUserResult> => {
   const telegramId = deps.requireTelegramId(ctx, "wallet action menu");
-  const walletAddress = await Promise.resolve(
-    deps.getWalletAddress(telegramId)
-  );
+  const walletAddress = await Promise.resolve(deps.getWalletAddress(telegramId));
 
   const resolveBalances =
     getBalances ?? ((id: bigint) => Promise.resolve(deps.getWalletBalances(id)));
@@ -839,8 +798,7 @@ export const buildWalletActionMenuForUser = async (
     tokenBalances,
   };
 
-  const resolvedBodyLines =
-    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
+  const resolvedBodyLines = typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
 
   const balancesForMenu = prepareBalances
     ? prepareBalances({ solBalance, tokenBalances })

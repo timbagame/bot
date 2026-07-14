@@ -12,12 +12,8 @@ describe("GameManager orphan cleanup", () => {
     resetGM();
     const gameAddress = "BPFLoader9999999999999999999999999999999999";
     const gamePda = new PublicKey(gameAddress);
-    const creatorPubkey = new PublicKey(
-      "BPFLoader1111111111111111111111111111111111"
-    );
-    const playerPubkey = new PublicKey(
-      "BPFLoader2111111111111111111111111111111111"
-    );
+    const creatorPubkey = new PublicKey("BPFLoader1111111111111111111111111111111111");
+    const playerPubkey = new PublicKey("BPFLoader2111111111111111111111111111111111");
 
     let participants = ["555"];
     const dbStub = {
@@ -64,11 +60,7 @@ describe("GameManager orphan cleanup", () => {
       gameType: { coinflip: {} },
     };
 
-    const result = await (gm as any).handleExpiredCoinflip(
-      gamePda,
-      gameAccount,
-      gameAddress
-    );
+    const result = await (gm as any).handleExpiredCoinflip(gamePda, gameAccount, gameAddress);
 
     expect(result).toBe(true);
     expect(cancelCalled).toBe(true);

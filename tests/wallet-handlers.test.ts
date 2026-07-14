@@ -7,9 +7,18 @@ function makeCtx() {
   const calls: any[] = [];
   const ctx: any = {
     from: { id: "1" },
-    answerCallbackQuery: async (...args: any[]) => { calls.push(["answer", ...args]); return { ok: true }; },
-    editMessageText: async (...args: any[]) => { calls.push(["editText", ...args]); throw new Error("fail"); },
-    reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
+    answerCallbackQuery: async (...args: any[]) => {
+      calls.push(["answer", ...args]);
+      return { ok: true };
+    },
+    editMessageText: async (...args: any[]) => {
+      calls.push(["editText", ...args]);
+      throw new Error("fail");
+    },
+    reply: async (...args: any[]) => {
+      calls.push(["reply", ...args]);
+      return { ok: true };
+    },
     __calls: calls,
   };
   return ctx;
@@ -20,7 +29,9 @@ describe("wallet handlers", () => {
     const ctx: any = makeCtx();
     let shown = 0;
     const deps = {
-      showWalletUI: async () => { shown++; },
+      showWalletUI: async () => {
+        shown++;
+      },
       clearWalletCache: (_: any) => {},
       createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
@@ -35,8 +46,12 @@ describe("wallet handlers", () => {
     let cleared: any = null;
     let shown = 0;
     const deps = {
-      showWalletUI: async () => { shown++; },
-      clearWalletCache: (id: any) => { cleared = id; },
+      showWalletUI: async () => {
+        shown++;
+      },
+      clearWalletCache: (id: any) => {
+        cleared = id;
+      },
       createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onWalletRefresh(ctx, deps);

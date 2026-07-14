@@ -32,7 +32,7 @@ describe("SwapQuoteCache", () => {
       cache.getJupiterQuote(params, async () => {
         loaderCalls += 1;
         throw new Error("quote unavailable");
-      })
+      }),
     ).rejects.toThrow("quote unavailable");
 
     const resolved = await cache.getJupiterQuote(params, async () => {
@@ -43,7 +43,7 @@ describe("SwapQuoteCache", () => {
     expect(loaderCalls).toBe(2);
     expect(resolved.outAmount).toBe("3000");
   });
- 
+
   test("keeps referral and non-referral quotes separate", async () => {
     const cache = new SwapQuoteCache({ ttlMs: 5_000 });
     const baseParams = makeJupiterParams({ amount: "1500" });

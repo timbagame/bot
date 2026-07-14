@@ -20,11 +20,7 @@ import {
   encodeVisibilityPayload,
   isCallbackSafeLength,
 } from "./callback-data";
-import {
-  formatCompactTokenDisplay,
-  formatTokenDisplay,
-  formatUsdValue,
-} from "./format-amount";
+import { formatCompactTokenDisplay, formatTokenDisplay, formatUsdValue } from "./format-amount";
 import { formatDuration } from "./format-time";
 import type { GameType } from "../types";
 
@@ -38,9 +34,7 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .row();
 };
 
-const appendBackToWalletButton = (
-  keyboard: InlineKeyboard
-): InlineKeyboard => {
+const appendBackToWalletButton = (keyboard: InlineKeyboard): InlineKeyboard => {
   return keyboard.text("← Back to Wallet", "main_wallet").row();
 };
 
@@ -49,15 +43,10 @@ export const createBackToWalletKeyboard = (): InlineKeyboard => {
 };
 
 export const createBackToSettingsKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("← Back to Settings", "wallet_settings")
-    .row();
+  return new InlineKeyboard().text("← Back to Settings", "wallet_settings").row();
 };
 
-export const createCancelKeyboard = (
-  callback: string,
-  label = "❌ Cancel"
-): InlineKeyboard => {
+export const createCancelKeyboard = (callback: string, label = "❌ Cancel"): InlineKeyboard => {
   return new InlineKeyboard().text(label, callback).row();
 };
 
@@ -68,7 +57,7 @@ export const createWalletSettingsKeyboard = (): InlineKeyboard => {
       .text("🧼 Unwrap WSOL", "cmd_unwrap")
       .row()
       .text("🔐 Private Key", "cmd_privatekey")
-      .row()
+      .row(),
   );
 };
 
@@ -80,9 +69,7 @@ export const createConfirmWrapKeyboard = (lamports: number): InlineKeyboard => {
     .row();
 };
 
-export const createConfirmUnwrapKeyboard = (
-  hasBalance: boolean
-): InlineKeyboard => {
+export const createConfirmUnwrapKeyboard = (hasBalance: boolean): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
 
   if (hasBalance) {
@@ -152,7 +139,7 @@ export const getFeeWarningMessage = (
   balance: number,
   contractMinimum: number = 20,
   tokenTicker: string = DEFAULT_TOKEN_TICKER,
-  options?: { includeBalanceInfo?: boolean }
+  options?: { includeBalanceInfo?: boolean },
 ): string => {
   const formattedGameType =
     typeof gameType === "string" && gameType.length > 0
@@ -179,33 +166,8 @@ export const getFeeWarningMessage = (
   return message;
 };
 
-const SUGGESTION_MULTIPLIERS = [
-  1,
-  2.5,
-  5,
-  10,
-  20,
-  30,
-  50,
-  75,
-  100,
-  150,
-  200,
-  250,
-] as const;
-const USD_STAKE_TARGETS = [
-  0.25,
-  0.5,
-  1,
-  2,
-  3,
-  5,
-  7.5,
-  10,
-  15,
-  20,
-  25,
-] as const;
+const SUGGESTION_MULTIPLIERS = [1, 2.5, 5, 10, 20, 30, 50, 75, 100, 150, 200, 250] as const;
+const USD_STAKE_TARGETS = [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 25] as const;
 
 type StakeSuggestion = {
   amount: number;
@@ -215,14 +177,12 @@ type StakeSuggestion = {
 export const getSuggestedStakeAmounts = (
   contractMinimum: number,
   _balance?: number,
-  tokenPriceUSD?: number
+  tokenPriceUSD?: number,
 ): StakeSuggestion[] => {
   const min = Math.max(contractMinimum, 0);
 
   const hasValidPrice =
-    typeof tokenPriceUSD === "number" &&
-    Number.isFinite(tokenPriceUSD) &&
-    tokenPriceUSD > 0;
+    typeof tokenPriceUSD === "number" && Number.isFinite(tokenPriceUSD) && tokenPriceUSD > 0;
 
   const suggestions = hasValidPrice
     ? USD_STAKE_TARGETS.map((usdTarget) => ({
@@ -258,7 +218,7 @@ export const createAmountSelectionKeyboard = (
   options?: {
     decimals?: number;
     tokenPriceUSD?: number;
-  }
+  },
 ): InlineKeyboard => {
   const typedGameType = gameType as GameType;
   const { guard, hasOverflow } = createCallbackGuard();
@@ -278,11 +238,7 @@ export const createAmountSelectionKeyboard = (
       ? options.tokenPriceUSD
       : undefined;
 
-  const amounts = getSuggestedStakeAmounts(
-    contractMinimum,
-    balance,
-    tokenPriceUSD
-  );
+  const amounts = getSuggestedStakeAmounts(contractMinimum, balance, tokenPriceUSD);
 
   const keyboard = new InlineKeyboard();
 
@@ -296,40 +252,33 @@ export const createAmountSelectionKeyboard = (
 
   const amountButtons: { text: string; callback: string }[] = [];
 
-  const minDisplay = formatCompactTokenDisplay(
-    formatTokenDisplay(contractMinimum, { decimals })
-  );
+  const minDisplay = formatCompactTokenDisplay(formatTokenDisplay(contractMinimum, { decimals }));
 
   amountButtons.push({
     text: `${minDisplay}${minUsdText}`,
     callback: guard(
       creatorId != null
-        ? encodeAmountSelectionPayload({
+        ? (encodeAmountSelectionPayload({
             gameType: typedGameType,
             amount: String(contractMinimum),
             creatorId,
-          }) ??
-          withCreatorSuffix(
-            `amount_${gameType}_${contractMinimum}`,
-            creatorId
-          )
-        : `amount_${gameType}_${contractMinimum}`
+          }) ?? withCreatorSuffix(`amount_${gameType}_${contractMinimum}`, creatorId))
+        : `amount_${gameType}_${contractMinimum}`,
     ),
   });
 
   const filteredAmounts = amounts.filter(
-    ({ amount }) => Math.abs(amount - contractMinimum) >= 1e-6
+    ({ amount }) => Math.abs(amount - contractMinimum) >= 1e-6,
   );
 
   filteredAmounts.forEach(({ amount, usdTarget }) => {
     const callbackData =
       creatorId != null
-        ? encodeAmountSelectionPayload({
+        ? (encodeAmountSelectionPayload({
             gameType: typedGameType,
             amount: String(amount),
             creatorId,
-          }) ??
-          withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId)
+          }) ?? withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId))
         : `amount_${gameType}_${amount}`;
     const fullDisplay = formatTokenDisplay(amount, { decimals });
     const display = formatCompactTokenDisplay(fullDisplay);
@@ -366,10 +315,7 @@ export const createAmountSelectionKeyboard = (
   keyboard.row();
 
   keyboard
-    .text(
-      "✏️ Custom Amount",
-      guard(withCreatorSuffix(`custom_amount_${gameType}`, creatorId))
-    )
+    .text("✏️ Custom Amount", guard(withCreatorSuffix(`custom_amount_${gameType}`, creatorId)))
     .row()
     .text("❌ Cancel", guard(withCreatorSuffix("cancel_game_setup", creatorId)))
     .row();
@@ -397,7 +343,7 @@ const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {
 export const createPlayerSelectionKeyboard = (
   gameType: string,
   amount: string,
-  creatorId?: string
+  creatorId?: string,
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
   const typedGameType = gameType as GameType;
@@ -414,18 +360,14 @@ export const createPlayerSelectionKeyboard = (
         `👥 ${count}`,
         guard(
           creatorId != null
-            ? encodePlayersSelectionPayload({
+            ? (encodePlayersSelectionPayload({
                 gameType: typedGameType,
                 amount,
                 players: count,
                 creatorId,
-              }) ??
-              withCreatorSuffix(
-                `players_${gameType}_${amount}_${count}`,
-                creatorId
-              )
-            : `players_${gameType}_${amount}_${count}`
-        )
+              }) ?? withCreatorSuffix(`players_${gameType}_${amount}_${count}`, creatorId))
+            : `players_${gameType}_${amount}_${count}`,
+        ),
       );
     }
 
@@ -437,20 +379,16 @@ export const createPlayerSelectionKeyboard = (
       "📊 Custom Players",
       guard(
         creatorId != null
-          ? encodeCustomPlayersPayload({
+          ? (encodeCustomPlayersPayload({
               gameType: typedGameType,
               amount,
               creatorId,
-            }) ??
-            withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId)
-          : `custom_players_${gameType}_${amount}`
-      )
+            }) ?? withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId))
+          : `custom_players_${gameType}_${amount}`,
+      ),
     )
     .row()
-    .text(
-      "⬅️ Back to Amount",
-      guard(withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId))
-    )
+    .text("⬅️ Back to Amount", guard(withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId)))
     .row();
 
   if (hasOverflow()) {
@@ -466,8 +404,7 @@ type GameAdvancedOptions = {
   isPrivate: boolean;
 };
 
-const visibilityLabel = (isPrivate: boolean): string =>
-  isPrivate ? "🔒 Private" : "🌐 Public";
+const visibilityLabel = (isPrivate: boolean): string => (isPrivate ? "🔒 Private" : "🌐 Public");
 
 const formatTimeoutLabel = (timeoutSeconds: number): string => {
   return formatDuration(timeoutSeconds);
@@ -497,7 +434,7 @@ const TIMEOUT_SNAP_LADDER_SECONDS = [
 const snapTimeoutSeconds = (candidateSeconds: number): number => {
   const clamped = clampTimeoutSeconds(candidateSeconds);
   const ladder = TIMEOUT_SNAP_LADDER_SECONDS.filter(
-    (seconds) => seconds >= MIN_GAME_TIMEOUT && seconds <= MAX_GAME_TIMEOUT
+    (seconds) => seconds >= MIN_GAME_TIMEOUT && seconds <= MAX_GAME_TIMEOUT,
   );
 
   if (ladder.length === 0) return clamped;
@@ -522,10 +459,9 @@ export const createGameConfirmKeyboard = (
   players: string,
   creatorId?: string,
   options?: Partial<GameAdvancedOptions>,
-  ui?: { lockVisibilityToPublic?: boolean }
+  ui?: { lockVisibilityToPublic?: boolean },
 ): InlineKeyboard => {
-  const fallbackMinPlayers =
-    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const fallbackMinPlayers = gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
   const advanced: GameAdvancedOptions = {
     timeoutSeconds: options?.timeoutSeconds ?? DEFAULT_GAME_TIMEOUT,
     minPlayers: options?.minPlayers ?? fallbackMinPlayers,
@@ -537,9 +473,7 @@ export const createGameConfirmKeyboard = (
 
   const timeoutDeltaCallback = (deltaMinutes: number): string => {
     if (!creatorId) return "noop";
-    const nextTimeout = clampTimeoutSeconds(
-      advanced.timeoutSeconds + deltaMinutes * 60
-    );
+    const nextTimeout = clampTimeoutSeconds(advanced.timeoutSeconds + deltaMinutes * 60);
     if (nextTimeout === advanced.timeoutSeconds || deltaMinutes === 0) {
       return "noop";
     }
@@ -556,12 +490,8 @@ export const createGameConfirmKeyboard = (
 
   const timeoutMultiplierCallback = (multiplier: number): string => {
     if (!Number.isFinite(multiplier) || multiplier <= 0) return "noop";
-    const targetTimeoutSeconds = snapTimeoutSeconds(
-      advanced.timeoutSeconds * multiplier
-    );
-    const deltaMinutes = Math.round(
-      (targetTimeoutSeconds - advanced.timeoutSeconds) / 60
-    );
+    const targetTimeoutSeconds = snapTimeoutSeconds(advanced.timeoutSeconds * multiplier);
+    const deltaMinutes = Math.round((targetTimeoutSeconds - advanced.timeoutSeconds) / 60);
     return timeoutDeltaCallback(deltaMinutes);
   };
 
@@ -571,8 +501,7 @@ export const createGameConfirmKeyboard = (
     return timeoutDeltaCallback(deltaMinutes);
   };
 
-  const minPlayersFloor =
-    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const minPlayersFloor = gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
   const playersCount = Number.parseInt(players, 10);
   const typedGameType = gameType as GameType;
   const maxPlayersForMinPlayers = Number.isFinite(playersCount)
@@ -583,7 +512,7 @@ export const createGameConfirmKeyboard = (
     typedGameType,
     advanced.minPlayers,
     maxPlayersForMinPlayers,
-    maxPlayersForMinPlayers
+    maxPlayersForMinPlayers,
   );
 
   const minPlayersDeltaCallback = (deltaPlayers: number): string => {
@@ -606,7 +535,7 @@ export const createGameConfirmKeyboard = (
       typedGameType,
       candidate,
       maxPlayersForMinPlayers,
-      maxPlayersForMinPlayers
+      maxPlayersForMinPlayers,
     );
     const delta = target - currentMinPlayers;
     if (delta === 0) return "noop";
@@ -614,7 +543,7 @@ export const createGameConfirmKeyboard = (
   };
 
   const confirmCallback = creatorId
-    ? encodeGameConfirmPayload({
+    ? (encodeGameConfirmPayload({
         gameType: typedGameType,
         amount,
         players: maxPlayersForMinPlayers,
@@ -622,7 +551,7 @@ export const createGameConfirmKeyboard = (
         minPlayers: currentMinPlayers,
         isPrivate: effectiveIsPrivate,
         creatorId,
-      }) ?? "noop"
+      }) ?? "noop")
     : "noop";
 
   const timeoutCallbacks = [
@@ -640,13 +569,13 @@ export const createGameConfirmKeyboard = (
   const visibilityCallback =
     !creatorId || lockVisibilityToPublic
       ? "noop"
-      : encodeVisibilityPayload({
+      : (encodeVisibilityPayload({
           gameType: typedGameType,
           amount,
           players: maxPlayersForMinPlayers,
           isPrivate: !effectiveIsPrivate,
           creatorId,
-        }) ?? "noop";
+        }) ?? "noop");
 
   const minPlayersCallbacks = [
     minPlayersTargetCallback(Math.floor(currentMinPlayers * 0.5)),
@@ -658,12 +587,11 @@ export const createGameConfirmKeyboard = (
 
   const backToPlayersCallback =
     creatorId != null
-      ? encodeAmountSelectionPayload({
+      ? (encodeAmountSelectionPayload({
           gameType: typedGameType,
           amount,
           creatorId,
-        }) ??
-        withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId)
+        }) ?? withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId))
       : withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId);
 
   const callbacksToValidate = [
@@ -682,23 +610,15 @@ export const createGameConfirmKeyboard = (
 
   if (hasOverflowingCallback || !confirmCallback || !visibilityCallback) {
     const example = callbacksToValidate.find(
-      (cb) => cb && Buffer.byteLength(cb, "utf-8") > CALLBACK_DATA_LIMIT
+      (cb) => cb && Buffer.byteLength(cb, "utf-8") > CALLBACK_DATA_LIMIT,
     );
     const decoded = example ? decodeGameConfirmPayload(confirmCallback) : null;
-    console.warn(
-      "Refusing to render confirm keyboard due to callback overflow",
-      example,
-      decoded
-    );
+    console.warn("Refusing to render confirm keyboard due to callback overflow", example, decoded);
     return createOverflowKeyboard();
   }
 
-  const safeTimeoutCallbacks = timeoutCallbacks.map((callback) =>
-    callback ?? "noop"
-  );
-  const safeMinPlayersCallbacks = minPlayersCallbacks.map((callback) =>
-    callback ?? "noop"
-  );
+  const safeTimeoutCallbacks = timeoutCallbacks.map((callback) => callback ?? "noop");
+  const safeMinPlayersCallbacks = minPlayersCallbacks.map((callback) => callback ?? "noop");
 
   const keyboard = new InlineKeyboard()
     .text("✅ Create Game", confirmCallback)
@@ -714,10 +634,7 @@ export const createGameConfirmKeyboard = (
     .text("12h", safeTimeoutCallbacks[7]!)
     .text("24h", safeTimeoutCallbacks[8]!)
     .row()
-    .text(
-      `${visibilityLabel(effectiveIsPrivate)}`,
-      visibilityCallback ?? "noop"
-    )
+    .text(`${visibilityLabel(effectiveIsPrivate)}`, visibilityCallback ?? "noop")
     .row()
     .text("-50%", safeMinPlayersCallbacks[0]!)
     .text("-25%", safeMinPlayersCallbacks[1]!)

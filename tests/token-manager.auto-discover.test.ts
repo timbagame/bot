@@ -22,7 +22,10 @@ function makeWalletStub() {
     }),
     formatTokenBalance: (amount: number, decimals: number) => {
       const v = amount / Math.pow(10, decimals);
-      return v.toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+      return v
+        .toFixed(6)
+        .replace(/\.0+$/, "")
+        .replace(/(\.\d*?)0+$/, "$1");
     },
     formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
     getConnection: () => ({}) as any,

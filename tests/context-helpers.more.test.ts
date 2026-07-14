@@ -5,7 +5,9 @@ beforeAll(() => {
   // Minimal env so dynamic imports in handler are safe
   process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
   process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
-  process.env.MNEMONIC = process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
+  process.env.MNEMONIC =
+    process.env.MNEMONIC ||
+    "test walk nut penalty hip pave soap entry language right filter choice";
 });
 
 test("handleCallbackErrorSafe: account not found shortcut", async () => {
@@ -16,11 +18,7 @@ test("handleCallbackErrorSafe: account not found shortcut", async () => {
     },
   } as any;
 
-  await handleCallbackErrorSafe(
-    ctx,
-    new Error("Account does not exist"),
-    "join"
-  );
+  await handleCallbackErrorSafe(ctx, new Error("Account does not exist"), "join");
 
   expect(calls.length).toBe(1);
   expect(calls[0]).toContain("no longer active");
@@ -38,7 +36,7 @@ test("handleCallbackErrorSafe: formats generic errors via utilities", async () =
     ctx,
     new Error("simulation failed: custom program error: 0x1"),
     "swap",
-    { maxLength: 200 }
+    { maxLength: 200 },
   );
 
   expect(calls.length).toBe(1);
@@ -64,10 +62,10 @@ test("handleCallbackErrorSafe uses Telegram API fallback when direct helper miss
     await handleCallbackErrorSafe(
       ctx,
       new Error(
-        "Unhandled failure that should be relayed back to the user with truncation safeguards in place."
+        "Unhandled failure that should be relayed back to the user with truncation safeguards in place.",
       ),
       "fallback",
-      { maxLength: 60 }
+      { maxLength: 60 },
     );
 
     expect(answered.length).toBe(1);
@@ -93,7 +91,7 @@ test("handleCallbackErrorSafe logs a warning when no callback answer is possible
       {},
       new Error("Generic failure that should trigger a warning path"),
       "missing-context",
-      { maxLength: 30 }
+      { maxLength: 30 },
     );
 
     expect(warnings.some((msg) => msg.includes("Unable to answer callback query"))).toBe(true);
@@ -117,11 +115,7 @@ test("handleCallbackErrorSafe swallows failures thrown while answering callback"
       },
     } as any;
 
-    await handleCallbackErrorSafe(
-      ctx,
-      new Error("Unexpected runtime failure"),
-      "answer-error"
-    );
+    await handleCallbackErrorSafe(ctx, new Error("Unexpected runtime failure"), "answer-error");
 
     expect(attempts).toBe(1);
     expect(errorLogs.some((msg) => msg.includes("Failed to answer callback query"))).toBe(true);

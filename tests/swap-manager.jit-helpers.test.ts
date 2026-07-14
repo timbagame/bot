@@ -19,10 +19,7 @@ const createConnection = (initialBalance = 0) => {
   } as any;
 };
 
-const createWallet = (
-  connection: any,
-  adminKeypair: Keypair | null
-): WalletManager => {
+const createWallet = (connection: any, adminKeypair: Keypair | null): WalletManager => {
   return {
     getConnection: () => connection,
     getAdminKeypair: () => adminKeypair,
@@ -43,7 +40,7 @@ const defaultFeeBudget: FeeBudgetStub = {
 const createSwapManager = (
   connection: any,
   wallet: WalletManager,
-  feeBudget: FeeBudgetStub = defaultFeeBudget
+  feeBudget: FeeBudgetStub = defaultFeeBudget,
 ) => new SwapManager(connection as any, wallet, feeBudget as any);
 
 describe("SwapManager JIT helpers", () => {
@@ -286,7 +283,7 @@ describe("SwapManager JIT helpers", () => {
     // Since we can't easily mock the module functions, test the calculation math directly
     const baseFeeBps = 85;
     const maxExtraBps = 100;
-    const tokenPrice = 0.10; // $0.10 per token
+    const tokenPrice = 0.1; // $0.10 per token
     const solPrice = 150; // $150 per SOL
     const tokenDecimals = 6;
     const availableTokenAmountRaw = 10_000_000; // 10 tokens
@@ -327,7 +324,12 @@ describe("SwapManager JIT helpers", () => {
       const tradeUsd = tokenAmount * tokenPrice;
       const deficitUsd = (shortfallLamports / LAMPORTS_PER_SOL) * solPrice;
       const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
-      return { tradeUsd, deficitUsd, rawExtraBps, fee: baseFeeBps + Math.min(rawExtraBps, maxExtraBps) };
+      return {
+        tradeUsd,
+        deficitUsd,
+        rawExtraBps,
+        fee: baseFeeBps + Math.min(rawExtraBps, maxExtraBps),
+      };
     })();
     expect(scenario1.tradeUsd).toBe(100);
     expect(scenario1.deficitUsd).toBeCloseTo(0.15);
@@ -337,13 +339,18 @@ describe("SwapManager JIT helpers", () => {
     // Scenario 2: Small trade, large shortfall = capped extra fee
     const scenario2 = (() => {
       const tokenAmount = 1; // 1 token
-      const tokenPrice = 0.50; // $0.50 = $0.50 trade
+      const tokenPrice = 0.5; // $0.50 = $0.50 trade
       const shortfallLamports = 5_000_000; // 0.005 SOL
       const solPrice = 150;
       const tradeUsd = tokenAmount * tokenPrice;
       const deficitUsd = (shortfallLamports / LAMPORTS_PER_SOL) * solPrice;
       const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
-      return { tradeUsd, deficitUsd, rawExtraBps, fee: baseFeeBps + Math.min(rawExtraBps, maxExtraBps) };
+      return {
+        tradeUsd,
+        deficitUsd,
+        rawExtraBps,
+        fee: baseFeeBps + Math.min(rawExtraBps, maxExtraBps),
+      };
     })();
     expect(scenario2.tradeUsd).toBe(0.5);
     expect(scenario2.deficitUsd).toBeCloseTo(0.75);

@@ -24,12 +24,7 @@ const createCtx = (options: CtxOptions = {}) => {
     from: { id: Number(USER_ID) },
     chat: { id: BASE_STATE.chatId },
     api: {
-      editMessageText: async (
-        chatId: number,
-        messageId: number,
-        text: string,
-        opts: any
-      ) => {
+      editMessageText: async (chatId: number, messageId: number, text: string, opts: any) => {
         calls.edits.push({ chatId, messageId, text, opts });
         if (options.failEdit) {
           const err: any = new Error("no text");

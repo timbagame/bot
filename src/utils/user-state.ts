@@ -6,10 +6,7 @@ const USER_STATE_TIMEOUT = INPUT_TIMEOUT_MS; // Keep aligned with user prompt ti
 
 type GenericState = { timestamp: number } & Record<string, any>;
 
-const pruneExpiredEntries = (
-  map: Map<string, GenericState>,
-  now: number
-): void => {
+const pruneExpiredEntries = (map: Map<string, GenericState>, now: number): void => {
   for (const [id, state] of map.entries()) {
     if (now - state.timestamp > USER_STATE_TIMEOUT) {
       map.delete(id);
@@ -20,8 +17,7 @@ const pruneExpiredEntries = (
 const userStates = new Map<string, GenericState>();
 const pendingTransactions = new Map<string, GenericState>();
 
-const buildNamespacedKey = (namespace: string, key: string): string =>
-  `${namespace}:${key}`;
+const buildNamespacedKey = (namespace: string, key: string): string => `${namespace}:${key}`;
 
 const stripTimestamp = <T>(state?: GenericState): T | undefined => {
   if (!state) {
@@ -33,23 +29,12 @@ const stripTimestamp = <T>(state?: GenericState): T | undefined => {
   return rest as T;
 };
 
-const getNamespacedState = <T>(
-  namespace: string,
-  key: string,
-  clear = false
-): T | undefined => {
-  const raw = getUserState<T & { timestamp: number }>(
-    buildNamespacedKey(namespace, key),
-    clear
-  );
+const getNamespacedState = <T>(namespace: string, key: string, clear = false): T | undefined => {
+  const raw = getUserState<T & { timestamp: number }>(buildNamespacedKey(namespace, key), clear);
   return stripTimestamp<T>(raw as unknown as GenericState | undefined);
 };
 
-const setNamespacedState = <T>(
-  namespace: string,
-  key: string,
-  state: T
-): void => {
+const setNamespacedState = <T>(namespace: string, key: string, state: T): void => {
   setUserState(buildNamespacedKey(namespace, key), state as GenericState);
 };
 
@@ -74,7 +59,7 @@ export function setUserState(userId: string, state: Record<string, any>): void {
 
 export function getUserState<T = any>(
   userId: string,
-  clear = false
+  clear = false,
 ): (T & { timestamp: number }) | undefined {
   const entry = userStates.get(userId) as (T & { timestamp: number }) | undefined;
   if (!entry) {
@@ -102,7 +87,7 @@ export function storePendingTransaction(txId: string, transaction: Record<string
 
 export function getPendingTransaction<T = any>(
   txId: string,
-  remove = true
+  remove = true,
 ): (T & { timestamp: number }) | undefined {
   const tx = pendingTransactions.get(txId) as (T & { timestamp: number }) | undefined;
   if (!tx) {
@@ -155,12 +140,9 @@ const DEFAULT_GAME_SETUP_SESSION: Pick<
 
 export const upsertGameSetupSession = (
   key: string,
-  updates: Partial<GameSetupSessionState>
+  updates: Partial<GameSetupSessionState>,
 ): GameSetupSessionState => {
-  const existing = getNamespacedState<GameSetupSessionState>(
-    GAME_SETUP_NAMESPACE,
-    key
-  );
+  const existing = getNamespacedState<GameSetupSessionState>(GAME_SETUP_NAMESPACE, key);
 
   const next: GameSetupSessionState = {
     ...DEFAULT_GAME_SETUP_SESSION,
@@ -172,9 +154,7 @@ export const upsertGameSetupSession = (
   return next;
 };
 
-export const getGameSetupSession = (
-  key: string
-): GameSetupSessionState | undefined =>
+export const getGameSetupSession = (key: string): GameSetupSessionState | undefined =>
   getNamespacedState<GameSetupSessionState>(GAME_SETUP_NAMESPACE, key);
 
 export const clearGameSetupSession = (key: string): void => {
@@ -197,10 +177,7 @@ export type InputSessionState = {
 
 const INPUT_SESSION_NAMESPACE = "input_session";
 
-export const setInputSession = (
-  key: string,
-  session: InputSessionState
-): InputSessionState => {
+export const setInputSession = (key: string, session: InputSessionState): InputSessionState => {
   const sanitized: InputSessionState = {
     ...session,
   };
@@ -213,9 +190,7 @@ export const setInputSession = (
   return session;
 };
 
-export const getInputSession = (
-  key: string
-): InputSessionState | undefined =>
+export const getInputSession = (key: string): InputSessionState | undefined =>
   getNamespacedState<InputSessionState>(INPUT_SESSION_NAMESPACE, key);
 
 export const clearInputSession = (key: string): void => {
@@ -229,10 +204,7 @@ export const clearAllInputSessions = (): void => {
 const getInputSessionNamespacedKey = (key: string): string =>
   buildNamespacedKey(INPUT_SESSION_NAMESPACE, key);
 
-export const markInputSessionProcessing = (
-  key: string,
-  lockerId: string
-): boolean => {
+export const markInputSessionProcessing = (key: string, lockerId: string): boolean => {
   const namespacedKey = getInputSessionNamespacedKey(key);
   const existing = userStates.get(namespacedKey);
   if (!existing) {

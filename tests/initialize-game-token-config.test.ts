@@ -12,9 +12,9 @@ describe("initialize-game-token configuration", () => {
     env["SOLANA_NETWORK"] = '["https://rpc1","https://rpc2"]';
 
     try {
-      const { CONFIG } = await importFresh<
-        typeof import("../scripts/initialize-game-token")
-      >("../scripts/initialize-game-token");
+      const { CONFIG } = await importFresh<typeof import("../scripts/initialize-game-token")>(
+        "../scripts/initialize-game-token",
+      );
 
       expect(CONFIG.RPC_URL).toBe("https://rpc1");
     } finally {

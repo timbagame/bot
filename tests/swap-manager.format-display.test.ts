@@ -7,12 +7,14 @@ describe("SwapManager.formatQuoteForDisplay", () => {
   const connection = new Connection("http://localhost:8899", "confirmed");
   const wallet = WalletManager.createForTest(
     "test walk nut penalty hip pave soap entry language right filter choice",
-    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
   const sm = new SwapManager(connection, wallet);
 
   test("delegates to Jupiter formatting with computed slippage", () => {
-    const stub = spyOn((sm as any).jupiterClient, "formatQuoteForDisplay").mockReturnValue("JUP_FMT");
+    const stub = spyOn((sm as any).jupiterClient, "formatQuoteForDisplay").mockReturnValue(
+      "JUP_FMT",
+    );
     const quote = {
       provider: "jupiter",
       inputMint: "So11111111111111111111111111111111111111112",

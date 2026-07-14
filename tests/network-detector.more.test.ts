@@ -32,21 +32,21 @@ describe("network detector utilities", () => {
 
   test("resolveNetworkInput handles URLs and aliases (property)", async () => {
     await fc.assert(
-        fc.asyncProperty(
-          fc.oneof(
-            fc.constant("https://api.devnet.solana.com"),
-            fc.constant("https://example.com"),
-            fc.constant("mainnet"),
-            fc.constant("devnet"),
-            fc.constant("testnet"),
-            fc.constant("localnet"),
-            fc.constant("mainnet-beta"),
-            fc.constant("localhost")
-          ),
-          async (input: string) => {
-            const result = NetworkDetector.resolveNetworkInput(input);
-            if (input.includes("example.com")) {
-              expect(result).toBe("mainnet");
+      fc.asyncProperty(
+        fc.oneof(
+          fc.constant("https://api.devnet.solana.com"),
+          fc.constant("https://example.com"),
+          fc.constant("mainnet"),
+          fc.constant("devnet"),
+          fc.constant("testnet"),
+          fc.constant("localnet"),
+          fc.constant("mainnet-beta"),
+          fc.constant("localhost"),
+        ),
+        async (input: string) => {
+          const result = NetworkDetector.resolveNetworkInput(input);
+          if (input.includes("example.com")) {
+            expect(result).toBe("mainnet");
           } else if (input.includes("devnet")) {
             expect(result).toBe("devnet");
           } else if (input.includes("testnet")) {
@@ -56,9 +56,9 @@ describe("network detector utilities", () => {
           } else {
             expect(result).toBe("mainnet");
           }
-        }
+        },
       ),
-      { seed: 7070, numRuns: 20 }
+      { seed: 7070, numRuns: 20 },
     );
   });
 });

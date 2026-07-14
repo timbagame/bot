@@ -7,9 +7,15 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-function programStub() { return { account: { game: { fetch: async () => ({}) } } } as any; }
-function walletStub() { return {} as any; }
-function dbStub() { return {} as any; }
+function programStub() {
+  return { account: { game: { fetch: async () => ({}) } } } as any;
+}
+function walletStub() {
+  return {} as any;
+}
+function dbStub() {
+  return {} as any;
+}
 
 describe("GameManager.getWinnerInfo", () => {
   test("returns empty string when not completed or no winner", async () => {
@@ -48,12 +54,7 @@ describe("GameManager.getWinnerInfo", () => {
     const originalNetwork = process.env.SOLANA_NETWORK;
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     try {
-      const line = await (gm as any).getWinnerInfo(
-        ctx,
-        "Completed",
-        "SomePubkey",
-        "sig123"
-      );
+      const line = await (gm as any).getWinnerInfo(ctx, "Completed", "SomePubkey", "sig123");
       expect(line).toContain("Winner:");
       expect(line).toContain(sanitizeTelegramDisplayName("@champ"));
       expect(line).toContain("https://solscan.io/tx/sig123");

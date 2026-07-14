@@ -36,13 +36,13 @@ const roundPadding = (value: number, rounding: "ceil" | "round"): number => {
 
 export const calculateRouteCosts = (
   costs: RouteLikeCosts | null | undefined,
-  config?: RouteCostConfig
+  config?: RouteCostConfig,
 ): RouteCostSummary => {
   const routeLamports = Math.max(
     0,
     (costs?.rentFeeLamports ?? 0) +
       (costs?.prioritizationFeeLamports ?? 0) +
-      (costs?.signatureFeeLamports ?? 0)
+      (costs?.signatureFeeLamports ?? 0),
   );
 
   const paddingRatio = config?.paddingRatio ?? 0.25;

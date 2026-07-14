@@ -20,9 +20,10 @@ describe("GameManager private auto-join recovery", () => {
       confirmTransaction: async () => {
         throw new Error("transaction was not confirmed in 30 seconds");
       },
-      getConnection: () => ({
-        getSignatureStatuses: async () => ({ value: [null] }),
-      }) as any,
+      getConnection: () =>
+        ({
+          getSignatureStatuses: async () => ({ value: [null] }),
+        }) as any,
     } as any;
 
     const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
@@ -85,7 +86,7 @@ describe("GameManager private auto-join recovery", () => {
         1n,
         playerKp.publicKey.toBase58(),
         "coinflip",
-        42
+        42,
       );
     } finally {
       (globalThis as any).setTimeout = originalSetTimeout;
@@ -110,22 +111,23 @@ describe("GameManager private auto-join recovery", () => {
       confirmTransaction: async () => {
         throw new Error("transaction was not confirmed in 30 seconds");
       },
-      getConnection: () => ({
-        getSignatureStatuses: async () => {
-          statusCalls += 1;
-          if (statusCalls < 3) {
-            return { value: [null] };
-          }
-          return {
-            value: [
-              {
-                err: null,
-                confirmationStatus: "confirmed",
-              },
-            ],
-          };
-        },
-      }) as any,
+      getConnection: () =>
+        ({
+          getSignatureStatuses: async () => {
+            statusCalls += 1;
+            if (statusCalls < 3) {
+              return { value: [null] };
+            }
+            return {
+              value: [
+                {
+                  err: null,
+                  confirmationStatus: "confirmed",
+                },
+              ],
+            };
+          },
+        }) as any,
     } as any;
 
     const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
@@ -192,7 +194,7 @@ describe("GameManager private auto-join recovery", () => {
         1n,
         playerKp.publicKey.toBase58(),
         "coinflip",
-        42
+        42,
       );
     } finally {
       (globalThis as any).setTimeout = originalSetTimeout;
