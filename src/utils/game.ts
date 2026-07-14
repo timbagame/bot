@@ -1812,7 +1812,8 @@ export class GameManager {
       8 + // total_amount
       4; // participants vec length prefix
 
-    const BYTES_PER_PARTICIPANT = 32;
+    const BYTES_PER_PARTICIPANT =
+      process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 32 : 8;
 
     const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
     const accountSize =
