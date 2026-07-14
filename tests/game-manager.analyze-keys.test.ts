@@ -23,7 +23,7 @@ test("analyzePlayerKeys classifies available/unavailable and creator", () => {
   const gamePda = new PublicKey(gameAddress);
   const info = (gm as any).analyzePlayerKeys(
     gamePda,
-    { creator, participantHashes: [] },
+    { creator, participants: [] },
     gameAddress
   );
   expect(info.available.length).toBe(1);

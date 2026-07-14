@@ -19,6 +19,7 @@ import {
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
+import { loadWalletMnemonic } from "../src/utils/secrets";
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
@@ -266,7 +267,7 @@ export async function resolveRequiredSolPriceUSD(
 async function main() {
   console.log("⚙️  Calibrating minimum bet sizes...\n");
 
-  const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+  const wallet = WalletManager.getInstance(loadWalletMnemonic());
   const adminRoot = wallet.getAdminKeypair();
   const adminBundle = bundleFromKeypair(adminRoot);
   const oracleOperatorBundle = resolveOracleOperatorBundle(adminRoot);

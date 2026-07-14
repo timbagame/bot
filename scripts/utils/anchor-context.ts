@@ -9,6 +9,7 @@ import { clusterApiUrl } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
 import idl from "../../idl/idl.json";
 import { WalletManager } from "../../src/utils/wallet";
+import { loadWalletMnemonic } from "../../src/utils/secrets";
 import { resolvePrimaryRpcEndpoint } from "../../src/utils/rpc-endpoints";
 
 type WalletOverride =
@@ -157,16 +158,10 @@ export const loadProgramContext = (
   options: ProgramContextLoadOptions = {}
 ): LoadedProgramContext => {
   const { mnemonic, wallet: walletOverride, ...anchorOverrides } = options;
-  const resolvedMnemonic = mnemonic ?? process.env.MNEMONIC;
-
-  if (!resolvedMnemonic || resolvedMnemonic.trim().length === 0) {
-    throw new Error(
-      "MNEMONIC environment variable is required to load the program context"
-    );
-  }
+  const resolvedMnemonic = mnemonic?.trim() || loadWalletMnemonic();
 
   const wallet =
-    walletOverride ?? WalletManager.getInstance(resolvedMnemonic.trim());
+    walletOverride ?? WalletManager.getInstance(resolvedMnemonic);
   const adminKeypair = wallet.getAdminKeypair();
 
   const context = createAnchorContext(adminKeypair, {

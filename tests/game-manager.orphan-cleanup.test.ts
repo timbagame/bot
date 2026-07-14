@@ -59,7 +59,7 @@ describe("GameManager orphan cleanup", () => {
 
     const gameAccount = {
       ticketsCount: 0,
-      participantHashes: [],
+      participants: [],
       creator: creatorPubkey,
       gameType: { coinflip: {} },
     };

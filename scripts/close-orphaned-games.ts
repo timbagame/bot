@@ -2,6 +2,7 @@ import { GameDatabase } from "../src/utils/game-database";
 import { GameManager } from "../src/utils/game";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import { loadProgramContext } from "./utils/anchor-context";
+import { loadWalletMnemonic } from "../src/utils/secrets";
 
 const requireEnvVar = (name: string): string => {
   const value = process.env[name];
@@ -14,7 +15,7 @@ const requireEnvVar = (name: string): string => {
 async function main(): Promise<void> {
   console.log("🧹 Starting orphaned game cleanup...\n");
 
-  const mnemonic = requireEnvVar("MNEMONIC");
+  const mnemonic = loadWalletMnemonic();
   const rpcEndpoint = resolvePrimaryRpcEndpoint(
     requireEnvVar("SOLANA_NETWORK")
   );

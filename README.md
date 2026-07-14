@@ -8,7 +8,7 @@ A Telegram bot for creating and playing coinflip and giveaway games on Solana us
 - **Giveaway Games**: Free-to-join giveaway games with token prizes
 - **Wallet Integration**: Built-in wallet management with mnemonic-based keypairs
 - **Token Support**: Support for any SPL token (WSOL by default)
-- **Oracle System**: Decentralized game completion using on-chain oracle
+- **Oracle Integration**: Oracle-approved game creation and automatic on-chain completion
 - **Database Tracking**: SQLite database for game history and player stats
 
 ## 📁 Project Structure
@@ -50,7 +50,7 @@ src/
 
 ### Admin Commands
 
-- `/privatekey` - Get wallet private key (private chat only)
+- `/privatekey` - Export the wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
 - `/oracle` - Check oracle configuration
 
 ## 🏗️ Architecture
@@ -59,12 +59,13 @@ src/
 
 1. **Creation**: User creates a game with specified parameters
 2. **Joining**: Players join the game until max capacity is reached
-3. **Completion**: Oracle determines winner using verifiable randomness
+3. **Completion**: The oracle reveals its committed secret; the program verifies the reveal and winner
 4. **Settlement**: Winner receives tokens, game account is closed
 
 ### Oracle System
 
-- Uses cryptographic randomness for fair game outcomes
+- Generates commitments through the separate oracle service; the bot never stores oracle secrets
+- Builds creator-funded initialization transactions, obtains the oracle's partial signature, then signs and submits them as the creator
 - Handles game timeouts and cancellations
 - Manages orphaned games from blockchain scans
 
@@ -72,7 +73,7 @@ src/
 
 - Tracks game participants and history
 - Stores player mappings (Telegram ID ↔ Public Key)
-- Maintains oracle secret keys for game completion
+- Tracks games and participant mappings; oracle secrets remain in the oracle service
 
 ## 🔧 Recent Improvements
 
@@ -108,6 +109,7 @@ src/
    ```
 
    > Optional: set `HELIUS_REBATE_ADDRESS` in `.env` if you want Helius to pay you post-trade rebates when using a Helius mainnet RPC endpoint.
+   > Rootless Podman reads the wallet mnemonic and oracle token from `secrets/bot-mnemonic` and `secrets/oracle-api-token`. Create both files with mode `600`; the token must match the oracle repository's token file.
 
 2. **Install Dependencies**
 
@@ -117,7 +119,7 @@ src/
 
 3. **Run the Bot**
    ```bash
-   bun src/bot.ts
+   bun run start
    ```
 
 ## 🧪 Testing
@@ -125,7 +127,7 @@ src/
 Run the TypeScript type checker:
 
 ```bash
-bunx tsc --noEmit
+bun run typecheck
 ```
 
 Run the test suite with Bun:

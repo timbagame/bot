@@ -5,7 +5,6 @@ import {
 } from "@solana/spl-token";
 import {
   PublicKey,
-  SystemProgram,
   Keypair,
   sendAndConfirmRawTransaction,
   type Connection,
@@ -13,6 +12,7 @@ import {
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import type { Timba } from "../../idl/idlType";
 import { WalletManager } from "../utils/wallet";
+import { loadWalletMnemonic } from "../utils/secrets";
 import {
   getSupportedTokens,
   type TokenConfig,
@@ -47,7 +47,7 @@ export interface FeeSweepOptions {
   solUsdThreshold?: number;
   swapManagerFactory?: (
     connection: Connection,
-    wallet: WalletManager
+    wallet: WalletManager,
   ) => SwapManager | Pick<SwapManager, "getQuote" | "executeJupiterSwap">;
   priceResolver?: PriceResolver;
   balanceFetcher?: TokenBalanceFetcher;
@@ -66,7 +66,7 @@ type PriceResolver = typeof getUsdPrice;
 type TokenBalanceFetcher = (
   connection: Connection,
   owner: PublicKey,
-  mint: PublicKey
+  mint: PublicKey,
 ) => Promise<bigint>;
 
 type SolPriceData = {
@@ -89,7 +89,7 @@ const validateSolPriceData = (
     maxAgeMs?: number;
     previousPrice?: number;
     maxDriftRatio?: number;
-  } = {}
+  } = {},
 ): { isValid: boolean; reason?: string } => {
   const solPrice = priceData?.price ?? 0;
   if (!Number.isFinite(solPrice) || solPrice <= 0) {
@@ -141,7 +141,7 @@ const validateSolPriceData = (
 const getSolBalanceUsdValue = async (
   connection: Connection,
   owner: PublicKey,
-  priceResolver: PriceResolver = getUsdPrice
+  priceResolver: PriceResolver = getUsdPrice,
 ) => {
   const [lamports, solPriceData] = await Promise.all([
     connection.getBalance(owner),
@@ -149,9 +149,7 @@ const getSolBalanceUsdValue = async (
   ]);
   const solPrice = solPriceData?.price ?? 0;
   const usdValue =
-    lamports > 0 && solPrice > 0
-      ? (lamports / LAMPORTS_PER_SOL) * solPrice
-      : 0;
+    lamports > 0 && solPrice > 0 ? (lamports / LAMPORTS_PER_SOL) * solPrice : 0;
   return { lamports, usdValue, solPrice, solPriceData };
 };
 
@@ -167,7 +165,7 @@ const shouldSkipTokenToSolSweeps = async (options: {
   const { lamports, usdValue, solPriceData } = await getSolBalanceUsdValue(
     connection,
     owner,
-    priceResolver
+    priceResolver,
   );
 
   const { isValid, reason } = validateSolPriceData(solPriceData, {
@@ -179,7 +177,7 @@ const shouldSkipTokenToSolSweeps = async (options: {
     console.warn(
       `⚠️  skipping due to unreliable SOL price${
         reason ? ` (${reason})` : ""
-      }; skipping token-to-SOL sweeps.`
+      }; skipping token-to-SOL sweeps.`,
     );
     return true;
   }
@@ -187,8 +185,8 @@ const shouldSkipTokenToSolSweeps = async (options: {
   if (usdValue >= solUsdThreshold) {
     console.log(
       `ℹ️  SOL balance ${wallet.formatSolBalance(
-        lamports
-      )} ≈ $${usdValue.toFixed(2)} (>= $${solUsdThreshold}); skipping token-to-SOL sweeps.`
+        lamports,
+      )} ≈ $${usdValue.toFixed(2)} (>= $${solUsdThreshold}); skipping token-to-SOL sweeps.`,
     );
     return true;
   }
@@ -201,11 +199,11 @@ const shouldWithdrawToken = async (
   config: TokenConfig,
   pendingFees: bigint,
   decimals: number,
-  priceResolver: PriceResolver = getUsdPrice
+  priceResolver: PriceResolver = getUsdPrice,
 ) => {
   const formattedPending = wallet.formatTokenBalance(
     Number(pendingFees),
-    decimals
+    decimals,
   );
   const tokenAmount = Number(pendingFees) / 10 ** decimals;
   const priceData = await priceResolver({
@@ -214,9 +212,9 @@ const shouldWithdrawToken = async (
   const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
   if (tokenUsdValue < MIN_USD_THRESHOLD) {
     console.log(
-      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${
-        tokenUsdValue.toFixed(2)
-      } (< $${MIN_USD_THRESHOLD}).`
+      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${tokenUsdValue.toFixed(
+        2,
+      )} (< $${MIN_USD_THRESHOLD}).`,
     );
     return { shouldWithdraw: false, formattedPending, tokenUsdValue };
   }
@@ -226,7 +224,7 @@ const shouldWithdrawToken = async (
 const getTotalTokenBalanceLamports: TokenBalanceFetcher = async (
   connection,
   owner,
-  mint
+  mint,
 ) => {
   let total = 0n;
   const parsed = await connection.getParsedTokenAccountsByOwner(owner, {
@@ -243,7 +241,7 @@ const shouldSwapTokenBalance = async (
   config: TokenConfig,
   lamports: bigint,
   decimals: number,
-  priceResolver: PriceResolver = getUsdPrice
+  priceResolver: PriceResolver = getUsdPrice,
 ) => {
   const amountDecimal = Number(lamports) / 10 ** decimals;
   const price = await priceResolver({
@@ -253,8 +251,8 @@ const shouldSwapTokenBalance = async (
   if (usdValue < MIN_USD_THRESHOLD) {
     console.log(
       `ℹ️  ${config.ticker} balance ${amountDecimal.toFixed(6)} ≈ $${usdValue.toFixed(
-        2
-      )}; skipping (<$${MIN_USD_THRESHOLD}).`
+        2,
+      )}; skipping (<$${MIN_USD_THRESHOLD}).`,
     );
     return { shouldSwap: false, amountDecimal, usdValue };
   }
@@ -268,7 +266,7 @@ const unwrapWsolBalance = async (
   owner: PublicKey,
   payer: Keypair,
   priceResolver: PriceResolver = getUsdPrice,
-  balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
+  balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports,
 ) => {
   const wsolMint = new PublicKey(WSOL_MINT);
   const wsolBalanceLamports = await balanceFetcher(connection, owner, wsolMint);
@@ -286,21 +284,23 @@ const unwrapWsolBalance = async (
   if (usdValue < MIN_USD_THRESHOLD) {
     console.log(
       `ℹ️  WSOL balance ${amountDecimal.toFixed(6)} ≈ $${usdValue.toFixed(
-        2
-      )}; skipping unwrap (<$${MIN_USD_THRESHOLD}).`
+        2,
+      )}; skipping unwrap (<$${MIN_USD_THRESHOLD}).`,
     );
     return;
   }
 
   if (!Number.isSafeInteger(Number(wsolBalanceLamports))) {
-    console.warn("⚠️  WSOL balance exceeds safe integer range; skipping unwrap.");
+    console.warn(
+      "⚠️  WSOL balance exceeds safe integer range; skipping unwrap.",
+    );
     return;
   }
 
   console.log(
     `➡️  Unwrapping ${amountDecimal.toFixed(6)} WSOL (~$${usdValue.toFixed(
-      2
-    )}) to SOL`
+      2,
+    )}) to SOL`,
   );
 
   const { signature, remainingLamports } = await wallet.unwrapSolWithKeypair({
@@ -313,8 +313,8 @@ const unwrapWsolBalance = async (
 
   console.log(
     `   ✅ Unwrapped WSOL. Remaining WSOL: ${remainingDecimal.toFixed(
-      6
-    )}. Signature: ${signature}`
+      6,
+    )}. Signature: ${signature}`,
   );
 };
 
@@ -325,26 +325,26 @@ async function processTokenFee(
   adminBundle: KeypairBundle,
   operatorBundle: KeypairBundle,
   config: TokenConfig,
-  priceResolver: PriceResolver
+  priceResolver: PriceResolver,
 ): Promise<boolean> {
   const mint = new PublicKey(config.mint);
   const [oraclePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
-    program.programId
+    program.programId,
   );
   const [gameTokenPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
   const [gameVaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_vault"), mint.toBuffer()],
-    program.programId
+    program.programId,
   );
 
   const gameTokenInfo = await connection.getAccountInfo(gameTokenPda);
   if (!gameTokenInfo) {
     console.warn(
-      `⚠️  No game token configuration found for ${config.ticker}; skipping.`
+      `⚠️  No game token configuration found for ${config.ticker}; skipping.`,
     );
     return false;
   }
@@ -362,7 +362,7 @@ async function processTokenFee(
     config,
     pendingFees,
     metadata.decimals,
-    priceResolver
+    priceResolver,
   );
   if (!shouldWithdraw) return false;
 
@@ -374,20 +374,20 @@ async function processTokenFee(
   } = await wallet.ensureAssociatedTokenAccount(
     operatorBundle.anchor.publicKey,
     mint,
-    adminBundle.root
+    adminBundle.root,
   );
   const gameVaultAta = getAssociatedTokenAddressSync(
     mint,
     gameVaultPda,
     true,
     tokenProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 
   console.log(
     `➡️  Withdrawing ${formattedPending} ${
       config.ticker
-    } to ${operatorBundle.anchor.publicKey.toBase58()}`
+    } to ${operatorBundle.anchor.publicKey.toBase58()}`,
   );
 
   const instruction = await program.methods
@@ -396,7 +396,6 @@ async function processTokenFee(
       oracle: oraclePda,
       oracleOperator: operatorBundle.anchor.publicKey,
       oracleOperatorTokenAccount: operatorAta,
-      systemProgram: SystemProgram.programId,
       gameTokenCtx: {
         tokenMint: mint,
         gameToken: gameTokenPda,
@@ -413,14 +412,14 @@ async function processTokenFee(
     console.log(
       `🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${
         config.ticker
-      }`
+      }`,
     );
   }
 
   const tx = await wallet.sendAndConfirmWithResubmits(
     instructions,
     uniqueSigners(adminBundle.root, operatorBundle.root),
-    { operationLabel: `Withdraw ${config.ticker} fees` }
+    { operationLabel: `Withdraw ${config.ticker} fees` },
   );
 
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
@@ -431,16 +430,20 @@ async function runReferralSweep(
   connection: Connection,
   adminBundle: KeypairBundle,
   referralEntries: ReferralTokenConfigEntry[],
-  priceResolver: PriceResolver = getUsdPrice
+  priceResolver: PriceResolver = getUsdPrice,
 ): Promise<number> {
   if (referralEntries.length === 0) {
-    console.log("ℹ️  No referral entries configured; skipping referral claims.");
+    console.log(
+      "ℹ️  No referral entries configured; skipping referral claims.",
+    );
     return 0;
   }
 
   const referralEntry = referralEntries[0];
   if (!referralEntry?.referralAccount) {
-    console.log("ℹ️  No referral account configured; skipping referral claims.");
+    console.log(
+      "ℹ️  No referral account configured; skipping referral claims.",
+    );
     return 0;
   }
 
@@ -451,7 +454,7 @@ async function runReferralSweep(
 
   // Get all referral token accounts and calculate total USD value
   const referralTokenAccountsResult = await provider.getReferralTokenAccounts(
-    referralAccount.toBase58()
+    referralAccount.toBase58(),
   );
   const allTokenAccounts = [
     ...referralTokenAccountsResult.tokenAccounts,
@@ -474,7 +477,9 @@ async function runReferralSweep(
     if (!priceData?.price) continue;
 
     // Fetch decimals for this token
-    const mintInfo = await connection.getParsedAccountInfo(tokenAccount.account.mint);
+    const mintInfo = await connection.getParsedAccountInfo(
+      tokenAccount.account.mint,
+    );
     const decimals =
       mintInfo.value &&
       "parsed" in mintInfo.value.data &&
@@ -488,12 +493,14 @@ async function runReferralSweep(
 
   if (totalUsdValue < MIN_USD_THRESHOLD) {
     console.log(
-      `ℹ️  Skipping referral claim: total value ≈ $${totalUsdValue.toFixed(2)} (< $${MIN_USD_THRESHOLD}).`
+      `ℹ️  Skipping referral claim: total value ≈ $${totalUsdValue.toFixed(2)} (< $${MIN_USD_THRESHOLD}).`,
     );
     return 0;
   }
 
-  console.log(`💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`);
+  console.log(
+    `💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`,
+  );
 
   const transactions = await provider.claimAllV2({
     payerPubKey: adminBundle.anchor.publicKey,
@@ -505,7 +512,9 @@ async function runReferralSweep(
     return 0;
   }
 
-  console.log(`🧾 Found ${transactions.length} referral transaction(s). Processing...`);
+  console.log(
+    `🧾 Found ${transactions.length} referral transaction(s). Processing...`,
+  );
 
   let processedClaims = 0;
   for (let i = 0; i < transactions.length; i++) {
@@ -514,7 +523,7 @@ async function runReferralSweep(
     tx.sign([adminBundle.anchor]);
     const sig = await sendAndConfirmRawTransaction(
       connection as unknown as Connection,
-      Buffer.from(tx.serialize())
+      Buffer.from(tx.serialize()),
     );
     processedClaims += 1;
     console.log(`   ✅ Referral claim ${i + 1}/${transactions.length}: ${sig}`);
@@ -530,12 +539,12 @@ async function sweepTokensToSol(
   swapManagerFactory: Required<FeeSweepOptions>["swapManagerFactory"],
   solUsdThreshold: number,
   priceResolver: PriceResolver = getUsdPrice,
-  balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
+  balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports,
 ) {
   const admin = wallet.getAdminKeypair();
   const swapManager = swapManagerFactory(connection, wallet);
   const sweepableTokens = tokens.filter(
-    (token) => token.mint !== WSOL_MINT && token.ticker !== "SOL"
+    (token) => token.mint !== WSOL_MINT && token.ticker !== "SOL",
   );
 
   if (sweepableTokens.length === 0) {
@@ -562,7 +571,7 @@ async function sweepTokensToSol(
       const balanceLamports = await balanceFetcher(
         connection,
         admin.publicKey,
-        mintPubkey
+        mintPubkey,
       );
 
       if (balanceLamports === 0n) {
@@ -571,19 +580,20 @@ async function sweepTokensToSol(
       }
 
       const metadata = await wallet.getTokenMetadata(token.mint);
-      const { shouldSwap, amountDecimal, usdValue } = await shouldSwapTokenBalance(
-        token,
-        balanceLamports,
-        metadata.decimals,
-        priceResolver
-      );
+      const { shouldSwap, amountDecimal, usdValue } =
+        await shouldSwapTokenBalance(
+          token,
+          balanceLamports,
+          metadata.decimals,
+          priceResolver,
+        );
 
       if (!shouldSwap) continue;
 
       console.log(
         `➡️  Swapping ${amountDecimal.toFixed(6)} ${token.ticker} (~$${usdValue.toFixed(
-          2
-        )}) to SOL`
+          2,
+        )}) to SOL`,
       );
 
       const swapRequest: SwapRequest = {
@@ -600,7 +610,7 @@ async function sweepTokensToSol(
       const quote = await swapManager.getQuote(swapRequest as any);
       const sig = await (swapManager as any).executeJupiterSwap(
         swapRequest as any,
-        quote
+        quote,
       );
       console.log(`   ✅ Swap submitted: ${sig}`);
     } catch (error) {
@@ -612,11 +622,12 @@ async function sweepTokensToSol(
 }
 
 export const sweepFees = async (
-  options: FeeSweepOptions = {}
+  options: FeeSweepOptions = {},
 ): Promise<FeeSweepResult> => {
   console.log("💸 Collecting oracle fees for configured tokens...\n");
 
-  const wallet = options.walletManager ?? WalletManager.getInstance(process.env.MNEMONIC!);
+  const wallet =
+    options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
   const adminRoot = wallet.getAdminKeypair();
   const adminBundle = bundleFromKeypair(adminRoot);
   const operatorBundle = resolveOracleOperatorBundle(adminRoot);
@@ -624,15 +635,14 @@ export const sweepFees = async (
   const tokens = options.tokenConfigs ?? getSupportedTokens();
   const referralEntries = options.referralEntries ?? getReferralTokenEntries();
   const rpcUrl = resolvePrimaryRpcEndpoint(
-    options.rpcUrl ?? process.env.SOLANA_NETWORK
+    options.rpcUrl ?? process.env.SOLANA_NETWORK,
   );
   const priceResolver = options.priceResolver ?? getUsdPrice;
   const swapManagerFactory =
     options.swapManagerFactory ??
     ((connection: Connection, walletManager: WalletManager) =>
       new SwapManager(connection as any, walletManager));
-  const balanceFetcher =
-    options.balanceFetcher ?? getTotalTokenBalanceLamports;
+  const balanceFetcher = options.balanceFetcher ?? getTotalTokenBalanceLamports;
   const enableSwapToSol = options.enableSwapToSol ?? true;
   const tokenFeeProcessor = options.tokenFeeProcessor ?? processTokenFee;
   const referralSweeper = options.referralSweeper ?? runReferralSweep;
@@ -652,7 +662,7 @@ export const sweepFees = async (
 
   console.log(`Program ID: ${program.programId.toBase58()}`);
   console.log(
-    `Admin payer: ${adminBundle.anchor.publicKey.toBase58()}, Oracle operator: ${operatorBundle.anchor.publicKey.toBase58()}`
+    `Admin payer: ${adminBundle.anchor.publicKey.toBase58()}, Oracle operator: ${operatorBundle.anchor.publicKey.toBase58()}`,
   );
 
   let tokenWithdrawals = 0;
@@ -665,7 +675,7 @@ export const sweepFees = async (
         adminBundle,
         operatorBundle,
         token,
-        priceResolver
+        priceResolver,
       );
       if (withdrawn) {
         tokenWithdrawals += 1;
@@ -677,7 +687,12 @@ export const sweepFees = async (
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(connection, adminBundle, referralEntries, priceResolver);
+    referralClaims = await referralSweeper(
+      connection,
+      adminBundle,
+      referralEntries,
+      priceResolver,
+    );
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }
@@ -699,7 +714,7 @@ export const sweepFees = async (
           swapManagerFactory,
           solUsdThreshold,
           priceResolver,
-          balanceFetcher
+          balanceFetcher,
         );
         await unwrapWsolBalance(
           wallet,
@@ -707,7 +722,7 @@ export const sweepFees = async (
           adminBundle.root.publicKey,
           adminBundle.root,
           priceResolver,
-          balanceFetcher
+          balanceFetcher,
         );
       }
     } catch (error) {

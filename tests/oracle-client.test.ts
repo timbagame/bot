@@ -11,6 +11,7 @@ describe("OracleClient", () => {
   beforeEach(() => {
     // Ensure predictable env
     process.env['ORACLE_API_URL'] = ORACLE_URL;
+    process.env['ORACLE_API_TOKEN'] = "test-oracle-token";
     resetTestDatabase("games.sqlite");
     GameDatabase.resetForTesting();
   });
@@ -90,6 +91,10 @@ describe("OracleClient", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe(`${ORACLE_URL}/games/complete-now`);
     expect(requests[0]?.init?.method).toBe("POST");
+    expect(requests[0]?.init?.headers).toEqual({
+      "Content-Type": "application/json",
+      Authorization: "Bearer test-oracle-token",
+    });
     expect(requests[0]?.init?.body).toBe(JSON.stringify({ gameAddress: "game123" }));
   });
 

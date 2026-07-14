@@ -10,6 +10,7 @@ import {
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
+import { loadWalletMnemonic } from "../src/utils/secrets";
 
 const TOKENS_TO_DISABLE = getSupportedTokens();
 
@@ -82,7 +83,7 @@ async function main() {
   console.log("🚦 Disabling game tokens on Timba program...\n");
 
   // Load admin/bot keypair via wallet manager
-  const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+  const wallet = WalletManager.getInstance(loadWalletMnemonic());
   const adminKeypairRoot = wallet.getAdminKeypair();
   const adminBundle = bundleFromKeypair(adminKeypairRoot);
 

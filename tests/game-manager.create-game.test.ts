@@ -29,7 +29,9 @@ function createConnectionStub(owner: PublicKey = TOKEN_PROGRAM_ID) {
 }
 
 function makeProgram(connection = createConnectionStub()) {
-  const programId = new PublicKey("BPFLoader1111111111111111111111111111111111");
+  const programId = new PublicKey(
+    "BPFLoader1111111111111111111111111111111111",
+  );
   const captures: Record<string, any> = {};
   return {
     programId,
@@ -60,8 +62,10 @@ function makeWallet(overrides: Record<string, any>) {
     connection,
     getConnection: () => connection,
     getKeyPair: (_: bigint) => Keypair.generate(),
-    formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
-    formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toString(),
+    formatTokenBalance: (n: number, d: number) =>
+      (n / Math.pow(10, d)).toString(),
+    formatSolBalance: (lamports: number) =>
+      (lamports / 1_000_000_000).toString(),
     ...rest,
   };
 
@@ -69,6 +73,12 @@ function makeWallet(overrides: Record<string, any>) {
   if (!wallet.getConnection) {
     wallet.getConnection = () => connection;
   }
+  wallet.getLatestBlockhash ??= async () => ({
+    blockhash: PublicKey.default.toBase58(),
+    lastValidBlockHeight: 1,
+  });
+  wallet.sendPartiallySignedTransaction ??= async (transaction: any) =>
+    wallet.sendTransaction(transaction.instructions, []);
 
   return wallet;
 }
@@ -84,7 +94,8 @@ describe("GameManager.createGame", () => {
       wrapSol: async () => {
         throw new Error("should not wrap");
       },
-      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+      formatSolBalance: (lamports: number) =>
+        (lamports / 1_000_000_000).toFixed(6),
     });
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
@@ -103,7 +114,7 @@ describe("GameManager.createGame", () => {
       2,
       2,
       60,
-      1n
+      1n,
     );
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Failed to wrap SOL automatically");
@@ -121,7 +132,14 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
     } as any);
-    const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
+    const res = await gm.createGame(
+      "coinflip",
+      { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      60,
+      1n,
+    );
     expect(res.success).toBe(false);
     const message = String(res.error);
     expect(message).toContain("Not enough TOK");
@@ -142,11 +160,16 @@ describe("GameManager.createGame", () => {
     } as any);
     const res = await gm.createGame(
       "coinflip",
-      { amount: 200_000, tokenMint: "M", tokenTicker: "<script>", isSol: false },
+      {
+        amount: 200_000,
+        tokenMint: "M",
+        tokenTicker: "<script>",
+        isSol: false,
+      },
       2,
       2,
       60,
-      1n
+      1n,
     );
     expect(res.success).toBe(false);
     const message = String(res.error);
@@ -166,10 +189,21 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = GameManager.getInstance(
+      makeProgram(wallet.connection),
+      wallet,
+      db,
+    );
     // Patch oracle client on the instance
     (gm as any).oracleClient = { isHealthy: async () => false };
-    const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
+    const res = await gm.createGame(
+      "coinflip",
+      { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      60,
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Oracle service is unavailable");
   });
@@ -192,14 +226,18 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => MAX_ACTIVE_GAMES_PER_CREATOR,
       countRecentGamesByCreator: () => 0,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = GameManager.getInstance(
+      makeProgram(wallet.connection),
+      wallet,
+      db,
+    );
     const res = await gm.createGame(
       "coinflip",
       { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
       2,
       2,
       60,
-      1n
+      1n,
     );
     expect(res.success).toBe(false);
     const message = String(res.error);
@@ -217,7 +255,9 @@ describe("GameManager.createGame", () => {
         throw new Error("balance should not be checked when rate limit hit");
       },
       getBalance: async () => {
-        throw new Error("SOL balance should not be checked when rate limit hit");
+        throw new Error(
+          "SOL balance should not be checked when rate limit hit",
+        );
       },
     });
     const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
@@ -226,14 +266,18 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => recentCount,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = GameManager.getInstance(
+      makeProgram(wallet.connection),
+      wallet,
+      db,
+    );
     const res = await gm.createGame(
       "coinflip",
       { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
       2,
       2,
       60,
-      1n
+      1n,
     );
 
     expect(res.success).toBe(false);
@@ -266,7 +310,7 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(
       makeProgram(wallet.connection),
       wallet,
-      db
+      db,
     );
 
     const sharedTimestamp = 1_700_000_000_000;
@@ -333,11 +377,10 @@ describe("GameManager.createGame", () => {
       const gm = GameManager.getInstance(
         makeProgram(wallet.connection),
         wallet,
-        db
+        db,
       );
 
-      const staleTimestamp =
-        fixedNow - 5 * GAME_CREATION_RATE_LIMIT_WINDOW_MS;
+      const staleTimestamp = fixedNow - 5 * GAME_CREATION_RATE_LIMIT_WINDOW_MS;
       const result = await gm.createGame(
         "coinflip",
         {
@@ -352,13 +395,13 @@ describe("GameManager.createGame", () => {
         1n,
         undefined,
         0,
-        staleTimestamp
+        staleTimestamp,
       );
 
       expect(result.success).toBe(false);
       expect(String(result.error ?? "")).toContain("Something went wrong");
       expect(capturedWindowStart).toBe(
-        fixedNow - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+        fixedNow - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
       );
     } finally {
       Date.now = originalNow;
@@ -394,7 +437,7 @@ describe("GameManager.createGame", () => {
       const gm = GameManager.getInstance(
         makeProgram(wallet.connection),
         wallet,
-        db
+        db,
       );
 
       for (const ts of [Number.POSITIVE_INFINITY, Number.NaN]) {
@@ -406,14 +449,14 @@ describe("GameManager.createGame", () => {
             tokenTicker: "TOK",
             isSol: false,
           },
-        2,
-        2,
-        60,
-        1n,
-        undefined,
-        0,
-        ts
-      );
+          2,
+          2,
+          60,
+          1n,
+          undefined,
+          0,
+          ts,
+        );
 
         expect(res.success).toBe(false);
         expect(String(res.error ?? "")).toContain("Something went wrong");
@@ -447,7 +490,7 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(
       makeProgram(wallet.connection),
       wallet,
-      db
+      db,
     );
 
     const creationArgs: Parameters<GameManager["createGame"]> = [
@@ -502,7 +545,7 @@ describe("GameManager.createGame", () => {
       const gm = GameManager.getInstance(
         makeProgram(wallet.connection),
         wallet,
-        db
+        db,
       );
 
       const futureTimestamp = fixedNow + 60_000;
@@ -520,12 +563,12 @@ describe("GameManager.createGame", () => {
         1n,
         undefined,
         0,
-        futureTimestamp
+        futureTimestamp,
       );
 
       expect(result.success).toBe(false);
       expect(capturedWindowStart).toBe(
-        fixedNow - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+        fixedNow - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
       );
     } finally {
       Date.now = originalNow;
@@ -547,7 +590,8 @@ describe("GameManager.createGame", () => {
       },
       sendTransaction: async () => "SIG",
       confirmTransaction: async () => true,
-      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+      formatSolBalance: (lamports: number) =>
+        (lamports / 1_000_000_000).toFixed(6),
     });
 
     const db = {
@@ -574,6 +618,7 @@ describe("GameManager.createGame", () => {
       generateGameSecrets: async () => ({
         randomHash: "0".repeat(64),
       }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     const res = await gm.createGame(
@@ -588,7 +633,7 @@ describe("GameManager.createGame", () => {
       2,
       2,
       60,
-      1n
+      1n,
     );
 
     expect(res.success).toBe(true);
@@ -614,7 +659,8 @@ describe("GameManager.createGame", () => {
       },
       sendTransaction: async () => "SIG",
       confirmTransaction: async () => true,
-      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+      formatSolBalance: (lamports: number) =>
+        (lamports / 1_000_000_000).toFixed(6),
     });
 
     const db = {
@@ -641,6 +687,7 @@ describe("GameManager.createGame", () => {
       generateGameSecrets: async () => ({
         randomHash: "1".repeat(64),
       }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
 
@@ -656,7 +703,7 @@ describe("GameManager.createGame", () => {
       2,
       2,
       60,
-      1n
+      1n,
     );
 
     expect(res.success).toBe(true);
@@ -675,7 +722,9 @@ describe("GameManager.createGame", () => {
     const saved: any[] = [];
     const db = {
       savePlayerMapping: () => {},
-      saveGame: (...args: any[]) => { saved.push(args); },
+      saveGame: (...args: any[]) => {
+        saved.push(args);
+      },
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
     } as any;
@@ -684,6 +733,7 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "deadbeef" }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
     const gameToken = Keypair.generate().publicKey;
@@ -706,13 +756,18 @@ describe("GameManager.createGame", () => {
 
     const res = await gm.createGame(
       "coinflip",
-      { amount: 1_000_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TIMBA", isSol: false },
+      {
+        amount: 1_000_000,
+        tokenMint: "11111111111111111111111111111111",
+        tokenTicker: "TIMBA",
+        isSol: false,
+      },
       2,
       2,
       60,
       1n,
       undefined,
-      100
+      100,
     );
     expect(res.success).toBe(true);
     expect(res.gameAddress).toBe(pda.toBase58());
@@ -726,9 +781,7 @@ describe("GameManager.createGame", () => {
     expect(ctx.tokenMint.toBase58()).toBe("11111111111111111111111111111111");
     expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(
-      gameTokenAccount.toBase58(),
-    );
+    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(
       ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
@@ -799,6 +852,7 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "cafebabe" }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     const gameToken = Keypair.generate().publicKey;
@@ -820,11 +874,16 @@ describe("GameManager.createGame", () => {
     try {
       const result = await gm.createGame(
         "giveaway",
-        { amount: 1_000_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        {
+          amount: 1_000_000,
+          tokenMint: "11111111111111111111111111111111",
+          tokenTicker: "TOK",
+          isSol: false,
+        },
         5,
         1,
         60,
-        telegramId
+        telegramId,
       );
 
       expect(result.success).toBe(true);
@@ -870,6 +929,7 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     (gm as any).resolveGameTokenAccounts = async () => ({
@@ -923,7 +983,14 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
     } as any);
-    const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
+    const res = await gm.createGame(
+      "coinflip",
+      { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      60,
+      1n,
+    );
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Something went wrong");
   });
@@ -958,6 +1025,7 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
+      signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     (gm as any).resolveGameTokenAccounts = async () => ({
@@ -970,22 +1038,27 @@ describe("GameManager.createGame", () => {
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
     (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
     const originalGetGamePda = (PDAManager as any).getGamePDA;
-    (PDAManager as any).getGamePDA = () => new PublicKey("11111111111111111111111111111111");
+    (PDAManager as any).getGamePDA = () =>
+      new PublicKey("11111111111111111111111111111111");
 
     try {
       // Create game with 2 players
       await gm.createGame(
         "coinflip",
-        { amount: 100_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        {
+          amount: 100_000,
+          tokenMint: "11111111111111111111111111111111",
+          tokenTicker: "TOK",
+          isSol: false,
+        },
         2, // maxTickets = 2
         2,
         60,
-        1n
+        1n,
       );
 
-      // Base size = 126 bytes + 8 bytes per participant
-      // For 2 players: 126 + 16 = 142 bytes
-      const expectedSize2Players = 126 + (2 * 8);
+      // Base size = 126 bytes + 32 bytes per participant public key
+      const expectedSize2Players = 126 + 2 * 32;
       expect(capturedRentCalls).toContain(expectedSize2Players);
 
       // Reset for next test
@@ -994,23 +1067,31 @@ describe("GameManager.createGame", () => {
 
       const gm2 = GameManager.getInstance(program, wallet, db);
       (gm2 as any).oracleClient = (gm as any).oracleClient;
-      (gm2 as any).resolveGameTokenAccounts = (gm as any).resolveGameTokenAccounts;
+      (gm2 as any).resolveGameTokenAccounts = (
+        gm as any
+      ).resolveGameTokenAccounts;
       (gm2 as any).deriveAta = (gm as any).deriveAta;
-      (gm2 as any).confirmTransactionWithRecovery = (gm as any).confirmTransactionWithRecovery;
+      (gm2 as any).confirmTransactionWithRecovery = (
+        gm as any
+      ).confirmTransactionWithRecovery;
       (gm2 as any).handleGameAutoJoinPure = (gm as any).handleGameAutoJoinPure;
 
       // Create game with 50 players
       await gm2.createGame(
         "giveaway",
-        { amount: 100_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        {
+          amount: 100_000,
+          tokenMint: "11111111111111111111111111111111",
+          tokenTicker: "TOK",
+          isSol: false,
+        },
         50, // maxTickets = 50
         1,
         60,
-        2n
+        2n,
       );
 
-      // For 50 players: 126 + 400 = 526 bytes
-      const expectedSize50Players = 126 + (50 * 8);
+      const expectedSize50Players = 126 + 50 * 32;
       expect(capturedRentCalls).toContain(expectedSize50Players);
     } finally {
       (PDAManager as any).getGamePDA = originalGetGamePda;
@@ -1068,7 +1149,10 @@ describe("GameManager.createGame", () => {
       await gm.createGame(
         "coinflip",
         { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
-        2, 2, 60, 1n
+        2,
+        2,
+        60,
+        1n,
       );
     } catch {
       // Expected to fail
@@ -1111,7 +1195,7 @@ describe("GameManager.createGame", () => {
       // Use actual rent calculation
       const baseSize = 126;
       const bytesPerParticipant = 8;
-      const accountSize = baseSize + (maxTickets * bytesPerParticipant);
+      const accountSize = baseSize + maxTickets * bytesPerParticipant;
       const estimatedRent = Math.ceil(accountSize * 6.96);
       (gm as any).getGameCreationRentLamports = async () => estimatedRent;
 
@@ -1133,7 +1217,10 @@ describe("GameManager.createGame", () => {
     await gm2.createGame(
       "coinflip",
       { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
-      2, 2, 60, 1n
+      2,
+      2,
+      60,
+      1n,
     );
 
     // Test with 50 players
@@ -1141,23 +1228,29 @@ describe("GameManager.createGame", () => {
     await gm50.createGame(
       "giveaway",
       { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
-      50, 1, 60, 2n
+      50,
+      1,
+      60,
+      2n,
     );
 
     expect(jitSwapCalls.length).toBe(2);
 
-    const call2Players = jitSwapCalls.find(c => c.maxTickets === 2);
-    const call50Players = jitSwapCalls.find(c => c.maxTickets === 50);
+    const call2Players = jitSwapCalls.find((c) => c.maxTickets === 2);
+    const call50Players = jitSwapCalls.find((c) => c.maxTickets === 50);
 
     expect(call2Players).toBeDefined();
     expect(call50Players).toBeDefined();
 
     // 50 player game should require more SOL than 2 player game
     // Difference should be approximately (50 - 2) * 8 * 6.96 = 2,670 lamports
-    expect(call50Players!.desiredLamports).toBeGreaterThan(call2Players!.desiredLamports);
+    expect(call50Players!.desiredLamports).toBeGreaterThan(
+      call2Players!.desiredLamports,
+    );
 
     // Verify the difference is proportional to player count difference
-    const rentDifference = call50Players!.desiredLamports - call2Players!.desiredLamports;
+    const rentDifference =
+      call50Players!.desiredLamports - call2Players!.desiredLamports;
     const playerDifference = 50 - 2;
     const expectedRentDifference = Math.ceil(playerDifference * 8 * 6.96);
     // Allow some tolerance for rounding
