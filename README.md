@@ -50,7 +50,7 @@ src/
 
 ### Admin Commands
 
-- `/privatekey` - Get wallet private key (private chat only)
+- `/privatekey` - Export the wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
 - `/oracle` - Check oracle configuration
 
 ## 🏗️ Architecture
@@ -109,6 +109,7 @@ src/
    ```
 
    > Optional: set `HELIUS_REBATE_ADDRESS` in `.env` if you want Helius to pay you post-trade rebates when using a Helius mainnet RPC endpoint.
+   > Rootless Podman reads the wallet mnemonic and oracle token from `secrets/bot-mnemonic` and `secrets/oracle-api-token`. Create both files with mode `600`; the token must match the oracle repository's token file.
 
 2. **Install Dependencies**
 

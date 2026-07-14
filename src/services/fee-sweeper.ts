@@ -12,6 +12,7 @@ import {
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import type { Timba } from "../../idl/idlType";
 import { WalletManager } from "../utils/wallet";
+import { loadWalletMnemonic } from "../utils/secrets";
 import {
   getSupportedTokens,
   type TokenConfig,
@@ -626,7 +627,7 @@ export const sweepFees = async (
   console.log("💸 Collecting oracle fees for configured tokens...\n");
 
   const wallet =
-    options.walletManager ?? WalletManager.getInstance(process.env.MNEMONIC!);
+    options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
   const adminRoot = wallet.getAdminKeypair();
   const adminBundle = bundleFromKeypair(adminRoot);
   const operatorBundle = resolveOracleOperatorBundle(adminRoot);

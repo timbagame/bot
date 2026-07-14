@@ -494,8 +494,12 @@ export class WalletManager {
 
   private loadAdminKeypair(): void {
     try {
-      const keypairPath = path.join(process.cwd(), "admin-keypair.json");
+      const keypairPath = process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
       if (fs.existsSync(keypairPath)) {
+        const stats = fs.lstatSync(keypairPath);
+        const mode = stats.mode & 0o777;
+        if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Admin keypair must be a regular file, not a symlink");
+        if ((mode & 0o077) !== 0) throw new Error(`Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`);
         const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
         this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
         console.log(
@@ -660,12 +664,16 @@ export class WalletManager {
   public getAdminKeypair(): Keypair {
     if (this.adminKeypair) return this.adminKeypair;
 
-    const keypairPath = path.join(process.cwd(), "admin-keypair.json");
+    const keypairPath = process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
     if (!fs.existsSync(keypairPath)) {
       throw new Error("Admin keypair file not found at " + keypairPath);
     }
 
     try {
+      const stats = fs.lstatSync(keypairPath);
+      const mode = stats.mode & 0o777;
+      if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Admin keypair must be a regular file, not a symlink");
+      if ((mode & 0o077) !== 0) throw new Error(`Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`);
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
       this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
       return this.adminKeypair;

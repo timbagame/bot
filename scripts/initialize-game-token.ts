@@ -785,12 +785,8 @@ async function initializeGameToken() {
   );
 
   // Create wallet manager for transaction sending
-  const mnemonic = process.env["MNEMONIC"]?.trim();
-  if (!mnemonic) {
-    throw new Error(
-      "MNEMONIC env var must be set to initialize the wallet manager."
-    );
-  }
+  const { loadWalletMnemonic } = await import("../src/utils/secrets");
+  const mnemonic = loadWalletMnemonic();
 
   if (!process.env["SOLANA_NETWORK"]) {
     process.env["SOLANA_NETWORK"] = CONFIG.RPC_URL;

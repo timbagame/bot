@@ -6,6 +6,7 @@ import { run, sequentialize } from "@grammyjs/runner";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { CommandGroup } from "@grammyjs/commands";
 import { WalletManager } from "./utils/wallet";
+import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@anchor-lang/core";
 import { EventParser } from "@anchor-lang/core";
@@ -67,7 +68,6 @@ import {
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createBackToWalletKeyboard,
-  createBackToSettingsKeyboard,
   createCancelKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
@@ -210,10 +210,14 @@ bot.use(async (ctx, next) => {
 
   await next();
 });
-export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+export const wallet = WalletManager.getInstance(loadWalletMnemonic());
 const walletRpcLimiter = new SlidingWindowRateLimiter(
   USER_WALLET_RPC_WINDOW_MS
 );
+const privateKeyExportLimiter = new SlidingWindowRateLimiter(60 * 60_000);
+const pendingPrivateKeyExports = new Map<string, number>();
+const PRIVATE_KEY_CONFIRM_TTL_MS = 60_000;
+const PRIVATE_KEY_MESSAGE_TTL_MS = 60_000;
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
@@ -4768,6 +4772,43 @@ bot.callbackQuery(
       if (telegramId == null) {
         return;
       }
+      pendingPrivateKeyExports.set(telegramId.toString(), Date.now() + PRIVATE_KEY_CONFIRM_TTL_MS);
+      const keyboard = new InlineKeyboard()
+        .text("Reveal private key", "confirm_privatekey")
+        .row()
+        .text("Cancel", "settings");
+      await respondWithMenu(ctx, {
+        text: "⚠️ <b>Reveal private key?</b>\n\nAnyone with this key controls the wallet. The key message will be deleted after one minute, but notifications, screenshots, and forwarded copies may remain.",
+        keyboard,
+      });
+      await safeAnswerCallbackQuery(ctx, "Confirmation required");
+    },
+    { action: "cmd_privatekey", errorAck: "❌ Error preparing private key export" }
+  )
+);
+
+bot.callbackQuery(
+  "confirm_privatekey",
+  wrapCallbackHandler(
+    async (ctx) => {
+      if (ctx.chat?.type !== "private") {
+        await safeAnswerCallbackQuery(ctx, "❌ Private key only available in private chat");
+        return;
+      }
+      const telegramId = await resolveTelegramIdOrRespond(ctx, "show private key");
+      if (telegramId == null) return;
+      const id = telegramId.toString();
+      const expiresAt = pendingPrivateKeyExports.get(id);
+      pendingPrivateKeyExports.delete(id);
+      if (!expiresAt || expiresAt < Date.now()) {
+        await safeAnswerCallbackQuery(ctx, "❌ Confirmation expired. Try again.");
+        return;
+      }
+      const limit = privateKeyExportLimiter.consume(id, 3);
+      if (!limit.allowed) {
+        await safeAnswerCallbackQuery(ctx, "❌ Too many exports. Try again later.");
+        return;
+      }
       const keypair = wallet.getKeyPair(telegramId);
       const privateKeyBase64 = Buffer.from(keypair.secretKey).toString(
         "base64"
@@ -4792,13 +4833,14 @@ bot.callbackQuery(
         `You can import this key into Phantom, Solflare, or other Solana wallets.`,
       ];
 
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        keyboard: createBackToSettingsKeyboard(),
-      });
+      const message = await ctx.reply(response.join("\n"), { parse_mode: "HTML" });
+      const timer = setTimeout(() => {
+        void ctx.api.deleteMessage(message.chat.id, message.message_id).catch(() => undefined);
+      }, PRIVATE_KEY_MESSAGE_TTL_MS);
+      timer.unref?.();
       await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
     },
-    { action: "cmd_privatekey", errorAck: "❌ Error showing private key" }
+    { action: "confirm_privatekey", errorAck: "❌ Error showing private key" }
   )
 );
 

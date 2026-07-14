@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { GameDatabase } from "./game-database";
 import { WalletManager } from "./wallet";
+import { loadOracleApiToken } from "./secrets";
 
 // ================================
 // ORACLE API CLIENT
@@ -38,6 +39,16 @@ export class OracleClient {
   // ORACLE API METHODS
   // ================================
 
+  private serviceHeaders(includeJson = false): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (includeJson) headers["Content-Type"] = "application/json";
+    const apiToken = loadOracleApiToken();
+    if (apiToken) {
+      headers["Authorization"] = `Bearer ${apiToken}`;
+    }
+    return headers;
+  }
+
   /**
    * Request a random hash from the oracle API for game creation
    */
@@ -45,9 +56,7 @@ export class OracleClient {
     try {
       const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: this.serviceHeaders(true),
       });
 
       if (!response.ok) {
@@ -81,7 +90,7 @@ export class OracleClient {
       .toString("base64");
     const response = await fetch(`${this.oracleApiUrl}/sign-game-transaction`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.serviceHeaders(true),
       body: JSON.stringify({ txBase64 }),
     });
     const data = (await response.json()) as OracleApiResponse & {
@@ -98,7 +107,9 @@ export class OracleClient {
    */
   public async getStats(): Promise<OracleStats | null> {
     try {
-      const response = await fetch(`${this.oracleApiUrl}/stats`);
+      const response = await fetch(`${this.oracleApiUrl}/stats`, {
+        headers: this.serviceHeaders(),
+      });
 
       if (!response.ok) {
         console.warn(`Oracle stats request failed: ${response.status}`);
@@ -149,9 +160,7 @@ export class OracleClient {
     try {
       const response = await fetch(`${this.oracleApiUrl}/games/complete-now`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: this.serviceHeaders(true),
         body: JSON.stringify({ gameAddress }),
         signal: AbortSignal.timeout(3000),
       });

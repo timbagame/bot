@@ -6,7 +6,9 @@ declare global {
     TELEGRAM_TOKEN: string;
     SOLANA_NETWORK: string;
     HELIUS_REBATE_ADDRESS?: string;
-    MNEMONIC: string;
+      MNEMONIC?: string;
+      MNEMONIC_FILE?: string;
+      ADMIN_KEYPAIR_PATH?: string;
       DEFAULT_TOKEN_MINT?: string;
       DEFAULT_TOKEN_TICKER?: string;
       ORACLE_OPERATOR_KEYPAIR_PATH?: string;
@@ -20,6 +22,8 @@ declare global {
       ENABLE_FEE_SWEEPER?: string;
       FEE_SWEEP_INTERVAL_MS?: string;
       JUPITER_API_KEY?: string;
+      ORACLE_API_TOKEN?: string;
+      ORACLE_API_TOKEN_FILE?: string;
       BOT_INTERNAL_PORT?: string;
     }
   }

@@ -5,6 +5,7 @@ import { getUsdPrice } from "../src/utils/price-service";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { SwapRequest } from "../src/utils/swap/types";
 import { unwrapWsolBalance } from "../src/services/fee-sweeper";
+import { loadWalletMnemonic } from "../src/utils/secrets";
 
 async function getTotalTokenBalanceLamports(
   connection: ReturnType<WalletManager["getConnection"]>,
@@ -24,7 +25,7 @@ async function getTotalTokenBalanceLamports(
 }
 
 async function main() {
-  const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+  const wallet = WalletManager.getInstance(loadWalletMnemonic());
   const admin = wallet.getAdminKeypair();
   const connection = wallet.getConnection();
   const swapManager = new SwapManager(connection, wallet);
