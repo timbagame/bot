@@ -8,8 +8,7 @@ import { loadWalletMnemonic } from "../utils/secrets";
 import {
   getSupportedTokens,
   type TokenConfig,
-  getReferralTokenEntries,
-  type ReferralTokenConfigEntry,
+  getReferralConfig,
   WSOL_MINT,
 } from "../utils/token-registry";
 import { resolvePrimaryRpcEndpoint } from "../utils/rpc-endpoints";
@@ -34,7 +33,7 @@ export interface FeeSweepOptions {
   rpcUrl?: string;
   walletManager?: WalletManager;
   tokenConfigs?: TokenConfig[];
-  referralEntries?: ReferralTokenConfigEntry[];
+  referralAccount?: string;
   enableSwapToSol?: boolean;
   solUsdThreshold?: number;
   swapManagerFactory?: (
@@ -399,23 +398,17 @@ async function processTokenFee(
 async function runReferralSweep(
   connection: Connection,
   adminBundle: KeypairBundle,
-  referralEntries: ReferralTokenConfigEntry[],
+  referralAccountAddress: string,
   priceResolver: PriceResolver = getUsdPrice,
   referralProviderFactory: ReferralProviderFactory = (referralConnection) =>
     new ReferralProvider(referralConnection),
 ): Promise<number> {
-  if (referralEntries.length === 0) {
-    console.log("ℹ️  No referral entries configured; skipping referral claims.");
-    return 0;
-  }
-
-  const referralEntry = referralEntries[0];
-  if (!referralEntry?.referralAccount) {
+  if (!referralAccountAddress) {
     console.log("ℹ️  No referral account configured; skipping referral claims.");
     return 0;
   }
 
-  const referralAccount = new PublicKey(referralEntry.referralAccount);
+  const referralAccount = new PublicKey(referralAccountAddress);
   const provider = referralProviderFactory(connection as unknown as Connection);
 
   console.log("💸 Checking Jupiter referral fees...");
@@ -584,7 +577,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   const operatorBundle = resolveOracleOperatorBundle(adminRoot);
 
   const tokens = options.tokenConfigs ?? getSupportedTokens();
-  const referralEntries = options.referralEntries ?? getReferralTokenEntries();
+  const referralAccount = options.referralAccount ?? getReferralConfig().referralAccount;
   const rpcUrl = resolvePrimaryRpcEndpoint(options.rpcUrl ?? process.env.SOLANA_NETWORK);
   const priceResolver = options.priceResolver ?? getUsdPrice;
   const swapManagerFactory =
@@ -636,7 +629,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(connection, adminBundle, referralEntries, priceResolver);
+    referralClaims = await referralSweeper(connection, adminBundle, referralAccount, priceResolver);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }

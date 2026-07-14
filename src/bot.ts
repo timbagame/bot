@@ -106,7 +106,7 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getUsdPrice } from "./utils/price-service";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import type { IntegratorSwapParams } from "./utils/integrator-fees";
-import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./utils/token-registry";
+import { getReferralConfig, type ReferralConfig } from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
@@ -982,7 +982,7 @@ const prepareTokenTradeQuote = async ({
 
   const outputIsSol = outputAsset.ticker === "SOL";
 
-  const referralConfig = getReferralConfigForMint(inputAsset.mint);
+  const referralConfig = getReferralConfig();
 
   let shouldApplySolFeeBuffer = inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
@@ -4763,7 +4763,7 @@ registerWalletActionMenuHandler({
 
 type ResolveAdminIntegratorConfigOptions = {
   integratorConfig: IntegratorSwapParams | null;
-  referralConfig: ReferralTokenConfigEntry;
+  referralConfig: ReferralConfig;
   amountResolution: ReturnType<typeof presentSpendAmount>;
   inputAsset: ResolvedTradeAsset;
   solFeeBufferLamports?: number;
@@ -4829,7 +4829,7 @@ const buildAdminIntegratorConfig = async ({
   tradeDecimals,
   solFeeBufferLamports,
 }: {
-  referralConfig: ReferralTokenConfigEntry;
+  referralConfig: ReferralConfig;
   baseFeeBps: number;
   tradeAmountRaw: number;
   tradeMint: string;

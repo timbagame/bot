@@ -1,5 +1,5 @@
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
-import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./token-registry";
+import { getReferralConfig } from "./token-registry";
 import { getUsdPrice } from "./price-service";
 import {
   clampReferralFeeBps,
@@ -32,13 +32,6 @@ export interface IntegratorFeeContext {
   availableSolLamports: number;
   solFeeBufferLamports?: number;
 }
-
-const getReferralTargetForPair = (
-  inputMint: string,
-  outputMint: string,
-): ReferralTokenConfigEntry | undefined => {
-  return getReferralConfigForMint(inputMint) || getReferralConfigForMint(outputMint);
-};
 
 const isSolMint = (mint: string): boolean => mint === WSOL_MINT || mint === "SOL";
 
@@ -181,10 +174,7 @@ export const resolveIntegratorSwapParams = async (
   const isUnwrappingSol = inputMint === WSOL_MINT && isSolMint(outputMint);
   const availableForFeesLamports = availableSolLamports;
 
-  const referralConfig = getReferralTargetForPair(inputMint, outputMint);
-  if (!referralConfig) {
-    return null;
-  }
+  const referralConfig = getReferralConfig();
 
   const requiresAdminPayer =
     Boolean(referralConfig.adminPayer) && Boolean(referralConfig.adminCloseAuthority);

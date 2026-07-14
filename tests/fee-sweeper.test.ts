@@ -309,23 +309,12 @@ describe("Jupiter referral sweep threshold", () => {
     anchor: adminKeypair,
   } as any;
 
-  test("returns 0 when no referral entries configured", async () => {
-    const result = await __test_runReferralSweep(buildConnection(), adminBundle, [], async () => ({
+  test("returns 0 when referral account is not configured", async () => {
+    const result = await __test_runReferralSweep(buildConnection(), adminBundle, "", async () => ({
       price: 100,
       identifier: "test",
       resolvedAt: Date.now(),
     }));
-
-    expect(result).toBe(0);
-  });
-
-  test("returns 0 when referral account is not configured", async () => {
-    const result = await __test_runReferralSweep(
-      buildConnection(),
-      adminBundle,
-      [{ mint: "test", referralAccount: undefined as any }],
-      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() }),
-    );
 
     expect(result).toBe(0);
   });
@@ -335,7 +324,7 @@ describe("Jupiter referral sweep threshold", () => {
     const result = await __test_runReferralSweep(
       buildConnection(),
       adminBundle,
-      [{ mint: "test", referralAccount: Keypair.generate().publicKey.toBase58() }],
+      Keypair.generate().publicKey.toBase58(),
       buildPriceResolver(1),
       () =>
         ({
@@ -367,7 +356,7 @@ describe("Jupiter referral sweep threshold", () => {
     const result = await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
-      referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
+      referralAccount: "someAccount",
       contextFactory: () =>
         ({
           provider: { connection: {} },
@@ -391,7 +380,7 @@ describe("Jupiter referral sweep threshold", () => {
     const result = await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
-      referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
+      referralAccount: "someAccount",
       contextFactory: () =>
         ({
           provider: { connection: {} },
@@ -418,7 +407,7 @@ describe("Jupiter referral sweep threshold", () => {
     await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
-      referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
+      referralAccount: "someAccount",
       priceResolver: async ({ tokenMint }) => {
         // Return different prices for different tokens
         const now = Date.now();
@@ -456,7 +445,7 @@ describe("Jupiter referral sweep threshold", () => {
     await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
-      referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
+      referralAccount: "someAccount",
       contextFactory: () =>
         ({
           provider: { connection: {} },
@@ -481,7 +470,7 @@ describe("Jupiter referral sweep threshold", () => {
     const result = await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
-      referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
+      referralAccount: "someAccount",
       priceResolver: async (_params: { tokenMint?: string }) => null, // No price data
       contextFactory: () =>
         ({
@@ -544,7 +533,7 @@ describe("sweepFees integration hooks", () => {
     const result = await sweepFees({
       walletManager: wallet,
       tokenConfigs: tokens,
-      referralEntries: [],
+      referralAccount: "referral",
       priceResolver: async () => ({
         price: 1,
         identifier: "SOL",
@@ -584,7 +573,7 @@ describe("sweepFees integration hooks", () => {
     await sweepFees({
       walletManager: wallet,
       tokenConfigs: tokens,
-      referralEntries: [],
+      referralAccount: "referral",
       solUsdThreshold: 15,
       priceResolver: async () => ({
         price: 30,
@@ -611,7 +600,7 @@ describe("sweepFees integration hooks", () => {
     await sweepFees({
       walletManager: wallet,
       tokenConfigs: tokens,
-      referralEntries: [],
+      referralAccount: "referral",
       enableSwapToSol: false,
       contextFactory: fakeContext as any,
       tokenFeeProcessor: async () => true,

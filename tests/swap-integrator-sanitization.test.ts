@@ -596,7 +596,6 @@ describe("buildAdminIntegratorConfig", () => {
 
     const configPromise = buildAdminIntegratorConfig({
       referralConfig: {
-        mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
         referralAccount: "REF",
       },
       baseFeeBps: 85,
@@ -630,7 +629,6 @@ describe("buildAdminIntegratorConfig", () => {
 
     const config = await buildAdminIntegratorConfig({
       referralConfig: {
-        mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
         referralAccount: "REF",
       },
       baseFeeBps: 85,

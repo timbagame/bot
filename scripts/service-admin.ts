@@ -13,14 +13,20 @@ export function isServiceAdminCommand(value: string): value is ServiceAdminComma
 
 export function usage(): string {
   return [
-    "Usage: bun run service-admin <command>",
+    "Usage: bun run service-admin <command> [arguments]",
     "",
     "Commands:",
-    ...COMMANDS.map((command) => `  ${command}`),
+    "  close-orphaned-games",
+    "  initialize-referral-token-accounts <mint> [mint...]",
+    "  withdraw-token-fees",
+    "  sweep-to-sol",
   ].join("\n");
 }
 
-export async function runServiceAdmin(command: ServiceAdminCommand): Promise<void> {
+export async function runServiceAdmin(
+  command: ServiceAdminCommand,
+  args: string[] = [],
+): Promise<void> {
   switch (command) {
     case "close-orphaned-games": {
       const { closeOrphanedGames } = await import("./close-orphaned-games");
@@ -30,7 +36,7 @@ export async function runServiceAdmin(command: ServiceAdminCommand): Promise<voi
     case "initialize-referral-token-accounts": {
       const { initializeReferralTokenAccounts } =
         await import("./initialize-referral-token-accounts");
-      await initializeReferralTokenAccounts();
+      await initializeReferralTokenAccounts(args);
       return;
     }
     case "withdraw-token-fees": {
@@ -52,7 +58,7 @@ if (import.meta.main) {
     process.exit(2);
   }
 
-  runServiceAdmin(command).catch((error) => {
+  runServiceAdmin(command, process.argv.slice(3)).catch((error) => {
     console.error(`Service administration failed (${command}):`, error);
     process.exit(1);
   });

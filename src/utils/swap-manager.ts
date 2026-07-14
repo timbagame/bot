@@ -28,7 +28,7 @@ import type { JustInTimeSwapResult, SwapQuote, SwapRequest } from "./swap/types"
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { calculateDynamicReferralFee } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
-import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
+import { getReferralConfig } from "./token-registry";
 import { SwapService } from "./swap/service";
 import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "./swap/route-cost";
 import { DEFAULT_REFERRAL_BASE_FEE_BPS, DEFAULT_MAX_EXTRA_FEE_BPS } from "./admin-payer-surcharge";
@@ -409,7 +409,7 @@ export class SwapManager {
       inputAmountRawOverride,
     } = options;
 
-    const ref = getReferralConfigForMint(tokenMint) || getReferralConfigForMint(REGISTRY_SOL);
+    const ref = getReferralConfig();
     if (!ref?.referralAccount || !this.wallet.getAdminKeypair) {
       return null;
     }

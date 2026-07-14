@@ -1,19 +1,22 @@
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
-import { getReferralTokenEntries } from "../src/utils/token-registry";
+import { getReferralConfig } from "../src/utils/token-registry";
 import { loadWalletMnemonic } from "../src/utils/secrets";
 import { WalletManager } from "../src/utils/wallet";
 
-export async function initializeReferralTokenAccounts(): Promise<void> {
+export async function initializeReferralTokenAccounts(mintAddresses: string[]): Promise<void> {
+  if (mintAddresses.length === 0) {
+    throw new Error("Provide at least one token mint to initialize.");
+  }
+
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
   const payer = wallet.getAdminKeypair();
   const connection = wallet.getConnection();
   const provider = new ReferralProvider(connection);
-  const entries = getReferralTokenEntries();
+  const referralAccount = new PublicKey(getReferralConfig().referralAccount);
 
-  for (const entry of entries) {
-    const mint = new PublicKey(entry.mint);
-    const referralAccount = new PublicKey(entry.referralAccount);
+  for (const mintAddress of [...new Set(mintAddresses)]) {
+    const mint = new PublicKey(mintAddress);
     const transaction = await provider.initializeReferralTokenAccountV2({
       payerPubKey: payer.publicKey,
       referralAccountPubKey: referralAccount,
@@ -35,7 +38,7 @@ export async function initializeReferralTokenAccounts(): Promise<void> {
 }
 
 if (import.meta.main) {
-  initializeReferralTokenAccounts().catch((error) => {
+  initializeReferralTokenAccounts(process.argv.slice(2)).catch((error) => {
     console.error("Failed to initialize referral token accounts:", error);
     process.exit(1);
   });

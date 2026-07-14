@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "bun:test";
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS } from "../src/utils/constants";
 import {
-  __test_registerReferralEntry,
-  __test_resetReferralEntries,
+  __test_setReferralConfig,
+  __test_resetReferralConfig,
   WSOL_MINT,
 } from "../src/utils/token-registry";
 import {
@@ -23,31 +23,16 @@ const priceLookup = (price: number, identifier: string) => ({
 
 describe("Integrator fee calculations", () => {
   beforeEach(() => {
-    __test_resetReferralEntries();
+    __test_resetReferralConfig();
   });
 
   afterEach(() => {
-    __test_resetReferralEntries();
+    __test_resetReferralConfig();
     vi.restoreAllMocks();
   });
 
-  test("returns null when referral entries are missing for both mints", async () => {
-    const result = await resolveIntegratorSwapParams({
-      inputMint: "UnknownMint1111111111111111111111111111111",
-      outputMint: "AnotherUnknownMint2222222222222222222222222",
-      inputTicker: "XYZ",
-      inputDecimals: 6,
-      inputAmountRaw: 1_000_000,
-      userPublicKey: "UserX",
-      availableSolLamports: 1_000_000,
-    });
-
-    expect(result).toBeNull();
-  });
-
   test("throws when trade is too small to cover admin payer shortfall", async () => {
-    __test_registerReferralEntry({
-      mint: ADMIN_REF_MINT1,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -78,8 +63,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("applies extra referral fee to reimburse admin gas payer shortfall", async () => {
-    __test_registerReferralEntry({
-      mint: WSOL_MINT,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -109,8 +93,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("treats unwrap as user-funded when SOL buffer is already present", async () => {
-    __test_registerReferralEntry({
-      mint: ADMIN_REF_MINT1,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -134,8 +117,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("uses admin top-up for unwrap when user lacks upfront SOL buffer", async () => {
-    __test_registerReferralEntry({
-      mint: WSOL_MINT,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -165,8 +147,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("treats WSOL output unwraps as SOL for admin surcharge calculations", async () => {
-    __test_registerReferralEntry({
-      mint: WSOL_MINT,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -197,8 +178,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("uses admin top-up when provided SOL buffer is below minimum", async () => {
-    __test_registerReferralEntry({
-      mint: ADMIN_REF_MINT1,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
@@ -229,8 +209,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("returns admin payer and close authority when user lacks buffer", async () => {
-    __test_registerReferralEntry({
-      mint: ADMIN_REF_MINT2,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer22222222222222222222222222",
       adminCloseAuthority: "AdminCloseAuthority33333333333333333333333333",
@@ -259,8 +238,7 @@ describe("Integrator fee calculations", () => {
   });
 
   test("clamps referral fee floor to 50 bps when configured lower", async () => {
-    __test_registerReferralEntry({
-      mint: CLAMP_REF_MINT,
+    __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       baseFeeBps: 10,
     });
