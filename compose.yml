@@ -21,6 +21,7 @@ services:
       - ./chat-settings.sqlite:/app/chat-settings.sqlite:Z
       - ./games.sqlite:/app/games.sqlite:Z
       - ./tokens.sqlite:/app/tokens.sqlite:Z
+      - ./transaction-history.sqlite:/app/transaction-history.sqlite:Z
     networks:
       - timba
     security_opt:
