@@ -37,6 +37,7 @@ src/
 
 - `/start`, `/balance` - Show wallet address and balances
 - `/help` - Display all available commands
+- `/oracle` - Show the current oracle configuration
 
 ### Game Commands
 
@@ -47,11 +48,7 @@ src/
 
 - `/withdraw <address> <amount>` - Withdraw tokens to external wallet
 - `/tip @username <amount>` - Tip tokens by replying or tagging a user
-
-### Admin Commands
-
-- `/privatekey` - Export the wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
-- `/oracle` - Check oracle configuration
+- **Private Key** in the wallet menu - Reveal the current user's wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
 
 ## 🏗️ Architecture
 
