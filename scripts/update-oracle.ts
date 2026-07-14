@@ -10,7 +10,7 @@ import { createOracleConfig, logOracleConfig } from "./utils/oracle-config";
 
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";
 
-const updateOracle = async () => {
+export const updateOracle = async (): Promise<void> => {
   try {
     console.log("🔄 Starting Oracle Update...");
 
@@ -101,8 +101,10 @@ const updateOracle = async () => {
     );
   } catch (error) {
     console.error("❌ Error updating Oracle:", error);
+    throw error;
   }
 };
 
-// Run the update
-updateOracle();
+if (import.meta.main) {
+  updateOracle().catch(() => process.exit(1));
+}

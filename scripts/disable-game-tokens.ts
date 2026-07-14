@@ -75,7 +75,7 @@ async function disableToken(
   console.log(`🚫 ${ticker} disabled. Transaction: ${tx}`);
 }
 
-async function main() {
+export async function disableGameTokens(): Promise<void> {
   console.log("🚦 Disabling game tokens on Timba program...\n");
 
   // Load admin/bot keypair via wallet manager
@@ -112,7 +112,9 @@ async function main() {
   console.log("\n🏁 Token disable process finished.");
 }
 
-main().catch((error) => {
-  console.error("❌ Failed to disable tokens:", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  disableGameTokens().catch((error) => {
+    console.error("❌ Failed to disable tokens:", error);
+    process.exit(1);
+  });
+}

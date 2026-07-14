@@ -1,94 +1,27 @@
-# Telegram Bot — Mainnet Deployment Guide
+# Telegram Bot — Service Deployment
 
-This guide covers running the Timba Telegram bot against the mainnet-beta program and oracle.
+This guide covers only the Bot service. Cross-project production operations and chain administration are documented in the private Operations repository.
 
-## Prerequisites
+## Configuration
 
-- Rootless Podman with Quadlet support
-- Telegram BotFather token
-- Mnemonic for the bot’s Solana wallet (funded on mainnet)
-- Oracle API URL accessible from the bot host
-- Latest IDL in `idl/idl.json`
+Copy `.env.example` to `.env` and set the production values. For the shared rootless Podman network, use `ORACLE_API_URL=http://oracle:3001`; the Oracle port is not published on the VPS host.
 
-## 1. Configure Environment
+`SOLANA_NETWORK` accepts a JSON array or comma-separated RPC list and fails over in order. `TIMBA_CONTRACT_VERSION` selects the supported contract ABI.
 
-```bash
-cd bot
-cp .env.example .env
-```
+Keep these files outside `.env` and set them to mode `600`:
 
-Populate `.env` with production values:
+- `admin-keypair.json`
+- `secrets/bot-mnemonic`
+- `secrets/oracle-api-token`
 
-```bash
-TELEGRAM_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
-SOLANA_NETWORK=["https://api.mainnet-beta.solana.com","https://rpc-backup.example.com"]
-ORACLE_API_URL=https://oracle.example.com
-HELIUS_REBATE_ADDRESS=<SOL-address>  # Optional: collect Helius backrun rebates when using a Helius mainnet RPC endpoint
-# Optional overrides if default detection is insufficient
-# DEFAULT_TOKEN_MINT=F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump
-# DEFAULT_TOKEN_TICKER=TIMBA
-# Optional: specify dedicated oracle operator keys for scripts
-# ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json
-# NEW_ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/new-operator.json
-# Automated fee sweeps run by default inside the bot; disable with:
-# ENABLE_FEE_SWEEPER=false
-# FEE_SWEEP_INTERVAL_MS=3600000
-```
+The Oracle API token must match the Oracle repository copy.
 
-`SOLANA_NETWORK` accepts either a JSON array (as shown) or a comma-separated string; the bot will cycle through the list automatically when it encounters transient RPC failures.
+## Rootless Podman Quadlet
 
-For the Podman deployment, use `ORACLE_API_URL=http://oracle:3001` on the shared private `timba` network. The oracle does not publish port 3001 on the VPS host.
-
-Place `admin-keypair.json` (bot authority) in the project root. Fund it with enough SOL to cover gameplay and swap fees.
-
-Create `secrets/bot-mnemonic` and `secrets/oracle-api-token`, then run `chmod 600 admin-keypair.json secrets/bot-mnemonic secrets/oracle-api-token`. Podman mounts these files read-only; do not put their contents in `.env`. The token file must contain the same random value as the oracle token file.
-
-## 2. Install Dependencies
-
-```bash
-bun install
-```
-
-## 3. Optional Onboarding Scripts
-
-Before going live, ensure the oracle configuration and tokens are initialised:
-
-```bash
-cd ../operations
-bun run initialize-program --authority /path/to/upgrade-authority.json \
-  --operator /path/to/oracle-operator.json --rpc-url <RPC_URL>
-cd ../bot
-ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json bun run scripts/initialize-game-token.ts
-```
-
-To make sure oracle fees cover completion costs, bump each token's minimum bet so the 1% protocol fee exceeds the target network fee threshold:
-
-```bash
-MIN_COMPLETION_FEE_LAMPORTS=2000000 \
-ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json \
-bun run scripts/update-token-min-bets.ts
-```
-
-Override per-token thresholds with `TIMBA_MIN_COMPLETION_FEE_LAMPORTS`, `WSOL_MIN_COMPLETION_FEE_LAMPORTS`, etc., as needed. Values are expressed in raw token units (e.g., lamports for 9-decimal tokens).
-
-Collect any accrued protocol fees to the oracle operator wallet when needed (the sweep also swaps non-SOL balances over $5 to SOL):
-
-```bash
-ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json \\
-bun run scripts/withdraw-token-fees.ts
-```
-
-These scripts reuse the admin wallet for signing and honour `ORACLE_OPERATOR_KEYPAIR_PATH`.
-
-The bot runs fee sweeps automatically every hour by default, withdrawing oracle fees, claiming Jupiter referrals, and swapping collected tokens to SOL when the balance exceeds $5. Disable the job with `ENABLE_FEE_SWEEPER=false` or adjust the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
-
-## 4. Run with rootless Podman Quadlet
-
-Place this repository at `~/timba/bot` and install its rootless Quadlet after installing the oracle Quadlet:
+The production checkout is expected at `~/timba/bot`. Install the Oracle service first, then:
 
 ```bash
 mkdir -p ~/.config/containers/systemd
-rm -f ~/.config/systemd/user/timba-bot.service
 cp deploy/quadlet/timba-bot.container ~/.config/containers/systemd/
 systemctl --user daemon-reload
 systemctl --user start timba-bot.service
@@ -96,12 +29,19 @@ systemctl --user enable --now podman-auto-update.timer
 loginctl enable-linger "$USER"
 ```
 
-The Quadlet uses `AutoUpdate=registry`. After a reviewed merge publishes a new `:main` image, the user timer pulls it and recreates the service. Check with `podman auto-update --dry-run` and follow logs with `journalctl --user -u timba-bot.service -f`.
+The Quadlet uses `AutoUpdate=registry`. Inspect updates and logs with:
 
-The included `compose.yml` remains available for local/manual diagnostics, but do not run a Compose copy alongside the Quadlet service. If the checkout lives outside `~/timba/bot`, update the `%h/timba/bot` paths in the installed Quadlet. Do not run rootless Podman with `sudo`.
+```bash
+podman auto-update --dry-run
+journalctl --user -u timba-bot.service -f
+```
 
-## 5. Post-Deployment Checks
+Do not run a Compose copy alongside the Quadlet or use `sudo` for rootless Podman. If the checkout path changes, update the `%h/timba/bot` paths in the installed Quadlet.
 
-- Verify `/balance` or `/oracle` commands respond with mainnet data.
-- Confirm swaps and token transfers settle on mainnet (monitor via explorers).
-- Keep both bot and oracle wallets topped up to avoid failed transactions.
+## Service Checks
+
+- Verify `/balance` and `/oracle` return mainnet data.
+- Confirm the Bot can reach `http://oracle:3001` on the private Podman network.
+- Keep its Solana wallets funded.
+
+For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.

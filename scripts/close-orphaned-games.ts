@@ -12,7 +12,7 @@ const requireEnvVar = (name: string): string => {
   return value;
 };
 
-async function main(): Promise<void> {
+export async function closeOrphanedGames(): Promise<void> {
   console.log("🧹 Starting orphaned game cleanup...\n");
 
   const mnemonic = loadWalletMnemonic();
@@ -34,7 +34,9 @@ async function main(): Promise<void> {
   console.log("\n✅ Orphaned game cleanup finished.");
 }
 
-main().catch((error) => {
-  console.error("❌ Failed to close orphaned games:", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  closeOrphanedGames().catch((error) => {
+    console.error("❌ Failed to close orphaned games:", error);
+    process.exit(1);
+  });
+}

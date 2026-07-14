@@ -24,7 +24,7 @@ async function getTotalTokenBalanceLamports(
   return total;
 }
 
-async function main() {
+export async function sweepToSol(): Promise<void> {
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
   const admin = wallet.getAdminKeypair();
   const connection = wallet.getConnection();
@@ -88,7 +88,9 @@ async function main() {
   await unwrapWsolBalance(wallet, connection, admin.publicKey, admin, getUsdPrice);
 }
 
-main().catch((error) => {
-  console.error("❌ Sweep script failed:", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  sweepToSol().catch((error) => {
+    console.error("❌ Sweep script failed:", error);
+    process.exit(1);
+  });
+}

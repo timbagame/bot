@@ -235,7 +235,7 @@ export async function resolveRequiredSolPriceUSD(
   return solPriceUSD;
 }
 
-async function main() {
+export async function updateTokenMinBets(): Promise<void> {
   console.log("⚙️  Calibrating minimum bet sizes...\n");
 
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
@@ -396,7 +396,7 @@ async function main() {
 }
 
 if (import.meta.main) {
-  main().catch((error) => {
+  updateTokenMinBets().catch((error) => {
     console.error("❌ Failed to update minimum bets:", error);
     process.exit(1);
   });
