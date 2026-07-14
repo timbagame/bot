@@ -45,3 +45,5 @@ Do not run a Compose copy alongside the Quadlet or use `sudo` for rootless Podma
 - Keep its Solana wallets funded.
 
 For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.
+
+Bot-specific database and wallet maintenance runs inside the container with `podman exec bot bun run service-admin <command>`. Contract configuration does not belong to the Bot service.

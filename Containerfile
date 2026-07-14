@@ -10,7 +10,6 @@ RUN bun install --frozen-lockfile
 
 # Copy the rest of the application source
 COPY tsconfig.json ./tsconfig.json
-COPY game-tokens-info.json ./game-tokens-info.json
 COPY src ./src
 COPY scripts ./scripts
 COPY idl ./idl

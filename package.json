@@ -1,7 +1,7 @@
 {
   "name": "timba-bot",
   "scripts": {
-    "chain-admin": "bun run scripts/chain-admin.ts",
+    "service-admin": "bun run scripts/service-admin.ts",
     "start": "bun run src/bot.ts",
     "dev": "bun run --watch src/bot.ts",
     "format": "prettier . --write",
