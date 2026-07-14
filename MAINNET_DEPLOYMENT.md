@@ -4,7 +4,7 @@ This guide covers running the Timba Telegram bot against the mainnet-beta progra
 
 ## Prerequisites
 
-- Rootless Podman with a working `podman compose` provider
+- Rootless Podman with Quadlet support
 - Telegram BotFather token
 - Mnemonic for the bot’s Solana wallet (funded on mainnet)
 - Oracle API URL accessible from the bot host
@@ -79,28 +79,23 @@ These scripts reuse the admin wallet for signing and honour `ORACLE_OPERATOR_KEY
 
 The bot runs fee sweeps automatically every hour by default, withdrawing oracle fees, claiming Jupiter referrals, and swapping collected tokens to SOL when the balance exceeds $5. Disable the job with `ENABLE_FEE_SWEEPER=false` or adjust the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
 
-## 4. Run with rootless Podman
+## 4. Run with rootless Podman Quadlet
+
+Place this repository at `~/timba/bot` and install its rootless Quadlet after installing the oracle Quadlet:
 
 ```bash
-podman network exists timba || podman network create timba
-podman compose -f compose.yml pull
-podman compose -f compose.yml up -d
-podman compose -f compose.yml ps
-```
-
-Start the oracle first. Follow logs with `podman compose -f compose.yml logs -f bot`.
-
-For automatic startup, place this repository at `~/timba/bot`, then install the included user service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp deploy/systemd/timba-bot.service ~/.config/systemd/user/
+mkdir -p ~/.config/containers/systemd
+rm -f ~/.config/systemd/user/timba-bot.service
+cp deploy/quadlet/timba-bot.container ~/.config/containers/systemd/
 systemctl --user daemon-reload
-systemctl --user enable --now timba-bot.service
+systemctl --user start timba-bot.service
+systemctl --user enable --now podman-auto-update.timer
 loginctl enable-linger "$USER"
 ```
 
-If the checkout lives elsewhere, edit `WorkingDirectory` in the copied unit. Rootless Podman keeps container privileges scoped to the deployment user; do not run these commands with `sudo`.
+The Quadlet uses `AutoUpdate=registry`. After a reviewed merge publishes a new `:main` image, the user timer pulls it and recreates the service. Check with `podman auto-update --dry-run` and follow logs with `journalctl --user -u timba-bot.service -f`.
+
+The included `compose.yml` remains available for local/manual diagnostics, but do not run a Compose copy alongside the Quadlet service. If the checkout lives outside `~/timba/bot`, update the `%h/timba/bot` paths in the installed Quadlet. Do not run rootless Podman with `sudo`.
 
 ## 5. Post-Deployment Checks
 

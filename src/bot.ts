@@ -6439,6 +6439,12 @@ if (process.env.NODE_ENV !== "test") {
         port: botInternalPort,
         async fetch(request) {
           const url = new URL(request.url);
+          if (url.pathname === "/health" && request.method === "GET") {
+            return new Response(JSON.stringify({ status: "ok" }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (url.pathname === "/internal/completed" && request.method === "POST") {
             try {
               const body = (await request.json()) as Record<string, unknown>;

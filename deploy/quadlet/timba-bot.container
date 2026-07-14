@@ -1,0 +1,41 @@
+[Unit]
+Description=Timba bot
+Wants=network-online.target
+After=network-online.target timba-oracle.service
+Requires=timba-oracle.service
+
+[Container]
+Image=ghcr.io/timbagame/bot:main
+ContainerName=bot
+AutoUpdate=registry
+Network=timba.network
+EnvironmentFile=%h/timba/bot/.env
+Environment=MNEMONIC_FILE=/run/secrets/bot_mnemonic
+Environment=ADMIN_KEYPAIR_PATH=/run/secrets/admin_keypair.json
+Environment=ORACLE_API_URL=http://oracle:3001
+Environment=ORACLE_API_TOKEN_FILE=/run/secrets/oracle_api_token
+Volume=%h/timba/bot/admin-keypair.json:/run/secrets/admin_keypair.json:ro,Z
+Volume=%h/timba/bot/secrets/bot-mnemonic:/run/secrets/bot_mnemonic:ro,Z
+Volume=%h/timba/bot/secrets/oracle-api-token:/run/secrets/oracle_api_token:ro,Z
+Volume=%h/timba/bot/chat-settings.sqlite:/app/chat-settings.sqlite:Z
+Volume=%h/timba/bot/games.sqlite:/app/games.sqlite:Z
+Volume=%h/timba/bot/tokens.sqlite:/app/tokens.sqlite:Z
+PublishPort=3000:3000
+PublishPort=3002:3002
+NoNewPrivileges=true
+DropCapability=all
+PidsLimit=256
+HealthCmd=bun -e "const response = await fetch('http://127.0.0.1:3002/health'); if (!response.ok) process.exit(1)"
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=20s
+HealthOnFailure=kill
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target
