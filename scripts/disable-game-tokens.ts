@@ -2,9 +2,13 @@ import * as anchor from "@anchor-lang/core";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
-import type { KeypairBundle } from "./utils/keypairs";
-import { bundleFromKeypair, resolveOracleOperatorBundle, uniqueSigners } from "./utils/keypairs";
-import { createAnchorContext } from "./utils/anchor-context";
+import type { KeypairBundle } from "../src/utils/keypairs";
+import {
+  bundleFromKeypair,
+  resolveOracleOperatorBundle,
+  uniqueSigners,
+} from "../src/utils/keypairs";
+import { createAnchorContext } from "../src/utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import { loadWalletMnemonic } from "../src/utils/secrets";
 

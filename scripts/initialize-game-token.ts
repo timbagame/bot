@@ -24,8 +24,12 @@ import { WalletManager } from "../src/utils/wallet";
 import { getReferralTokenEntries, getSupportedTokens } from "../src/utils/token-registry";
 import { NetworkDetector, type SolanaNetwork } from "../src/utils/network-detector";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
-import { loadKeypairFromPath, resolveOracleOperatorKeypair, uniqueSigners } from "./utils/keypairs";
-import { createAnchorContext } from "./utils/anchor-context";
+import {
+  loadKeypairFromPath,
+  resolveOracleOperatorKeypair,
+  uniqueSigners,
+} from "../src/utils/keypairs";
+import { createAnchorContext } from "../src/utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { Buffer } from "buffer";
 import { ReferralProvider } from "@jup-ag/referral-sdk";

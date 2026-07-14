@@ -25,8 +25,8 @@ import {
   resolveOracleOperatorBundle,
   uniqueSigners,
   type KeypairBundle,
-} from "../../scripts/utils/keypairs";
-import { createAnchorContext } from "../../scripts/utils/anchor-context";
+} from "../utils/keypairs";
+import { createAnchorContext } from "../utils/anchor-context";
 import { SwapManager } from "../utils/swap-manager";
 import type { SwapRequest } from "../utils/swap/types";
 

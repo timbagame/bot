@@ -3,9 +3,9 @@ import type { Commitment, Connection, ConnectionConfig, Keypair } from "@solana/
 import { clusterApiUrl } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
 import idl from "../../idl/idl.json";
-import { WalletManager } from "../../src/utils/wallet";
-import { loadWalletMnemonic } from "../../src/utils/secrets";
-import { resolvePrimaryRpcEndpoint } from "../../src/utils/rpc-endpoints";
+import { WalletManager } from "./wallet";
+import { loadWalletMnemonic } from "./secrets";
+import { resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
 
 type WalletOverride = anchor.Wallet | Keypair | anchor.web3.Keypair;
 

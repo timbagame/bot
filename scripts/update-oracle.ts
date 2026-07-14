@@ -4,8 +4,8 @@ import {
   resolveKeypairFromEnv,
   resolveOracleOperatorKeypair,
   uniqueSigners,
-} from "./utils/keypairs";
-import { loadProgramContext } from "./utils/anchor-context";
+} from "../src/utils/keypairs";
+import { loadProgramContext } from "../src/utils/anchor-context";
 import { createOracleConfig, logOracleConfig } from "./utils/oracle-config";
 
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";

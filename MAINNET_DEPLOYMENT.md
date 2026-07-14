@@ -54,7 +54,10 @@ bun install
 Before going live, ensure the oracle configuration and tokens are initialised:
 
 ```bash
-ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json bun run scripts/initialize-program.ts
+cd ../operations
+bun run initialize-program --authority /path/to/upgrade-authority.json \
+  --operator /path/to/oracle-operator.json --rpc-url <RPC_URL>
+cd ../bot
 ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json bun run scripts/initialize-game-token.ts
 ```
 

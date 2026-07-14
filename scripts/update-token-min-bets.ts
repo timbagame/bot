@@ -7,8 +7,12 @@ import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
 import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 import { getSupportedTokens, type TokenConfig, WSOL_MINT } from "../src/utils/token-registry";
-import { bundleFromKeypair, resolveOracleOperatorBundle, uniqueSigners } from "./utils/keypairs";
-import { createAnchorContext } from "./utils/anchor-context";
+import {
+  bundleFromKeypair,
+  resolveOracleOperatorBundle,
+  uniqueSigners,
+} from "../src/utils/keypairs";
+import { createAnchorContext } from "../src/utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import { loadWalletMnemonic } from "../src/utils/secrets";
