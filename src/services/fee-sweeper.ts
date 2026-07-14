@@ -55,6 +55,9 @@ export interface FeeSweepResult {
 }
 
 type PriceResolver = typeof getUsdPrice;
+type ReferralProviderFactory = (
+  connection: Connection,
+) => Pick<ReferralProvider, "getReferralTokenAccountsV2" | "claimAllV2">;
 type TokenBalanceFetcher = (
   connection: Connection,
   owner: PublicKey,
@@ -398,6 +401,8 @@ async function runReferralSweep(
   adminBundle: KeypairBundle,
   referralEntries: ReferralTokenConfigEntry[],
   priceResolver: PriceResolver = getUsdPrice,
+  referralProviderFactory: ReferralProviderFactory = (referralConnection) =>
+    new ReferralProvider(referralConnection),
 ): Promise<number> {
   if (referralEntries.length === 0) {
     console.log("ℹ️  No referral entries configured; skipping referral claims.");
@@ -411,12 +416,12 @@ async function runReferralSweep(
   }
 
   const referralAccount = new PublicKey(referralEntry.referralAccount);
-  const provider = new ReferralProvider(connection as unknown as Connection);
+  const provider = referralProviderFactory(connection as unknown as Connection);
 
   console.log("💸 Checking Jupiter referral fees...");
 
   // Get all referral token accounts and calculate total USD value
-  const referralTokenAccountsResult = await provider.getReferralTokenAccounts(
+  const referralTokenAccountsResult = await provider.getReferralTokenAccountsV2(
     referralAccount.toBase58(),
   );
   const allTokenAccounts = [

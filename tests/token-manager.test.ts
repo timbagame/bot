@@ -231,23 +231,23 @@ test("parseAmount converts $-prefixed USD amounts when explicit token is provide
 });
 
 test("parseAmount converts $-prefixed USD amounts into the requested token", async () => {
-  const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
+  const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
   const priceSpy = vi
     .spyOn(priceService, "getUsdPrice")
-    .mockResolvedValue(mockPriceLookup(2, "WBTC"));
+    .mockResolvedValue(mockPriceLookup(2, "USDC"));
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
-  await tm.addToken(wbtcMint, "WBTC", 8);
+  await tm.addToken(usdcMint, "USDC", 6);
 
-  const res = await tm.parseAmount(["/cf", "$10", "WBTC"], 1, 1, "game");
+  const res = await tm.parseAmount(["/cf", "$10", "USDC"], 1, 1, "game");
   if (!res.success) {
     throw new Error(`expected success, got ${res.error}`);
   }
 
-  expect(res.data.tokenMint).toBe(wbtcMint);
-  expect(res.data.tokenTicker).toBe("WBTC");
-  expect(res.data.amount).toBe(500_000_000);
+  expect(res.data.tokenMint).toBe(usdcMint);
+  expect(res.data.tokenTicker).toBe("USDC");
+  expect(res.data.amount).toBe(5_000_000);
   expect(res.data.tokenWasSpecified).toBe(true);
-  expect(res.data.formattedAmount).toContain("WBTC");
+  expect(res.data.formattedAmount).toContain("USDC");
   expect(priceSpy).toHaveBeenCalled();
 });
 

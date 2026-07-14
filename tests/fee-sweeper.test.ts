@@ -330,6 +330,35 @@ describe("Jupiter referral sweep threshold", () => {
     expect(result).toBe(0);
   });
 
+  test("discovers V2 referral token accounts", async () => {
+    let v2Called = false;
+    const result = await __test_runReferralSweep(
+      buildConnection(),
+      adminBundle,
+      [{ mint: "test", referralAccount: Keypair.generate().publicKey.toBase58() }],
+      buildPriceResolver(1),
+      () =>
+        ({
+          getReferralTokenAccountsV2: async () => {
+            v2Called = true;
+            return {
+              tokenAccounts: [
+                {
+                  pubkey: Keypair.generate().publicKey,
+                  account: { mint: Keypair.generate().publicKey, amount: 0n },
+                },
+              ],
+              token2022Accounts: [],
+            };
+          },
+          claimAllV2: async () => [],
+        }) as any,
+    );
+
+    expect(v2Called).toBe(true);
+    expect(result).toBe(0);
+  });
+
   test("skips claim when total value is below $5 threshold", async () => {
     // We need to mock the ReferralProvider - since we can't easily do that,
     // we'll test via the integration hook instead

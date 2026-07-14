@@ -73,40 +73,8 @@ const REGISTERED_TOKENS: TokenConfig[] = [
     ticker: "USDT",
   },
   {
-    mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
-    ticker: "WBTC",
-  },
-  {
-    mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
-    ticker: "ETH",
-  },
-  {
-    mint: "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
-    ticker: "cbBTC",
-  },
-  {
-    mint: "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
-    ticker: "JLP",
-  },
-  {
-    mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
-    ticker: "JUP",
-  },
-  {
-    mint: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
-    ticker: "TRUMP",
-  },
-  {
     mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
     ticker: "MAGAIBA",
-  },
-  {
-    mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
-    ticker: "GLORP",
-  },
-  {
-    mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
-    ticker: "AI16Z",
   },
 ];
 
