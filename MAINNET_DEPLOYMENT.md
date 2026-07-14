@@ -36,7 +36,7 @@ podman auto-update --dry-run
 journalctl --user -u timba-bot.service -f
 ```
 
-Do not run a Compose copy alongside the Quadlet or use `sudo` for rootless Podman. If the checkout path changes, update the `%h/timba/bot` paths in the installed Quadlet.
+Do not use `sudo` for rootless Podman. If the checkout path changes, update the `%h/timba/bot` paths in the installed Quadlet.
 
 ## Service Checks
 

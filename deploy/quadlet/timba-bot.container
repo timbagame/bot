@@ -20,6 +20,7 @@ Volume=%h/timba/bot/secrets/oracle-api-token:/run/secrets/oracle_api_token:ro,Z
 Volume=%h/timba/bot/chat-settings.sqlite:/app/chat-settings.sqlite:Z
 Volume=%h/timba/bot/games.sqlite:/app/games.sqlite:Z
 Volume=%h/timba/bot/tokens.sqlite:/app/tokens.sqlite:Z
+Volume=%h/timba/bot/transaction-history.sqlite:/app/transaction-history.sqlite:Z
 PublishPort=3000:3000
 PublishPort=3002:3002
 NoNewPrivileges=true
