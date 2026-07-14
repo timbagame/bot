@@ -934,6 +934,8 @@ export class SwapManager {
       payer: integrator?.payer,
       closeAuthority: integrator?.closeAuthority,
     });
+    quote.executionFeeMint = swapResponse.order?.feeMint;
+    quote.executionReferralApplied = swapResponse.order?.referralApplied;
 
     const adminPayerApplied =
       integrator?.payerKind === "admin" &&

@@ -21,6 +21,8 @@ export interface SwapQuote {
   outputDecimals?: number;
   inputTicker?: string;
   outputTicker?: string;
+  executionFeeMint?: string;
+  executionReferralApplied?: boolean;
 }
 
 export interface SwapRequest {

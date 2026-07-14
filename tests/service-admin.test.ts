@@ -5,6 +5,7 @@ describe("service-admin command routing", () => {
   test.each([
     "close-orphaned-games",
     "initialize-referral-token-accounts",
+    "show-swap-stats",
     "withdraw-token-fees",
     "sweep-to-sol",
   ])("accepts %s", (command) => {

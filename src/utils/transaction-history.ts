@@ -22,6 +22,29 @@ export interface TransactionRecord {
   block_height?: number;
 }
 
+export interface SwapStatRecord {
+  signature: string;
+  wallet: string;
+  input_mint: string;
+  output_mint: string;
+  fee_mint?: string;
+  input_ticker: string;
+  output_ticker: string;
+  amount_in: string;
+  amount_out?: string;
+  referral_applied: boolean;
+  timestamp: number;
+  network?: string;
+}
+
+export interface SwapTokenStat {
+  mint: string;
+  inputSwaps: number;
+  outputSwaps: number;
+  feeMintSelections: number;
+  lastTradedAt: number;
+}
+
 // ================================
 // TRANSACTION HISTORY DATABASE
 // ================================
@@ -63,8 +86,76 @@ export class TransactionHistory extends BaseDatabase {
         `CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature)`,
         `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`,
+        `CREATE TABLE IF NOT EXISTS swap_stats (
+          signature TEXT PRIMARY KEY,
+          wallet TEXT NOT NULL,
+          input_mint TEXT NOT NULL,
+          output_mint TEXT NOT NULL,
+          fee_mint TEXT,
+          input_ticker TEXT NOT NULL,
+          output_ticker TEXT NOT NULL,
+          amount_in TEXT NOT NULL,
+          amount_out TEXT,
+          referral_applied INTEGER NOT NULL DEFAULT 0,
+          timestamp INTEGER NOT NULL,
+          network TEXT NOT NULL DEFAULT 'mainnet',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_swap_stats_timestamp ON swap_stats(timestamp DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_swap_stats_fee_mint ON swap_stats(fee_mint)`,
       ],
       "TransactionHistory",
+    );
+  }
+
+  recordSwap(record: SwapStatRecord): void {
+    this.run(
+      `INSERT OR IGNORE INTO swap_stats (
+        signature, wallet, input_mint, output_mint, fee_mint,
+        input_ticker, output_ticker, amount_in, amount_out,
+        referral_applied, timestamp, network
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.signature,
+        record.wallet,
+        record.input_mint,
+        record.output_mint,
+        record.fee_mint || null,
+        record.input_ticker,
+        record.output_ticker,
+        record.amount_in,
+        record.amount_out || null,
+        record.referral_applied ? 1 : 0,
+        record.timestamp,
+        record.network || "mainnet",
+      ],
+      "recording swap statistics",
+    );
+  }
+
+  getSwapTokenStats(): SwapTokenStat[] {
+    return this.all<SwapTokenStat>(
+      `WITH token_mints AS (
+        SELECT input_mint AS mint FROM swap_stats
+        UNION
+        SELECT output_mint AS mint FROM swap_stats
+        UNION
+        SELECT fee_mint AS mint FROM swap_stats WHERE fee_mint IS NOT NULL
+      )
+      SELECT
+        token_mints.mint,
+        (SELECT COUNT(*) FROM swap_stats WHERE input_mint = token_mints.mint) AS inputSwaps,
+        (SELECT COUNT(*) FROM swap_stats WHERE output_mint = token_mints.mint) AS outputSwaps,
+        (SELECT COUNT(*) FROM swap_stats
+          WHERE fee_mint = token_mints.mint AND referral_applied = 1) AS feeMintSelections,
+        (SELECT MAX(timestamp) FROM swap_stats
+          WHERE input_mint = token_mints.mint
+             OR output_mint = token_mints.mint
+             OR fee_mint = token_mints.mint) AS lastTradedAt
+      FROM token_mints
+      ORDER BY feeMintSelections DESC, inputSwaps + outputSwaps DESC, lastTradedAt DESC`,
+      [],
+      "getting swap token statistics",
     );
   }
 

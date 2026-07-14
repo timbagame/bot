@@ -59,4 +59,33 @@ describe("TransactionHistory", () => {
     expect(row.status).toBe("SUCCESS");
     expect(row.block_height).toBe(999);
   });
+
+  it("aggregates traded and referral fee mints", () => {
+    const txDb = TransactionHistory.getInstance();
+    txDb.recordSwap({
+      signature: "swap-1",
+      wallet: "wallet",
+      input_mint: "USDC-mint",
+      output_mint: "TOKEN-mint",
+      fee_mint: "USDC-mint",
+      input_ticker: "USDC",
+      output_ticker: "TOKEN",
+      amount_in: "1000000",
+      amount_out: "2000000",
+      referral_applied: true,
+      timestamp: 1234,
+    });
+
+    const stats = txDb.getSwapTokenStats();
+    expect(stats.find((stat) => stat.mint === "USDC-mint")).toMatchObject({
+      inputSwaps: 1,
+      outputSwaps: 0,
+      feeMintSelections: 1,
+    });
+    expect(stats.find((stat) => stat.mint === "TOKEN-mint")).toMatchObject({
+      inputSwaps: 0,
+      outputSwaps: 1,
+      feeMintSelections: 0,
+    });
+  });
 });

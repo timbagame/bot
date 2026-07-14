@@ -7,6 +7,8 @@ import type { WalletManager } from "../wallet";
 import { FeeBudgetManager } from "../fee-budget";
 import type { SwapQuote, SwapRequest } from "./types";
 import { calculateRouteCosts, type RouteLikeCosts } from "./route-cost";
+import { TransactionHistory } from "../transaction-history";
+import { NetworkDetector } from "../network-detector";
 
 export interface SwapBackend {
   getQuote(request: SwapRequest & { integrator?: IntegratorSwapParams | null }): Promise<SwapQuote>;
@@ -190,6 +192,28 @@ export class SwapService {
       return this.backend.executeUnwrapSwap(request, quote, adminTopUpLamports);
     }
 
-    return this.backend.executeJupiterSwap(request, quote);
+    const signature = await this.backend.executeJupiterSwap(request, quote);
+    try {
+      TransactionHistory.getInstance().recordSwap({
+        signature,
+        wallet: userKeypair.publicKey.toBase58(),
+        input_mint: quote.inputMint,
+        output_mint: quote.outputMint,
+        fee_mint: quote.executionFeeMint ?? quote.providerQuote?.feeMint,
+        input_ticker: request.inputTicker,
+        output_ticker: request.outputTicker,
+        amount_in: quote.inputAmountRaw,
+        amount_out: quote.providerQuote?.outAmount ?? quote.outputAmount,
+        referral_applied:
+          quote.executionReferralApplied === true ||
+          quote.providerQuote?.referralApplied === true ||
+          quote.integratorApplied === true,
+        timestamp: Date.now(),
+        network: NetworkDetector.getCurrentNetwork(),
+      });
+    } catch (error) {
+      console.error("Failed to record swap statistics:", error);
+    }
+    return signature;
   }
 }
