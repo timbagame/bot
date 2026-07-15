@@ -751,7 +751,7 @@ describe("GameManager.createGame", () => {
       100,
     );
     expect(res.success).toBe(true);
-    expect(signingCalls).toBe(0);
+    expect(signingCalls).toBe(process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 1 : 0);
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
 
