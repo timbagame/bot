@@ -10,10 +10,42 @@ import { getPricesUSD } from "./prices";
 
 export type TokenDisplayLine = {
   ticker: string;
+  mint?: string;
   amount: string;
   usdValue?: string;
   unit?: string;
 };
+
+const MAX_TOKEN_SYMBOL_GRAPHEMES = 10;
+
+function abbreviateMint(mint?: string): string {
+  const normalizedMint = mint?.trim();
+  if (!normalizedMint) return "TOKEN";
+  if (normalizedMint.length <= 10) return normalizedMint;
+  return `${normalizedMint.slice(0, 4)}…${normalizedMint.slice(-4)}`;
+}
+
+export function sanitizeTokenSymbol(symbol: unknown, mint?: string): string {
+  const normalized = String(symbol ?? "")
+    .normalize("NFKC")
+    .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (!normalized) {
+    return abbreviateMint(mint);
+  }
+
+  const graphemes = Array.from(
+    new Intl.Segmenter("en", { granularity: "grapheme" }).segment(normalized),
+    ({ segment }) => segment,
+  );
+  if (graphemes.length <= MAX_TOKEN_SYMBOL_GRAPHEMES) {
+    return normalized;
+  }
+
+  return `${graphemes.slice(0, MAX_TOKEN_SYMBOL_GRAPHEMES - 1).join("")}…`;
+}
 
 export type WalletTokenBalance = {
   mint: string;
@@ -83,6 +115,7 @@ export async function buildWalletTokenLines({
 
     const line: TokenDisplayLine = {
       ticker: token.ticker,
+      mint: token.mint,
       amount: formattedAmount,
       usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
     };
@@ -133,7 +166,7 @@ export function buildWalletCaption(walletAddress: string, tokenLines: TokenDispl
 
   for (const line of tokenLines) {
     const parts: string[] = [];
-    parts.push(`${escapeHtml(line.ticker)}:`);
+    parts.push(`${escapeHtml(sanitizeTokenSymbol(line.ticker, line.mint))}:`);
 
     const amountLabel = line.unit
       ? `${escapeHtml(line.amount)} ${escapeHtml(line.unit)}`

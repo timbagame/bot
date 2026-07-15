@@ -6,6 +6,7 @@ import {
   buildWalletActionMenuForUser,
   showCustomAmountPrompt,
   persistInputPromptFromContext,
+  sanitizeTokenSymbol,
 } from "../src/utils/wallet-ui";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "../src/utils/constants";
 import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
@@ -113,6 +114,39 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
       process.env.SOLANA_NETWORK = originalNetwork;
     }
   }
+});
+
+test("sanitizeTokenSymbol truncates long token metadata", () => {
+  expect(
+    sanitizeTokenSymbol(
+      "PUMPAPI.IO CREATE BOTS ON PUMP.FUN,METEORA, RAYDIUM BOT IN A FEW SECONDS.",
+    ),
+  ).toBe("PUMPAPI.I…");
+});
+
+test("sanitizeTokenSymbol removes control and invisible formatting characters", () => {
+  expect(sanitizeTokenSymbol("BAD\n\tTOKEN\u202e\u200b  NAME")).toBe("BADTOKEN …");
+});
+
+test("sanitizeTokenSymbol falls back to an abbreviated mint", () => {
+  expect(sanitizeTokenSymbol("\u200b\n", "HGBiGfyR9GF36J4SMPjxsRkFuwYNuNYuzdCjgR4aw4FC")).toBe(
+    "HGBi…w4FC",
+  );
+});
+
+test("buildWalletCaption sanitizes token symbols before escaping HTML", () => {
+  const caption = buildWalletCaption("AbCdEf", [
+    {
+      ticker: "<PUMPAPI.IO CREATE BOTS\nNOW>",
+      mint: "mint-1",
+      amount: "20",
+      usdValue: "0",
+    },
+  ]);
+
+  expect(caption).toContain("&lt;PUMPAPI.…: 20 ($0)");
+  expect(caption).not.toContain("CREATE BOTS");
+  expect(caption).not.toContain("\nNOW");
 });
 
 test("buildWalletTokenLines batches price lookups and reuses cached values", async () => {

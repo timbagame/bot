@@ -1200,13 +1200,18 @@ export class GameManager {
     recovered: Array<{ telegramId: string; publicKey: string }>;
     unmatchedParticipants: string[];
   } {
-    const rawParticipants = gameAccount.participants;
+    const legacy = resolveContractVersion() === "0.1.3";
+    const rawParticipants = legacy ? gameAccount.participantHashes : gameAccount.participants;
     if (!Array.isArray(rawParticipants) || rawParticipants.length === 0) {
       return { recovered: [], unmatchedParticipants: [] };
     }
 
     const onChainParticipants = new Set(
       rawParticipants.flatMap((participant: any) => {
+        if (legacy) {
+          const value = participant?.toString?.();
+          return value ? [value] : [];
+        }
         try {
           return [new PublicKey(participant).toBase58()];
         } catch (_) {
@@ -1221,13 +1226,29 @@ export class GameManager {
 
     const unmatchedParticipants = new Set(onChainParticipants);
 
+    const participantIdentifier = (publicKey: string): string => {
+      if (!legacy) return publicKey;
+      return createHash("sha256")
+        .update(Buffer.from("timba:part:v1"))
+        .update(gamePda.toBuffer())
+        .update(new PublicKey(publicKey).toBuffer())
+        .digest()
+        .subarray(0, 8)
+        .readBigUInt64LE(0)
+        .toString();
+    };
+
     for (const telegramId of knownTelegramIds) {
       const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
       if (!publicKey) {
         continue;
       }
 
-      unmatchedParticipants.delete(publicKey);
+      try {
+        unmatchedParticipants.delete(participantIdentifier(publicKey));
+      } catch (_) {
+        // Ignore invalid stale mappings and continue recovery.
+      }
     }
 
     const initialUnmatched = unmatchedParticipants.size;
@@ -1245,9 +1266,16 @@ export class GameManager {
         continue;
       }
 
-      if (unmatchedParticipants.has(publicKey)) {
+      let identifier: string;
+      try {
+        identifier = participantIdentifier(publicKey);
+      } catch (_) {
+        continue;
+      }
+
+      if (unmatchedParticipants.has(identifier)) {
         recovered.push({ telegramId, publicKey });
-        unmatchedParticipants.delete(publicKey);
+        unmatchedParticipants.delete(identifier);
       }
 
       if (unmatchedParticipants.size === 0) {
@@ -1278,7 +1306,7 @@ export class GameManager {
 
     if (recovered.length > 0) {
       debugLog(
-        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain public keys`,
+        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain data`,
       );
     }
 
@@ -1294,6 +1322,14 @@ export class GameManager {
       recovered,
       unmatchedParticipants: Array.from(unmatchedParticipants),
     };
+  }
+
+  private getOnChainParticipantCount(gameAccount: any): number {
+    const participants =
+      resolveContractVersion() === "0.1.3"
+        ? gameAccount.participantHashes
+        : gameAccount.participants;
+    return Array.isArray(participants) ? participants.length : 0;
   }
 
   private async resolveTokenFormattingInfo(
@@ -6014,9 +6050,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string,
   ): Promise<boolean> {
     const onChainTickets = Number(gameAccount.ticketsCount ?? 0);
-    const onChainParticipants = Array.isArray(gameAccount.participants)
-      ? gameAccount.participants.length
-      : 0;
+    const onChainParticipants = this.getOnChainParticipantCount(gameAccount);
     const dbParticipantsSnapshot = this.gameDb.getGameParticipants(address);
     await this.reconcilePendingParticipants(gamePda);
     const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
@@ -6184,9 +6218,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
-    const onChainParticipantHashes = Array.isArray(gameAccount.participants)
-      ? gameAccount.participants.length
-      : 0;
+    const onChainParticipantCount = this.getOnChainParticipantCount(gameAccount);
 
     const { unmatchedParticipants } = this.recoverParticipantsFromChain(
       gamePda,
@@ -6240,7 +6272,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     const totalParticipants = Math.max(
       participantTelegramIds.size,
-      onChainParticipantHashes,
+      onChainParticipantCount,
       onChainTickets,
       creatorPubkey ? 1 : 0,
     );
@@ -6257,7 +6289,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       canCompleteCleanup,
       total: totalParticipants,
       onChainTickets,
-      onChainParticipants: onChainParticipantHashes,
+      onChainParticipants: onChainParticipantCount,
       dbParticipantCount: dbParticipants.length,
       unmatchedParticipants,
     };
