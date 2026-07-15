@@ -71,6 +71,7 @@ export type GameCallbacksModuleDeps = {
   gameDb: GameDatabase;
   wrapCallbackHandler: WrapCallbackHandler;
   withCreatorContext: GameSetupModule["withCreatorContext"];
+  withCreatorSessionContext: GameSetupModule["withCreatorSessionContext"];
   pendingGameCreations: Set<string>;
   getOracleMaxPlayers: () => number;
   getDefaultTokenMetadata: () => Promise<{ decimals: number }>;
@@ -1775,7 +1776,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
     deps.bot.callbackQuery(
       /^cancel_game_setup_(\d+)$/,
-      deps.withCreatorContext(
+      deps.withCreatorSessionContext(
         {
           name: "cancel_game_setup",
           resolveCreatorId: (ctx) => ctx.match?.[1],
@@ -1815,6 +1816,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               return;
             }
 
+            // Leaving typed input is a local state transition. Complete it
+            // before any wallet, contract, price, or Telegram request.
+            clearSession();
+
             let userBalance =
               session?.userBalance && session.userBalance > 0 ? session.userBalance : 0;
             if (userBalance <= 0) {
@@ -1846,8 +1851,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               userBalance,
               tokenPriceUSD ?? undefined,
             );
-
-            clearSession();
 
             let warningMessage = getFeeWarningMessage(
               gameType,

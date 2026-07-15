@@ -13,6 +13,8 @@ const makeDeps = () => {
       handler(ctx, next);
   const withCreatorContext = ((_: any, handler: any) => async (ctx: any) =>
     handler(ctx, {} as any)) as GameCallbacksModuleDeps["withCreatorContext"];
+  const withCreatorSessionContext =
+    withCreatorContext as GameCallbacksModuleDeps["withCreatorSessionContext"];
 
   const gameDb = {
     getGame: () => ({ token_ticker: "TOK", amount: 100 }),
@@ -57,6 +59,7 @@ const makeDeps = () => {
     gameDb,
     wrapCallbackHandler,
     withCreatorContext,
+    withCreatorSessionContext,
     pendingGameCreations: new Set(),
     getOracleMaxPlayers: () => 100,
     getDefaultTokenMetadata: async () => ({ decimals: 6 }),

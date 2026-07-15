@@ -11,6 +11,7 @@ process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
   process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+process.env.NODE_ENV = "test";
 
 let bot: any;
 let wallet: any;
@@ -46,11 +47,23 @@ beforeAll(async () => {
     supports_inline_queries: false,
   };
 
-  // Stub API methods used in these handlers to avoid Telegram errors/timeouts
-  try {
-    (bot as any).api.answerCallbackQuery = async () => ({ ok: true, result: true });
-    (bot as any).api.editMessageText = async () => ({ ok: true, result: true });
-  } catch {}
+  // Context API methods run through Grammy's transformer pipeline. Intercept
+  // that boundary so no callback can reach Telegram or its retry middleware.
+  (bot as any).api.config.use(async (_prev: unknown, method: string) => {
+    if (method === "editMessageText") {
+      return {
+        ok: true,
+        result: {
+          message_id: 1,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: 1, type: "private" },
+          text: "test",
+        },
+      };
+    }
+
+    return { ok: true, result: true };
+  });
 });
 
 beforeEach(() => {

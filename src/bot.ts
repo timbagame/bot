@@ -2739,6 +2739,7 @@ const {
   startInteractiveGameSetup,
   resolveCommandTokenOverride: resolveGameCommandTokenOverride,
   withCreatorContext,
+  withCreatorSessionContext,
   __test_startInteractiveGameSetup: startInteractiveGameSetupTest,
 } = gameSetupModule;
 
@@ -2784,6 +2785,7 @@ const gameCallbacksModule = createGameCallbacksModule({
   gameDb,
   wrapCallbackHandler,
   withCreatorContext,
+  withCreatorSessionContext,
   pendingGameCreations,
   getOracleMaxPlayers,
   getDefaultTokenMetadata: () => getDefaultTokenMetadata(),

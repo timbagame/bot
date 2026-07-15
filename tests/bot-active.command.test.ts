@@ -190,6 +190,7 @@ describe("active game keyboard helpers", () => {
       gameDb: {} as any,
       wrapCallbackHandler: (handler: any) => handler,
       withCreatorContext: (handler: any) => handler,
+      withCreatorSessionContext: (handler: any) => handler,
       pendingGameCreations: new Set<string>(),
       getOracleMaxPlayers: () => 0,
       getDefaultTokenMetadata: async () => ({ decimals: 6 }),

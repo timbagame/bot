@@ -81,6 +81,11 @@ type CreatorCallbackHandler = (
   creatorCtx: CreatorCallbackContext,
 ) => Promise<void> | void;
 
+type CreatorSessionCallbackHandler = (
+  ctx: Context,
+  creatorCtx: CreatorSessionCallbackContext,
+) => Promise<void> | void;
+
 type CreatorResolver = (ctx: Context) => string | undefined;
 
 type GameSetupModuleDeps = {
@@ -114,6 +119,13 @@ export type CreatorCallbackContext = {
   clearSession: () => void;
 };
 
+export type CreatorSessionCallbackContext = {
+  creatorId: string;
+  userId: number;
+  session?: GameSetupSession;
+  clearSession: () => void;
+};
+
 export type GameSetupModule = {
   startInteractiveGameSetup: (
     ctx: Context & { message?: any },
@@ -132,6 +144,10 @@ export type GameSetupModule = {
   withCreatorContext: (
     options: CreatorCallbackOptions,
     handler: CreatorCallbackHandler,
+  ) => (ctx: Context) => Promise<void>;
+  withCreatorSessionContext: (
+    options: CreatorCallbackOptions,
+    handler: CreatorSessionCallbackHandler,
   ) => (ctx: Context) => Promise<void>;
   __test_startInteractiveGameSetup: (
     ctx: Context & { message?: any },
@@ -362,7 +378,10 @@ export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModul
     return true;
   };
 
-  const withCreatorContext = (options: CreatorCallbackOptions, handler: CreatorCallbackHandler) => {
+  const withCreatorSessionContext = (
+    options: CreatorCallbackOptions,
+    handler: CreatorSessionCallbackHandler,
+  ) => {
     return async (ctx: Context) => {
       const creatorId = options.resolveCreatorId(ctx);
       const currentUserId = deps.getTelegramIdString(ctx);
@@ -392,31 +411,10 @@ export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModul
       const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
 
       let session = deps.getGameSetupSession(sessionKey);
-      const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-      const creatorContext: CreatorCallbackContext = {
+      const creatorContext: CreatorSessionCallbackContext = {
         creatorId,
         userId,
         session,
-        tokenContext,
-        updateSession: (updates, keyOverride?: string) => {
-          const keyToUse = keyOverride ?? sessionKey;
-          const contractMinimum =
-            updates.contractMinimum ?? session?.contractMinimum ?? tokenContext.contractMinimum;
-
-          const next = deps.upsertGameSetupSession(keyToUse, {
-            ...updates,
-            creatorId,
-            tokenMint: tokenContext.tokenMint,
-            tokenTicker: tokenContext.tokenTicker,
-            tokenDecimals: tokenContext.tokenDecimals,
-            contractMinimum,
-          });
-
-          session = next;
-          creatorContext.session = next;
-          return next;
-        },
         clearSession: () => {
           deps.clearGameSetupSession(sessionKey);
           session = undefined;
@@ -428,11 +426,45 @@ export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModul
     };
   };
 
+  const withCreatorContext = (options: CreatorCallbackOptions, handler: CreatorCallbackHandler) =>
+    withCreatorSessionContext(options, async (ctx, sessionContext) => {
+      const tokenContext = await buildTokenContext(sessionContext.session, ctx.chat?.id);
+      const creatorContext: CreatorCallbackContext = {
+        ...sessionContext,
+        tokenContext,
+        updateSession: (updates, keyOverride?: string) => {
+          const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
+          const keyToUse = keyOverride ?? sessionKey;
+          const contractMinimum =
+            updates.contractMinimum ??
+            creatorContext.session?.contractMinimum ??
+            tokenContext.contractMinimum;
+          const next = deps.upsertGameSetupSession(keyToUse, {
+            ...updates,
+            creatorId: creatorContext.creatorId,
+            tokenMint: tokenContext.tokenMint,
+            tokenTicker: tokenContext.tokenTicker,
+            tokenDecimals: tokenContext.tokenDecimals,
+            contractMinimum,
+          });
+          creatorContext.session = next;
+          return next;
+        },
+        clearSession: () => {
+          sessionContext.clearSession();
+          creatorContext.session = undefined;
+        },
+      };
+
+      await handler(ctx, creatorContext);
+    });
+
   return {
     startInteractiveGameSetup,
     resolveCommandTokenOverride,
     buildTokenContext,
     withCreatorContext,
+    withCreatorSessionContext,
     __test_startInteractiveGameSetup: startInteractiveGameSetup,
   };
 };
