@@ -101,6 +101,9 @@ type WrapConfirmationResult = {
   displayAmount: string;
 };
 
+const findWalletToken = (tokenBalances: WalletMenuBalances["tokenBalances"], identifier: string) =>
+  tokenBalances.find((token) => token.mint === identifier || token.ticker === identifier);
+
 export type WalletTransactionsModuleOptions = {
   bot: Bot;
   wallet: WalletManager;
@@ -443,7 +446,8 @@ export const createWalletTransactionsModule = (
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
     const isSol = token === "SOL";
-    const selectedToken = !isSol ? tokenBalances.find((t) => t.ticker === token) : undefined;
+    const selectedToken = !isSol ? findWalletToken(tokenBalances, token) : undefined;
+    const displayToken = selectedToken?.ticker ?? token;
 
     if (!isSol && !selectedToken) {
       throw new Error(`Token ${token} not found in wallet`);
@@ -451,7 +455,7 @@ export const createWalletTransactionsModule = (
 
     const exampleAddress = tryGetUserWalletAddress(wallet, telegramId);
     const amountResolution = resolveSendAmountSelection({
-      token,
+      token: displayToken,
       rawAmount: amount,
       decimals: isSol ? 9 : selectedToken!.decimals,
       solBalance,
@@ -503,6 +507,20 @@ export const createWalletTransactionsModule = (
       throw new Error("Invalid wallet address format");
     }
 
+    let transferWarnings: string[] = [];
+    if (token !== "SOL") {
+      try {
+        const telegramId = requireTelegramId(ctx, "send confirmation");
+        const { tokenBalances } = await getCachedWalletData(telegramId);
+        const selectedToken = findWalletToken(tokenBalances, token);
+        if (selectedToken) {
+          transferWarnings = await wallet.getTokenTransferWarnings(selectedToken.mint);
+        }
+      } catch (warningError) {
+        console.warn(`Unable to inspect transfer extensions for ${token}`, warningError);
+      }
+    }
+
     const txId = generateTransactionId();
     storePendingTransaction(txId, {
       type: "send",
@@ -518,6 +536,9 @@ export const createWalletTransactionsModule = (
       "",
       `<b>Amount:</b> ${escapeHtml(amountDisplay)}`,
       `<b>To:</b> <code>${escapeHtml(address)}</code>`,
+      ...(transferWarnings.length > 0
+        ? ["", ...transferWarnings.map((warning) => `⚠️ ${escapeHtml(warning)}`)]
+        : []),
       "",
       `⚠️ <b>Please confirm this transaction</b>`,
       `This action cannot be undone.`,
@@ -624,6 +645,7 @@ export const createWalletTransactionsModule = (
             actionPrefix: "send_select_",
             includeSol: true,
             limit: 5,
+            tokenCallback: (token) => `send_select_${token.mint}`,
           },
         },
         successAck: "💸 Select Token to Withdraw",
@@ -959,13 +981,14 @@ export const createWalletTransactionsModule = (
       try {
         const { menu } = await buildWalletActionMenuForUser(defaultWalletActionMenuDeps, {
           ctx,
-          title: `📤 <b>Send ${escapeHtml(token)}</b>`,
+          title: `📤 <b>Send</b>`,
           bodyLines: ({ solBalance, tokenBalances }) => {
             let balanceDisplay = "0";
+            const selectedToken =
+              token === "SOL" ? undefined : findWalletToken(tokenBalances, token);
             if (token === "SOL") {
               balanceDisplay = wallet.formatSolBalance(solBalance);
             } else {
-              const selectedToken = tokenBalances.find((t) => t.ticker === token);
               if (selectedToken) {
                 balanceDisplay = wallet.formatTokenBalance(
                   selectedToken.balance,
@@ -974,9 +997,10 @@ export const createWalletTransactionsModule = (
               }
             }
 
+            const displayToken = selectedToken?.ticker ?? token;
             return [
               `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-              `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
+              `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(displayToken)}`,
               "",
               `<b>Quick Send Amounts:</b>`,
             ];
@@ -992,7 +1016,7 @@ export const createWalletTransactionsModule = (
         });
 
         await respondWithMenu(ctx, menu);
-        await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
+        await safeAnswerCallbackQuery(ctx, "Token selected");
       } catch (error) {
         console.error("Error in send token selection:", error);
         await safeAnswerCallbackQuery(ctx, "❌ Error processing selection");
@@ -1011,6 +1035,14 @@ export const createWalletTransactionsModule = (
         const userId = getTelegramIdString(ctx);
         if (!userId) return;
 
+        const telegramId = await resolveTelegramIdOrRespond(ctx, "send amount selection");
+        if (telegramId == null) return;
+        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+        const isSol = token === "SOL";
+        const selectedToken = !isSol ? findWalletToken(tokenBalances, token) : undefined;
+        if (!isSol && !selectedToken) throw new Error(`Token ${token} not found in wallet`);
+        const displayToken = selectedToken?.ticker ?? token;
+
         if (amountChoice === "CUSTOM") {
           const examples =
             token === "SOL"
@@ -1020,7 +1052,7 @@ export const createWalletTransactionsModule = (
           await showCustomAmountPrompt({
             ctx,
             userId,
-            title: `✏️ <b>Custom Amount - ${token}</b>`,
+            title: `✏️ <b>Custom Amount - ${escapeHtml(displayToken)}</b>`,
             instructions: [`Reply to this message with the amount you want to send.`],
             examples,
             cancelCallback: `send_select_${token}`,
@@ -1034,22 +1066,9 @@ export const createWalletTransactionsModule = (
           return;
         }
 
-        const telegramId = await resolveTelegramIdOrRespond(ctx, "send amount selection");
-        if (telegramId == null) {
-          return;
-        }
-        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-        const isSol = token === "SOL";
-        const selectedToken = !isSol ? tokenBalances.find((t) => t.ticker === token) : undefined;
-
-        if (!isSol && !selectedToken) {
-          throw new Error(`Token ${token} not found in wallet`);
-        }
-
         const exampleAddress = tryGetUserWalletAddress(wallet, telegramId);
         const amountResolution = resolveSendAmountSelection({
-          token,
+          token: displayToken,
           rawAmount: amountChoice,
           decimals: isSol ? 9 : selectedToken!.decimals,
           solBalance,
@@ -1155,7 +1174,7 @@ export const createWalletTransactionsModule = (
             }
 
             const { tokenBalances } = await getCachedWalletData(telegramId);
-            const tokenBalance = tokenBalances.find((t) => t.ticker === transaction.token);
+            const tokenBalance = findWalletToken(tokenBalances, transaction.token);
 
             if (!tokenBalance) {
               throw new Error(`Token ${transaction.token} not found in wallet`);

@@ -7,6 +7,10 @@ import { getTelegramIdString } from "./context-helpers";
 import { NetworkDetector } from "./network-detector";
 import { createCancelKeyboard } from "./keyboards";
 import { getPricesUSD } from "./prices";
+import { resolveTokenDisplaySymbols, sanitizeTokenSymbol } from "./token-display";
+import { sortTokensByRecognition } from "./verified-token-registry";
+
+export { sanitizeTokenSymbol } from "./token-display";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -15,37 +19,6 @@ export type TokenDisplayLine = {
   usdValue?: string;
   unit?: string;
 };
-
-const MAX_TOKEN_SYMBOL_GRAPHEMES = 10;
-
-function abbreviateMint(mint?: string): string {
-  const normalizedMint = mint?.trim();
-  if (!normalizedMint) return "TOKEN";
-  if (normalizedMint.length <= 10) return normalizedMint;
-  return `${normalizedMint.slice(0, 4)}…${normalizedMint.slice(-4)}`;
-}
-
-export function sanitizeTokenSymbol(symbol: unknown, mint?: string): string {
-  const normalized = String(symbol ?? "")
-    .normalize("NFKC")
-    .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-
-  if (!normalized) {
-    return abbreviateMint(mint);
-  }
-
-  const graphemes = Array.from(
-    new Intl.Segmenter("en", { granularity: "grapheme" }).segment(normalized),
-    ({ segment }) => segment,
-  );
-  if (graphemes.length <= MAX_TOKEN_SYMBOL_GRAPHEMES) {
-    return normalized;
-  }
-
-  return `${graphemes.slice(0, MAX_TOKEN_SYMBOL_GRAPHEMES - 1).join("")}…`;
-}
 
 export type WalletTokenBalance = {
   mint: string;
@@ -69,12 +42,14 @@ export async function buildWalletTokenLines({
   formatTokenBalance,
   fetchPricesUSD,
 }: BuildWalletTokenLinesParams): Promise<TokenDisplayLine[]> {
-  const filteredBalances = tokenBalances.filter((token) => {
-    if (!token) return false;
-    if (token.balance <= 0) return false;
-    if (token.ticker === "SOL") return false;
-    return true;
-  });
+  const filteredBalances = sortTokensByRecognition(
+    tokenBalances.filter((token) => {
+      if (!token) return false;
+      if (token.balance <= 0) return false;
+      if (token.ticker === "SOL") return false;
+      return true;
+    }),
+  );
 
   const priceReferences = new Set<string>([WSOL_MINT]);
   for (const token of filteredBalances) {
@@ -96,7 +71,7 @@ export async function buildWalletTokenLines({
     {
       ticker: "SOL",
       amount: solFormatted,
-      usdValue: formatUsdValue(solDecimalBalance * solPriceUSD),
+      usdValue: solPriceUSD > 0 ? formatUsdValue(solDecimalBalance * solPriceUSD) : undefined,
       unit: "SOL",
     },
   ];
@@ -117,7 +92,7 @@ export async function buildWalletTokenLines({
       ticker: token.ticker,
       mint: token.mint,
       amount: formattedAmount,
-      usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
+      usdValue: tokenPriceUSD > 0 ? formatUsdValue(tokenDecimalBalance * tokenPriceUSD) : undefined,
     };
 
     if (token.ticker === "WSOL") {
@@ -153,7 +128,16 @@ export async function buildWalletTokenLines({
  * Includes a token list where each line follows the format:
  * TICKER: amount [UNIT] ($usdValue)
  */
-export function buildWalletCaption(walletAddress: string, tokenLines: TokenDisplayLine[]): string {
+export type WalletCaptionOptions = {
+  page?: number;
+  pageSize?: number;
+};
+
+export function buildWalletCaption(
+  walletAddress: string,
+  tokenLines: TokenDisplayLine[],
+  options: WalletCaptionOptions = {},
+): string {
   const lines: string[] = [];
 
   const explorerUrl = NetworkDetector.buildSolscanAccountUrl(walletAddress);
@@ -164,9 +148,18 @@ export function buildWalletCaption(walletAddress: string, tokenLines: TokenDispl
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
 
-  for (const line of tokenLines) {
+  const pageSize = Math.max(1, Math.trunc(options.pageSize ?? 8));
+  const pageCount = Math.max(1, Math.ceil(tokenLines.length / pageSize));
+  const page = Math.min(Math.max(0, Math.trunc(options.page ?? 0)), pageCount - 1);
+  const pageLines = tokenLines.slice(page * pageSize, (page + 1) * pageSize);
+  const displaySymbols = resolveTokenDisplaySymbols(tokenLines);
+
+  for (const [pageIndex, line] of pageLines.entries()) {
     const parts: string[] = [];
-    parts.push(`${escapeHtml(sanitizeTokenSymbol(line.ticker, line.mint))}:`);
+    const absoluteIndex = page * pageSize + pageIndex;
+    parts.push(
+      `${escapeHtml(displaySymbols[absoluteIndex] ?? sanitizeTokenSymbol(line.ticker, line.mint))}:`,
+    );
 
     const amountLabel = line.unit
       ? `${escapeHtml(line.amount)} ${escapeHtml(line.unit)}`
@@ -688,8 +681,9 @@ const buildTokenSelectKeyboard = (
 
   const limit = params.limit ?? balances.tokenBalances.length;
   const tokens = balances.tokenBalances.slice(0, limit);
+  const displaySymbols = resolveTokenDisplaySymbols(tokens);
 
-  for (const token of tokens) {
+  for (const [index, token] of tokens.entries()) {
     if (params.filter && !params.filter(token)) {
       continue;
     }
@@ -697,7 +691,7 @@ const buildTokenSelectKeyboard = (
     const formatted = formatters.formatTokenBalance(token.balance, token.decimals);
     const label = params.tokenLabel
       ? params.tokenLabel(token, formatted)
-      : `${token.ticker} (${formatted})`;
+      : `${displaySymbols[index] ?? sanitizeTokenSymbol(token.ticker, token.mint)} (${formatted})`;
     const callback = params.tokenCallback
       ? params.tokenCallback(token)
       : `${params.actionPrefix}${token.ticker}`;

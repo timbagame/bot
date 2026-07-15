@@ -189,7 +189,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     const tokenManager = getTokenManager();
     const overrideKey = telegramId.toString();
     const overrideApprovedTokens = testApprovedTokenOverrides.get(overrideKey);
-    const approvedTokens =
+    const knownTokens =
       overrideApprovedTokens ??
       (tokenManager ? tokenManager.getAllApprovedTokensWithMetadata() : []);
 
@@ -204,7 +204,10 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
         const nativeSolBalance = await wallet.getBalance(telegramId, {
           allowStaleOnError,
         });
-        const tokenBalances = await wallet.getAllApprovedTokenBalances(telegramId, approvedTokens, {
+        const loadTokenBalances =
+          wallet.getAllWalletTokenBalances?.bind(wallet) ??
+          wallet.getAllApprovedTokenBalances.bind(wallet);
+        const tokenBalances = await loadTokenBalances(telegramId, knownTokens, {
           allowStaleOnError,
         });
 
@@ -216,7 +219,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
           nativeSolBalance,
           wsolBalance,
           tokenBalances,
-          approvedTokens,
+          approvedTokens: knownTokens,
         };
         const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
         if (invalidatedAt < fetchStart) {
@@ -250,7 +253,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
               nativeSolBalance: resolvedNative,
               wsolBalance,
               tokenBalances: resolvedTokens,
-              approvedTokens,
+              approvedTokens: knownTokens,
             };
             const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
             if (invalidatedAt < fetchStart) {
@@ -320,6 +323,10 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
 
     bot.callbackQuery("wallet_refresh", async (ctx) => {
       await onWalletRefresh(ctx as any, walletHandlerDeps);
+    });
+
+    bot.callbackQuery(/^wallet_page_\d+$/, async (ctx) => {
+      await onMainWallet(ctx as any, walletHandlerDeps);
     });
 
     bot.callbackQuery("wallet_settings", async (ctx) => {

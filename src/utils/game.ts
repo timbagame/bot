@@ -1052,9 +1052,9 @@ export class GameManager {
         return false;
       }
 
-      if (resolveContractVersion() === "0.1.3") {
-        const participantHashes = (gameAccount as any)?.participantHashes;
-        if (!Array.isArray(participantHashes) || participantHashes.length === 0) {
+      const participantHashes = (gameAccount as any)?.participantHashes;
+      if (Array.isArray(participantHashes)) {
+        if (participantHashes.length === 0) {
           return false;
         }
 
@@ -1200,7 +1200,7 @@ export class GameManager {
     recovered: Array<{ telegramId: string; publicKey: string }>;
     unmatchedParticipants: string[];
   } {
-    const legacy = resolveContractVersion() === "0.1.3";
+    const legacy = Array.isArray(gameAccount.participantHashes);
     const rawParticipants = legacy ? gameAccount.participantHashes : gameAccount.participants;
     if (!Array.isArray(rawParticipants) || rawParticipants.length === 0) {
       return { recovered: [], unmatchedParticipants: [] };
@@ -1325,10 +1325,9 @@ export class GameManager {
   }
 
   private getOnChainParticipantCount(gameAccount: any): number {
-    const participants =
-      resolveContractVersion() === "0.1.3"
-        ? gameAccount.participantHashes
-        : gameAccount.participants;
+    const participants = Array.isArray(gameAccount.participantHashes)
+      ? gameAccount.participantHashes
+      : gameAccount.participants;
     return Array.isArray(participants) ? participants.length : 0;
   }
 

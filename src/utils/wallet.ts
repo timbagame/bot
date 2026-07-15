@@ -27,6 +27,12 @@ import {
   TokenInvalidAccountOwnerError,
   unpackMint,
   unpackAccount,
+  getPermanentDelegate,
+  getTransferHook,
+  getTransferFeeConfig,
+  getNonTransferable,
+  getDefaultAccountState,
+  AccountState,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -57,6 +63,7 @@ import {
   type ActiveEndpointChange,
 } from "./rpc-endpoints";
 import { createRebateAwareFetch } from "./helius-rebate-fetch";
+import { sanitizeTokenSymbol } from "./token-display";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (
@@ -150,6 +157,21 @@ type WalletDeps = {
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
+const TOKEN_METADATA_LOOKUP_TIMEOUT_MS = 5_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Token metadata lookup timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export type WalletFetchOptions = {
   forceFresh?: boolean;
@@ -832,13 +854,15 @@ export class WalletManager {
 
       const results: ApprovedTokenBalance[] = [];
       for (const account of parsedAccounts) {
-        const entry = await this.processParsedTokenAccount({
-          account,
-          approvedTokensMap,
-          metadataLoader,
-        });
-        if (entry) {
-          results.push(entry);
+        try {
+          const entry = await this.processParsedTokenAccount({
+            account,
+            approvedTokensMap,
+            metadataLoader,
+          });
+          if (entry) results.push(entry);
+        } catch (accountError) {
+          console.warn(`Skipping unreadable token account for mint ${account.mint}`, accountError);
         }
       }
 
@@ -873,6 +897,14 @@ export class WalletManager {
       console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
       return [];
     }
+  }
+
+  public async getAllWalletTokenBalances(
+    telegramId: bigint,
+    knownTokens: ApprovedTokenDefinition[],
+    options: WalletFetchOptions = {},
+  ): Promise<ApprovedTokenBalance[]> {
+    return this.getAllApprovedTokenBalances(telegramId, knownTokens, options);
   }
 
   private async buildAtaLookupForApprovedTokens(
@@ -1075,6 +1107,22 @@ export class WalletManager {
         const parsedData = accountInfo.account.data.parsed;
         const tokenAmount = parsedData.info.tokenAmount;
         const mint = parsedData.info.mint;
+        if (
+          typeof mint !== "string" ||
+          typeof tokenAmount?.amount !== "string" ||
+          !Number.isInteger(tokenAmount?.decimals) ||
+          tokenAmount.decimals < 0 ||
+          tokenAmount.decimals > 255
+        ) {
+          console.warn(`Skipping malformed token account for user ${telegramId}`);
+          continue;
+        }
+        try {
+          new PublicKey(mint);
+        } catch {
+          console.warn(`Skipping token account with invalid mint for user ${telegramId}`);
+          continue;
+        }
         const lamports = this.parseLamports(tokenAmount.amount, mint);
         if (lamports === null) {
           continue;
@@ -1102,7 +1150,10 @@ export class WalletManager {
       }
 
       if (!metadataPromises.has(mint)) {
-        const promise = this.getFullTokenMetadata(mint)
+        const promise = withTimeout(
+          this.getFullTokenMetadata(mint),
+          TOKEN_METADATA_LOOKUP_TIMEOUT_MS,
+        )
           .then((metadata) => {
             metadataCache.set(mint, metadata ?? null);
             return metadata ?? null;
@@ -1122,8 +1173,10 @@ export class WalletManager {
     };
 
     const prefetch = async (mints: Iterable<string>) => {
-      const uniqueMints = Array.from(new Set(mints));
-      await Promise.all(uniqueMints.map((mint) => load(mint)));
+      const uniqueMints = Array.from(new Set(mints)).slice(0, 64);
+      for (let index = 0; index < uniqueMints.length; index += 8) {
+        await Promise.all(uniqueMints.slice(index, index + 8).map((mint) => load(mint)));
+      }
     };
 
     return { load, prefetch };
@@ -1239,7 +1292,7 @@ export class WalletManager {
     if (mint === WSOL_MINT) {
       finalTicker = "WSOL";
     } else if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
-      finalTicker = metadata.symbol;
+      finalTicker = sanitizeTokenSymbol(metadata.symbol, mint);
     }
 
     return {
@@ -1327,6 +1380,38 @@ export class WalletManager {
       getDecimals,
       defaultDecimals: 0,
     });
+  }
+
+  public async getTokenTransferWarnings(tokenMint: string): Promise<string[]> {
+    const mint = new PublicKey(tokenMint);
+    const detection = await this.resolveTokenProgram(mint);
+    if (!detection?.isToken2022) return [];
+
+    const accountInfo = await this.connection.getAccountInfo(mint, "confirmed");
+    if (!accountInfo || !accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+      throw new Error("Invalid Token-2022 mint account");
+    }
+
+    const mintState = unpackMint(mint, accountInfo, TOKEN_2022_PROGRAM_ID);
+    const warnings: string[] = [];
+    if (getPermanentDelegate(mintState)) {
+      warnings.push("This token has a permanent delegate that can transfer or burn balances.");
+    }
+    if (getTransferHook(mintState)) {
+      warnings.push("This token runs an external program during transfers.");
+    }
+    const transferFee = getTransferFeeConfig(mintState);
+    if (transferFee?.newerTransferFee.transferFeeBasisPoints) {
+      const percent = transferFee.newerTransferFee.transferFeeBasisPoints / 100;
+      warnings.push(`This token charges a transfer fee of up to ${percent}%.`);
+    }
+    if (getNonTransferable(mintState)) {
+      warnings.push("This token is non-transferable.");
+    }
+    if (getDefaultAccountState(mintState)?.state === AccountState.Frozen) {
+      warnings.push("New accounts for this token are frozen by default.");
+    }
+    return warnings;
   }
 
   public async getTokenMetadata(

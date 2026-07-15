@@ -24,14 +24,28 @@ import { formatCompactTokenDisplay, formatTokenDisplay, formatUsdValue } from ".
 import { formatDuration } from "./format-time";
 import type { GameType } from "../types";
 
-export const createWalletKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
+export type WalletPagination = { page: number; pageCount: number };
+
+export const createWalletKeyboard = (pagination?: WalletPagination): InlineKeyboard => {
+  const keyboard = new InlineKeyboard()
     .text("🔄 Swap", "cmd_swap")
     .text("💸 Withdraw", "cmd_withdraw")
     .row()
     .text("🔁 Refresh", "wallet_refresh")
     .text("⚙️ Settings", "wallet_settings")
     .row();
+
+  if (pagination && pagination.pageCount > 1) {
+    if (pagination.page > 0) {
+      keyboard.text("←", `wallet_page_${pagination.page - 1}`);
+    }
+    if (pagination.page + 1 < pagination.pageCount) {
+      keyboard.text("→", `wallet_page_${pagination.page + 1}`);
+    }
+    keyboard.row();
+  }
+
+  return keyboard;
 };
 
 const appendBackToWalletButton = (keyboard: InlineKeyboard): InlineKeyboard => {

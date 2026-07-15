@@ -98,7 +98,7 @@ describe("wallet handler showWalletUI", () => {
     expect(calls[0][0]).toBe("edit");
     expect(capturedLines).toEqual([
       { ticker: "SOL", amount: "0.000000", usdValue: "0", unit: "SOL" },
-      { ticker: "USDC", amount: "1", usdValue: "1" },
+      { ticker: "USDC", mint: "EPjF...USDC", amount: "1", usdValue: "1" },
     ]);
   });
 
@@ -139,7 +139,7 @@ describe("wallet handler showWalletUI", () => {
     expect(calls[0][0]).toBe("video");
     expect(capturedLines).toEqual([
       { ticker: "SOL", amount: "0.000000", usdValue: "0", unit: "SOL" },
-      { ticker: "USDC", amount: "1", usdValue: "1" },
+      { ticker: "USDC", mint: "EPjF...USDC", amount: "1", usdValue: "1" },
     ]);
   });
 
@@ -326,7 +326,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
 
   expect(lines).toEqual([
     { ticker: "SOL", amount: "2.000000", usdValue: "40", unit: "SOL" },
-    { ticker: "AAA", amount: "1.500", usdValue: "7.5" },
+    { ticker: "AAA", mint: "mint-aaa", amount: "1.500", usdValue: "7.5" },
   ]);
 });
 

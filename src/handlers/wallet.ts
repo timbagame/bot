@@ -1,6 +1,11 @@
 import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
-import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
+import {
+  buildWalletTokenLines,
+  type TokenDisplayLine,
+  type WalletCaptionOptions,
+} from "../utils/wallet-ui";
+import type { WalletPagination } from "../utils/keyboards";
 import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -22,8 +27,12 @@ export type ShowWalletUIDeps = {
     tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
   }>;
   fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
-  buildWalletCaption: (walletAddress: string, tokenLines: TokenDisplayLine[]) => string;
-  createWalletKeyboard: () => InlineKeyboard;
+  buildWalletCaption: (
+    walletAddress: string,
+    tokenLines: TokenDisplayLine[],
+    options?: WalletCaptionOptions,
+  ) => string;
+  createWalletKeyboard: (pagination?: WalletPagination) => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
 };
 
@@ -53,7 +62,10 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
-  const getWalletKeyboard = () => createWalletKeyboard();
+  const requestedPageMatch = String(ctx?.callbackQuery?.data ?? "").match(/^wallet_page_(\d+)$/);
+  const requestedPage = requestedPageMatch ? Number(requestedPageMatch[1]) : 0;
+  let pagination: WalletPagination | undefined;
+  const getWalletKeyboard = () => createWalletKeyboard(pagination);
   const callbackMessage = ctx?.callbackQuery?.message;
   const botId = ctx?.me?.id;
   const messageAuthorId = callbackMessage?.from?.id;
@@ -157,7 +169,11 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       fetchPricesUSD,
     });
 
-    const caption = buildWalletCaption(walletAddress, tokenLines);
+    const pageSize = 8;
+    const pageCount = Math.max(1, Math.ceil(tokenLines.length / pageSize));
+    const page = Math.min(Math.max(0, requestedPage), pageCount - 1);
+    pagination = { page, pageCount };
+    const caption = buildWalletCaption(walletAddress, tokenLines, { page, pageSize });
 
     await sendWalletContent(caption);
     if ((ctx as any).__walletDmForbidden) {

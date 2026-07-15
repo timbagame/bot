@@ -13,6 +13,7 @@ import { parseDecimalAmount } from "./amount";
 import { escapeHtml } from "./format-amount";
 import { createSingleton } from "./singleton";
 import { getUsdPrice, type CachedPriceLookup } from "./price-service";
+import { sanitizeTokenSymbol } from "./token-display";
 
 type TokenMetadataResolverResult =
   { symbol?: string | null; decimals?: number | null } | null | undefined;
@@ -935,16 +936,19 @@ export class TokenManager {
       resolvedTicker = "WSOL";
     }
 
-    console.log(`${logPrefix} Auto-registering token ${resolvedTicker} (${mint})`);
+    const logTicker = sanitizeTokenSymbol(resolvedTicker, mint);
+    console.log(`${logPrefix} Auto-registering token ${logTicker} (${mint})`);
     const added = await this.addToken(mint, resolvedTicker, metadata.decimals);
     if (!added) {
-      console.log(`${logPrefix} Failed to auto-register token ${resolvedTicker} (${mint})`);
+      console.log(`${logPrefix} Failed to auto-register token ${logTicker} (${mint})`);
       return { status: "failed", resolvedTicker };
     }
 
     const registered = this.getKnownTokenByMint(mint);
     if (registered) {
-      console.log(`${logPrefix} Registered token ${registered.token_ticker} (${mint})`);
+      console.log(
+        `${logPrefix} Registered token ${sanitizeTokenSymbol(registered.token_ticker, mint)} (${mint})`,
+      );
     }
 
     return {

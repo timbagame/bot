@@ -149,6 +149,45 @@ test("buildWalletCaption sanitizes token symbols before escaping HTML", () => {
   expect(caption).not.toContain("\nNOW");
 });
 
+test("buildWalletCaption paginates token lines", () => {
+  const tokenLines = Array.from({ length: 10 }, (_, index) => ({
+    ticker: `T${index}`,
+    mint: `mint-${index}`,
+    amount: String(index),
+  }));
+
+  const firstPage = buildWalletCaption("AbCdEf", tokenLines, { page: 0, pageSize: 4 });
+  const lastPage = buildWalletCaption("AbCdEf", tokenLines, { page: 2, pageSize: 4 });
+
+  expect(firstPage).toContain("T0: 0");
+  expect(firstPage).toContain("T3: 3");
+  expect(firstPage).not.toContain("T4: 4");
+  expect(lastPage).toContain("T8: 8");
+  expect(lastPage).toContain("T9: 9");
+});
+
+test("buildWalletCaption disambiguates duplicate symbols by mint", () => {
+  const caption = buildWalletCaption("AbCdEf", [
+    { ticker: "SAME", mint: "111111111111", amount: "1" },
+    { ticker: "SAME", mint: "222222222222", amount: "2" },
+  ]);
+
+  expect(caption).toContain("SAME · 1111…1111: 1");
+  expect(caption).toContain("SAME · 2222…2222: 2");
+});
+
+test("buildWalletTokenLines omits unavailable USD prices", async () => {
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: LAMPORTS_PER_SOL,
+    tokenBalances: [{ mint: "mint", ticker: "TOK", balance: 1, decimals: 0 }],
+    formatSolBalance: () => "1",
+    fetchPricesUSD: async () => ({}),
+  });
+
+  expect(lines[0]?.usdValue).toBeUndefined();
+  expect(lines[1]?.usdValue).toBeUndefined();
+});
+
 test("buildWalletTokenLines batches price lookups and reuses cached values", async () => {
   const calls: string[] = [];
   const lines = await buildWalletTokenLines({
@@ -187,7 +226,7 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     },
   });
 
-  expect(calls).toEqual([WSOL_MINT, "mint-1", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]);
+  expect(calls).toEqual([WSOL_MINT, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "mint-1"]);
   expect(lines).toHaveLength(4);
   expect(lines[0]).toEqual({
     ticker: "SOL",
@@ -195,9 +234,9 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     usdValue: "50",
     unit: "SOL",
   });
-  const tokenLine = lines[1]!;
-  const tokenLineB = lines[2]!;
-  const stablecoinLine = lines[3]!;
+  const tokenLine = lines.find((line) => line.ticker === "TOKEN")!;
+  const tokenLineB = lines.find((line) => line.ticker === "TOKEN-B")!;
+  const stablecoinLine = lines.find((line) => line.ticker === "USDC")!;
   expect(tokenLine.usdValue).toBe("1");
   expect(tokenLineB.usdValue).toBe("1.5");
   expect(stablecoinLine.usdValue).toBe("10");
