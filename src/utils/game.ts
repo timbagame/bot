@@ -14,6 +14,7 @@ import {
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@anchor-lang/core";
+import { createHash } from "node:crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -1051,10 +1052,26 @@ export class GameManager {
         return false;
       }
 
-      const participants = (gameAccount as any)?.participants;
-      if (!Array.isArray(participants) || participants.length === 0) {
-        return false;
+      if (resolveContractVersion() === "0.1.3") {
+        const participantHashes = (gameAccount as any)?.participantHashes;
+        if (!Array.isArray(participantHashes) || participantHashes.length === 0) {
+          return false;
+        }
+
+        const expectedHash = createHash("sha256")
+          .update(Buffer.from("timba:part:v1"))
+          .update(gamePda.toBuffer())
+          .update(playerPubkey.toBuffer())
+          .digest()
+          .subarray(0, 8)
+          .readBigUInt64LE(0)
+          .toString();
+
+        return participantHashes.some((value: any) => value?.toString?.() === expectedHash);
       }
+
+      const participants = (gameAccount as any)?.participants;
+      if (!Array.isArray(participants) || participants.length === 0) return false;
 
       return participants.some((value: any) => {
         try {
