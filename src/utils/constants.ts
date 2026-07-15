@@ -97,7 +97,7 @@ export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration("FEE_SWEEP_SOL_
 // ================================
 
 export const BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
-export const TOKEN_MANAGER_APPROVED_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+export const TOKEN_MANAGER_KNOWN_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const TOKEN_PRICE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const FEE_SWEEP_SOL_PRICE_MAX_AGE_MS = parsePositiveDuration(
   "FEE_SWEEP_SOL_PRICE_MAX_AGE_MS",

@@ -46,19 +46,19 @@ test("falls back to stale wallet cache when fresh fetch fails", async () => {
     tokenBalances: [
       { mint: "mint-a", ticker: "AAA", balance: 1_000_000, decimals: 6, rawBalance: "1000000" },
     ],
-    approvedTokens: [],
+    knownTokens: [],
   };
 
   __test_setWalletCache(telegramId, staleSnapshot, 1);
   await new Promise((resolve) => setTimeout(resolve, 5));
 
   const originalGetBalance = wallet.getBalance.bind(wallet);
-  const originalGetTokenBalances = wallet.getAllApprovedTokenBalances.bind(wallet);
+  const originalGetTokenBalances = wallet.getAllWalletTokenBalances.bind(wallet);
 
   wallet.getBalance = async () => {
     throw new Error("RPC down");
   };
-  wallet.getAllApprovedTokenBalances = async () => {
+  wallet.getAllWalletTokenBalances = async () => {
     throw new Error("Should not fetch tokens when using stale cache");
   };
 
@@ -70,7 +70,7 @@ test("falls back to stale wallet cache when fresh fetch fails", async () => {
   });
 
   wallet.getBalance = originalGetBalance;
-  wallet.getAllApprovedTokenBalances = originalGetTokenBalances;
+  wallet.getAllWalletTokenBalances = originalGetTokenBalances;
   __test_clearWalletCache(telegramId);
 });
 

@@ -195,7 +195,7 @@ describe("WalletManager dependency injection", () => {
     expect(meta.name).toBe("Jupiter Token");
   });
 
-  test("getAllApprovedTokenBalances returns filtered results sorted by ticker", async () => {
+  test("getAllWalletTokenBalances returns filtered results sorted by ticker", async () => {
     const conn = makeMockConnection();
     const acc = (mint: string, amount: string, decimals = 6) => ({
       account: {
@@ -215,7 +215,7 @@ describe("WalletManager dependency injection", () => {
     ]);
     (conn as any).setTokenAccounts2022([]);
 
-    // Use a fetch that always fails to ensure we keep approved tickers (no override)
+    // Use a fetch that always fails to ensure we keep known tickers (no override)
     const failingFetch = async () => makeResponse(false, 404, {});
     const wm = WalletManager.createForTest("test mnemonic", {
       connection: conn,
@@ -225,12 +225,12 @@ describe("WalletManager dependency injection", () => {
 
     (conn as any).setOwner(wm.getPublicKey(1n));
 
-    const approved = [
+    const known = [
       { token_mint: MINT_A, token_ticker: "AAA", decimals: 6 },
       { token_mint: MINT_B, token_ticker: "BBB", decimals: 6 },
     ];
 
-    const list = await wm.getAllApprovedTokenBalances(1n, approved);
+    const list = await wm.getAllWalletTokenBalances(1n, known);
     // Sorted by ticker asc: AAA then BBB
     expect(list.map((i) => i.ticker)).toEqual(["AAA", "BBB"]);
     expect(list.map((i) => i.mint)).toEqual([MINT_A, MINT_B]);

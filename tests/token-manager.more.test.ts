@@ -32,7 +32,7 @@ test("addToken registers token and appears in approved tokens list", async () =>
   const ok = await tm.addToken("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC");
   expect(ok).toBe(true);
 
-  const list = tm.getAllApprovedTokensWithMetadata();
+  const list = tm.getAllKnownTokensWithMetadata();
   expect(list.length).toBe(1);
   expect(list[0]!.token_ticker).toBe("USDC");
 });

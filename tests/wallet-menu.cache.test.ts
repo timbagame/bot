@@ -3,7 +3,7 @@ import { createWalletMenuModule } from "../src/handlers/wallet-menu";
 
 const stubBot = { callbackQuery: () => undefined };
 const stubLimiter = { consume: () => ({ allowed: true, resetInMs: 0 }) };
-const stubTokenManager = { getAllApprovedTokensWithMetadata: () => [] };
+const stubTokenManager = { getAllKnownTokensWithMetadata: () => [] };
 
 type WalletState = {
   balanceCalls: number;
@@ -48,10 +48,10 @@ const createStubWallet = (
       return state.balanceValue;
     },
     peekCachedNativeBalance: () => state.staleNative,
-    getAllApprovedTokenBalances: async () => [],
-    peekCachedApprovedTokenBalances: () => state.staleTokens,
+    getAllWalletTokenBalances: async () => [],
+    peekCachedWalletTokenBalances: () => state.staleTokens,
     setCachedNativeBalance: () => {},
-    setCachedApprovedTokenBalances: () => {},
+    setCachedWalletTokenBalances: () => {},
     clearCachedWalletData: (telegramId: bigint | number | string) => {
       for (const listener of listeners) {
         listener(telegramId);

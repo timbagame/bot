@@ -74,7 +74,7 @@ describe("message input sessions", () => {
 
     (wallet as any).getTokenMetadata = async () => ({ decimals: 9 });
     (wallet as any).getBalance = async () => 5_000_000_000;
-    (wallet as any).getAllApprovedTokenBalances = async () => [];
+    (wallet as any).getAllWalletTokenBalances = async () => [];
 
     (bot as any).api.config.use(async (_prev: any, method: string, payload: any) => {
       if (method === "editMessageCaption") {

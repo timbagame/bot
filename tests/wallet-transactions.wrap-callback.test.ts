@@ -52,7 +52,7 @@ beforeEach(() => {
         nativeSolBalance: 5_000_000_000,
         wsolBalance: 0,
         tokenBalances: [],
-        approvedTokens: [],
+        knownTokens: [],
       }),
       clearWalletCache: () => {},
       wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),

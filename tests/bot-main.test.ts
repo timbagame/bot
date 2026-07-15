@@ -122,7 +122,7 @@ describe("Bot Main Entry Point Tests", () => {
       const cacheData = {
         solBalance: 1,
         tokenBalances: [],
-        approvedTokens: [],
+        knownTokens: [],
       };
       botModule.__test_setWalletCache("1", cacheData);
       // cache is internal, but calling again should not throw

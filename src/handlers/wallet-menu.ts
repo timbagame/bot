@@ -16,7 +16,7 @@ import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/key
 import { getPricesUSD } from "../utils/prices";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
-import type { WalletManager, WalletBalancesSnapshot, ApprovedTokenBalance } from "../utils/wallet";
+import type { WalletManager, WalletBalancesSnapshot, WalletTokenBalance } from "../utils/wallet";
 import type { TokenManager } from "../utils/token-manager";
 import {
   showWalletUI as showWalletUIHandler,
@@ -49,7 +49,7 @@ export type WalletCacheSnapshot = WalletBalancesSnapshot;
 type WalletSnapshotSeed = {
   solBalance: number;
   tokenBalances: Array<
-    Partial<ApprovedTokenBalance> & {
+    Partial<WalletTokenBalance> & {
       mint: string;
       ticker: string;
       balance: number;
@@ -57,7 +57,7 @@ type WalletSnapshotSeed = {
       rawBalance?: string;
     }
   >;
-  approvedTokens?: WalletBalancesSnapshot["approvedTokens"];
+  knownTokens?: WalletBalancesSnapshot["knownTokens"];
   nativeSolBalance?: number;
   wsolBalance?: number;
 };
@@ -112,7 +112,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   const pendingWalletFetches = new Map<string, Promise<WalletBalancesSnapshot>>();
   const cacheInvalidations = new Map<string, number>();
 
-  const testApprovedTokenOverrides = new Map<string, WalletBalancesSnapshot["approvedTokens"]>();
+  const testKnownTokenOverrides = new Map<string, WalletBalancesSnapshot["knownTokens"]>();
 
   const normalizeTelegramId = (value: bigint | number | string): bigint =>
     typeof value === "bigint" ? value : BigInt(value);
@@ -121,7 +121,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     const cacheKey = getCacheKey(telegramId);
     walletSnapshotCache.delete(cacheKey);
     pendingWalletFetches.delete(cacheKey);
-    testApprovedTokenOverrides.delete(telegramId.toString());
+    testKnownTokenOverrides.delete(telegramId.toString());
     cacheInvalidations.set(cacheKey, Date.now());
   };
 
@@ -129,9 +129,9 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     invalidateWalletSnapshot(normalizeTelegramId(telegramId));
   });
 
-  const coerceApprovedTokenBalances = (
+  const coerceWalletTokenBalances = (
     entries: WalletSnapshotSeed["tokenBalances"],
-  ): ApprovedTokenBalance[] =>
+  ): WalletTokenBalance[] =>
     entries.map((entry) => {
       const rawBalance =
         entry.rawBalance ?? (Number.isFinite(entry.balance) ? String(entry.balance) : "0");
@@ -188,13 +188,13 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
 
     const tokenManager = getTokenManager();
     const overrideKey = telegramId.toString();
-    const overrideApprovedTokens = testApprovedTokenOverrides.get(overrideKey);
+    const overrideKnownTokens = testKnownTokenOverrides.get(overrideKey);
     const knownTokens =
-      overrideApprovedTokens ??
-      (tokenManager ? tokenManager.getAllApprovedTokensWithMetadata() : []);
+      overrideKnownTokens ??
+      (tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : []);
 
     const staleNative = wallet.peekCachedNativeBalance(telegramId);
-    const staleTokens = wallet.peekCachedApprovedTokenBalances(telegramId);
+    const staleTokens = wallet.peekCachedWalletTokenBalances(telegramId);
     const allowStaleOnError = staleNative !== undefined || (staleTokens?.length ?? 0) > 0;
 
     const fetchPromise = (async () => {
@@ -204,10 +204,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
         const nativeSolBalance = await wallet.getBalance(telegramId, {
           allowStaleOnError,
         });
-        const loadTokenBalances =
-          wallet.getAllWalletTokenBalances?.bind(wallet) ??
-          wallet.getAllApprovedTokenBalances.bind(wallet);
-        const tokenBalances = await loadTokenBalances(telegramId, knownTokens, {
+        const tokenBalances = await wallet.getAllWalletTokenBalances(telegramId, knownTokens, {
           allowStaleOnError,
         });
 
@@ -219,7 +216,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
           nativeSolBalance,
           wsolBalance,
           tokenBalances,
-          approvedTokens: knownTokens,
+          knownTokens,
         };
         const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
         if (invalidatedAt < fetchStart) {
@@ -232,7 +229,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       } catch (error) {
         if (allowStaleOnError) {
           const fallbackNative = wallet.peekCachedNativeBalance(telegramId) ?? staleNative;
-          const fallbackTokens = wallet.peekCachedApprovedTokenBalances(telegramId) ?? staleTokens;
+          const fallbackTokens = wallet.peekCachedWalletTokenBalances(telegramId) ?? staleTokens;
 
           if (fallbackNative !== undefined || (fallbackTokens && fallbackTokens.length > 0)) {
             console.warn(
@@ -242,7 +239,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
 
             const resolvedNative = fallbackNative ?? 0;
             const resolvedTokensSource = fallbackTokens ?? [];
-            const resolvedTokens: ApprovedTokenBalance[] = resolvedTokensSource.map((token) => ({
+            const resolvedTokens: WalletTokenBalance[] = resolvedTokensSource.map((token) => ({
               ...token,
             }));
             const wsolToken = resolvedTokens.find((token) => token.mint === WSOL_MINT);
@@ -253,7 +250,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
               nativeSolBalance: resolvedNative,
               wsolBalance,
               tokenBalances: resolvedTokens,
-              approvedTokens: knownTokens,
+              knownTokens,
             };
             const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
             if (invalidatedAt < fetchStart) {
@@ -301,7 +298,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       getWalletPageData: async (telegramId, page, pageSize) => {
         enforceWalletBudget(telegramId);
         const tokenManager = getTokenManager();
-        const knownTokens = tokenManager ? tokenManager.getAllApprovedTokensWithMetadata() : [];
+        const knownTokens = tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
         const [solBalance, tokenPage] = await Promise.all([
           wallet.getBalance(telegramId, { allowStaleOnError: true }),
           wallet.getWalletTokenBalancePage(telegramId, knownTokens, page, pageSize),
@@ -399,13 +396,13 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   ) => {
     const normalizedId = normalizeTelegramId(telegramId);
     const nativeBalance = data.nativeSolBalance ?? data.solBalance;
-    const coercedTokenBalances = coerceApprovedTokenBalances(data.tokenBalances ?? []);
+    const coercedTokenBalances = coerceWalletTokenBalances(data.tokenBalances ?? []);
 
     wallet.setCachedNativeBalance(normalizedId, nativeBalance, ttlOverrideMs);
-    wallet.setCachedApprovedTokenBalances(normalizedId, coercedTokenBalances, ttlOverrideMs);
+    wallet.setCachedWalletTokenBalances(normalizedId, coercedTokenBalances, ttlOverrideMs);
 
-    if (data.approvedTokens) {
-      testApprovedTokenOverrides.set(normalizedId.toString(), data.approvedTokens);
+    if (data.knownTokens) {
+      testKnownTokenOverrides.set(normalizedId.toString(), data.knownTokens);
     }
   };
 

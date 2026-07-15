@@ -40,7 +40,7 @@ beforeAll(async () => {
 
   // Stub wallet RPCs used indirectly
   (wallet as any).getBalance = async () => 0;
-  (wallet as any).getAllApprovedTokenBalances = async () => [];
+  (wallet as any).getAllWalletTokenBalances = async () => [];
 
   // Stub Telegram API methods that may be called
   (bot as any).api.editMessageText = async () => ({ ok: true, result: true });

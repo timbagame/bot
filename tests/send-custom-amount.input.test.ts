@@ -13,7 +13,7 @@ import {
   __test_listInputSessions,
   __test_clearUserState as __test_clearRawState,
 } from "../src/utils/user-state";
-import type { ApprovedTokenBalance } from "../src/utils/wallet";
+import type { WalletTokenBalance } from "../src/utils/wallet";
 
 type MockCtxOptions = {
   editError?: Error;
@@ -33,19 +33,19 @@ const baseWalletCache = {
     decimals: number;
     rawBalance: string;
   }>,
-  approvedTokens: [] as any[],
+  knownTokens: [] as any[],
 };
 
 const userKey = String(TELEGRAM_NUMERIC_ID);
 
 let originalFeeBuffer = 0;
 let originalGetBalance: typeof wallet.getBalance;
-let originalGetAllApprovedTokenBalances: typeof wallet.getAllApprovedTokenBalances;
+let originalGetAllWalletTokenBalances: typeof wallet.getAllWalletTokenBalances;
 
 beforeAll(() => {
   originalFeeBuffer = __test_getSolFeeBufferLamports();
   originalGetBalance = wallet.getBalance.bind(wallet);
-  originalGetAllApprovedTokenBalances = wallet.getAllApprovedTokenBalances.bind(wallet);
+  originalGetAllWalletTokenBalances = wallet.getAllWalletTokenBalances.bind(wallet);
 
   wallet.getBalance = async (telegramId: bigint, options?: any) => {
     if (telegramId === TELEGRAM_ID) {
@@ -54,24 +54,24 @@ beforeAll(() => {
     return originalGetBalance(telegramId, options);
   };
 
-  wallet.getAllApprovedTokenBalances = async (
+  wallet.getAllWalletTokenBalances = async (
     telegramId: bigint,
-    approvedTokens: Parameters<typeof originalGetAllApprovedTokenBalances>[1],
-    options?: Parameters<typeof originalGetAllApprovedTokenBalances>[2],
-  ): Promise<ApprovedTokenBalance[]> => {
+    knownTokens: Parameters<typeof originalGetAllWalletTokenBalances>[1],
+    options?: Parameters<typeof originalGetAllWalletTokenBalances>[2],
+  ): Promise<WalletTokenBalance[]> => {
     if (telegramId === TELEGRAM_ID) {
-      return baseWalletCache.tokenBalances.map((token): ApprovedTokenBalance => {
+      return baseWalletCache.tokenBalances.map((token): WalletTokenBalance => {
         const lamports = typeof token.rawBalance === "string" ? BigInt(token.rawBalance) : 0n;
         return {
           ...token,
           lamports,
           formattedBalance: token.balance.toString(),
           decimalBalance: token.balance,
-          truncated: (token as Partial<ApprovedTokenBalance>).truncated ?? false,
+          truncated: (token as Partial<WalletTokenBalance>).truncated ?? false,
         };
       });
     }
-    return originalGetAllApprovedTokenBalances(telegramId, approvedTokens, options);
+    return originalGetAllWalletTokenBalances(telegramId, knownTokens, options);
   };
 });
 
@@ -127,7 +127,7 @@ beforeEach(() => {
 afterAll(() => {
   __test_setSolFeeBufferLamports(originalFeeBuffer);
   wallet.getBalance = originalGetBalance;
-  wallet.getAllApprovedTokenBalances = originalGetAllApprovedTokenBalances;
+  wallet.getAllWalletTokenBalances = originalGetAllWalletTokenBalances;
 });
 
 describe("handleCustomAmountInput", () => {

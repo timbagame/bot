@@ -3,7 +3,7 @@ import { Keypair } from "@solana/web3.js";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
-import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "../src/utils/constants";
+import { WSOL_MINT, TOKEN_MANAGER_KNOWN_CACHE_TTL_MS } from "../src/utils/constants";
 import * as priceService from "../src/utils/price-service";
 import { __test_clearPriceServiceCache } from "../src/utils/price-service";
 import { createWalletStub, resetTokenManagerState } from "./helpers/fixtures";
@@ -654,7 +654,7 @@ test("validateTokenMint validates base58 and metadata path", async () => {
   expect(await tm.validateTokenMint("not-a-mint")).toBe(false);
 });
 
-test("getAllApprovedTokensWithMetadata caches results and invalidates on changes", async () => {
+test("getAllKnownTokensWithMetadata caches results and invalidates on changes", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const tokenDb = TokenDatabase.getInstance();
   const originalGetter = tokenDb.getAllKnownTokens.bind(tokenDb);
@@ -669,25 +669,25 @@ test("getAllApprovedTokensWithMetadata caches results and invalidates on changes
   Date.now = () => now;
 
   try {
-    const initial = tm.getAllApprovedTokensWithMetadata();
+    const initial = tm.getAllKnownTokensWithMetadata();
     expect(calls).toBe(1);
 
-    now += TOKEN_MANAGER_APPROVED_CACHE_TTL_MS - 10;
-    expect(tm.getAllApprovedTokensWithMetadata()).toEqual(initial);
+    now += TOKEN_MANAGER_KNOWN_CACHE_TTL_MS - 10;
+    expect(tm.getAllKnownTokensWithMetadata()).toEqual(initial);
     expect(calls).toBe(1);
 
     now += 20;
-    expect(tm.getAllApprovedTokensWithMetadata()).toEqual(initial);
+    expect(tm.getAllKnownTokensWithMetadata()).toEqual(initial);
     expect(calls).toBe(2);
 
     const newMint = Keypair.generate().publicKey.toBase58();
     await tm.addToken(newMint, "CACHE", 6);
-    const cachedAfterAdd = tm.getAllApprovedTokensWithMetadata();
+    const cachedAfterAdd = tm.getAllKnownTokensWithMetadata();
     expect(calls).toBe(3);
     expect(cachedAfterAdd.some((token) => token.token_mint === newMint)).toBe(true);
 
     tm.removeToken(newMint);
-    const afterRemove = tm.getAllApprovedTokensWithMetadata();
+    const afterRemove = tm.getAllKnownTokensWithMetadata();
     expect(calls).toBe(4);
     expect(afterRemove.some((token) => token.token_mint === newMint)).toBe(false);
   } finally {
@@ -696,7 +696,7 @@ test("getAllApprovedTokensWithMetadata caches results and invalidates on changes
   }
 });
 
-test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed externally", async () => {
+test("getAllKnownTokensWithMetadata refreshes cache when tokens removed externally", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const tokenDb = TokenDatabase.getInstance();
   const originalNow = Date.now;
@@ -710,14 +710,14 @@ test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed exter
   await tm.addToken(mintB, "BBB", 6);
 
   try {
-    const initial = tm.getAllApprovedTokensWithMetadata();
+    const initial = tm.getAllKnownTokensWithMetadata();
     expect(initial.some((token) => token.token_mint === mintA)).toBe(true);
     expect(initial.some((token) => token.token_mint === mintB)).toBe(true);
 
-    now += TOKEN_MANAGER_APPROVED_CACHE_TTL_MS / 2;
+    now += TOKEN_MANAGER_KNOWN_CACHE_TTL_MS / 2;
     tokenDb.removeKnownToken(mintA);
 
-    const afterRemoval = tm.getAllApprovedTokensWithMetadata();
+    const afterRemoval = tm.getAllKnownTokensWithMetadata();
     expect(afterRemoval.some((token) => token.token_mint === mintA)).toBe(false);
     expect(afterRemoval.some((token) => token.token_mint === mintB)).toBe(true);
   } finally {

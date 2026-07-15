@@ -180,14 +180,14 @@ export type WalletFetchOptions = {
   cacheTtlMs?: number;
 };
 
-export type ApprovedTokenDefinition = {
+export type KnownTokenDefinition = {
   token_mint: string;
   token_ticker: string;
   decimals: number;
   token_program_id?: string | null;
 };
 
-export type ApprovedTokenBalance = {
+export type WalletTokenBalance = {
   mint: string;
   ticker: string;
   balance: number;
@@ -203,12 +203,12 @@ export type WalletBalancesSnapshot = {
   solBalance: number;
   nativeSolBalance: number;
   wsolBalance: number;
-  tokenBalances: ApprovedTokenBalance[];
-  approvedTokens: ApprovedTokenDefinition[];
+  tokenBalances: WalletTokenBalance[];
+  knownTokens: KnownTokenDefinition[];
 };
 
 export type WalletTokenBalancePage = {
-  tokenBalances: ApprovedTokenBalance[];
+  tokenBalances: WalletTokenBalance[];
   page: number;
   pageCount: number;
 };
@@ -303,8 +303,8 @@ export class WalletManager {
   private mintProgramCache = new Map<string, TokenProgramDetection | null>();
   private missingMintWarnings = new Map<string, number>();
   private nativeBalanceCache = createExpiringCache<number>(WALLET_RPC_CACHE_TTL_MS);
-  private approvedTokenBalanceCache =
-    createExpiringCache<ApprovedTokenBalance[]>(WALLET_RPC_CACHE_TTL_MS);
+  private walletTokenBalanceCache =
+    createExpiringCache<WalletTokenBalance[]>(WALLET_RPC_CACHE_TTL_MS);
   private walletCacheListeners = new Set<(telegramId: bigint | number | string) => void>();
 
   public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
@@ -517,7 +517,7 @@ export class WalletManager {
     return typeof telegramId === "bigint" ? telegramId.toString() : String(telegramId);
   }
 
-  private cloneApprovedTokenBalances(balances: ApprovedTokenBalance[]): ApprovedTokenBalance[] {
+  private cloneWalletTokenBalances(balances: WalletTokenBalance[]): WalletTokenBalance[] {
     return balances.map((entry) => ({ ...entry }));
   }
 
@@ -531,13 +531,13 @@ export class WalletManager {
     }
   }
 
-  private applyProgramHintsToApprovedTokens(
-    approvedTokens: Array<{
+  private applyProgramHintsToKnownTokens(
+    knownTokens: Array<{
       token_mint: string;
       token_program_id?: string | null;
     }>,
   ): void {
-    for (const token of approvedTokens) {
+    for (const token of knownTokens) {
       const detection = this.mintProgramCache.get(token.token_mint);
       if (detection) {
         token.token_program_id = detection.programId.toBase58();
@@ -796,30 +796,27 @@ export class WalletManager {
     }
   }
 
-  /**
-   * Efficiently get all token balances for approved tokens in a single RPC call
-   * Returns only tokens with non-zero balances that are in the approved tokens list
-   */
-  public async getAllApprovedTokenBalances(
+  /** Load non-zero wallet balances, using locally known tokens as metadata hints. */
+  public async getAllWalletTokenBalances(
     telegramId: bigint,
-    approvedTokens: ApprovedTokenDefinition[],
+    knownTokens: KnownTokenDefinition[],
     options: WalletFetchOptions = {},
-  ): Promise<ApprovedTokenBalance[]> {
+  ): Promise<WalletTokenBalance[]> {
     const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
     const cacheKey = this.getUserCacheKey(telegramId);
 
     if (!forceFresh) {
-      const cached = this.approvedTokenBalanceCache.get(cacheKey);
+      const cached = this.walletTokenBalanceCache.get(cacheKey);
       if (cached) {
-        this.applyProgramHintsToApprovedTokens(approvedTokens);
-        return this.cloneApprovedTokenBalances(cached);
+        this.applyProgramHintsToKnownTokens(knownTokens);
+        return this.cloneWalletTokenBalances(cached);
       }
     }
 
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
-    if (approvedTokens.length === 0) {
+    if (knownTokens.length === 0) {
       return [];
     }
 
@@ -828,17 +825,17 @@ export class WalletManager {
         `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`,
       );
 
-      const approvedTokensMap = new Map(approvedTokens.map((token) => [token.token_mint, token]));
+      const knownTokensMap = new Map(knownTokens.map((token) => [token.token_mint, token]));
       const seenAccounts = new Set<string>();
       const metadataPrefetchMints = new Set<string>();
       const parsedAccounts: ParsedTokenAccount[] = [];
 
-      const ataLookup = await this.buildAtaLookupForApprovedTokens(
+      const ataLookup = await this.buildAtaLookupForKnownTokens(
         pubkey,
-        approvedTokens,
-        approvedTokensMap,
+        knownTokens,
+        knownTokensMap,
       );
-      const ataResult = await this.loadApprovedTokenAccounts(ataLookup, seenAccounts);
+      const ataResult = await this.loadKnownTokenAccounts(ataLookup, seenAccounts);
       ataResult.metadataPrefetchMints.forEach((mint) => metadataPrefetchMints.add(mint));
       parsedAccounts.push(...ataResult.accounts);
 
@@ -859,12 +856,12 @@ export class WalletManager {
       const metadataLoader = this.createMetadataLoader();
       await metadataLoader.prefetch(metadataPrefetchMints);
 
-      const results: ApprovedTokenBalance[] = [];
+      const results: WalletTokenBalance[] = [];
       for (const account of parsedAccounts) {
         try {
           const entry = await this.processParsedTokenAccount({
             account,
-            approvedTokensMap,
+            knownTokensMap,
             metadataLoader,
           });
           if (entry) results.push(entry);
@@ -874,9 +871,9 @@ export class WalletManager {
       }
 
       results.sort((a, b) => a.ticker.localeCompare(b.ticker));
-      this.approvedTokenBalanceCache.setWithTTL(
+      this.walletTokenBalanceCache.setWithTTL(
         cacheKey,
-        this.cloneApprovedTokenBalances(results),
+        this.cloneWalletTokenBalances(results),
         cacheTtlMs,
       );
       return results;
@@ -890,14 +887,14 @@ export class WalletManager {
       }
 
       if (!forceFresh && allowStaleOnError) {
-        const stale = this.approvedTokenBalanceCache.peek(cacheKey);
+        const stale = this.walletTokenBalanceCache.peek(cacheKey);
         if (stale) {
           console.warn(
             `⚠️ Using stale token balances for ${pubkey.toBase58()} after RPC error:`,
             error,
           );
-          this.applyProgramHintsToApprovedTokens(approvedTokens);
-          return this.cloneApprovedTokenBalances(stale);
+          this.applyProgramHintsToKnownTokens(knownTokens);
+          return this.cloneWalletTokenBalances(stale);
         }
       }
 
@@ -906,17 +903,9 @@ export class WalletManager {
     }
   }
 
-  public async getAllWalletTokenBalances(
-    telegramId: bigint,
-    knownTokens: ApprovedTokenDefinition[],
-    options: WalletFetchOptions = {},
-  ): Promise<ApprovedTokenBalance[]> {
-    return this.getAllApprovedTokenBalances(telegramId, knownTokens, options);
-  }
-
   public async getWalletTokenBalancePage(
     telegramId: bigint,
-    knownTokens: ApprovedTokenDefinition[],
+    knownTokens: KnownTokenDefinition[],
     requestedPage: number,
     pageSize: number,
   ): Promise<WalletTokenBalancePage> {
@@ -978,7 +967,7 @@ export class WalletManager {
     const metadataLoader = this.createMetadataLoader();
     await metadataLoader.prefetch(selected.map((entry) => entry.mint));
 
-    const tokenBalances: ApprovedTokenBalance[] = [];
+    const tokenBalances: WalletTokenBalance[] = [];
     for (const entry of selected) {
       try {
         const known = knownByMint.get(entry.mint) ?? {
@@ -986,7 +975,7 @@ export class WalletManager {
           token_ticker: entry.mint,
           decimals: entry.decimals,
         };
-        const balance = await this.buildApprovedTokenBalanceEntry(
+        const balance = await this.buildWalletTokenBalanceEntry(
           entry.mint,
           { amount: entry.amount.toString(), decimals: entry.decimals },
           entry.amount,
@@ -1002,14 +991,14 @@ export class WalletManager {
     return { tokenBalances, page, pageCount };
   }
 
-  private async buildAtaLookupForApprovedTokens(
+  private async buildAtaLookupForKnownTokens(
     pubkey: PublicKey,
-    approvedTokens: ApprovedTokenDefinition[],
-    approvedTokensMap: Map<string, ApprovedTokenDefinition>,
+    knownTokens: KnownTokenDefinition[],
+    knownTokensMap: Map<string, KnownTokenDefinition>,
   ): Promise<Map<string, AtaLookupPlan>> {
     const lookup = new Map<string, AtaLookupPlan>();
     const plans = await Promise.all(
-      approvedTokens.map(async (token) => {
+      knownTokens.map(async (token) => {
         try {
           const mintKey = new PublicKey(token.token_mint);
           const hintedProgram = token.token_program_id;
@@ -1038,7 +1027,7 @@ export class WalletManager {
                 programPersistError,
               );
             }
-            const mapEntry = approvedTokensMap.get(token.token_mint);
+            const mapEntry = knownTokensMap.get(token.token_mint);
             if (mapEntry) {
               mapEntry.token_program_id = programDetection.programId.toBase58();
             }
@@ -1078,7 +1067,7 @@ export class WalletManager {
     return lookup;
   }
 
-  private async loadApprovedTokenAccounts(
+  private async loadKnownTokenAccounts(
     ataLookup: Map<string, AtaLookupPlan>,
     seenAccounts: Set<string>,
   ): Promise<{
@@ -1139,7 +1128,7 @@ export class WalletManager {
       });
     }
 
-    console.log(`📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`);
+    console.log(`📦 Loaded ${fetchedAtaAccounts} known token accounts via ATA lookups`);
 
     return { accounts, metadataPrefetchMints };
   }
@@ -1288,7 +1277,7 @@ export class WalletManager {
 
   private async autoRegisterTokenForBalance(
     mint: string,
-    approvedTokensMap: Map<string, ApprovedTokenDefinition>,
+    knownTokensMap: Map<string, KnownTokenDefinition>,
     metadataLoader: MetadataLoader,
   ): Promise<void> {
     console.log(`🔄 Auto-registering unknown token with balance: ${mint}`);
@@ -1310,7 +1299,7 @@ export class WalletManager {
         return;
       }
 
-      approvedTokensMap.set(mint, {
+      knownTokensMap.set(mint, {
         token_mint: registration.token.token_mint,
         token_ticker: registration.token.token_ticker,
         decimals: registration.token.decimals,
@@ -1323,45 +1312,45 @@ export class WalletManager {
 
   private async processParsedTokenAccount({
     account,
-    approvedTokensMap,
+    knownTokensMap,
     metadataLoader,
   }: {
     account: ParsedTokenAccount;
-    approvedTokensMap: Map<string, ApprovedTokenDefinition>;
+    knownTokensMap: Map<string, KnownTokenDefinition>;
     metadataLoader: MetadataLoader;
-  }): Promise<ApprovedTokenBalance | null> {
+  }): Promise<WalletTokenBalance | null> {
     const { mint, tokenAmount } = account;
     const lamports = this.parseLamports(tokenAmount.amount, mint);
     if (lamports === null || lamports <= 0n) {
       return null;
     }
 
-    let approvedToken = approvedTokensMap.get(mint);
-    if (!approvedToken) {
-      await this.autoRegisterTokenForBalance(mint, approvedTokensMap, metadataLoader);
-      approvedToken = approvedTokensMap.get(mint);
+    let knownToken = knownTokensMap.get(mint);
+    if (!knownToken) {
+      await this.autoRegisterTokenForBalance(mint, knownTokensMap, metadataLoader);
+      knownToken = knownTokensMap.get(mint);
     }
 
-    if (!approvedToken) {
+    if (!knownToken) {
       return null;
     }
 
-    return this.buildApprovedTokenBalanceEntry(
+    return this.buildWalletTokenBalanceEntry(
       mint,
       tokenAmount,
       lamports,
-      approvedToken,
+      knownToken,
       metadataLoader,
     );
   }
 
-  private async buildApprovedTokenBalanceEntry(
+  private async buildWalletTokenBalanceEntry(
     mint: string,
     tokenAmount: { amount: string; decimals: number },
     lamports: bigint,
-    approvedToken: ApprovedTokenDefinition,
+    knownToken: KnownTokenDefinition,
     metadataLoader: MetadataLoader,
-  ): Promise<ApprovedTokenBalance> {
+  ): Promise<WalletTokenBalance> {
     const formattedBalance = this.formatTokenBalance(lamports, tokenAmount.decimals);
     const decimalBalance = Number.parseFloat(
       formatAmount(lamports, tokenAmount.decimals, {
@@ -1382,7 +1371,7 @@ export class WalletManager {
       balanceNumber = Number(lamports);
     }
 
-    let finalTicker = approvedToken.token_ticker;
+    let finalTicker = knownToken.token_ticker;
     const metadata = await metadataLoader.load(mint);
     if (mint === WSOL_MINT) {
       finalTicker = "WSOL";
@@ -1410,23 +1399,23 @@ export class WalletManager {
     return this.nativeBalanceCache.peek(this.getUserCacheKey(telegramId));
   }
 
-  public peekCachedApprovedTokenBalances(telegramId: bigint): ApprovedTokenBalance[] | undefined {
-    const cached = this.approvedTokenBalanceCache.peek(this.getUserCacheKey(telegramId));
-    return cached ? this.cloneApprovedTokenBalances(cached) : undefined;
+  public peekCachedWalletTokenBalances(telegramId: bigint): WalletTokenBalance[] | undefined {
+    const cached = this.walletTokenBalanceCache.peek(this.getUserCacheKey(telegramId));
+    return cached ? this.cloneWalletTokenBalances(cached) : undefined;
   }
 
   public setCachedNativeBalance(telegramId: bigint, lamports: number, ttlMs?: number): void {
     this.nativeBalanceCache.setWithTTL(this.getUserCacheKey(telegramId), lamports, ttlMs);
   }
 
-  public setCachedApprovedTokenBalances(
+  public setCachedWalletTokenBalances(
     telegramId: bigint,
-    balances: ApprovedTokenBalance[],
+    balances: WalletTokenBalance[],
     ttlMs?: number,
   ): void {
-    this.approvedTokenBalanceCache.setWithTTL(
+    this.walletTokenBalanceCache.setWithTTL(
       this.getUserCacheKey(telegramId),
-      this.cloneApprovedTokenBalances(balances),
+      this.cloneWalletTokenBalances(balances),
       ttlMs,
     );
   }
@@ -1443,7 +1432,7 @@ export class WalletManager {
   public clearCachedWalletData(telegramId: bigint | number | string): void {
     const cacheKey = this.getUserCacheKey(telegramId);
     this.nativeBalanceCache.delete(cacheKey);
-    this.approvedTokenBalanceCache.delete(cacheKey);
+    this.walletTokenBalanceCache.delete(cacheKey);
     this.notifyWalletCacheCleared(telegramId);
   }
 

@@ -3,7 +3,7 @@ import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { TOKENS_LIST, WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
+import { TOKENS_LIST, WSOL_MINT, TOKEN_MANAGER_KNOWN_CACHE_TTL_MS } from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -76,7 +76,7 @@ export class TokenManager {
   private wallet: WalletManager;
   private defaultTokenMint: string;
   private defaultTokenTicker: string;
-  private approvedTokensCache: {
+  private knownTokensCache: {
     value: Array<{
       token_mint: string;
       token_ticker: string;
@@ -84,8 +84,8 @@ export class TokenManager {
     }>;
     expiresAt: number;
   } | null = null;
-  private approvedTokensCacheVersion: number | null = null;
-  private readonly approvedTokensCacheTtlMs = TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
+  private knownTokensCacheVersion: number | null = null;
+  private readonly knownTokensCacheTtlMs = TOKEN_MANAGER_KNOWN_CACHE_TTL_MS;
   private readonly maxSupportedDecimals = MAX_SUPPORTED_TOKEN_DECIMALS;
   private lastMetadataFailure: { reason: "invalid_decimals"; mint: string } | null = null;
 
@@ -167,7 +167,7 @@ export class TokenManager {
     return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
   }
 
-  private snapshotApprovedTokens(tokens: KnownToken[]): Array<{
+  private snapshotKnownTokens(tokens: KnownToken[]): Array<{
     token_mint: string;
     token_ticker: string;
     decimals: number;
@@ -181,9 +181,9 @@ export class TokenManager {
     }));
   }
 
-  private invalidateApprovedTokensCache(): void {
-    this.approvedTokensCache = null;
-    this.approvedTokensCacheVersion = null;
+  private invalidateKnownTokensCache(): void {
+    this.knownTokensCache = null;
+    this.knownTokensCacheVersion = null;
   }
 
   private resolveBuiltinMintToken(
@@ -894,7 +894,7 @@ export class TokenManager {
       }
 
       this.tokenDb.addKnownToken(tokenMint, ticker.toUpperCase(), decimalsCandidate);
-      this.invalidateApprovedTokensCache();
+      this.invalidateKnownTokensCache();
       return true;
     } catch (error) {
       console.error(`Error adding token ${ticker}:`, error);
@@ -1000,7 +1000,7 @@ export class TokenManager {
 
   public removeToken(tokenMint: string): void {
     this.tokenDb.removeKnownToken(tokenMint);
-    this.invalidateApprovedTokensCache();
+    this.invalidateKnownTokensCache();
   }
 
   // ================================
@@ -1023,10 +1023,8 @@ export class TokenManager {
     return this.tokenDb.getTokenCount();
   }
 
-  /**
-   * Get all approved tokens with their metadata for efficient balance checking
-   */
-  public getAllApprovedTokensWithMetadata(): Array<{
+  /** Get locally known tokens as metadata hints for wallet balance loading. */
+  public getAllKnownTokensWithMetadata(): Array<{
     token_mint: string;
     token_ticker: string;
     decimals: number;
@@ -1034,18 +1032,18 @@ export class TokenManager {
   }> {
     const now = Date.now();
     const tokenCount = this.tokenDb.getTokenCount();
-    const cache = this.approvedTokensCache;
-    if (cache && cache.expiresAt > now && this.approvedTokensCacheVersion === tokenCount) {
+    const cache = this.knownTokensCache;
+    if (cache && cache.expiresAt > now && this.knownTokensCacheVersion === tokenCount) {
       return cache.value;
     }
 
     const tokens = this.tokenDb.getAllKnownTokens();
-    const snapshot = this.snapshotApprovedTokens(tokens);
-    this.approvedTokensCache = {
+    const snapshot = this.snapshotKnownTokens(tokens);
+    this.knownTokensCache = {
       value: snapshot,
-      expiresAt: now + this.approvedTokensCacheTtlMs,
+      expiresAt: now + this.knownTokensCacheTtlMs,
     };
-    this.approvedTokensCacheVersion = tokenCount;
+    this.knownTokensCacheVersion = tokenCount;
     return snapshot;
   }
 
@@ -1185,7 +1183,7 @@ export class TokenManager {
         const ticker = metadata.ticker.toUpperCase();
         if (persistDiscovered) {
           this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
-          this.invalidateApprovedTokensCache();
+          this.invalidateKnownTokensCache();
         }
         return {
           token_mint: registryMint.mint,
@@ -1228,7 +1226,7 @@ export class TokenManager {
     const ticker = discovered.ticker.toUpperCase();
     if (persistDiscovered) {
       this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
-      this.invalidateApprovedTokensCache();
+      this.invalidateKnownTokensCache();
     }
 
     return {

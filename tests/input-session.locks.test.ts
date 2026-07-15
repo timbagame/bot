@@ -43,7 +43,7 @@ beforeAll(async () => {
   };
 
   (wallet as any).getBalance = async () => 0;
-  (wallet as any).getAllApprovedTokenBalances = async () => [];
+  (wallet as any).getAllWalletTokenBalances = async () => [];
 
   const api = (bot as any).api;
   api.editMessageText = async () => ({ ok: true, result: true });

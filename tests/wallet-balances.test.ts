@@ -138,8 +138,8 @@ class ConnParsed implements Partial<Connection> {
   }
 }
 
-describe("WalletManager.getAllApprovedTokenBalances", () => {
-  test("returns filtered balances for approved tokens", async () => {
+describe("WalletManager.getAllWalletTokenBalances", () => {
+  test("returns filtered balances for known tokens", async () => {
     const connection = new ConnParsed();
     const wm = WalletManager.createForTest(
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
@@ -163,7 +163,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       decimals: 9,
     });
 
-    const approved = [
+    const known = [
       {
         token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         token_ticker: "USDC",
@@ -176,7 +176,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       },
     ];
 
-    const res = await wm.getAllApprovedTokenBalances(1n, approved);
+    const res = await wm.getAllWalletTokenBalances(1n, known);
     expect(res.length).toBe(2);
     const usdc = res.find((r) => r.ticker === "USDC")!;
     const wsol = res.find((r) => r.ticker === "WSOL")!;
@@ -269,7 +269,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       decimals: 6,
     });
 
-    const approved = [{ token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 }];
+    const known = [{ token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 }];
 
     let invocations = 0;
     let failures = 0;
@@ -282,17 +282,17 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       return { decimals: 6, symbol: "META" };
     };
 
-    const first = await wm.getAllApprovedTokenBalances(1n, approved);
+    const first = await wm.getAllWalletTokenBalances(1n, known);
     expect(first[0]?.ticker).toBe("META");
     expect(invocations).toBeGreaterThan(1);
     expect(failures).toBe(1);
 
-    const cached = await wm.getAllApprovedTokenBalances(1n, approved);
+    const cached = await wm.getAllWalletTokenBalances(1n, known);
     expect(cached[0]?.ticker).toBe("META");
     expect(failures).toBe(1);
   });
 
-  test("persists detected program ids for approved tokens without hints", async () => {
+  test("persists detected program ids for known tokens without hints", async () => {
     const connection = new ConnParsed();
     const persisted: Array<[string, string | null]> = [];
     const tokenDbStub = {
@@ -331,7 +331,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       decimals: 9,
     });
 
-    const approved = [
+    const known = [
       { token_mint: splMint.toBase58(), token_ticker: "USDC", decimals: 6 },
       {
         token_mint: token2022Mint.toBase58(),
@@ -341,10 +341,10 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
       },
     ];
 
-    await wm.getAllApprovedTokenBalances(1n, approved);
+    await wm.getAllWalletTokenBalances(1n, known);
 
     expect(persisted).toEqual([[splMint.toBase58(), TOKEN_PROGRAM_ID.toBase58()]]);
-    expect(approved[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
+    expect(known[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
   });
 
   test("token discovery respects cooldown when accounts already known", async () => {

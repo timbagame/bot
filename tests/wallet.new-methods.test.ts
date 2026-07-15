@@ -27,7 +27,7 @@ const resolveTokenMetadataMock = vi.fn(async (params: any) => {
     return { decimals: 9, symbol: "JUPSYM", name: "Jupiter Token" };
   }
 
-  // Default: return decimals but NO symbol so we don't override approved tickers
+  // Default: return decimals but NO symbol so we don't override known tickers
   return { decimals };
 });
 
