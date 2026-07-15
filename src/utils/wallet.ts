@@ -64,6 +64,7 @@ import {
 } from "./rpc-endpoints";
 import { createRebateAwareFetch } from "./helius-rebate-fetch";
 import { sanitizeTokenSymbol } from "./token-display";
+import { getVerifiedTokenMints } from "./verified-token-registry";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (
@@ -204,6 +205,12 @@ export type WalletBalancesSnapshot = {
   wsolBalance: number;
   tokenBalances: ApprovedTokenBalance[];
   approvedTokens: ApprovedTokenDefinition[];
+};
+
+export type WalletTokenBalancePage = {
+  tokenBalances: ApprovedTokenBalance[];
+  page: number;
+  pageCount: number;
 };
 
 type ParsedTokenAccount = {
@@ -907,6 +914,94 @@ export class WalletManager {
     return this.getAllApprovedTokenBalances(telegramId, knownTokens, options);
   }
 
+  public async getWalletTokenBalancePage(
+    telegramId: bigint,
+    knownTokens: ApprovedTokenDefinition[],
+    requestedPage: number,
+    pageSize: number,
+  ): Promise<WalletTokenBalancePage> {
+    await this.throttle();
+    const owner = this.getPublicKey(telegramId);
+    const [splAccounts, token2022Accounts] = await Promise.all([
+      this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+      this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
+    ]);
+
+    const balancesByMint = new Map<string, { mint: string; amount: bigint; decimals: number }>();
+    for (const account of [...splAccounts.value, ...token2022Accounts.value]) {
+      try {
+        const info = account.account.data.parsed?.info;
+        const mint = String(info?.mint ?? "");
+        const amountRaw = info?.tokenAmount?.amount;
+        const decimals = info?.tokenAmount?.decimals;
+        new PublicKey(mint);
+        if (
+          typeof amountRaw !== "string" ||
+          !Number.isInteger(decimals) ||
+          decimals < 0 ||
+          decimals > 255
+        ) {
+          continue;
+        }
+        const amount = BigInt(amountRaw);
+        if (amount <= 0n) continue;
+
+        const existing = balancesByMint.get(mint);
+        if (existing && existing.decimals === decimals) {
+          existing.amount += amount;
+        } else if (!existing) {
+          balancesByMint.set(mint, { mint, amount, decimals });
+        }
+      } catch {
+        // Ignore malformed accounts without failing the rest of the wallet.
+      }
+    }
+
+    const knownByMint = new Map(knownTokens.map((token) => [token.token_mint, token]));
+    const verifiedMints = getVerifiedTokenMints();
+    const rawBalances = [...balancesByMint.values()].sort((left, right) => {
+      const recognitionDelta =
+        Number(verifiedMints.has(right.mint)) - Number(verifiedMints.has(left.mint));
+      const leftTicker = knownByMint.get(left.mint)?.token_ticker ?? left.mint;
+      const rightTicker = knownByMint.get(right.mint)?.token_ticker ?? right.mint;
+      return (
+        recognitionDelta ||
+        leftTicker.localeCompare(rightTicker) ||
+        left.mint.localeCompare(right.mint)
+      );
+    });
+
+    const normalizedPageSize = Math.max(1, Math.min(20, Math.trunc(pageSize)));
+    const pageCount = Math.max(1, Math.ceil(rawBalances.length / normalizedPageSize));
+    const page = Math.min(Math.max(0, Math.trunc(requestedPage)), pageCount - 1);
+    const selected = rawBalances.slice(page * normalizedPageSize, (page + 1) * normalizedPageSize);
+    const metadataLoader = this.createMetadataLoader();
+    await metadataLoader.prefetch(selected.map((entry) => entry.mint));
+
+    const tokenBalances: ApprovedTokenBalance[] = [];
+    for (const entry of selected) {
+      try {
+        const known = knownByMint.get(entry.mint) ?? {
+          token_mint: entry.mint,
+          token_ticker: entry.mint,
+          decimals: entry.decimals,
+        };
+        const balance = await this.buildApprovedTokenBalanceEntry(
+          entry.mint,
+          { amount: entry.amount.toString(), decimals: entry.decimals },
+          entry.amount,
+          known,
+          metadataLoader,
+        );
+        tokenBalances.push(balance);
+      } catch (error) {
+        console.warn(`Skipping unreadable wallet token ${entry.mint}`, error);
+      }
+    }
+
+    return { tokenBalances, page, pageCount };
+  }
+
   private async buildAtaLookupForApprovedTokens(
     pubkey: PublicKey,
     approvedTokens: ApprovedTokenDefinition[],
@@ -1382,10 +1477,12 @@ export class WalletManager {
     });
   }
 
-  public async getTokenTransferWarnings(tokenMint: string): Promise<string[]> {
+  public async getTokenTransferSafety(
+    tokenMint: string,
+  ): Promise<{ warnings: string[]; blockedReason?: string }> {
     const mint = new PublicKey(tokenMint);
     const detection = await this.resolveTokenProgram(mint);
-    if (!detection?.isToken2022) return [];
+    if (!detection?.isToken2022) return { warnings: [] };
 
     const accountInfo = await this.connection.getAccountInfo(mint, "confirmed");
     if (!accountInfo || !accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
@@ -1398,7 +1495,10 @@ export class WalletManager {
       warnings.push("This token has a permanent delegate that can transfer or burn balances.");
     }
     if (getTransferHook(mintState)) {
-      warnings.push("This token runs an external program during transfers.");
+      return {
+        warnings,
+        blockedReason: "Transfers for this token use a hook that the wallet does not support.",
+      };
     }
     const transferFee = getTransferFeeConfig(mintState);
     if (transferFee?.newerTransferFee.transferFeeBasisPoints) {
@@ -1406,12 +1506,16 @@ export class WalletManager {
       warnings.push(`This token charges a transfer fee of up to ${percent}%.`);
     }
     if (getNonTransferable(mintState)) {
-      warnings.push("This token is non-transferable.");
+      return { warnings, blockedReason: "This token is non-transferable." };
     }
     if (getDefaultAccountState(mintState)?.state === AccountState.Frozen) {
       warnings.push("New accounts for this token are frozen by default.");
     }
-    return warnings;
+    return { warnings };
+  }
+
+  public async getTokenTransferWarnings(tokenMint: string): Promise<string[]> {
+    return (await this.getTokenTransferSafety(tokenMint)).warnings;
   }
 
   public async getTokenMetadata(

@@ -7,7 +7,11 @@ import { getTelegramIdString } from "./context-helpers";
 import { NetworkDetector } from "./network-detector";
 import { createCancelKeyboard } from "./keyboards";
 import { getPricesUSD } from "./prices";
-import { resolveTokenDisplaySymbols, sanitizeTokenSymbol } from "./token-display";
+import {
+  resolveTokenDisplaySymbols,
+  sanitizeTokenSymbol,
+  truncateTokenDisplay,
+} from "./token-display";
 import { sortTokensByRecognition } from "./verified-token-registry";
 
 export { sanitizeTokenSymbol } from "./token-display";
@@ -138,6 +142,7 @@ export function buildWalletCaption(
   tokenLines: TokenDisplayLine[],
   options: WalletCaptionOptions = {},
 ): string {
+  const maxCaptionLength = 1_024;
   const lines: string[] = [];
 
   const explorerUrl = NetworkDetector.buildSolscanAccountUrl(walletAddress);
@@ -162,15 +167,17 @@ export function buildWalletCaption(
     );
 
     const amountLabel = line.unit
-      ? `${escapeHtml(line.amount)} ${escapeHtml(line.unit)}`
-      : escapeHtml(line.amount);
+      ? `${escapeHtml(truncateTokenDisplay(line.amount))} ${escapeHtml(line.unit)}`
+      : escapeHtml(truncateTokenDisplay(line.amount));
     parts.push(amountLabel);
 
     if (line.usdValue !== undefined) {
-      parts.push(`($${escapeHtml(String(line.usdValue))})`);
+      parts.push(`($${escapeHtml(truncateTokenDisplay(line.usdValue, 32))})`);
     }
 
-    lines.push(parts.join(" "));
+    const candidate = parts.join(" ");
+    if ([...lines, candidate].join("\n").length > maxCaptionLength) break;
+    lines.push(candidate);
   }
 
   return lines.join("\n");

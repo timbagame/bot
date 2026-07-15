@@ -176,6 +176,20 @@ test("buildWalletCaption disambiguates duplicate symbols by mint", () => {
   expect(caption).toContain("SAME · 2222…2222: 2");
 });
 
+test("buildWalletCaption stays within Telegram's media caption limit", () => {
+  const caption = buildWalletCaption(
+    "AbCdEf",
+    Array.from({ length: 8 }, (_, index) => ({
+      ticker: `TOKEN${index}`,
+      mint: `mint-${index}`,
+      amount: "9".repeat(2_000),
+      usdValue: "8".repeat(2_000),
+    })),
+  );
+
+  expect(caption.length).toBeLessThanOrEqual(1_024);
+});
+
 test("buildWalletTokenLines omits unavailable USD prices", async () => {
   const lines = await buildWalletTokenLines({
     solBalanceLamports: LAMPORTS_PER_SOL,

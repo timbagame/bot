@@ -298,6 +298,16 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     await showWalletUIHandler(ctx, {
       wallet,
       getCachedWalletData,
+      getWalletPageData: async (telegramId, page, pageSize) => {
+        enforceWalletBudget(telegramId);
+        const tokenManager = getTokenManager();
+        const knownTokens = tokenManager ? tokenManager.getAllApprovedTokensWithMetadata() : [];
+        const [solBalance, tokenPage] = await Promise.all([
+          wallet.getBalance(telegramId, { allowStaleOnError: true }),
+          wallet.getWalletTokenBalancePage(telegramId, knownTokens, page, pageSize),
+        ]);
+        return { solBalance, ...tokenPage };
+      },
       fetchPricesUSD: getPricesUSD,
       buildWalletCaption,
       createWalletKeyboard,

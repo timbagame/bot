@@ -26,6 +26,16 @@ export type ShowWalletUIDeps = {
     solBalance: number;
     tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
   }>;
+  getWalletPageData?: (
+    telegramId: bigint,
+    page: number,
+    pageSize: number,
+  ) => Promise<{
+    solBalance: number;
+    tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
+    page: number;
+    pageCount: number;
+  }>;
   fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
   buildWalletCaption: (
     walletAddress: string,
@@ -40,6 +50,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const {
     wallet,
     getCachedWalletData,
+    getWalletPageData,
     fetchPricesUSD,
     buildWalletCaption,
     createWalletKeyboard,
@@ -158,7 +169,15 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   };
 
   try {
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    const pageSize = 8;
+    const pageData = getWalletPageData
+      ? await getWalletPageData(telegramId, requestedPage, pageSize)
+      : await getCachedWalletData(telegramId).then((balances) => ({
+          ...balances,
+          page: 0,
+          pageCount: Math.max(1, Math.ceil(balances.tokenBalances.length / pageSize)),
+        }));
+    const { solBalance, tokenBalances } = pageData;
     const tokenLines = await buildWalletTokenLines({
       solBalanceLamports: solBalance,
       tokenBalances,
@@ -169,11 +188,13 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       fetchPricesUSD,
     });
 
-    const pageSize = 8;
-    const pageCount = Math.max(1, Math.ceil(tokenLines.length / pageSize));
-    const page = Math.min(Math.max(0, requestedPage), pageCount - 1);
+    const pageCount = pageData.pageCount;
+    const page = pageData.page;
     pagination = { page, pageCount };
-    const caption = buildWalletCaption(walletAddress, tokenLines, { page, pageSize });
+    const caption = buildWalletCaption(walletAddress, tokenLines, {
+      page: 0,
+      pageSize: pageSize + 1,
+    });
 
     await sendWalletContent(caption);
     if ((ctx as any).__walletDmForbidden) {

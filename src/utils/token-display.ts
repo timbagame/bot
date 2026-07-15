@@ -24,6 +24,18 @@ export function sanitizeTokenSymbol(symbol: unknown, mint?: string): string {
   return `${graphemes.slice(0, MAX_TOKEN_SYMBOL_GRAPHEMES - 1).join("")}…`;
 }
 
+export function truncateTokenDisplay(value: unknown, maxGraphemes = 64): string {
+  const normalized = String(value ?? "")
+    .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
+    .trim();
+  const graphemes = Array.from(
+    new Intl.Segmenter("en", { granularity: "grapheme" }).segment(normalized),
+    ({ segment }) => segment,
+  );
+  if (graphemes.length <= maxGraphemes) return normalized;
+  return `${graphemes.slice(0, Math.max(0, maxGraphemes - 1)).join("")}…`;
+}
+
 export function resolveTokenDisplaySymbols(
   tokens: ReadonlyArray<{ ticker: string; mint?: string }>,
 ): string[] {

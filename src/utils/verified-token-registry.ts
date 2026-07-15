@@ -1,11 +1,51 @@
 import { PublicKey } from "@solana/web3.js";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { getSupportedTokens } from "./token-registry";
 
 const JUPITER_VERIFIED_URL = "https://api.jup.ag/tokens/v2/tag?query=verified";
 const REFRESH_INTERVAL_MS = 6 * 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 3_000;
 
-let verifiedMints = new Set(getSupportedTokens().map((token) => token.mint));
+const localMints = () => getSupportedTokens().map((token) => token.mint);
+const snapshotPath = join(
+  resolve(process.env["BOT_DB_DIR"]?.trim() || process.cwd()),
+  "verified-tokens.json",
+);
+
+function loadSnapshot(): { mints: Set<string>; savedAt: number } {
+  const mints = new Set(localMints());
+  try {
+    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as {
+      savedAt?: unknown;
+      mints?: unknown;
+    };
+    if (Array.isArray(snapshot.mints)) {
+      for (const mint of snapshot.mints) if (isMint(mint)) mints.add(mint);
+    }
+    return { mints, savedAt: Number(snapshot.savedAt) || 0 };
+  } catch {
+    return { mints, savedAt: 0 };
+  }
+}
+
+function saveSnapshot(mints: ReadonlySet<string>): void {
+  try {
+    mkdirSync(dirname(snapshotPath), { recursive: true });
+    const temporaryPath = `${snapshotPath}.tmp`;
+    writeFileSync(
+      temporaryPath,
+      JSON.stringify({ savedAt: Date.now(), mints: [...mints].sort() }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    renameSync(temporaryPath, snapshotPath);
+  } catch {
+    // Persistence is best-effort; the in-memory snapshot remains usable.
+  }
+}
+
+const initialSnapshot = loadSnapshot();
+let verifiedMints = initialSnapshot.mints;
 let refreshAfter = 0;
 let refreshPromise: Promise<void> | undefined;
 
@@ -34,12 +74,13 @@ async function refreshVerifiedMints(): Promise<void> {
     const payload = (await response.json()) as unknown;
     if (!Array.isArray(payload)) return;
 
-    const next = new Set(getSupportedTokens().map((token) => token.mint));
+    const next = new Set(localMints());
     for (const entry of payload) {
       const mint = (entry as { id?: unknown })?.id;
       if (isMint(mint)) next.add(mint);
     }
     verifiedMints = next;
+    saveSnapshot(next);
     refreshAfter = Date.now() + REFRESH_INTERVAL_MS;
   } catch {
     // Keep the last successful snapshot.

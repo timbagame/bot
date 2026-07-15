@@ -131,6 +131,7 @@ import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
+import { getVerifiedTokenMints } from "./utils/verified-token-registry";
 import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
@@ -628,6 +629,7 @@ const buildGaslessFeeRequirementMessage = (): string => {
 };
 
 type WalletBalanceEntry = {
+  mint?: string;
   ticker: string;
   balance: number;
   decimals: number;
@@ -645,7 +647,7 @@ const resolveFormattedBalance = (
     };
   }
 
-  const entry = tokenBalances.find((token) => token?.ticker === ticker);
+  const entry = tokenBalances.find((token) => token?.mint === ticker || token?.ticker === ticker);
   if (!entry) {
     return { decimalBalance: 0, formattedBalance: "0" };
   }
@@ -677,6 +679,19 @@ const isTokenSelectionCacheEntry = (
   entry: TransactionCacheEntry | undefined,
 ): entry is TokenSelectionCacheEntry =>
   Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
+
+const resolveCachedTokenIdentifier = (identifier: string) => {
+  const cached = transactionCache.get(identifier);
+  if (!isTokenSelectionCacheEntry(cached)) {
+    return { identifier, ticker: identifier, mint: undefined, decimals: undefined };
+  }
+  return {
+    identifier,
+    ticker: cached.tokenMetadata?.symbol ?? cached.targetToken,
+    mint: cached.targetTokenAddress,
+    decimals: cached.tokenMetadata?.decimals,
+  };
+};
 
 type TradeConfirmationParams = {
   payToken: string;
@@ -4754,6 +4769,20 @@ registerWalletActionMenuHandler({
                 : 0;
           return Number.isFinite(rawValue) && rawValue > 0;
         },
+        tokenCallback: (token) => {
+          const tokenId = createTokenLookupId();
+          transactionCache.setWithTTL(tokenId, {
+            targetToken: token.ticker,
+            targetTokenAddress: token.mint,
+            paymentToken: token.ticker,
+            tokenMetadata: {
+              symbol: token.ticker,
+              decimals: token.decimals,
+              verified: getVerifiedTokenMints().has(token.mint),
+            },
+          });
+          return `swap_from_${tokenId}`;
+        },
         emptyLabel: "❌ No tokens available to swap",
       },
     },
@@ -4975,8 +5004,9 @@ bot.callbackQuery("start_bot", async (ctx) => {
 // Handle "FROM" token selection for swap
 registerCallbackPrefixHandler(
   "swap_from_",
-  async (ctx, { payload: fromToken }) => {
-    console.log("🔔 Swap FROM token selected:", fromToken);
+  async (ctx, { payload: fromTokenIdentifier }) => {
+    const source = resolveCachedTokenIdentifier(fromTokenIdentifier);
+    console.log("🔔 Swap FROM token selected:", source.mint ?? source.ticker);
 
     try {
       const telegramId = await resolveTelegramIdOrRespond(ctx, "swap menu from token");
@@ -4990,7 +5020,7 @@ registerCallbackPrefixHandler(
       await getCachedWalletData(telegramId);
 
       const response = [
-        `💱 <b>Swap ${fromToken}</b>`,
+        `💱 <b>Swap ${escapeHtml(source.ticker)}</b>`,
         "",
         `<b>From:</b> <code>${walletAddressHtml}</code>`,
         "",
@@ -4999,18 +5029,18 @@ registerCallbackPrefixHandler(
 
       const keyboard = new InlineKeyboard();
 
-      if (fromToken !== "SOL") {
-        keyboard.text(`SOL`, `swap_to_${fromToken}_SOL`).row();
+      if (source.ticker !== "SOL") {
+        keyboard.text(`SOL`, `swap_to_${fromTokenIdentifier}_SOL`).row();
       }
 
       const popularTokens = ["USDC", "WSOL", "TIMBA"];
       for (const token of popularTokens) {
-        if (token !== fromToken) {
-          keyboard.text(`${token}`, `swap_to_${fromToken}_${token}`).row();
+        if (token !== source.ticker) {
+          keyboard.text(`${token}`, `swap_to_${fromTokenIdentifier}_${token}`).row();
         }
       }
 
-      keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
+      keyboard.text("🔍 Other Token", `swap_to_${fromTokenIdentifier}_OTHER`).row();
       keyboard.text("← Back to Swap", "cmd_swap").row();
 
       await respondWithMenu(ctx, {
@@ -5045,7 +5075,8 @@ registerCallbackPrefixHandler(
       return;
     }
 
-    console.log(`🔔 Swap pair selected: ${fromToken} → ${toToken}`);
+    const source = resolveCachedTokenIdentifier(fromToken);
+    console.log(`🔔 Swap pair selected: ${source.mint ?? source.ticker} → ${toToken}`);
 
     try {
       if (toToken === "OTHER") {
@@ -5054,7 +5085,7 @@ registerCallbackPrefixHandler(
 
         await persistInputPromptFromContext({
           ctx,
-          text: buildCustomTokenPrompt(fromToken),
+          text: buildCustomTokenPrompt(source.ticker),
           keyboard: createCancelKeyboard("cmd_swap"),
           session: {
             type: "swap_to_token",
@@ -5074,7 +5105,7 @@ registerCallbackPrefixHandler(
         await showSwapAmountSelection(ctx, fromToken, displayToken, {
           toTokenIdentifier: toToken,
         });
-        await safeAnswerCallbackQuery(ctx, `${fromToken} → ${displayToken}`);
+        await safeAnswerCallbackQuery(ctx, `${source.ticker} → ${displayToken}`);
         return;
       }
 
@@ -5082,7 +5113,7 @@ registerCallbackPrefixHandler(
       await showSwapAmountSelection(ctx, fromToken, normalizedTarget, {
         toTokenIdentifier: normalizedTarget,
       });
-      await safeAnswerCallbackQuery(ctx, `${fromToken} → ${normalizedTarget}`);
+      await safeAnswerCallbackQuery(ctx, `${source.ticker} → ${normalizedTarget}`);
     } catch (error) {
       console.error("Error in swap_to selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
@@ -5110,7 +5141,10 @@ registerCallbackPrefixHandler(
       return;
     }
 
-    console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toTokenIdentifier}`);
+    const source = resolveCachedTokenIdentifier(fromToken);
+    console.log(
+      `🔔 Swap amount selected: ${amount} ${source.mint ?? source.ticker} → ${toTokenIdentifier}`,
+    );
 
     try {
       const cachedTarget = transactionCache.get(toTokenIdentifier);
@@ -5137,9 +5171,9 @@ registerCallbackPrefixHandler(
           ctx,
           userId,
           title: "✏️ <b>Custom Amount</b>",
-          tokenLines: [`<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`],
+          tokenLines: [`<b>Swap:</b> ${escapeHtml(source.ticker)} → ${escapeHtml(displayToToken)}`],
           instructions: [
-            `Reply to this message with the amount of ${escapeHtml(fromToken)} to swap.`,
+            `Reply to this message with the amount of ${escapeHtml(source.ticker)} to swap.`,
           ],
           examples: ["• <code>10</code>", "• <code>0.5</code>", "• <code>max</code> (all balance)"],
           cancelCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
@@ -5180,17 +5214,18 @@ registerCallbackPrefixHandler(
  */
 const showSwapAmountSelection = async (
   ctx: any,
-  fromToken: string,
+  fromTokenIdentifier: string,
   toToken: string,
   options: { toTokenIdentifier?: string } = {},
 ) => {
   const telegramId = requireTelegramId(ctx, "swap amount selection");
+  const source = resolveCachedTokenIdentifier(fromTokenIdentifier);
 
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
   const { decimalBalance: balanceDecimal, formattedBalance } = resolveFormattedBalance(
-    fromToken,
+    source.mint ?? source.ticker,
     solBalance,
     tokenBalances,
   );
@@ -5198,7 +5233,7 @@ const showSwapAmountSelection = async (
   const response = [
     `💱 <b>Swap Amount</b>`,
     "",
-    `<b>From:</b> ${fromToken} (${formattedBalance})`,
+    `<b>From:</b> ${escapeHtml(source.ticker)} (${formattedBalance})`,
     `<b>To:</b> ${toToken}`,
     "",
     `<b>Select amount to swap:</b>`,
@@ -5209,7 +5244,7 @@ const showSwapAmountSelection = async (
   const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
 
   const keyboard = createSwapAmountKeyboard({
-    fromToken,
+    fromToken: fromTokenIdentifier,
     toTokenIdentifier,
     canTrade,
   });
@@ -5225,7 +5260,7 @@ const showSwapAmountSelection = async (
  */
 const showSwapQuoteAndConfirmation = async (
   ctx: any,
-  fromToken: string,
+  fromTokenIdentifier: string,
   toToken: string,
   amount: string,
   telegramId?: bigint,
@@ -5236,8 +5271,12 @@ const showSwapQuoteAndConfirmation = async (
     toDecimals?: number;
   } = {},
 ) => {
+  const source = resolveCachedTokenIdentifier(fromTokenIdentifier);
+  const fromToken = source.ticker;
+  overrides.fromMint = overrides.fromMint ?? source.mint;
+  overrides.fromDecimals = overrides.fromDecimals ?? source.decimals;
   const userId = telegramId || getTelegramId(ctx);
-  const cancelCallback = `swap_to_${fromToken}_${toToken}`;
+  const cancelCallback = `swap_to_${fromTokenIdentifier}_${toToken}`;
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -5252,7 +5291,11 @@ const showSwapQuoteAndConfirmation = async (
         }
 
         const balanceEntry =
-          fromToken === "SOL" ? undefined : tokenBalances.find((t) => t.ticker === fromToken);
+          fromToken === "SOL"
+            ? undefined
+            : tokenBalances.find(
+                (token) => token.mint === overrides.fromMint || token.ticker === fromToken,
+              );
         const decimals =
           overrides.fromDecimals ??
           (fromToken === "SOL"

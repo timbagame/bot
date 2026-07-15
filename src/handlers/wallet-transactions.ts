@@ -509,15 +509,13 @@ export const createWalletTransactionsModule = (
 
     let transferWarnings: string[] = [];
     if (token !== "SOL") {
-      try {
-        const telegramId = requireTelegramId(ctx, "send confirmation");
-        const { tokenBalances } = await getCachedWalletData(telegramId);
-        const selectedToken = findWalletToken(tokenBalances, token);
-        if (selectedToken) {
-          transferWarnings = await wallet.getTokenTransferWarnings(selectedToken.mint);
-        }
-      } catch (warningError) {
-        console.warn(`Unable to inspect transfer extensions for ${token}`, warningError);
+      const telegramId = requireTelegramId(ctx, "send confirmation");
+      const { tokenBalances } = await getCachedWalletData(telegramId);
+      const selectedToken = findWalletToken(tokenBalances, token);
+      if (selectedToken) {
+        const safety = await wallet.getTokenTransferSafety(selectedToken.mint);
+        if (safety.blockedReason) throw new Error(safety.blockedReason);
+        transferWarnings = safety.warnings;
       }
     }
 

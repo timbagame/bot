@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   AccountLayout,
   AccountState,
@@ -236,5 +236,35 @@ describe("WalletManager dependency injection", () => {
     expect(list.map((i) => i.mint)).toEqual([MINT_A, MINT_B]);
     expect(list[0]!.rawBalance).toBe("1000000");
     expect(list[1]!.rawBalance).toBe("2000000");
+  });
+
+  test("getWalletTokenBalancePage enriches only the requested page", async () => {
+    const conn = makeMockConnection();
+    const mints = Array.from({ length: 12 }, () => Keypair.generate().publicKey.toBase58());
+    (conn as any).setTokenAccounts(
+      mints.map((mint) => ({
+        account: {
+          data: { parsed: { info: { mint, tokenAmount: { amount: "1", decimals: 0 } } } },
+        },
+      })),
+    );
+    (conn as any).setTokenAccounts2022([]);
+
+    let metadataCalls = 0;
+    const wm = WalletManager.createForTest("test mnemonic", {
+      connection: conn,
+      fetch: (async () => makeResponse(false, 404, {})) as any,
+      tokenMetadataResolver: async () => {
+        metadataCalls += 1;
+        return { decimals: 0 };
+      },
+    });
+
+    const page = await wm.getWalletTokenBalancePage(1n, [], 1, 4);
+
+    expect(page.page).toBe(1);
+    expect(page.pageCount).toBe(3);
+    expect(page.tokenBalances).toHaveLength(4);
+    expect(metadataCalls).toBeLessThanOrEqual(4);
   });
 });
