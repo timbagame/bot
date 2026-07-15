@@ -19,6 +19,7 @@ import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
+import { resolveContractVersion } from "./contract-idl";
 import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
@@ -3499,6 +3500,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         tokenAccounts.tokenProgram,
       );
       const oraclePda = this.getOraclePda();
+      const requiresOracleSignature = resolveContractVersion() === "0.2.0";
 
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
@@ -3506,9 +3508,13 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           game: gamePda,
           creator: playerKp.publicKey,
           oracle: oraclePda,
-          // The oracle replaces this signer placeholder with its operator key
-          // before returning the partially signed transaction.
-          oracleOperator: playerKp.publicKey,
+          ...(requiresOracleSignature
+            ? {
+                // The oracle replaces this signer placeholder with its operator key
+                // before returning the partially signed transaction.
+                oracleOperator: playerKp.publicKey,
+              }
+            : {}),
           gameTokenCtx,
           creatorTokenAccount,
           systemProgram: SystemProgram.programId,
@@ -3516,6 +3522,9 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         .instruction();
 
       const sendCreationTransaction = async () => {
+        if (!requiresOracleSignature) {
+          return this.wallet.sendTransaction([gameInstruction], [playerKp]);
+        }
         const latestBlockhash = await this.wallet.getLatestBlockhash();
         const unsigned = new Transaction({
           feePayer: playerKp.publicKey,

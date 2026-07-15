@@ -665,6 +665,7 @@ describe("GameManager.createGame", () => {
 
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
+    let signingCalls = 0;
     const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
       getTokenBalance: async () => 2_000_000,
@@ -685,7 +686,10 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "deadbeef" }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: async (transaction: any) => {
+        signingCalls += 1;
+        return transaction;
+      },
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
     const gameToken = Keypair.generate().publicKey;
@@ -722,6 +726,7 @@ describe("GameManager.createGame", () => {
       100,
     );
     expect(res.success).toBe(true);
+    expect(signingCalls).toBe(0);
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
 
@@ -947,6 +952,7 @@ describe("GameManager.createGame", () => {
     const originalContractVersion = process.env["TIMBA_CONTRACT_VERSION"];
     process.env["TIMBA_CONTRACT_VERSION"] = "0.2.0";
     resetGM();
+    let signingCalls = 0;
     const capturedRentCalls: number[] = [];
     const connection = {
       ...createConnectionStub(),
@@ -975,7 +981,10 @@ describe("GameManager.createGame", () => {
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: async (transaction: any) => {
+        signingCalls += 1;
+        return transaction;
+      },
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     (gm as any).resolveGameTokenAccounts = async () => ({
@@ -1038,6 +1047,7 @@ describe("GameManager.createGame", () => {
 
       const expectedSize50Players = 126 + 50 * 32;
       expect(capturedRentCalls).toContain(expectedSize50Players);
+      expect(signingCalls).toBe(2);
     } finally {
       if (originalContractVersion === undefined) {
         delete process.env["TIMBA_CONTRACT_VERSION"];
