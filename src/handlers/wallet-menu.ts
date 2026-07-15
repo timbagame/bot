@@ -190,8 +190,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     const overrideKey = telegramId.toString();
     const overrideKnownTokens = testKnownTokenOverrides.get(overrideKey);
     const knownTokens =
-      overrideKnownTokens ??
-      (tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : []);
+      overrideKnownTokens ?? (tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : []);
 
     const staleNative = wallet.peekCachedNativeBalance(telegramId);
     const staleTokens = wallet.peekCachedWalletTokenBalances(telegramId);
