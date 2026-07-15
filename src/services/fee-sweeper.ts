@@ -1,5 +1,9 @@
 import * as anchor from "@anchor-lang/core";
-import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddressSync,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { PublicKey, Keypair, sendAndConfirmRawTransaction, type Connection } from "@solana/web3.js";
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import type { Timba } from "../../idl/idlType";
@@ -349,11 +353,14 @@ async function processTokenFee(
     mint,
     adminBundle.root,
   );
+  if (!tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
+    throw new Error(`Timba only supports legacy SPL Token mints`);
+  }
   const gameVaultAta = getAssociatedTokenAddressSync(
     mint,
     gameVaultPda,
     true,
-    tokenProgramId,
+    TOKEN_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 
@@ -374,7 +381,7 @@ async function processTokenFee(
         gameToken: gameTokenPda,
         gameVault: gameVaultPda,
         gameTokenAccount: gameVaultAta,
-        tokenProgram: tokenProgramId,
+        tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       },
     } as any)

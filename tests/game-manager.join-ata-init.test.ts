@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { GameManager } from "../src/utils/game";
@@ -90,7 +90,7 @@ describe("GameManager join initializes missing ATAs", () => {
     const gameTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
     (gm as any).resolveGameTokenAccounts = async () => ({
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      tokenProgram: TOKEN_PROGRAM_ID,
       gameToken,
       gameVault,
       gameTokenAccount,
@@ -107,12 +107,12 @@ describe("GameManager join initializes missing ATAs", () => {
       playerTokenAccount,
       playerKp.publicKey,
       tokenMint,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     );
     expect(ataInstruction?.programId?.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     const tokenProgramKey = ataInstruction?.keys?.find(
-      (key) => key.pubkey?.toBase58?.() === TOKEN_2022_PROGRAM_ID.toBase58(),
+      (key) => key.pubkey?.toBase58?.() === TOKEN_PROGRAM_ID.toBase58(),
     );
     expect(tokenProgramKey).toBeDefined();
     expect(ataInstruction?.data).toEqual(expectedAtaInstruction.data);
@@ -132,7 +132,7 @@ describe("GameManager join initializes missing ATAs", () => {
       new PublicKey("6GyJRLV8EtRcR1xoss6aMBJXnPCxgoqBrC4UpAx2Jkgg"),
       playerKp.publicKey,
       tokenMint,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     );
 
@@ -233,7 +233,7 @@ describe("GameManager join initializes missing ATAs", () => {
     const gameTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = expectedAtaInstruction.keys[1]?.pubkey as PublicKey;
     (gm as any).resolveGameTokenAccounts = async () => ({
-      tokenProgram: TOKEN_2022_PROGRAM_ID,
+      tokenProgram: TOKEN_PROGRAM_ID,
       gameToken,
       gameVault,
       gameTokenAccount,

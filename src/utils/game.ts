@@ -10,6 +10,7 @@ import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@anchor-lang/core";
@@ -435,7 +436,6 @@ export class GameManager {
   };
   private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
-  private tokenProgramCache = new Map<string, PublicKey>();
   private inFlightGameCreations = new Map<string, number>();
   private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
@@ -857,19 +857,14 @@ export class GameManager {
   }
 
   private async resolveTokenProgramId(tokenMint: PublicKey): Promise<PublicKey> {
-    const cacheKey = tokenMint.toBase58();
-    const cached = this.tokenProgramCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
     const accountInfo = await this.getConnection().getAccountInfo(tokenMint);
     if (!accountInfo) {
-      throw new Error(`Token mint ${cacheKey} not found`);
+      throw new Error(`Token mint ${tokenMint.toBase58()} not found`);
     }
-
-    this.tokenProgramCache.set(cacheKey, accountInfo.owner);
-    return accountInfo.owner;
+    if (!accountInfo.owner.equals(TOKEN_PROGRAM_ID)) {
+      throw new Error(`Timba only supports legacy SPL Token mints`);
+    }
+    return TOKEN_PROGRAM_ID;
   }
 
   private async deriveAta(
