@@ -147,7 +147,9 @@ export const confirmTransactionWithRecovery = async (
           const resubmittedSignature = await resubmit(attempt, currentSignature);
 
           if (!resubmittedSignature || typeof resubmittedSignature !== "string") {
-            throw new Error("Resubmission callback did not return a transaction signature");
+            throw new Error("Resubmission callback did not return a transaction signature", {
+              cause: confirmError,
+            });
           }
 
           currentSignature = resubmittedSignature;

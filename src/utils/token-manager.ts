@@ -1134,7 +1134,7 @@ export class TokenManager {
       return knownByTicker;
     }
 
-    let normalizedMint: string | null = null;
+    let normalizedMint: string | null;
     try {
       normalizedMint = new PublicKey(candidate).toBase58();
     } catch {

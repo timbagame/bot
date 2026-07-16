@@ -325,7 +325,9 @@ const getCachedTokenMetadata = async (mint: string) => {
       setTokenMetadataCacheEntry(normalizedMint, entry);
       return entry;
     } catch (error) {
-      throw new Error(`Token metadata unavailable for ${normalizedMint}: ${String(error)}`);
+      throw new Error(`Token metadata unavailable for ${normalizedMint}: ${String(error)}`, {
+        cause: error,
+      });
     } finally {
       inflightTokenMetadataFetches.delete(normalizedMint);
     }
@@ -3377,7 +3379,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  let recipientTelegramId: bigint | null = null;
+  let recipientTelegramId: bigint | null;
   let recipientName = "User";
   let amountArgs = args;
 
@@ -4285,6 +4287,7 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
     console.error("Error generating leaderboard:", error);
     await handleCommandError(ctx, error, "leaderboard");
   }
+  return undefined;
 });
 
 registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
@@ -4331,6 +4334,7 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
     console.error("Error generating global leaderboard:", error);
     await handleCommandError(ctx, error, "globalboard");
   }
+  return undefined;
 });
 
 // ================================
@@ -4875,7 +4879,9 @@ const buildAdminIntegratorConfig = async ({
   } catch (error) {
     const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
     if (!Number.isFinite(fallback) || fallback <= 0) {
-      throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.");
+      throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.", {
+        cause: error,
+      });
     }
     rentReserveLamports = fallback;
   }

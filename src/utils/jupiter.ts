@@ -386,7 +386,7 @@ export class JupiterClient {
       return { raw: data, normalized, referralApplied };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
-      throw new Error(`Failed to request Jupiter order: ${error.message}`);
+      throw new Error(`Failed to request Jupiter order: ${error.message}`, { cause: error });
     }
   }
 
@@ -503,7 +503,7 @@ export class JupiterClient {
       return data;
     } catch (error: any) {
       console.error("Error requesting Jupiter build:", error);
-      throw new Error(`Failed to request Jupiter build: ${error.message}`);
+      throw new Error(`Failed to request Jupiter build: ${error.message}`, { cause: error });
     }
   }
 
@@ -550,7 +550,7 @@ export class JupiterClient {
       return data;
     } catch (error: any) {
       console.error("Error executing Jupiter order:", error);
-      throw new Error(`Failed to execute Jupiter order: ${error.message}`);
+      throw new Error(`Failed to execute Jupiter order: ${error.message}`, { cause: error });
     }
   }
 

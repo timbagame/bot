@@ -309,8 +309,6 @@ describe("GameManager confirm/reload helpers", () => {
 
     let attempts = 0;
 
-    let capturedError: Error | null = null;
-
     try {
       await (gm as any).confirmTransactionWithRecovery(
         "SIG-RESUBMIT-FAIL",
@@ -326,14 +324,12 @@ describe("GameManager confirm/reload helpers", () => {
       );
       throw new Error("Expected failure");
     } catch (error: any) {
-      capturedError = error;
       expect(error.message).toMatch(/transaction confirmation timeout/);
       expect(error.cause).toBeInstanceOf(Error);
       expect((error.cause as Error).message).toMatch(/resubmit attempt/);
     }
 
     expect(attempts).toBe(TRANSACTION_RESUBMIT_ATTEMPTS);
-    expect(capturedError).not.toBeNull();
   });
 
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {

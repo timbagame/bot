@@ -335,7 +335,7 @@ test("getGamesExpiringBefore can paginate large batches by excluding processed e
 
   const seen = new Set<string>();
   const limit = 15;
-  let batch: GameData[] = [];
+  let batch: GameData[];
   const excludes: string[] = [];
   do {
     batch = db.getGamesExpiringBefore(base + 1000, limit, excludes);

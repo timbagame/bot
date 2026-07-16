@@ -47,7 +47,7 @@ async function withTimeout<T>(
     return await factory(ac.signal);
   } catch (error) {
     if ((error as any)?.name === "AbortError" || (error as any)?.code === "ABORT_ERR") {
-      throw new Error("timeout");
+      throw new Error("timeout", { cause: error });
     }
     throw error;
   } finally {

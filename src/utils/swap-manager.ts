@@ -1185,7 +1185,9 @@ export class SwapManager {
 
       return signature;
     } catch (error: any) {
-      throw new Error(`Failed to execute Jupiter transaction: ${error?.message || error}`);
+      throw new Error(`Failed to execute Jupiter transaction: ${error?.message || error}`, {
+        cause: error,
+      });
     }
   }
 

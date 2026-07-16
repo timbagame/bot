@@ -75,7 +75,7 @@ export class OracleClient {
       };
     } catch (error) {
       console.error("❌ Error requesting random hash from oracle:", error);
-      throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
+      throw new Error(`Oracle API unavailable: ${(error as Error).message}`, { cause: error });
     }
   }
 

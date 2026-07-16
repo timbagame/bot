@@ -658,6 +658,7 @@ export class WalletManager {
     } catch (error) {
       throw new Error(
         "Failed to load admin keypair. Make sure admin-keypair.json exists in the project root.",
+        { cause: error },
       );
     }
   }
@@ -1359,7 +1360,7 @@ export class WalletManager {
       }),
     );
 
-    let balanceNumber = 0;
+    let balanceNumber: number;
     let truncated = false;
     if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
       balanceNumber = Number.MAX_SAFE_INTEGER;
@@ -1557,6 +1558,7 @@ export class WalletManager {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
       throw new Error(
         `Failed to get token metadata: ${error instanceof Error ? error.message : "Unknown error"}`,
+        { cause: error },
       );
     }
   }
@@ -1716,7 +1718,7 @@ export class WalletManager {
     try {
       accountInfo = await getAccount(this.connection, wsolAta, "confirmed", TOKEN_PROGRAM_ID);
     } catch (error) {
-      throw new Error("No WSOL account found to unwrap.");
+      throw new Error("No WSOL account found to unwrap.", { cause: error });
     }
 
     const availableLamports = Number(accountInfo.amount);
@@ -2536,10 +2538,11 @@ export class WalletManager {
       ) {
         throw new Error(
           "Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment.",
+          { cause: error },
         );
       }
 
-      throw new Error(`Failed to send transaction: ${error.message}`);
+      throw new Error(`Failed to send transaction: ${error.message}`, { cause: error });
     }
   }
 

@@ -1793,8 +1793,8 @@ export class GameManager {
       };
     }
 
-    let updatedTokenBalance = 0;
-    let updatedSolBalance = 0;
+    let updatedTokenBalance: number;
+    let updatedSolBalance: number;
 
     const retryDelays = getWrapBalanceRetryDelays();
 
@@ -3801,6 +3801,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
             if (isAtaInitFailure) {
               throw new Error(
                 "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees.",
+                { cause: joinError },
               );
             }
 
@@ -4352,6 +4353,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             if (isAtaInitFailure) {
               throw new Error(
                 "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees.",
+                { cause: joinError },
               );
             }
 
@@ -4602,6 +4604,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     } catch (error: any) {
       throw new Error(
         `Failed to fetch game account for ${gameAddress}: ${error?.message ?? error}`,
+        { cause: error },
       );
     }
 
@@ -4853,6 +4856,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           if (isAtaInitFailure) {
             throw new Error(
               "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees.",
+              { cause: joinError },
             );
           }
 
@@ -5623,7 +5627,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       return existing;
     }
 
-    let gameAccount: any | null = null;
+    let gameAccount: any | null;
     try {
       const gamePda = new PublicKey(gameAddress);
       const accountApi = this.program.account.game as any;
@@ -6192,7 +6196,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const dbParticipants = this.getGamePlayers(gameAddress);
     const participantTelegramIds = new Set(dbParticipants);
     const onChainTickets = Number(gameAccount.ticketsCount ?? 0);
-    let creatorPubkey: PublicKey | null = null;
+    let creatorPubkey: PublicKey | null;
     let creatorTelegramId: string | null = null;
 
     try {

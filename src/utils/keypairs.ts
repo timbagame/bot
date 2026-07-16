@@ -30,7 +30,7 @@ export const loadKeypairFromPath = (filePath: string): Keypair => {
     const secret = readSecretKey(resolvedPath);
     return Keypair.fromSecretKey(secret);
   } catch (error) {
-    throw new Error(`Failed to load keypair from ${resolvedPath}: ${error}`);
+    throw new Error(`Failed to load keypair from ${resolvedPath}: ${error}`, { cause: error });
   }
 };
 
@@ -67,7 +67,9 @@ export const resolveKeypairFromEnv = (
     );
     return keypair;
   } catch (error) {
-    throw new Error(`${roleDescription}: failed to load keypair from ${configuredPath}: ${error}`);
+    throw new Error(`${roleDescription}: failed to load keypair from ${configuredPath}: ${error}`, {
+      cause: error,
+    });
   }
 };
 
