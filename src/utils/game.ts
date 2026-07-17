@@ -2147,6 +2147,11 @@ export class GameManager {
           })
         : [];
 
+      this.gameDb.saveGameParticipantAddresses?.(
+        gamePda.toBase58(),
+        participantAddresses.slice(0, currentTickets),
+      );
+
       return {
         currentTickets,
         maxTickets,
@@ -2182,7 +2187,8 @@ export class GameManager {
     const gameAddress = gamePda.toBase58();
     const gameData = this.gameDb.getGame(gameAddress);
     const participants = this.getGamePlayers(gameAddress);
-    const currentTickets = participants.length;
+    const participantAddresses = this.gameDb.getGameParticipantAddresses?.(gameAddress) ?? [];
+    const currentTickets = Math.max(participants.length, participantAddresses.length);
 
     const parsedMax = Number(gameData?.max_players);
     const maxTickets =
@@ -2227,6 +2233,7 @@ export class GameManager {
       totalPot: totalPot ?? baseAmountLamports,
       expirationInfo: "",
       tokenMint: gameData?.token_mint || undefined,
+      participantAddresses,
     };
   }
 

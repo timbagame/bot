@@ -38,6 +38,43 @@ function makeCtx() {
 }
 
 describe("GameManager participants rendering", () => {
+  test("keeps web wallet participants in completed games", async () => {
+    reset();
+    const webWallet = Keypair.generate().publicKey.toBase58();
+    const telegramWallet = Keypair.generate().publicKey.toBase58();
+    const gm = GameManager.getInstance(makeProgram({}), makeWallet(), {
+      getGameParticipants: () => ["222"],
+      getGameParticipantsPreview: () => ["222"],
+      getGameParticipantAddresses: () => [webWallet, telegramWallet],
+      getGame: () => ({
+        token_mint: "M",
+        token_ticker: "TOK",
+        max_players: 2,
+        min_players: 2,
+      }),
+      getPlayerTelegramId: (publicKey: string) => (publicKey === telegramWallet ? "222" : null),
+      saveUsernameMapping: () => {},
+      findTelegramIdByNormalizedUsername: () => null,
+    } as any);
+    const ctx = makeCtx();
+
+    const res = await gm.formatGameMessage(
+      ctx,
+      Keypair.generate().publicKey,
+      "coinflip",
+      1_000_000_000,
+      "Wallet creator",
+      "Completed",
+      "TOK",
+      telegramWallet,
+      2_000_000_000,
+    );
+
+    expect(res.messageText).toContain(`Wallet ${webWallet.slice(0, 4)}…${webWallet.slice(-4)}`);
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user222"));
+    expect(res.messageText).toContain("2/2 tickets");
+  });
+
   test("shows participant usernames for active game", async () => {
     reset();
     const program = makeProgram({

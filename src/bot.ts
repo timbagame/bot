@@ -4402,6 +4402,24 @@ const handlePlayerEvent = async (
     const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
 
     if (slotWasUpdated) {
+      if (eventName === "PlayerJoined") {
+        gameDb.recordGameParticipantJoined(
+          gameAddress,
+          playerAddress,
+          event.ticketIndex,
+          event.ticketsCount,
+        );
+      } else if (eventName === "PlayerUnjoined") {
+        const unjoinedEvent = event as PlayerUnjoinedEvent;
+        gameDb.recordGameParticipantUnjoined(
+          gameAddress,
+          playerAddress,
+          event.ticketIndex,
+          event.ticketsCount,
+          unjoinedEvent.movedParticipant?.toString(),
+        );
+      }
+
       const targets = getGameMessageTargets(gameAddress);
 
       if (targets.length > 0) {

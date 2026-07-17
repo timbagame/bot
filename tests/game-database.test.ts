@@ -19,6 +19,13 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   expect(game.creator_telegram_id).toBe("tg_creator");
   expect(db.getCreatorTelegramId("gameA")).toBe("tg_creator");
 
+  db.recordGameParticipantJoined("gameA", "pub_creator", 0, 1);
+  db.recordGameParticipantJoined("gameA", "pub_p2", 1, 2);
+  expect(db.getGameParticipantAddresses("gameA")).toEqual(["pub_creator", "pub_p2"]);
+  db.recordGameParticipantJoined("gameA", "pub_p3", 2, 3);
+  db.recordGameParticipantUnjoined("gameA", "pub_p2", 1, 2, "pub_p3");
+  expect(db.getGameParticipantAddresses("gameA")).toEqual(["pub_creator", "pub_p3"]);
+
   // Save message/chat ids - chat_id should be preserved from creation
   db.saveGameMessage("gameA", 777, 999);
   const withMsg = db.getGame("gameA")!;

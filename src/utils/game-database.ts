@@ -49,7 +49,8 @@ export class GameDatabase extends BaseDatabase {
           min_players INTEGER,
           last_slot TEXT,
           last_slot_timestamp INTEGER,
-          total_amount INTEGER
+          total_amount INTEGER,
+          participant_addresses TEXT
         )`,
         `CREATE TABLE IF NOT EXISTS player_mappings (
           public_key TEXT PRIMARY KEY,
@@ -152,6 +153,76 @@ export class GameDatabase extends BaseDatabase {
       [gameAddress],
       "getting game",
     );
+  }
+
+  public getGameParticipantAddresses(gameAddress: string): string[] {
+    const game = this.get<{ participant_addresses: string | null }>(
+      "SELECT participant_addresses FROM games WHERE game_address = ?",
+      [gameAddress],
+      "getting game participant addresses",
+    );
+
+    if (!game?.participant_addresses) {
+      return [];
+    }
+
+    try {
+      const addresses = JSON.parse(game.participant_addresses);
+      return Array.isArray(addresses)
+        ? addresses.filter((address): address is string => typeof address === "string" && !!address)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  public saveGameParticipantAddresses(gameAddress: string, addresses: string[]): void {
+    const normalized = [
+      ...new Set(addresses.filter((address) => typeof address === "string" && !!address.trim())),
+    ];
+    this.run(
+      "UPDATE games SET participant_addresses = ? WHERE game_address = ?",
+      [JSON.stringify(normalized), gameAddress],
+      "saving game participant addresses",
+    );
+  }
+
+  public recordGameParticipantJoined(
+    gameAddress: string,
+    playerAddress: string,
+    ticketIndex: number,
+    ticketsCount: number,
+  ): void {
+    const addresses = this.getGameParticipantAddresses(gameAddress).filter(
+      (address) => address !== playerAddress,
+    );
+    const index = Number.isInteger(ticketIndex)
+      ? Math.min(Math.max(ticketIndex, 0), addresses.length)
+      : addresses.length;
+    addresses.splice(index, 0, playerAddress);
+    this.saveGameParticipantAddresses(gameAddress, addresses.slice(0, ticketsCount));
+  }
+
+  public recordGameParticipantUnjoined(
+    gameAddress: string,
+    playerAddress: string,
+    ticketIndex: number,
+    ticketsCount: number,
+    movedParticipant?: string | null,
+  ): void {
+    const addresses = this.getGameParticipantAddresses(gameAddress);
+    const index = Number.isInteger(ticketIndex) && ticketIndex >= 0 ? ticketIndex : -1;
+
+    if (movedParticipant && index < addresses.length) {
+      addresses[index] = movedParticipant;
+    } else {
+      const playerIndex = addresses.indexOf(playerAddress);
+      if (playerIndex >= 0) {
+        addresses.splice(playerIndex, 1);
+      }
+    }
+
+    this.saveGameParticipantAddresses(gameAddress, addresses.slice(0, ticketsCount));
   }
 
   public completeGame(
@@ -660,6 +731,14 @@ export class GameDatabase extends BaseDatabase {
           "ALTER TABLE games ADD COLUMN total_amount INTEGER",
           [],
           "adding total_amount column to games",
+        );
+      }
+
+      if (!columnNames.has("participant_addresses")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN participant_addresses TEXT",
+          [],
+          "adding participant_addresses column to games",
         );
       }
 

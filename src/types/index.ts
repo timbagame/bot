@@ -30,6 +30,7 @@ export interface GameData {
   timeout_seconds?: number;
   expires_at?: number;
   total_amount?: number;
+  participant_addresses?: string | null;
 }
 
 export interface PlayerMapping {
