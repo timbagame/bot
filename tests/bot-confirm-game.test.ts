@@ -200,7 +200,7 @@ test("confirm_game replies directly when confirmation message is missing and cre
   };
 
   botModule.__test_setGameManager({
-    createGame: async () => ({ success: false, error: "No liquidity" }),
+    createGame: async () => ({ success: false, error: "❌ No liquidity" }),
     createGameMessage: async () => {},
     updateGameMessageFromData: async () => {},
   } as any);

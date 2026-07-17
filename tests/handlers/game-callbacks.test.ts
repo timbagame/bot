@@ -10,19 +10,9 @@ import {
   __test_setGameDatabase,
   __test_setGameManager,
 } from "../../src/bot";
-import { createGameCallbacksModule, ensureErrorIcon } from "../../src/handlers/game-callbacks";
+import { createGameCallbacksModule } from "../../src/handlers/game-callbacks";
 import { GAME_SETUP_COPY } from "../../src/handlers/game-setup";
 import type { GameCallbacksModuleDeps } from "../../src/handlers/game-callbacks";
-
-describe("ensureErrorIcon", () => {
-  test("adds an icon when the message has none", () => {
-    expect(ensureErrorIcon("Something went wrong")).toBe("❌ Something went wrong");
-  });
-
-  test("does not duplicate an existing icon", () => {
-    expect(ensureErrorIcon("❌ Something went wrong")).toBe("❌ Something went wrong");
-  });
-});
 
 const makeDeps = () => {
   const wrapCallbackHandler: GameCallbacksModuleDeps["wrapCallbackHandler"] =

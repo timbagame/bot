@@ -89,9 +89,6 @@ export type GameCallbacksModuleDeps = {
   getChatGameSettings?: (chatId: number) => ChatGameSettings | null;
 };
 
-export const ensureErrorIcon = (message: string): string =>
-  message.trimStart().startsWith("❌") ? message : `❌ ${message}`;
-
 type HandleJoinGameFn = (
   ctx: Context,
   gamePda: PublicKey,
@@ -1457,11 +1454,11 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                   logLabel: "confirm_game_error",
                 } as const;
 
-                const rawError = result.error || "Failed to create game";
+                const rawError = result.error || "❌ Failed to create game";
                 const hasBalanceInfo = containsBalanceInfo(rawError);
                 const displayText = hasBalanceInfo
                   ? "❌ Game creation failed (insufficient funds). Please add more funds and try again."
-                  : ensureErrorIcon(rawError);
+                  : rawError;
 
                 await respondWithMenu(
                   ctx,
