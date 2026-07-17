@@ -718,12 +718,11 @@ describe("GameManager.createGame", () => {
       gameTokenAccount,
     });
     (gm as any).deriveAta = async () => creatorTokenAccount;
-    // Derivation + confirmation + auto-join patched
+    // Derivation and confirmation patched
     const pda = new PublicKey("11111111111111111111111111111111");
     const original = (PDAManager as any).getGamePDA;
     (PDAManager as any).getGamePDA = () => pda;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
-    (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
 
     const res = await gm.createGame(
       "coinflip",
@@ -916,7 +915,6 @@ describe("GameManager.createGame", () => {
     });
     (gm as any).deriveAta = async () => Keypair.generate().publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
-    (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
 
     const tokenMint = Keypair.generate().publicKey.toBase58();
     const creationArgs: Parameters<GameManager["createGame"]> = [
@@ -1019,7 +1017,6 @@ describe("GameManager.createGame", () => {
     });
     (gm as any).deriveAta = async () => Keypair.generate().publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
-    (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
     const originalGetGamePda = (PDAManager as any).getGamePDA;
     (PDAManager as any).getGamePDA = () => new PublicKey("11111111111111111111111111111111");
 
@@ -1057,7 +1054,6 @@ describe("GameManager.createGame", () => {
       (gm2 as any).resolveGameTokenAccounts = (gm as any).resolveGameTokenAccounts;
       (gm2 as any).deriveAta = (gm as any).deriveAta;
       (gm2 as any).confirmTransactionWithRecovery = (gm as any).confirmTransactionWithRecovery;
-      (gm2 as any).handleGameAutoJoinPure = (gm as any).handleGameAutoJoinPure;
 
       // Create game with 50 players
       await gm2.createGame(
