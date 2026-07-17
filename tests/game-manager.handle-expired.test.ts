@@ -155,6 +155,54 @@ describe("GameManager.handleExpiredGame", () => {
     });
   });
 
+  test("coinflip below minimum automatically unjoins bot players from a mixed-client game", async () => {
+    resetGM();
+    const gameAddress = new PublicKey("BPFLoader7111111111111111111111111111111111");
+    const webCreator = new PublicKey("BPFLoader8111111111111111111111111111111111");
+    const botPlayer = new PublicKey("BPFLoader9111111111111111111111111111111111");
+    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+
+    (gm as any).analyzePlayerKeys = () => ({
+      available: [{ pubkey: botPlayer, telegramId: "42", isCreator: false }],
+      unavailable: [webCreator.toBase58()],
+      nonCreators: [{ pubkey: botPlayer, telegramId: "42", isCreator: false }],
+      creator: undefined,
+      canCompleteCleanup: false,
+      total: 2,
+      onChainTickets: 2,
+      onChainParticipants: 2,
+      dbParticipantCount: 1,
+      unmatchedParticipants: [webCreator.toBase58()],
+    });
+    (gm as any).reconcilePendingParticipants = async () => {};
+
+    let unjoinedPlayers: Array<{ pubkey: PublicKey; telegramId: string }> = [];
+    (gm as any).unjoinPlayers = async (_game: PublicKey, _account: any, players: any[]) => {
+      unjoinedPlayers = players;
+      return players.length;
+    };
+    (gm as any).program = {
+      account: { game: { fetch: async () => ({ ticketsCount: 1 }) } },
+    } as any;
+
+    const now = Math.floor(Date.now() / 1000);
+    const result = await gm.handleExpiredGame(gameAddress, {
+      gameType: { coinflip: {} },
+      createdAt: now - 600,
+      timeout: 60,
+      ticketsCount: 2,
+      minTickets: 3,
+      maxTickets: 4,
+      ticketAmount: 50,
+      creator: webCreator,
+    });
+
+    expect(unjoinedPlayers).toHaveLength(1);
+    expect(unjoinedPlayers[0]?.pubkey.equals(botPlayer)).toBeTrue();
+    expect(unjoinedPlayers[0]?.telegramId).toBe("42");
+    expect(result).toBe(false);
+  });
+
   test("coinflip with minimum players waits until buffer elapses", async () => {
     resetGM();
     const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
