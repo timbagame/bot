@@ -182,6 +182,7 @@ export interface AuthorizationResult {
 export interface OracleApiResponse {
   success: boolean;
   randomHash?: string;
+  oracleOperator?: string;
   secretKey?: string;
   error?: string;
 }

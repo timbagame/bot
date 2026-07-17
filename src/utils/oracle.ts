@@ -51,7 +51,7 @@ export class OracleClient {
   /**
    * Request a random hash from the oracle API for game creation
    */
-  public async generateGameSecrets(): Promise<{ randomHash: string }> {
+  public async generateGameSecrets(): Promise<{ randomHash: string; oracleOperator: string }> {
     try {
       const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
         method: "POST",
@@ -64,7 +64,7 @@ export class OracleClient {
 
       const data = (await response.json()) as OracleApiResponse;
 
-      if (!data.success || !data.randomHash) {
+      if (!data.success || !data.randomHash || !data.oracleOperator) {
         throw new Error(data.error || "Failed to generate random hash");
       }
 
@@ -72,6 +72,7 @@ export class OracleClient {
 
       return {
         randomHash: data.randomHash,
+        oracleOperator: data.oracleOperator,
       };
     } catch (error) {
       console.error("❌ Error requesting random hash from oracle:", error);

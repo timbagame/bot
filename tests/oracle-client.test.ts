@@ -42,12 +42,17 @@ describe("OracleClient", () => {
     globalThis.fetch = async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ success: true, randomHash: "a1b2c3" }),
+      json: async () => ({
+        success: true,
+        randomHash: "a1b2c3",
+        oracleOperator: PublicKey.default.toBase58(),
+      }),
     });
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
     const res = await oc.generateGameSecrets();
     expect(res.randomHash).toBe("a1b2c3");
+    expect(res.oracleOperator).toBe(PublicKey.default.toBase58());
   });
 
   test("generateGameSecrets throws on bad response", async () => {

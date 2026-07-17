@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
 import {
@@ -36,13 +36,19 @@ function makeProgram(connection = createConnectionStub()) {
       initializeGame: (_cfg: any, _hash: any) => ({
         accounts: (accs: any) => {
           captures["initializeGameAccounts"] = accs;
-          return { instruction: async () => ({}) };
+          return {
+            instruction: async () =>
+              new TransactionInstruction({ programId, keys: [], data: Buffer.alloc(0) }),
+          };
         },
       }),
       joinGame: () => ({
         accounts: (accs: any) => {
           captures["joinGameAccounts"] = accs;
-          return { instruction: async () => ({}) };
+          return {
+            instruction: async () =>
+              new TransactionInstruction({ programId, keys: [], data: Buffer.alloc(0) }),
+          };
         },
       }),
     },
@@ -570,6 +576,7 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "0".repeat(64),
+        oracleOperator: PublicKey.default.toBase58(),
       }),
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
@@ -638,6 +645,7 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "1".repeat(64),
+        oracleOperator: PublicKey.default.toBase58(),
       }),
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
@@ -689,7 +697,10 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(program, wallet, db);
     (gm as any).oracleClient = {
       isHealthy: async () => true,
-      generateGameSecrets: async () => ({ randomHash: "deadbeef" }),
+      generateGameSecrets: async () => ({
+        randomHash: "deadbeef",
+        oracleOperator: PublicKey.default.toBase58(),
+      }),
       signGameTransaction: async (transaction: any) => {
         signingCalls += 1;
         return transaction;
@@ -737,6 +748,7 @@ describe("GameManager.createGame", () => {
 
     const captures = (program as any).__captures;
     const accounts = captures["initializeGameAccounts"];
+    expect(captures["joinGameAccounts"].oracleOperator).toBeUndefined();
     expect(accounts).toBeDefined();
     expect(accounts.gameTokenCtx).toBeDefined();
     const ctx = accounts.gameTokenCtx;
@@ -809,7 +821,10 @@ describe("GameManager.createGame", () => {
     };
     (gm as any).oracleClient = {
       isHealthy: async () => true,
-      generateGameSecrets: async () => ({ randomHash: "cafebabe" }),
+      generateGameSecrets: async () => ({
+        randomHash: "cafebabe",
+        oracleOperator: PublicKey.default.toBase58(),
+      }),
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
@@ -886,7 +901,10 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(program, wallet, db);
     (gm as any).oracleClient = {
       isHealthy: async () => true,
-      generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
+      generateGameSecrets: async () => ({
+        randomHash: "a".repeat(64),
+        oracleOperator: PublicKey.default.toBase58(),
+      }),
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
@@ -983,7 +1001,10 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(program, wallet, db);
     (gm as any).oracleClient = {
       isHealthy: async () => true,
-      generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
+      generateGameSecrets: async () => ({
+        randomHash: "a".repeat(64),
+        oracleOperator: PublicKey.default.toBase58(),
+      }),
       signGameTransaction: async (transaction: any) => {
         signingCalls += 1;
         return transaction;

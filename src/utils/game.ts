@@ -3504,6 +3504,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       let randomHash: string;
       let randomHashBuffer: Buffer;
+      let oracleOperator: PublicKey;
 
       if (!isOracleHealthy) {
         return {
@@ -3515,6 +3516,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         const secretsResponse = await this.oracleClient.generateGameSecrets();
         randomHash = secretsResponse.randomHash;
         randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
+        oracleOperator = new PublicKey(secretsResponse.oracleOperator);
       }
 
       // Create game
@@ -3540,30 +3542,27 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         tokenAccounts.tokenProgram,
       );
       const oraclePda = this.getOraclePda();
+      const usesAtomicCreatorJoin = gameType === "coinflip";
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
           game: gamePda,
           creator: playerKp.publicKey,
           oracle: oraclePda,
-          // This must be distinct from the writable creator. Solana merges
-          // privileges for duplicate account keys, and the oracle rejects a
-          // writable operator signer before replacing it with its own key.
-          oracleOperator: Keypair.generate().publicKey,
+          oracleOperator: usesAtomicCreatorJoin ? oracleOperator : Keypair.generate().publicKey,
           gameTokenCtx,
           creatorTokenAccount,
           systemProgram: SystemProgram.programId,
         } as any)
         .instruction();
 
-      const usesAtomicCreatorJoin = gameType === "coinflip" && !isPrivate;
       let creationInstructions: TransactionInstruction[] = [gameInstruction];
       if (usesAtomicCreatorJoin) {
         const { accounts: joinAccounts, setupInstructions } = await this.buildJoinAccounts(
           gamePda,
           { tokenMint },
           playerKp.publicKey,
-          playerKp.publicKey,
+          isPrivate ? oracleOperator : undefined,
         );
         const joinInstruction = await this.program.methods
           .joinGame()
@@ -3578,6 +3577,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           feePayer: playerKp.publicKey,
           ...latestBlockhash,
         }).add(...creationInstructions);
+        if (usesAtomicCreatorJoin) unsigned.partialSign(playerKp);
         const oracleSigned = await this.oracleClient.signGameTransaction(unsigned);
         return this.wallet.sendPartiallySignedTransaction(
           oracleSigned,
@@ -3621,15 +3621,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           lastVerifiedAt: Date.now(),
         });
         autoJoinResult = { success: true };
-      } else if (gameType === "coinflip") {
-        autoJoinResult = await this.handleGameAutoJoinPure(
-          gamePda,
-          playerKp,
-          telegramId,
-          creatorPubkey,
-          gameType,
-          chatId || 0,
-        );
       } else {
         debugLog(
           `🎁 ${
@@ -3667,196 +3658,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
     }
   }
 
-  private async handleGameAutoJoinPure(
-    gamePda: PublicKey,
-    playerKp: Keypair,
-    telegramId: bigint,
-    creatorPubkey: string,
-    gameType: string,
-    chatId?: number,
-  ): Promise<{ success: boolean; error?: string }> {
-    debugLog(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
-
-    try {
-      let gameAccount = await this.program.account.game.fetch(gamePda);
-      const gameAddress = gamePda.toBase58();
-      const telegramIdStr = telegramId.toString();
-      let joinTx: string | undefined;
-      let joinConfirmed = false;
-      let pendingRecorded = false;
-
-      if (gameAccount.isPrivate) {
-        debugLog(`🔐 Game is private, using authorized join...`);
-        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
-        if (!result.success) {
-          return {
-            success: false,
-            error: result.error || "Failed to join private game",
-          };
-        }
-        joinTx = result.tx;
-        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
-          status: "pending",
-          joinSignature: joinTx ?? null,
-          lastVerifiedAt: null,
-        });
-        pendingRecorded = true;
-        joinConfirmed = true;
-      } else {
-        debugLog(`🌐 Game is public, using regular join...`);
-        const maxJoinAttempts = 2;
-
-        for (let attempt = 0; attempt < maxJoinAttempts; attempt++) {
-          let setupInstructions: TransactionInstruction[] = [];
-          let joinInstructions: TransactionInstruction[] = [];
-          try {
-            if (attempt > 0) {
-              gameAccount = await this.program.account.game.fetch(gamePda);
-            }
-
-            const { accounts: joinAccounts, setupInstructions: setupIxs = [] } =
-              await this.buildJoinAccounts(
-                gamePda,
-                gameAccount,
-                playerKp.publicKey,
-                // Provide a signer for the optional oracleOperator slot to avoid
-                // Anchor inserting the default pubkey as a required (unsigned) signer
-                // which triggers signature verification failures on public joins.
-                playerKp.publicKey,
-              );
-            setupInstructions = setupIxs;
-            const joinInstruction = await this.program.methods
-              .joinGame()
-              .accounts(joinAccounts as any)
-              .instruction();
-            joinInstructions = [...setupInstructions, joinInstruction];
-
-            joinTx = await this.wallet.sendTransaction(joinInstructions, [playerKp]);
-
-            this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
-              status: "pending",
-              joinSignature: joinTx ?? null,
-              lastVerifiedAt: null,
-            });
-            pendingRecorded = true;
-
-            joinTx = await this.confirmTransactionWithRecovery(
-              joinTx,
-              gamePda,
-              "Player join",
-              playerKp.publicKey,
-              async () => {
-                const resendJoinTransaction = async () => {
-                  return await this.sendInstructionsWithFallback(
-                    joinInstructions,
-                    [playerKp],
-                    "Player join transaction",
-                  );
-                };
-
-                const refreshedSignature = await resendJoinTransaction();
-
-                this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
-                  status: "pending",
-                  joinSignature: refreshedSignature ?? null,
-                  lastVerifiedAt: null,
-                });
-
-                return refreshedSignature ?? joinTx;
-              },
-            );
-
-            joinConfirmed = true;
-            break;
-          } catch (joinError: any) {
-            const message = joinError?.message ?? "";
-            const normalized = message.toLowerCase();
-            const needsAtaCreation = (setupInstructions ?? []).length > 0;
-            const isAtaInitFailure =
-              needsAtaCreation &&
-              (normalized.includes("associated token account") ||
-                normalized.includes("accountnotinitialized") ||
-                normalized.includes("uninitialized"));
-            const isTimeout =
-              normalized.includes("timeout") || normalized.includes("not confirmed");
-            const isExpiration =
-              normalized.includes("expired before confirmation") ||
-              normalized.includes("last valid block height");
-            const isLastAttempt = attempt === maxJoinAttempts - 1;
-
-            if ((isTimeout || isExpiration) && !isLastAttempt) {
-              const alreadyJoined = await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
-                () => false,
-              );
-
-              if (alreadyJoined) {
-                joinConfirmed = true;
-                break;
-              }
-
-              console.warn(
-                `⚠️ Player join attempt ${attempt + 1} for ${gamePda.toBase58()} ` +
-                  `timed out or expired; retrying with a fresh blockhash.`,
-              );
-              continue;
-            }
-
-            if (isAtaInitFailure) {
-              throw new Error(
-                "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees.",
-                { cause: joinError },
-              );
-            }
-
-            throw joinError;
-          }
-        }
-      }
-
-      if (joinConfirmed) {
-        const verified = await this.verifyParticipantJoin(
-          gamePda,
-          playerKp.publicKey,
-          telegramIdStr,
-          { joinSignature: joinTx ?? null },
-        );
-        if (verified) {
-          return { success: true };
-        }
-
-        return {
-          success: false,
-          error:
-            "Join transaction confirmed but participant record is still syncing. We'll retry automatically.",
-        };
-      } else {
-        if (pendingRecorded) {
-          this.gameDb.removeGameParticipant(gameAddress, telegramIdStr);
-        }
-        return {
-          success: false,
-          error: "Failed to confirm auto-join transaction",
-        };
-      }
-    } catch (joinError: any) {
-      try {
-        this.gameDb.removeGameParticipant(gamePda.toBase58(), telegramId.toString());
-      } catch (_) {
-        // ignore cleanup errors
-      }
-      const errorMsg = await logAndFormatError(
-        joinError,
-        `auto-joining creator to ${gameType} game`,
-        this.wallet,
-      );
-      return {
-        success: false,
-        error: `Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
-      };
-    }
-  }
-
-  // ================================
   // HELPER METHODS
   // ================================
 
