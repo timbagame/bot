@@ -864,7 +864,7 @@ const renderTradeQuoteError = async ({ error, retryCallback }: TradeQuoteErrorPa
   const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
   const userFriendly = await formatUserFriendlyError(error, wallet);
   return {
-    text: `❌ <b>Quote Error</b>\n\n${userFriendly}`,
+    text: userFriendly,
     keyboard,
   };
 };
@@ -4750,7 +4750,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       console.error("Swap transaction failed:", swapError);
       const userFriendlyError = await formatUserFriendlyError(swapError, wallet);
       await respondWithMenu(ctx, {
-        text: `❌ <b>Swap Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
+        text: escapeHtml(userFriendlyError),
         parseMode: "HTML",
         keyboard: createBackToWalletKeyboard(),
       });

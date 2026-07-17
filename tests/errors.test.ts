@@ -81,6 +81,14 @@ test("parseTransactionError returns default message for unknown errors", async (
   expect(message).toContain("Please try again");
 });
 
+test("parseTransactionError owns the complete wrap failure message", async () => {
+  const message = await parseTransactionError(
+    new Error("Failed to wrap SOL automatically: RPC unavailable"),
+  );
+  expect(message).toStartWith("🪙 Failed to wrap SOL automatically.");
+  expect(message).not.toContain("❌ ❌");
+});
+
 test("parseTransactionError handles 'no record of prior credit' Solana error", async () => {
   const error = new Error(
     "Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.",

@@ -1740,7 +1740,11 @@ export class GameManager {
       const wrapSignature = await this.wallet.wrapSol(telegramId, deficit);
       debugLog(`✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`);
     } catch (error) {
-      const friendly = await formatUserFriendlyError(error, this.wallet);
+      const detail = error instanceof Error ? error.message : String(error);
+      const friendly = await formatUserFriendlyError(
+        new Error(`Failed to wrap SOL automatically: ${detail}`),
+        this.wallet,
+      );
       console.error(
         `❌ Wrap failed for ${context}: ${friendly}. deficit=${this.wallet.formatSolBalance(
           deficit,
@@ -1748,9 +1752,7 @@ export class GameManager {
       );
       return {
         success: false,
-        error: `Failed to wrap SOL automatically before game ${
-          context === "create" ? "creation" : "join"
-        }.\n${friendly}`,
+        error: friendly,
       };
     }
 
@@ -3175,15 +3177,8 @@ export class GameManager {
 
       return messageText;
     } catch (error: any) {
-      const userFriendlyError = await logAndFormatError(
-        error,
-        `fetching game info for ${gamePda.toBase58()}`,
-        this.wallet,
-      );
-      return (
-        "⚠️ Unable to load this game right now. Please try again in a moment.\n\n" +
-        userFriendlyError
-      );
+      console.error(`Error fetching game info for ${gamePda.toBase58()}:`, error);
+      return "⚠️ Unable to load this game right now. Please try again in a moment.";
     }
   }
 

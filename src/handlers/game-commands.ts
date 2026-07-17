@@ -290,7 +290,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       );
 
       if (!gameResult.success) {
-        const finalError = gameResult.error ?? "Failed to create game";
+        const finalError = gameResult.error ?? "❌ Failed to create game";
         const isCreationRateLimit = /game creation rate limit/i.test(finalError);
 
         if (isCreationRateLimit && !shouldSendGameCreationRateLimitNotice(telegramId)) {
@@ -300,7 +300,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         const hasBalanceInfo = containsBalanceInfo(finalError);
         const displayText = hasBalanceInfo
           ? "❌ Failed to create game: insufficient funds. Please add more funds and try again."
-          : `❌ ${finalError}`;
+          : finalError;
         await ctx.reply(displayText, { parse_mode: "HTML" });
         return;
       }

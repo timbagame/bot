@@ -160,6 +160,12 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       `We couldn't convert SOL to WSOL. Unwrap any stuck WSOL or contact an admin if the issue keeps happening.`,
   },
   {
+    matcher: (ctx) => ctx.lowerMessage.includes("failed to wrap sol automatically"),
+    handler: () =>
+      `🪙 Failed to wrap SOL automatically.\n` +
+      `Try again shortly or add more SOL if the problem continues.`,
+  },
+  {
     // Must come before "simulation failed" handler since it's more specific
     matcher: (ctx) =>
       ctx.lowerMessage.includes("no record of a prior credit") ||

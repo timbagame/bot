@@ -1221,7 +1221,7 @@ export const createWalletTransactionsModule = (
           console.error("Transaction failed:", txError);
           const userFriendlyError = await formatUserFriendlyError(txError, wallet);
           await respondWithMenu(ctx, {
-            text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
+            text: escapeHtml(userFriendlyError),
             keyboard: createBackToWalletKeyboard(),
           });
           await safeAnswerCallbackQuery(ctx, "❌ Send failed");
