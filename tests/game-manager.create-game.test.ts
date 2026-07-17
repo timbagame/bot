@@ -666,11 +666,15 @@ describe("GameManager.createGame", () => {
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
     let signingCalls = 0;
+    let sentInstructionCount = 0;
     const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      sendTransaction: async () => "SIG",
+      sendTransaction: async (instructions: unknown[]) => {
+        sentInstructionCount = instructions.length;
+        return "SIG";
+      },
     });
     const saved: any[] = [];
     const db = {
@@ -722,11 +726,12 @@ describe("GameManager.createGame", () => {
       2,
       60,
       1n,
-      undefined,
+      { isPrivate: false },
       100,
     );
     expect(res.success).toBe(true);
     expect(signingCalls).toBe(1);
+    expect(sentInstructionCount).toBe(2);
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
 

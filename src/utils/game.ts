@@ -3556,12 +3556,28 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         } as any)
         .instruction();
 
+      const usesAtomicCreatorJoin = gameType === "coinflip" && !isPrivate;
+      let creationInstructions: TransactionInstruction[] = [gameInstruction];
+      if (usesAtomicCreatorJoin) {
+        const { accounts: joinAccounts, setupInstructions } = await this.buildJoinAccounts(
+          gamePda,
+          { tokenMint },
+          playerKp.publicKey,
+          playerKp.publicKey,
+        );
+        const joinInstruction = await this.program.methods
+          .joinGame()
+          .accounts(joinAccounts as any)
+          .instruction();
+        creationInstructions = [gameInstruction, ...setupInstructions, joinInstruction];
+      }
+
       const sendCreationTransaction = async () => {
         const latestBlockhash = await this.wallet.getLatestBlockhash();
         const unsigned = new Transaction({
           feePayer: playerKp.publicKey,
           ...latestBlockhash,
-        }).add(gameInstruction);
+        }).add(...creationInstructions);
         const oracleSigned = await this.oracleClient.signGameTransaction(unsigned);
         return this.wallet.sendPartiallySignedTransaction(
           oracleSigned,
@@ -3573,7 +3589,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       debugLog(`📍 Game address: ${gamePda.toBase58()}`);
 
-      await this.confirmTransactionWithRecovery(
+      const confirmedCreationTx = await this.confirmTransactionWithRecovery(
         creationTx,
         gamePda,
         "Game creation",
@@ -3598,7 +3614,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       // Auto-join logic based on game type
       let autoJoinResult: { success: boolean; error?: string } | undefined;
-      if (gameType === "coinflip") {
+      if (usesAtomicCreatorJoin) {
+        this.gameDb.saveGameParticipant?.(gamePda.toBase58(), telegramIdStr, creatorPubkey, {
+          status: "confirmed",
+          joinSignature: confirmedCreationTx,
+          lastVerifiedAt: Date.now(),
+        });
+        autoJoinResult = { success: true };
+      } else if (gameType === "coinflip") {
         autoJoinResult = await this.handleGameAutoJoinPure(
           gamePda,
           playerKp,
