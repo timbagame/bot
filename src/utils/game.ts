@@ -3562,9 +3562,10 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           oracle: oraclePda,
           ...(requiresOracleSignature
             ? {
-                // The oracle replaces this signer placeholder with its operator key
-                // before returning the partially signed transaction.
-                oracleOperator: playerKp.publicKey,
+                // This must be distinct from the writable creator. Solana merges
+                // privileges for duplicate account keys, and the oracle rejects a
+                // writable operator signer before replacing it with its own key.
+                oracleOperator: Keypair.generate().publicKey,
               }
             : {}),
           gameTokenCtx,

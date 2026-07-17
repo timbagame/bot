@@ -1040,6 +1040,11 @@ describe("GameManager.createGame", () => {
         1n,
       );
 
+      const firstInitializeAccounts = (program as any).__captures["initializeGameAccounts"];
+      expect(firstInitializeAccounts.oracleOperator.toBase58()).not.toBe(
+        firstInitializeAccounts.creator.toBase58(),
+      );
+
       // Base size = 126 bytes + 32 bytes per participant public key
       const expectedSize2Players = 126 + 2 * 32;
       expect(capturedRentCalls).toContain(expectedSize2Players);
