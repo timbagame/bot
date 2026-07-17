@@ -6,7 +6,7 @@ This guide covers only the Bot service. Cross-project production operations and 
 
 Copy `.env.example` to `.env` and set the production values. For the shared rootless Podman network, use `ORACLE_API_URL=http://oracle:3001`; the Oracle port is not published on the VPS host.
 
-`SOLANA_NETWORK` accepts a JSON array or comma-separated RPC list and fails over in order. `TIMBA_CONTRACT_VERSION` selects the supported contract ABI.
+`SOLANA_NETWORK` accepts a JSON array or comma-separated RPC list and fails over in order.
 
 Keep these files outside `.env` and set them to mode `600`:
 

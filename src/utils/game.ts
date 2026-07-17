@@ -14,13 +14,11 @@ import {
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@anchor-lang/core";
-import { createHash } from "node:crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
-import { resolveContractVersion } from "./contract-idl";
 import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
@@ -1052,24 +1050,6 @@ export class GameManager {
         return false;
       }
 
-      const participantHashes = (gameAccount as any)?.participantHashes;
-      if (Array.isArray(participantHashes)) {
-        if (participantHashes.length === 0) {
-          return false;
-        }
-
-        const expectedHash = createHash("sha256")
-          .update(Buffer.from("timba:part:v1"))
-          .update(gamePda.toBuffer())
-          .update(playerPubkey.toBuffer())
-          .digest()
-          .subarray(0, 8)
-          .readBigUInt64LE(0)
-          .toString();
-
-        return participantHashes.some((value: any) => value?.toString?.() === expectedHash);
-      }
-
       const participants = (gameAccount as any)?.participants;
       if (!Array.isArray(participants) || participants.length === 0) return false;
 
@@ -1200,18 +1180,13 @@ export class GameManager {
     recovered: Array<{ telegramId: string; publicKey: string }>;
     unmatchedParticipants: string[];
   } {
-    const legacy = Array.isArray(gameAccount.participantHashes);
-    const rawParticipants = legacy ? gameAccount.participantHashes : gameAccount.participants;
+    const rawParticipants = gameAccount.participants;
     if (!Array.isArray(rawParticipants) || rawParticipants.length === 0) {
       return { recovered: [], unmatchedParticipants: [] };
     }
 
     const onChainParticipants = new Set(
       rawParticipants.flatMap((participant: any) => {
-        if (legacy) {
-          const value = participant?.toString?.();
-          return value ? [value] : [];
-        }
         try {
           return [new PublicKey(participant).toBase58()];
         } catch (_) {
@@ -1226,18 +1201,6 @@ export class GameManager {
 
     const unmatchedParticipants = new Set(onChainParticipants);
 
-    const participantIdentifier = (publicKey: string): string => {
-      if (!legacy) return publicKey;
-      return createHash("sha256")
-        .update(Buffer.from("timba:part:v1"))
-        .update(gamePda.toBuffer())
-        .update(new PublicKey(publicKey).toBuffer())
-        .digest()
-        .subarray(0, 8)
-        .readBigUInt64LE(0)
-        .toString();
-    };
-
     for (const telegramId of knownTelegramIds) {
       const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
       if (!publicKey) {
@@ -1245,7 +1208,7 @@ export class GameManager {
       }
 
       try {
-        unmatchedParticipants.delete(participantIdentifier(publicKey));
+        unmatchedParticipants.delete(new PublicKey(publicKey).toBase58());
       } catch (_) {
         // Ignore invalid stale mappings and continue recovery.
       }
@@ -1268,7 +1231,7 @@ export class GameManager {
 
       let identifier: string;
       try {
-        identifier = participantIdentifier(publicKey);
+        identifier = new PublicKey(publicKey).toBase58();
       } catch (_) {
         continue;
       }
@@ -1325,9 +1288,7 @@ export class GameManager {
   }
 
   private getOnChainParticipantCount(gameAccount: any): number {
-    const participants = Array.isArray(gameAccount.participantHashes)
-      ? gameAccount.participantHashes
-      : gameAccount.participants;
+    const participants = gameAccount.participants;
     return Array.isArray(participants) ? participants.length : 0;
   }
 
@@ -1692,7 +1653,7 @@ export class GameManager {
       8 + // total_amount
       4; // participants vec length prefix
 
-    const BYTES_PER_PARTICIPANT = process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 32 : 8;
+    const BYTES_PER_PARTICIPANT = 32;
 
     const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
     const accountSize = BASE_GAME_ACCOUNT_SIZE + safeMaxTickets * BYTES_PER_PARTICIPANT;
@@ -3552,22 +3513,16 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         tokenAccounts.tokenProgram,
       );
       const oraclePda = this.getOraclePda();
-      const requiresOracleSignature = resolveContractVersion() === "0.2.0";
-
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
           game: gamePda,
           creator: playerKp.publicKey,
           oracle: oraclePda,
-          ...(requiresOracleSignature
-            ? {
-                // This must be distinct from the writable creator. Solana merges
-                // privileges for duplicate account keys, and the oracle rejects a
-                // writable operator signer before replacing it with its own key.
-                oracleOperator: Keypair.generate().publicKey,
-              }
-            : {}),
+          // This must be distinct from the writable creator. Solana merges
+          // privileges for duplicate account keys, and the oracle rejects a
+          // writable operator signer before replacing it with its own key.
+          oracleOperator: Keypair.generate().publicKey,
           gameTokenCtx,
           creatorTokenAccount,
           systemProgram: SystemProgram.programId,
@@ -3575,9 +3530,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         .instruction();
 
       const sendCreationTransaction = async () => {
-        if (!requiresOracleSignature) {
-          return this.wallet.sendTransaction([gameInstruction], [playerKp]);
-        }
         const latestBlockhash = await this.wallet.getLatestBlockhash();
         const unsigned = new Transaction({
           feePayer: playerKp.publicKey,

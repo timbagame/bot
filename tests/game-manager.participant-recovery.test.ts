@@ -1,8 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
-import { createHash } from "node:crypto";
 import { GameManager } from "../src/utils/game";
-import { resolveContractVersion } from "../src/utils/contract-idl";
 
 function resetGM() {
   // @ts-ignore
@@ -39,24 +37,12 @@ describe("GameManager participant recovery", () => {
     } as any;
 
     const gm = GameManager.getInstance({} as any, {} as any, dbStub);
-    const legacyHash = createHash("sha256")
-      .update(Buffer.from("timba:part:v1"))
-      .update(gamePda.toBuffer())
-      .update(playerPubkey.toBuffer())
-      .digest()
-      .subarray(0, 8)
-      .readBigUInt64LE(0);
-    const participantData =
-      resolveContractVersion() === "0.1.3"
-        ? { participantHashes: [{ toString: () => legacyHash.toString() }] }
-        : { participants: [playerPubkey] };
-
     const info = (gm as any).analyzePlayerKeys(
       gamePda,
       {
         creator: creatorPubkey,
         ticketsCount: 1,
-        ...participantData,
+        participants: [playerPubkey],
       },
       gameAddress,
     );

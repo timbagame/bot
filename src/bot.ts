@@ -12,7 +12,7 @@ import * as anchor from "@anchor-lang/core";
 import { EventParser } from "@anchor-lang/core";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
-import { contractIdl, contractVersion } from "./utils/contract-idl";
+import { contractIdl } from "./utils/contract-idl";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
 import { GameManager, type GamesTab } from "./utils/game";
@@ -3008,7 +3008,7 @@ const initializeAnchorProvider = async () => {
   );
 
   anchor.setProvider(provider);
-  console.log(`Using Timba contract ABI ${contractVersion}`);
+  console.log("Using Timba contract ABI 0.2.0");
   return new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>;
 };
 

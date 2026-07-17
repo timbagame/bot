@@ -3,7 +3,6 @@ import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
-import { createHash } from "node:crypto";
 import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   MAX_ACTIVE_GAMES_PER_CREATOR,
@@ -78,30 +77,6 @@ function makeWallet(overrides: Record<string, any>) {
 }
 
 describe("GameManager.createGame", () => {
-  test("verifies 0.1.3 participants from their on-chain hashes", async () => {
-    resetGM();
-    const gamePda = Keypair.generate().publicKey;
-    const player = Keypair.generate().publicKey;
-    const participantHash = createHash("sha256")
-      .update(Buffer.from("timba:part:v1"))
-      .update(gamePda.toBuffer())
-      .update(player.toBuffer())
-      .digest()
-      .subarray(0, 8)
-      .readBigUInt64LE(0);
-    const program = makeProgram();
-    program.account.game.fetch = async () => ({ participantHashes: [participantHash] });
-    const wallet = makeWallet({});
-    const database = {
-      getPlayerTelegramId: () => null,
-      getGameParticipants: () => [],
-    } as any;
-    const manager = GameManager.getInstance(program, wallet, database);
-
-    expect(await (manager as any).isPlayerInGame(gamePda, player)).toBe(true);
-    resetGM();
-  });
-
   test("surface helpful error when SOL auto-wrap cannot proceed", async () => {
     resetGM();
     const wallet = makeWallet({
@@ -751,7 +726,7 @@ describe("GameManager.createGame", () => {
       100,
     );
     expect(res.success).toBe(true);
-    expect(signingCalls).toBe(process.env["TIMBA_CONTRACT_VERSION"] === "0.2.0" ? 1 : 0);
+    expect(signingCalls).toBe(1);
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
 
@@ -974,8 +949,6 @@ describe("GameManager.createGame", () => {
   });
 
   test("calculates game rent based on maxTickets", async () => {
-    const originalContractVersion = process.env["TIMBA_CONTRACT_VERSION"];
-    process.env["TIMBA_CONTRACT_VERSION"] = "0.2.0";
     resetGM();
     let signingCalls = 0;
     const capturedRentCalls: number[] = [];
@@ -1079,11 +1052,6 @@ describe("GameManager.createGame", () => {
       expect(capturedRentCalls).toContain(expectedSize50Players);
       expect(signingCalls).toBe(2);
     } finally {
-      if (originalContractVersion === undefined) {
-        delete process.env["TIMBA_CONTRACT_VERSION"];
-      } else {
-        process.env["TIMBA_CONTRACT_VERSION"] = originalContractVersion;
-      }
       (PDAManager as any).getGamePDA = originalGetGamePda;
       resetGM();
     }
