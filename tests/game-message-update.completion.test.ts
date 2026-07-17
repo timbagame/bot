@@ -131,4 +131,64 @@ describe("Game message updates during completion", () => {
       totalPot: gameRecord.amount,
     });
   });
+
+  test("a later completion signature enriches an already-completed message", async () => {
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const winnerAddress = Keypair.generate().publicKey.toBase58();
+    const gameRecord = {
+      game_address: gameAddress,
+      chat_id: 707,
+      message_id: 808,
+      status: "completed",
+      winner_address: winnerAddress,
+      amount: 42_000,
+      token_ticker: "WIN",
+      token_mint: Keypair.generate().publicKey.toBase58(),
+    } as any;
+    let completeGameCalls = 0;
+
+    botModule.__test_setGameDatabase({
+      getGame: () => gameRecord,
+      completeGame: () => {
+        completeGameCalls += 1;
+      },
+    } as any);
+
+    const messageUpdates: Array<{
+      status: string;
+      winner?: string;
+      totalPot?: number;
+      signature?: string;
+    }> = [];
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async (
+        _ctx: any,
+        _game: string,
+        status: string,
+        winner?: string,
+        totalPot?: number,
+        signature?: string,
+      ) => {
+        messageUpdates.push({ status, winner, totalPot, signature });
+      },
+    } as any);
+
+    await botModule.__test_processGameCompletion(
+      gameAddress,
+      winnerAddress,
+      gameRecord.amount,
+      "LATE_COMPLETION_SIGNATURE",
+    );
+
+    expect(completeGameCalls).toBe(0);
+    expect(messageUpdates).toEqual([
+      {
+        status: "Completed",
+        winner: winnerAddress,
+        totalPot: gameRecord.amount,
+        signature: "LATE_COMPLETION_SIGNATURE",
+      },
+    ]);
+  });
 });

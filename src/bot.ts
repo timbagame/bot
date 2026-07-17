@@ -2053,6 +2053,21 @@ const processGameCompletion = async (
 
   const existing = gameDb.getGame(gameAddress);
   if (existing?.status === "completed") {
+    // The Anchor event and the oracle callback can race. The event may mark the
+    // game completed before it has a transaction signature; when the oracle's
+    // richer callback arrives, still refresh the message so it gains the web
+    // verification link without replaying completion side effects.
+    if (winnerTxSignature) {
+      await updateGameMessageSafely(
+        gameAddress,
+        existing,
+        "Completed",
+        existing.winner_address || winnerAddress,
+        totalPot,
+        winnerTxSignature,
+      );
+      console.log(`Enriched completed game ${gameAddress} with its completion signature`);
+    }
     console.log(`Game ${gameAddress} already completed; skipping duplicate processing`);
     return;
   }
