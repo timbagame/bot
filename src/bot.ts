@@ -3008,13 +3008,13 @@ export const __test_formatDefaultTokenSetMessage = formatDefaultTokenSetMessage;
 // ================================
 
 const initializeAnchorProvider = async () => {
-  const adminKeypair = wallet.getAdminKeypair();
-  const adminWallet = new anchor.Wallet(adminKeypair as unknown as anchor.web3.Keypair);
+  const operatorKeypair = wallet.getOperatorKeypair();
+  const operatorWallet = new anchor.Wallet(operatorKeypair as unknown as anchor.web3.Keypair);
   const connection = wallet.getConnection();
 
   const provider = new anchor.AnchorProvider(
     connection as unknown as anchor.web3.Connection,
-    adminWallet,
+    operatorWallet,
     {
       commitment: "confirmed",
       preflightCommitment: "confirmed",
@@ -3048,7 +3048,9 @@ const setupAnchor = async () => {
     await checkGameTokenStatus();
   } catch (error) {
     console.error("Error initializing Anchor program:", error);
-    console.error("Make sure admin-keypair.json exists in the project root directory.");
+    console.error(
+      "Set OPERATOR_KEYPAIR_PATH or provide operator-keypair.json in the project root directory.",
+    );
     throw error;
   }
 };
@@ -4906,7 +4908,7 @@ const buildAdminIntegratorConfig = async ({
   tradeDecimals: number;
   solFeeBufferLamports?: number;
 }): Promise<IntegratorSwapParams> => {
-  const adminKeypair = wallet.getAdminKeypair();
+  const operatorKeypair = wallet.getOperatorKeypair();
   let rentReserveLamports: number;
   try {
     rentReserveLamports = await getSolWrapRentReserveLamports();
@@ -4933,7 +4935,7 @@ const buildAdminIntegratorConfig = async ({
     extraAtaLamports,
     priorityBufferLamports,
   );
-  const adminBalance = await wallet.getConnection().getBalance(adminKeypair.publicKey);
+  const adminBalance = await wallet.getConnection().getBalance(operatorKeypair.publicKey);
 
   if (adminBalance < requiredLamports) {
     throw new Error(
@@ -4977,7 +4979,7 @@ const buildAdminIntegratorConfig = async ({
     );
   }
 
-  const adminKey = adminKeypair.publicKey.toBase58();
+  const adminKey = operatorKeypair.publicKey.toBase58();
 
   return {
     referralAccount: referralConfig.referralAccount,

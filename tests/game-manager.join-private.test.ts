@@ -49,7 +49,7 @@ describe("GameManager joinPrivateGame resilience", () => {
     (gm as any).oracleClient = {
       authorizePlayer: async () => ({
         authorized: true,
-        adminKeypair: adminKp,
+        operatorKeypair: adminKp,
       }),
     };
 
@@ -105,7 +105,7 @@ describe("GameManager joinPrivateGame resilience", () => {
     (gm as any).oracleClient = {
       authorizePlayer: async () => ({
         authorized: true,
-        adminKeypair: adminKp,
+        operatorKeypair: adminKp,
       }),
     };
 

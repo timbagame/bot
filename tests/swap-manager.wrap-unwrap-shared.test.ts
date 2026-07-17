@@ -17,7 +17,7 @@ const createWalletStub = () => {
       amountLamports: 1_500,
       remainingLamports: 0,
     }),
-    getAdminKeypair: vi.fn(),
+    getOperatorKeypair: vi.fn(),
     formatSolBalance: vi.fn((lamports: number) => `${lamports}`),
     getConnection: vi.fn(),
   };
@@ -25,7 +25,7 @@ const createWalletStub = () => {
   return wallet as unknown as WalletManager & {
     wrapSolWithKeypair: ReturnType<typeof vi.fn>;
     unwrapSolWithKeypair: ReturnType<typeof vi.fn>;
-    getAdminKeypair: ReturnType<typeof vi.fn>;
+    getOperatorKeypair: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -68,8 +68,8 @@ describe("SwapManager wrap/unwrap helpers", () => {
 
   test("executeUnwrapSwap carries admin top-up through wallet helper", async () => {
     const wallet = createWalletStub();
-    const adminKeypair = Keypair.generate();
-    wallet.getAdminKeypair = vi.fn().mockReturnValue(adminKeypair);
+    const operatorKeypair = Keypair.generate();
+    wallet.getOperatorKeypair = vi.fn().mockReturnValue(operatorKeypair);
     const manager = createManager(wallet);
 
     const signature = await manager.executeUnwrapSwap(
@@ -89,14 +89,14 @@ describe("SwapManager wrap/unwrap helpers", () => {
         payer: baseRequest.userKeypair,
         amountLamports: 4000,
         adminTopUpLamports: 300,
-        adminKeypair,
+        operatorKeypair,
       }),
     );
   });
 
   test("executeUnwrapSwap uses user payer when no loan is required", async () => {
     const wallet = createWalletStub();
-    wallet.getAdminKeypair = vi.fn();
+    wallet.getOperatorKeypair = vi.fn();
     const manager = createManager(wallet);
 
     const signature = await manager.executeUnwrapSwap(
@@ -113,21 +113,21 @@ describe("SwapManager wrap/unwrap helpers", () => {
       expect.objectContaining({
         payer: baseRequest.userKeypair,
         adminTopUpLamports: 0,
-        adminKeypair: undefined,
+        operatorKeypair: undefined,
       }),
     );
   });
 
   test("jit unwrap helper reuses wallet unwrap implementation", async () => {
     const wallet = createWalletStub();
-    const adminKeypair = Keypair.generate();
+    const operatorKeypair = Keypair.generate();
     const manager = createManager(wallet);
 
     const result = await (manager as any).unwrapWsolPortion({
       userKeypair: baseRequest.userKeypair,
       unwrapLamports: 1_800,
       logContext: "jit",
-      adminKeypair,
+      operatorKeypair,
       lendingLamports: 200,
     });
 
@@ -136,7 +136,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
       expect.objectContaining({
         amountLamports: 1_800,
         adminTopUpLamports: 200,
-        adminKeypair,
+        operatorKeypair,
       }),
     );
   });

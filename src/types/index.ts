@@ -176,7 +176,7 @@ export interface PlayerUnjoinedEvent {
 
 export interface AuthorizationResult {
   authorized: boolean;
-  adminKeypair?: Keypair;
+  operatorKeypair?: Keypair;
   error?: string;
 }
 

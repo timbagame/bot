@@ -125,7 +125,7 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Object.assign(connection, { getBalance: async () => 1_000_000_000 });
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => {
+    Reflect.set(wallet, "getOperatorKeypair", () => {
       throw new Error("admin keypair should not be loaded for user-paid fallback");
     });
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
@@ -204,7 +204,7 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Object.assign(connection, { getBalance: async () => 0 });
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => {
+    Reflect.set(wallet, "getOperatorKeypair", () => {
       throw new Error("admin keypair should not be loaded for invalid payer fallback");
     });
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
@@ -318,7 +318,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     };
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Reflect.set(wallet, "getOperatorKeypair", () => admin);
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       getLatestBlockhash: async () => ({
@@ -477,7 +477,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     };
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Reflect.set(wallet, "getOperatorKeypair", () => admin);
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({
@@ -586,7 +586,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     };
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Reflect.set(wallet, "getOperatorKeypair", () => admin);
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
@@ -693,7 +693,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     };
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
-    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Reflect.set(wallet, "getOperatorKeypair", () => admin);
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),

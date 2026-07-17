@@ -78,6 +78,8 @@ type HttpFetch = (
 
 const KEYPAIR_CACHE_MAX_ENTRIES = 1024;
 const KEYPAIR_CACHE_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_OPERATOR_KEYPAIR_FILE = "operator-keypair.json";
+const LEGACY_OPERATOR_KEYPAIR_FILE = "admin-keypair.json";
 
 type KeypairCacheEntry = {
   keypair: Keypair;
@@ -274,7 +276,7 @@ export class WalletManager {
   private tokenMetadataResolver?: (
     mint: string,
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
-  private adminKeypair: Keypair | null = null;
+  private operatorKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
   private tokenDb: TokenDatabase;
 
@@ -444,7 +446,7 @@ export class WalletManager {
       name?: string;
     }>(TOKEN_METADATA_CACHE_DURATION_MS);
     this.tokenDb = deps?.tokenDb ?? TokenDatabase.getInstance();
-    this.loadAdminKeypair();
+    this.loadOperatorKeypair();
   }
 
   public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
@@ -482,26 +484,36 @@ export class WalletManager {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private loadAdminKeypair(): void {
+  private loadOperatorKeypair(): void {
     try {
-      const keypairPath =
-        process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
+      const keypairPath = this.resolveOperatorKeypairPath();
       if (fs.existsSync(keypairPath)) {
         const stats = fs.lstatSync(keypairPath);
         const mode = stats.mode & 0o777;
         if (!stats.isFile() || stats.isSymbolicLink())
-          throw new Error("Admin keypair must be a regular file, not a symlink");
+          throw new Error("Operator keypair must be a regular file, not a symlink");
         if ((mode & 0o077) !== 0)
           throw new Error(
-            `Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
+            `Operator keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
           );
         const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
-        this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-        console.log(`Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`);
+        this.operatorKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
+        console.log(`Loaded operator keypair: ${this.operatorKeypair.publicKey.toBase58()}`);
       }
     } catch (error) {
-      console.error("Failed to load admin keypair:", error);
+      console.error("Failed to load operator keypair:", error);
     }
+  }
+
+  private resolveOperatorKeypairPath(): string {
+    const configuredPath =
+      process.env.OPERATOR_KEYPAIR_PATH?.trim() || process.env.ADMIN_KEYPAIR_PATH?.trim();
+    if (configuredPath) return configuredPath;
+
+    const operatorPath = path.join(process.cwd(), DEFAULT_OPERATOR_KEYPAIR_FILE);
+    if (fs.existsSync(operatorPath)) return operatorPath;
+
+    return path.join(process.cwd(), LEGACY_OPERATOR_KEYPAIR_FILE);
   }
 
   private prunePendingSignatures(now: number = Date.now()): void {
@@ -634,30 +646,29 @@ export class WalletManager {
     return keypair;
   }
 
-  public getAdminKeypair(): Keypair {
-    if (this.adminKeypair) return this.adminKeypair;
+  public getOperatorKeypair(): Keypair {
+    if (this.operatorKeypair) return this.operatorKeypair;
 
-    const keypairPath =
-      process.env.ADMIN_KEYPAIR_PATH?.trim() || path.join(process.cwd(), "admin-keypair.json");
+    const keypairPath = this.resolveOperatorKeypairPath();
     if (!fs.existsSync(keypairPath)) {
-      throw new Error("Admin keypair file not found at " + keypairPath);
+      throw new Error("Operator keypair file not found at " + keypairPath);
     }
 
     try {
       const stats = fs.lstatSync(keypairPath);
       const mode = stats.mode & 0o777;
       if (!stats.isFile() || stats.isSymbolicLink())
-        throw new Error("Admin keypair must be a regular file, not a symlink");
+        throw new Error("Operator keypair must be a regular file, not a symlink");
       if ((mode & 0o077) !== 0)
         throw new Error(
-          `Admin keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
+          `Operator keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
         );
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
-      this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-      return this.adminKeypair;
+      this.operatorKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
+      return this.operatorKeypair;
     } catch (error) {
       throw new Error(
-        "Failed to load admin keypair. Make sure admin-keypair.json exists in the project root.",
+        "Failed to load operator keypair. Set OPERATOR_KEYPAIR_PATH or provide operator-keypair.json.",
         { cause: error },
       );
     }
@@ -1835,13 +1846,13 @@ export class WalletManager {
     payer,
     amountLamports,
     adminTopUpLamports = 0,
-    adminKeypair,
+    operatorKeypair,
   }: {
     owner: PublicKey;
     payer: Keypair;
     amountLamports?: number;
     adminTopUpLamports?: number | bigint;
-    adminKeypair?: Keypair;
+    operatorKeypair?: Keypair;
   }): Promise<{
     signature: string;
     amountLamports: number;
@@ -1856,8 +1867,8 @@ export class WalletManager {
         ? Number(adminTopUpLamports > 0n ? adminTopUpLamports : 0n)
         : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
 
-    if (loanLamports > 0 && !adminKeypair) {
-      throw new Error("Admin keypair required when lending lamports for WSOL unwrap.");
+    if (loanLamports > 0 && !operatorKeypair) {
+      throw new Error("Operator keypair required when lending lamports for WSOL unwrap.");
     }
 
     if (!owner.equals(payer.publicKey)) {
@@ -1876,13 +1887,13 @@ export class WalletManager {
     const signers: Keypair[] = [payer];
 
     if (loanLamports > 0) {
-      if (adminKeypair) {
-        signers.push(adminKeypair);
+      if (operatorKeypair) {
+        signers.push(operatorKeypair);
       }
 
       instructions.push(
         SystemProgram.transfer({
-          fromPubkey: adminKeypair!.publicKey,
+          fromPubkey: operatorKeypair!.publicKey,
           toPubkey: payer.publicKey,
           lamports: loanLamports,
         }),
@@ -1895,7 +1906,7 @@ export class WalletManager {
       instructions.push(
         SystemProgram.transfer({
           fromPubkey: payer.publicKey,
-          toPubkey: adminKeypair!.publicKey,
+          toPubkey: operatorKeypair!.publicKey,
           lamports: loanLamports,
         }),
       );

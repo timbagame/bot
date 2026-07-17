@@ -59,16 +59,16 @@ export type ProgramContextLoadOptions = Omit<AnchorContextOverrides, "wallet"> &
 
 export interface LoadedProgramContext extends AnchorContextResult {
   wallet: WalletManager;
-  adminKeypair: Keypair;
+  operatorKeypair: Keypair;
   connection: anchor.web3.Connection;
 }
 
 const toAnchorKeypair = (keypair: Keypair | anchor.web3.Keypair) =>
   anchor.web3.Keypair.fromSecretKey(keypair.secretKey);
 
-const resolveWallet = (adminKeypair: Keypair, override?: WalletOverride): anchor.Wallet => {
+const resolveWallet = (operatorKeypair: Keypair, override?: WalletOverride): anchor.Wallet => {
   if (!override) {
-    return new anchor.Wallet(toAnchorKeypair(adminKeypair));
+    return new anchor.Wallet(toAnchorKeypair(operatorKeypair));
   }
 
   if (override instanceof anchor.Wallet) {
@@ -103,7 +103,7 @@ const toAnchorConnection = (
 };
 
 export const createAnchorContext = (
-  adminKeypair: Keypair,
+  operatorKeypair: Keypair,
   overrides: AnchorContextOverrides = {},
 ): AnchorContextResult => {
   const commitment = overrides.commitment ?? "confirmed";
@@ -124,7 +124,7 @@ export const createAnchorContext = (
     ? toAnchorConnection(overrides.connection)
     : resolveConnection(resolvedRpcUrl, commitment, overrides.connectionConfig);
 
-  const wallet = resolveWallet(adminKeypair, overrides.wallet);
+  const wallet = resolveWallet(operatorKeypair, overrides.wallet);
 
   const provider = new anchor.AnchorProvider(connection, wallet, providerOptions);
   anchor.setProvider(provider);
@@ -141,16 +141,16 @@ export const loadProgramContext = (
   const resolvedMnemonic = mnemonic?.trim() || loadWalletMnemonic();
 
   const wallet = walletOverride ?? WalletManager.getInstance(resolvedMnemonic);
-  const adminKeypair = wallet.getAdminKeypair();
+  const operatorKeypair = wallet.getOperatorKeypair();
 
-  const context = createAnchorContext(adminKeypair, {
+  const context = createAnchorContext(operatorKeypair, {
     ...anchorOverrides,
     connection: anchorOverrides.connection ?? wallet.getConnection(),
   });
 
   return {
     wallet,
-    adminKeypair,
+    operatorKeypair,
     program: context.program,
     provider: context.provider,
     connection: context.provider.connection,

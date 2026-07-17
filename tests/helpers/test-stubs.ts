@@ -10,12 +10,12 @@ export const stubWalletConnection = (lamports: number) => {
   };
 };
 
-export const stubAdminKeypair = () => {
-  const original = (wallet as any).getAdminKeypair;
+export const stubOperatorKeypair = () => {
+  const original = (wallet as any).getOperatorKeypair;
   const kp = Keypair.generate();
-  (wallet as any).getAdminKeypair = () => kp;
+  (wallet as any).getOperatorKeypair = () => kp;
   return () => {
-    (wallet as any).getAdminKeypair = original;
+    (wallet as any).getOperatorKeypair = original;
   };
 };
 

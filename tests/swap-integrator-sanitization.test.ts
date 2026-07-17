@@ -11,7 +11,7 @@ import {
   wallet,
 } from "../src/bot";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
-import { stubWalletConnection, stubAdminKeypair } from "./helpers/test-stubs";
+import { stubWalletConnection, stubOperatorKeypair } from "./helpers/test-stubs";
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../src/utils/constants";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 import * as priceService from "../src/utils/price-service";
@@ -592,7 +592,7 @@ describe("buildAdminIntegratorConfig", () => {
     const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockResolvedValue(0);
     const defaultSpy = vi.spyOn(feeBudget, "getDefaultWrapFeeBufferLamports").mockReturnValue(0);
     const restoreConn = stubWalletConnection(1_000_000_000);
-    const restoreAdmin = stubAdminKeypair();
+    const restoreAdmin = stubOperatorKeypair();
 
     const configPromise = buildAdminIntegratorConfig({
       referralConfig: {
@@ -617,7 +617,7 @@ describe("buildAdminIntegratorConfig", () => {
   test("builds admin config when wrap buffer refresh fails but fallback exists", async () => {
     __test_setSolWrapRentReserveLamports(0);
     const restoreConn = stubWalletConnection(1_000_000_000);
-    const restoreAdmin = stubAdminKeypair();
+    const restoreAdmin = stubOperatorKeypair();
     const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
     const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockResolvedValue(0);
     const defaultSpy = vi

@@ -410,16 +410,16 @@ export class SwapManager {
     } = options;
 
     const ref = getReferralConfig();
-    if (!ref?.referralAccount || !this.wallet.getAdminKeypair) {
+    if (!ref?.referralAccount || !this.wallet.getOperatorKeypair) {
       return null;
     }
 
-    const adminKeypair = this.wallet.getAdminKeypair();
-    if (!adminKeypair) {
+    const operatorKeypair = this.wallet.getOperatorKeypair();
+    if (!operatorKeypair) {
       return null;
     }
 
-    const admin = adminKeypair.publicKey.toBase58();
+    const admin = operatorKeypair.publicKey.toBase58();
     const baseFeeBps = ref.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS;
     const maxExtraBps = ref.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
 
@@ -650,13 +650,13 @@ export class SwapManager {
 
     try {
       const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-      const adminKeypair = lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
+      const operatorKeypair = lendingLamports > 0 ? this.wallet.getOperatorKeypair() : undefined;
 
       const { signature, lamportsReceived } = await this.unwrapWsolPortion({
         userKeypair,
         unwrapLamports,
         logContext,
-        adminKeypair,
+        operatorKeypair,
         lendingLamports,
       });
 
@@ -765,14 +765,20 @@ export class SwapManager {
     userKeypair: Keypair;
     unwrapLamports: number;
     logContext: string;
-    adminKeypair?: Keypair;
+    operatorKeypair?: Keypair;
     lendingLamports?: number;
   }): Promise<{ signature: string; lamportsReceived: number }> {
-    const { userKeypair, unwrapLamports, logContext, adminKeypair, lendingLamports = 0 } = options;
+    const {
+      userKeypair,
+      unwrapLamports,
+      logContext,
+      operatorKeypair,
+      lendingLamports = 0,
+    } = options;
 
     const loanLamports = Math.max(0, Math.trunc(lendingLamports));
-    if (loanLamports > 0 && !adminKeypair) {
-      throw new Error("Admin keypair required when lending lamports for WSOL unwrap.");
+    if (loanLamports > 0 && !operatorKeypair) {
+      throw new Error("Operator keypair required when lending lamports for WSOL unwrap.");
     }
 
     if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
@@ -788,7 +794,7 @@ export class SwapManager {
       payer: userKeypair,
       amountLamports: unwrapLamports,
       adminTopUpLamports: loanLamports,
-      adminKeypair: loanLamports > 0 ? adminKeypair : undefined,
+      operatorKeypair: loanLamports > 0 ? operatorKeypair : undefined,
     });
 
     const formattedUnwrap = formatAmount(BigInt(unwrapResult.amountLamports), SOL_DECIMALS, {
@@ -849,9 +855,9 @@ export class SwapManager {
 
     const { userKeypair } = request;
     const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
-    const adminKeypair =
+    const operatorKeypair =
       loanLamports > 0 && quote.integrator?.payerKind === "admin"
-        ? this.wallet.getAdminKeypair()
+        ? this.wallet.getOperatorKeypair()
         : undefined;
     const payer = userKeypair;
 
@@ -860,7 +866,7 @@ export class SwapManager {
       payer,
       amountLamports: lamportsNumber,
       adminTopUpLamports: loanLamports,
-      adminKeypair,
+      operatorKeypair,
     });
 
     return signature;
@@ -960,13 +966,13 @@ export class SwapManager {
         if (this.canUseAtomicBuildFallback(request, quote)) {
           const payerPublicKey = this.tryParsePublicKey(integrator.payer);
           if (payerPublicKey) {
-            const adminKeypair = this.wallet.getAdminKeypair();
-            if (payerPublicKey.equals(adminKeypair.publicKey)) {
+            const operatorKeypair = this.wallet.getOperatorKeypair();
+            if (payerPublicKey.equals(operatorKeypair.publicKey)) {
               return this.executeAtomicBuildFallback({
                 request,
                 quote,
                 jupiterQuote,
-                adminKeypair,
+                operatorKeypair,
                 reimbursementLamports: requiredLamports,
               });
             }
@@ -987,24 +993,28 @@ export class SwapManager {
     // Determine payer and required signer for admin-funded routes
     let signers = [userKeypair];
     if (adminPayerApplied) {
-      const adminKeypair = this.wallet.getAdminKeypair();
+      const operatorKeypair = this.wallet.getOperatorKeypair();
       const payerMissing = !integrator.payer;
       const payerMismatch =
-        integrator.payer && adminKeypair.publicKey.toBase58() !== integrator.payer;
+        integrator.payer && operatorKeypair.publicKey.toBase58() !== integrator.payer;
       const closeMismatch =
         integrator.closeAuthority &&
-        adminKeypair.publicKey.toBase58() !== integrator.closeAuthority;
+        operatorKeypair.publicKey.toBase58() !== integrator.closeAuthority;
 
       if (payerMissing || payerMismatch || closeMismatch) {
         throw new Error(
           `Integrator requires admin payer ${integrator.payer} / closeAuthority ${integrator.closeAuthority}, ` +
-            `but loaded admin keypair is ${adminKeypair.publicKey.toBase58()}`,
+            `but loaded operator keypair is ${operatorKeypair.publicKey.toBase58()}`,
         );
       }
 
-      await this.ensureAdminCanCoverRoute(integrator, swapResponse.order, adminKeypair.publicKey);
+      await this.ensureAdminCanCoverRoute(
+        integrator,
+        swapResponse.order,
+        operatorKeypair.publicKey,
+      );
 
-      signers = [userKeypair, adminKeypair];
+      signers = [userKeypair, operatorKeypair];
     }
 
     try {
@@ -1267,10 +1277,10 @@ export class SwapManager {
     request: SwapRequest;
     quote: SwapQuote;
     jupiterQuote: JupiterQuoteResponse;
-    adminKeypair: Keypair;
+    operatorKeypair: Keypair;
     reimbursementLamports: number;
   }): Promise<string> {
-    const { request, quote, jupiterQuote, adminKeypair } = options;
+    const { request, quote, jupiterQuote, operatorKeypair } = options;
     const reimbursementLamports = Math.max(0, Math.trunc(options.reimbursementLamports));
 
     if (!Number.isSafeInteger(reimbursementLamports)) {
@@ -1278,9 +1288,9 @@ export class SwapManager {
     }
 
     const integrator = quote.integrator;
-    if (!integrator?.payer || integrator.payer !== adminKeypair.publicKey.toBase58()) {
+    if (!integrator?.payer || integrator.payer !== operatorKeypair.publicKey.toBase58()) {
       throw new Error(
-        `Integrator admin payer does not match loaded admin keypair ${adminKeypair.publicKey.toBase58()}`,
+        `Integrator operator payer does not match loaded operator keypair ${operatorKeypair.publicKey.toBase58()}`,
       );
     }
 
@@ -1290,7 +1300,7 @@ export class SwapManager {
         ...jupiterQuote,
         mode: "build",
       },
-      adminKeypair.publicKey,
+      operatorKeypair.publicKey,
     );
 
     const build = await this.jupiterClient.getBuildInstructions({
@@ -1298,7 +1308,7 @@ export class SwapManager {
       outputMint: quote.outputMint,
       amount: quote.inputAmountRaw,
       taker: request.userKeypair.publicKey.toBase58(),
-      payer: adminKeypair.publicKey.toBase58(),
+      payer: operatorKeypair.publicKey.toBase58(),
       swapMode: jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
       slippageBps: quote.providerQuote?.slippageBps ?? jupiterQuote.slippageBps,
     });
@@ -1312,12 +1322,12 @@ export class SwapManager {
     const lookupTables = this.getJupiterBuildLookupTables(build);
     const reimbursementInstruction = SystemProgram.transfer({
       fromPubkey: request.userKeypair.publicKey,
-      toPubkey: adminKeypair.publicKey,
+      toPubkey: operatorKeypair.publicKey,
       lamports: reimbursementLamports,
     });
     const swapInstructions = this.getJupiterBuildInstructions(build, reimbursementInstruction);
     const simulationMessage = new TransactionMessage({
-      payerKey: adminKeypair.publicKey,
+      payerKey: operatorKeypair.publicKey,
       recentBlockhash,
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({
@@ -1344,7 +1354,7 @@ export class SwapManager {
         )
       : JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX;
     const finalMessage = new TransactionMessage({
-      payerKey: adminKeypair.publicKey,
+      payerKey: operatorKeypair.publicKey,
       recentBlockhash,
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
@@ -1355,7 +1365,7 @@ export class SwapManager {
       ],
     }).compileToV0Message(lookupTables);
     const transaction = new VersionedTransaction(finalMessage);
-    transaction.sign([adminKeypair, request.userKeypair]);
+    transaction.sign([operatorKeypair, request.userKeypair]);
 
     const signature = await this.connection.sendTransaction(transaction, {
       skipPreflight: false,

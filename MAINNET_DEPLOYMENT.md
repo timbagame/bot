@@ -10,7 +10,7 @@ Copy `.env.example` to `.env` and set the production values. For the shared root
 
 Keep these files outside `.env` and set them to mode `600`:
 
-- `admin-keypair.json`
+- `operator-keypair.json` (the shared bot/oracle operator)
 - `secrets/bot-mnemonic`
 - `secrets/oracle-api-token`
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { wallet } from "../../src/bot";
-import { stubWalletConnection, stubAdminKeypair, stubFeeBudgetWrapZero } from "./test-stubs";
+import { stubWalletConnection, stubOperatorKeypair, stubFeeBudgetWrapZero } from "./test-stubs";
 
 describe("test stubs helpers", () => {
   test("stubWalletConnection restores connection even on error", () => {
@@ -16,11 +16,11 @@ describe("test stubs helpers", () => {
     expect(wallet.getConnection).toBe(original);
   });
 
-  test("stubAdminKeypair restores original keypair", () => {
-    const original = (wallet as any).getAdminKeypair;
-    const restore = stubAdminKeypair();
+  test("stubOperatorKeypair restores original keypair", () => {
+    const original = (wallet as any).getOperatorKeypair;
+    const restore = stubOperatorKeypair();
     restore();
-    expect((wallet as any).getAdminKeypair).toBe(original);
+    expect((wallet as any).getOperatorKeypair).toBe(original);
   });
 
   test("stubFeeBudgetWrapZero restores fee getters", () => {

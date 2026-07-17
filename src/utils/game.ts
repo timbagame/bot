@@ -4552,7 +4552,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         };
       }
 
-      const adminKp = authResult.adminKeypair!;
+      const adminKp = authResult.operatorKeypair!;
       const loadGameAccount = async (): Promise<any | null> => {
         const accountApi = this.program.account.game as any;
         const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);

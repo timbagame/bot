@@ -10,7 +10,7 @@ export async function initializeReferralTokenAccounts(mintAddresses: string[]): 
   }
 
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
-  const payer = wallet.getAdminKeypair();
+  const payer = wallet.getOperatorKeypair();
   const connection = wallet.getConnection();
   const provider = new ReferralProvider(connection);
   const referralAccount = new PublicKey(getReferralConfig().referralAccount);

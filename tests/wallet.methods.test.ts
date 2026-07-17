@@ -138,7 +138,7 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
   );
 
   const payer = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const unwrapPlan = {
     instructions: ["UNWRAP"] as any,
     unwrapLamports: 1_000,
@@ -153,7 +153,7 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
   const result = await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
     payer,
-    adminKeypair,
+    operatorKeypair,
     adminTopUpLamports: 0,
     amountLamports: 1_000,
   });
@@ -175,7 +175,7 @@ test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
   );
 
   const payer = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const unwrapPlan = {
     instructions: ["UNWRAP"] as any,
     unwrapLamports: 1_000,
@@ -190,7 +190,7 @@ test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
   const result = await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
     payer,
-    adminKeypair,
+    operatorKeypair,
     amountLamports: 1_000,
   });
 
@@ -211,13 +211,13 @@ test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", asy
   );
 
   const user = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
 
   await expect(
     wm.unwrapSolWithKeypair({
       owner: user.publicKey,
-      payer: adminKeypair,
-      adminKeypair,
+      payer: operatorKeypair,
+      operatorKeypair,
       adminTopUpLamports: 500,
       amountLamports: 1_000,
     }),
@@ -231,7 +231,7 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   );
 
   const payer = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const unwrapPlan = {
     instructions: [
       new TransactionInstruction({
@@ -252,7 +252,7 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   const result = await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
     payer,
-    adminKeypair,
+    operatorKeypair,
     adminTopUpLamports: 750,
     amountLamports: 2_000,
   });
@@ -264,8 +264,8 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
     Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
   ];
 
-  expect(signers).toEqual([payer, adminKeypair]);
-  expect(ixs[0]!.keys[0]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(signers).toEqual([payer, operatorKeypair]);
+  expect(ixs[0]!.keys[0]!.pubkey).toEqual(operatorKeypair.publicKey);
   expect(ixs[ixs.length - 1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
   expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
 
@@ -283,7 +283,7 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
   );
 
   const payer = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const unwrapInstruction = new TransactionInstruction({
     keys: [
       { pubkey: payer.publicKey, isSigner: false, isWritable: true },
@@ -304,7 +304,7 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
   const result = await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
     payer,
-    adminKeypair,
+    operatorKeypair,
     adminTopUpLamports: 750,
     amountLamports: 5_000,
   });
@@ -316,13 +316,13 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
     Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
   ];
 
-  expect(signers).toEqual([payer, adminKeypair]);
+  expect(signers).toEqual([payer, operatorKeypair]);
   expect(ixs).toHaveLength(3);
-  expect(ixs[0]!.keys[0]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(ixs[0]!.keys[0]!.pubkey).toEqual(operatorKeypair.publicKey);
   expect(ixs[0]!.keys[1]!.pubkey).toEqual(payer.publicKey);
   expect(ixs[1]).toBe(unwrapInstruction);
   expect(ixs[2]!.keys[0]!.pubkey).toEqual(payer.publicKey);
-  expect(ixs[2]!.keys[1]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(ixs[2]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
   expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
 
   expect(result).toEqual({
@@ -423,7 +423,7 @@ test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
   );
 });
 
-test("unwrapSolWithKeypair throws if admin lending is requested without admin keypair", async () => {
+test("unwrapSolWithKeypair throws if operator lending is requested without operator keypair", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
@@ -437,9 +437,9 @@ test("unwrapSolWithKeypair throws if admin lending is requested without admin ke
       owner,
       payer,
       adminTopUpLamports: 1000,
-      // No adminKeypair provided
+      // No operatorKeypair provided
     }),
-  ).rejects.toThrow("Admin keypair required when lending lamports");
+  ).rejects.toThrow("Operator keypair required when lending lamports");
 });
 
 test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
@@ -449,7 +449,7 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
   );
 
   const payer = Keypair.generate();
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const unwrapPlan = {
     instructions: [],
     unwrapLamports: 1000,
@@ -462,7 +462,7 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
   await wm.unwrapSolWithKeypair({
     owner: payer.publicKey,
     payer,
-    adminKeypair,
+    operatorKeypair,
     adminTopUpLamports: 500n, // Pass as bigint
     amountLamports: 1000,
   });

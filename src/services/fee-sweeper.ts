@@ -304,7 +304,7 @@ async function processTokenFee(
   program: anchor.Program<Timba>,
   connection: Connection,
   wallet: WalletManager,
-  adminBundle: KeypairBundle,
+  payerBundle: KeypairBundle,
   operatorBundle: KeypairBundle,
   config: TokenConfig,
   priceResolver: PriceResolver,
@@ -351,7 +351,7 @@ async function processTokenFee(
   } = await wallet.ensureAssociatedTokenAccount(
     operatorBundle.anchor.publicKey,
     mint,
-    adminBundle.root,
+    payerBundle.root,
   );
   if (!tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
     throw new Error(`Timba only supports legacy SPL Token mints`);
@@ -394,7 +394,7 @@ async function processTokenFee(
 
   const tx = await wallet.sendAndConfirmWithResubmits(
     instructions,
-    uniqueSigners(adminBundle.root, operatorBundle.root),
+    uniqueSigners(payerBundle.root, operatorBundle.root),
     { operationLabel: `Withdraw ${config.ticker} fees` },
   );
 
@@ -404,7 +404,7 @@ async function processTokenFee(
 
 async function runReferralSweep(
   connection: Connection,
-  adminBundle: KeypairBundle,
+  payerBundle: KeypairBundle,
   referralAccountAddress: string,
   priceResolver: PriceResolver = getUsdPrice,
   referralProviderFactory: ReferralProviderFactory = (referralConnection) =>
@@ -467,7 +467,7 @@ async function runReferralSweep(
   console.log(`💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`);
 
   const transactions = await provider.claimAllV2({
-    payerPubKey: adminBundle.anchor.publicKey,
+    payerPubKey: payerBundle.anchor.publicKey,
     referralAccountPubKey: referralAccount,
   });
 
@@ -482,7 +482,7 @@ async function runReferralSweep(
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
     if (!tx) continue;
-    tx.sign([adminBundle.anchor]);
+    tx.sign([payerBundle.anchor]);
     const sig = await sendAndConfirmRawTransaction(
       connection as unknown as Connection,
       Buffer.from(tx.serialize()),
@@ -503,7 +503,7 @@ async function sweepTokensToSol(
   priceResolver: PriceResolver = getUsdPrice,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports,
 ) {
-  const admin = wallet.getAdminKeypair();
+  const operator = wallet.getOperatorKeypair();
   const swapManager = swapManagerFactory(connection, wallet);
   const sweepableTokens = tokens.filter(
     (token) => token.mint !== WSOL_MINT && token.ticker !== "SOL",
@@ -517,7 +517,7 @@ async function sweepTokensToSol(
   const shouldSkip = await shouldSkipTokenToSolSweeps({
     connection,
     wallet,
-    owner: admin.publicKey,
+    owner: operator.publicKey,
     solUsdThreshold,
     priceResolver,
   });
@@ -530,7 +530,7 @@ async function sweepTokensToSol(
   for (const token of sweepableTokens) {
     try {
       const mintPubkey = new PublicKey(token.mint);
-      const balanceLamports = await balanceFetcher(connection, admin.publicKey, mintPubkey);
+      const balanceLamports = await balanceFetcher(connection, operator.publicKey, mintPubkey);
 
       if (balanceLamports === 0n) {
         console.log(`ℹ️  No balance for ${token.ticker}; skipping.`);
@@ -557,7 +557,7 @@ async function sweepTokensToSol(
         inputMint: token.mint,
         outputMint: WSOL_MINT,
         amount: balanceLamports.toString(),
-        userKeypair: admin as any,
+        userKeypair: operator as any,
         inputDecimals: metadata.decimals,
         outputDecimals: 9,
         inputTicker: token.ticker,
@@ -579,9 +579,9 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   console.log("💸 Collecting oracle fees for configured tokens...\n");
 
   const wallet = options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
-  const adminRoot = wallet.getAdminKeypair();
-  const adminBundle = bundleFromKeypair(adminRoot);
-  const operatorBundle = resolveOracleOperatorBundle(adminRoot);
+  const payerRoot = wallet.getOperatorKeypair();
+  const payerBundle = bundleFromKeypair(payerRoot);
+  const operatorBundle = resolveOracleOperatorBundle(payerRoot);
 
   const tokens = options.tokenConfigs ?? getSupportedTokens();
   const referralAccount = options.referralAccount ?? getReferralConfig().referralAccount;
@@ -604,14 +604,14 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       ? options.solUsdThreshold
       : FEE_SWEEP_SOL_USD_THRESHOLD;
 
-  const { provider, program } = contextFactory(adminBundle.root, {
+  const { provider, program } = contextFactory(payerBundle.root, {
     rpcUrl,
   });
   const connection = provider.connection as unknown as Connection;
 
   console.log(`Program ID: ${program.programId.toBase58()}`);
   console.log(
-    `Admin payer: ${adminBundle.anchor.publicKey.toBase58()}, Oracle operator: ${operatorBundle.anchor.publicKey.toBase58()}`,
+    `Operator payer: ${payerBundle.anchor.publicKey.toBase58()}, Oracle operator: ${operatorBundle.anchor.publicKey.toBase58()}`,
   );
 
   let tokenWithdrawals = 0;
@@ -621,7 +621,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
         program,
         connection,
         wallet,
-        adminBundle,
+        payerBundle,
         operatorBundle,
         token,
         priceResolver,
@@ -636,7 +636,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(connection, adminBundle, referralAccount, priceResolver);
+    referralClaims = await referralSweeper(connection, payerBundle, referralAccount, priceResolver);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }
@@ -646,7 +646,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       const shouldSkip = await shouldSkipTokenToSolSweeps({
         connection,
         wallet,
-        owner: adminBundle.root.publicKey,
+        owner: payerBundle.root.publicKey,
         solUsdThreshold,
         priceResolver,
       });
@@ -663,8 +663,8 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
         await unwrapWsolBalance(
           wallet,
           connection,
-          adminBundle.root.publicKey,
-          adminBundle.root,
+          payerBundle.root.publicKey,
+          payerBundle.root,
           priceResolver,
           balanceFetcher,
         );

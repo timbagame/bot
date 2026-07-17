@@ -208,7 +208,7 @@ describe("sweeping tokens to SOL", () => {
     const tokenB = tokens[1]!;
 
     const wallet = {
-      getAdminKeypair: () => admin,
+      getOperatorKeypair: () => admin,
       getTokenMetadata: async () => ({ decimals: 9 }),
       formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
     } as any;
@@ -242,7 +242,7 @@ describe("sweeping tokens to SOL", () => {
     const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
-      getAdminKeypair: () => admin,
+      getOperatorKeypair: () => admin,
       getTokenMetadata: async () => ({ decimals: 9 }),
       formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
     } as any;
@@ -274,7 +274,7 @@ describe("sweeping tokens to SOL", () => {
     const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
-      getAdminKeypair: () => admin,
+      getOperatorKeypair: () => admin,
       getTokenMetadata: async () => ({ decimals: 9 }),
       formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
     } as any;
@@ -303,10 +303,10 @@ describe("sweeping tokens to SOL", () => {
 });
 
 describe("Jupiter referral sweep threshold", () => {
-  const adminKeypair = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
   const adminBundle = {
-    root: adminKeypair,
-    anchor: adminKeypair,
+    root: operatorKeypair,
+    anchor: operatorKeypair,
   } as any;
 
   test("returns 0 when referral account is not configured", async () => {
@@ -354,7 +354,7 @@ describe("Jupiter referral sweep threshold", () => {
     const claimAttempted = false;
 
     const result = await sweepFees({
-      walletManager: { getAdminKeypair: () => adminKeypair } as any,
+      walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
       contextFactory: () =>
@@ -378,7 +378,7 @@ describe("Jupiter referral sweep threshold", () => {
     let claimAttempted = false;
 
     const result = await sweepFees({
-      walletManager: { getAdminKeypair: () => adminKeypair } as any,
+      walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
       contextFactory: () =>
@@ -405,7 +405,7 @@ describe("Jupiter referral sweep threshold", () => {
     let receivedPriceResolver: TestPriceResolver | undefined;
 
     await sweepFees({
-      walletManager: { getAdminKeypair: () => adminKeypair } as any,
+      walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
       priceResolver: async ({ tokenMint }) => {
@@ -443,7 +443,7 @@ describe("Jupiter referral sweep threshold", () => {
     let totalCalculated = 0;
 
     await sweepFees({
-      walletManager: { getAdminKeypair: () => adminKeypair } as any,
+      walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
       contextFactory: () =>
@@ -468,7 +468,7 @@ describe("Jupiter referral sweep threshold", () => {
     let claimsReturned = 0;
 
     const result = await sweepFees({
-      walletManager: { getAdminKeypair: () => adminKeypair } as any,
+      walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
       priceResolver: async (_params: { tokenMint?: string }) => null, // No price data
@@ -511,7 +511,7 @@ describe("ENABLE_FEE_SWEEPER config", () => {
 describe("sweepFees integration hooks", () => {
   const admin = Keypair.generate();
   const wallet = {
-    getAdminKeypair: () => admin,
+    getOperatorKeypair: () => admin,
     formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
   } as any;
 

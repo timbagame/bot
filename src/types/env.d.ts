@@ -8,6 +8,8 @@ declare global {
       HELIUS_REBATE_ADDRESS?: string;
       MNEMONIC?: string;
       MNEMONIC_FILE?: string;
+      OPERATOR_KEYPAIR_PATH?: string;
+      /** @deprecated Use OPERATOR_KEYPAIR_PATH. */
       ADMIN_KEYPAIR_PATH?: string;
       DEFAULT_TOKEN_MINT?: string;
       DEFAULT_TOKEN_TICKER?: string;

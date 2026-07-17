@@ -23,7 +23,7 @@ const createWalletStub = () => {
     connection,
     getConnection: () => connection,
     getKeyPair: () => admin,
-    getAdminKeypair: () => admin,
+    getOperatorKeypair: () => admin,
     formatTokenBalance: (value: number) => value.toString(),
     formatSolBalance: (lamports: number) => lamports.toString(),
     getBlockchainTime: async () => Math.floor(Date.now() / 1000),

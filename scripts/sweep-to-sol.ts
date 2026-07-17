@@ -26,7 +26,7 @@ async function getTotalTokenBalanceLamports(
 
 export async function sweepToSol(): Promise<void> {
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
-  const admin = wallet.getAdminKeypair();
+  const operator = wallet.getOperatorKeypair();
   const connection = wallet.getConnection();
   const swapManager = new SwapManager(connection, wallet);
 
@@ -37,7 +37,11 @@ export async function sweepToSol(): Promise<void> {
   for (const token of tokens) {
     try {
       const mintPubkey = new PublicKey(token.mint);
-      const balance = await getTotalTokenBalanceLamports(connection, admin.publicKey, mintPubkey);
+      const balance = await getTotalTokenBalanceLamports(
+        connection,
+        operator.publicKey,
+        mintPubkey,
+      );
       if (balance === 0n) {
         console.log(`ℹ️  No balance for ${token.ticker}; skipping.`);
         continue;
@@ -68,7 +72,7 @@ export async function sweepToSol(): Promise<void> {
         inputMint: token.mint,
         outputMint: WSOL_MINT,
         amount: balance.toString(),
-        userKeypair: admin,
+        userKeypair: operator,
         inputDecimals: metadata.decimals,
         outputDecimals: 9,
         inputTicker: token.ticker,
@@ -85,7 +89,7 @@ export async function sweepToSol(): Promise<void> {
 
   console.log("\n🏁 Sweep complete.");
 
-  await unwrapWsolBalance(wallet, connection, admin.publicKey, admin, getUsdPrice);
+  await unwrapWsolBalance(wallet, connection, operator.publicKey, operator, getUsdPrice);
 }
 
 if (import.meta.main) {

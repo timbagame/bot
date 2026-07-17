@@ -19,10 +19,10 @@ const createConnection = (initialBalance = 0) => {
   } as any;
 };
 
-const createWallet = (connection: any, adminKeypair: Keypair | null): WalletManager => {
+const createWallet = (connection: any, operatorKeypair: Keypair | null): WalletManager => {
   return {
     getConnection: () => connection,
-    getAdminKeypair: () => adminKeypair,
+    getOperatorKeypair: () => operatorKeypair,
     formatSolBalance: (lamports: number) => `${lamports} lamports`,
     ensureAssociatedTokenAccount: async () => ({
       created: false,
@@ -125,7 +125,7 @@ describe("SwapManager JIT helpers", () => {
 
     expect(result.status).toBe("success");
     expect(calls).toHaveLength(1);
-    expect(calls[0].adminKeypair).toBeUndefined();
+    expect(calls[0].operatorKeypair).toBeUndefined();
     expect(calls[0].lendingLamports).toBe(0);
   });
 
@@ -152,7 +152,7 @@ describe("SwapManager JIT helpers", () => {
     });
 
     expect(result.status).toBe("success");
-    expect(calls[0].adminKeypair?.publicKey).toEqual(admin.publicKey);
+    expect(calls[0].operatorKeypair?.publicKey).toEqual(admin.publicKey);
     expect(calls[0].lendingLamports).toBe(600_000);
   });
 

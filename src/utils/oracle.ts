@@ -191,13 +191,13 @@ export class OracleClient {
         };
       }
 
-      // For private games, we still need admin keypair for authorization
+      // Private games require the shared operator keypair for authorization.
       if (!this.wallet) {
         return { authorized: false, error: "Wallet manager not available" };
       }
 
-      const adminKeypair = this.wallet.getAdminKeypair();
-      return { authorized: true, adminKeypair };
+      const operatorKeypair = this.wallet.getOperatorKeypair();
+      return { authorized: true, operatorKeypair };
     } catch (error) {
       console.error(`Error authorizing player:`, error);
       return { authorized: false, error: (error as Error).message };

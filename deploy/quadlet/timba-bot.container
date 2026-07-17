@@ -11,10 +11,10 @@ AutoUpdate=registry
 Network=timba.network
 EnvironmentFile=%h/timba/bot/.env
 Environment=MNEMONIC_FILE=/run/secrets/bot_mnemonic
-Environment=ADMIN_KEYPAIR_PATH=/run/secrets/admin_keypair.json
+Environment=OPERATOR_KEYPAIR_PATH=/run/secrets/operator_keypair.json
 Environment=ORACLE_API_URL=http://oracle:3001
 Environment=ORACLE_API_TOKEN_FILE=/run/secrets/oracle_api_token
-Volume=%h/timba/bot/admin-keypair.json:/run/secrets/admin_keypair.json:ro,Z
+Volume=%h/timba/bot/operator-keypair.json:/run/secrets/operator_keypair.json:ro,Z
 Volume=%h/timba/bot/secrets/bot-mnemonic:/run/secrets/bot_mnemonic:ro,Z
 Volume=%h/timba/bot/secrets/oracle-api-token:/run/secrets/oracle_api_token:ro,Z
 Volume=%h/timba/bot/chat-settings.sqlite:/app/chat-settings.sqlite:Z

@@ -85,7 +85,7 @@ test("getKeyPair remains consistent under concurrent cache evictions", async () 
   expect(concurrent[1].publicKey.toBase58()).not.toBe(expected.publicKey.toBase58());
 });
 
-test("getAdminKeypair throws when file missing", () => {
+test("getOperatorKeypair throws when file missing", () => {
   WalletManager.resetForTest();
   const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
@@ -96,14 +96,14 @@ test("getAdminKeypair throws when file missing", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    expect(() => manager.getAdminKeypair()).toThrow(/Admin keypair file not found/);
+    expect(() => manager.getOperatorKeypair()).toThrow(/Operator keypair file not found/);
   } finally {
     process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("getAdminKeypair surfaces parse failures", () => {
+test("getOperatorKeypair surfaces parse failures", () => {
   WalletManager.resetForTest();
   const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
@@ -115,7 +115,7 @@ test("getAdminKeypair surfaces parse failures", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    expect(() => manager.getAdminKeypair()).toThrow(/Failed to load admin keypair/);
+    expect(() => manager.getOperatorKeypair()).toThrow(/Failed to load operator keypair/);
   } finally {
     process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
