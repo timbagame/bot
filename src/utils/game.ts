@@ -2135,6 +2135,15 @@ export class GameManager {
       const expiresAt = createdAt + timeout;
       const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
       const tokenMint = ((gameAccount as any)?.tokenMint as PublicKey | undefined)?.toBase58();
+      const participantAddresses = Array.isArray((gameAccount as any)?.participants)
+        ? (gameAccount as any).participants.flatMap((participant: unknown) => {
+            try {
+              return [new PublicKey(participant as any).toBase58()];
+            } catch {
+              return [];
+            }
+          })
+        : [];
 
       return {
         currentTickets,
@@ -2143,6 +2152,7 @@ export class GameManager {
         totalPot: totalPot ?? baseAmountLamports,
         expirationInfo,
         tokenMint,
+        participantAddresses,
       };
     } catch (error) {
       console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
@@ -2153,6 +2163,7 @@ export class GameManager {
         totalPot: baseAmountLamports,
         expirationInfo: "",
         tokenMint: undefined,
+        participantAddresses: [],
       };
     }
   }
@@ -2381,6 +2392,8 @@ export class GameManager {
 
     const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats as any;
     const tokenMintHint = (gameStats as { tokenMint?: string | null }).tokenMint;
+    const participantAddresses = (gameStats as { participantAddresses?: string[] })
+      .participantAddresses;
 
     const {
       formatBalance: formatBalanceForDisplay,
@@ -2460,21 +2473,33 @@ export class GameManager {
         const allowNetworkLookup =
           totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
 
+        const previewEntries: Array<{ publicKey: string | null; telegramId: string | null }> =
+          participantAddresses && participantAddresses.length > 0
+            ? participantAddresses.slice(0, previewLimit).map((publicKey) => ({
+                publicKey,
+                telegramId: this.gameDb.getPlayerTelegramId(publicKey),
+              }))
+            : previewIds.map((telegramId) => ({ telegramId, publicKey: null }));
+
         const resolved = await mapWithConcurrency(
-          previewIds,
+          previewEntries,
           GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
-          async (telegramId) => {
-            try {
-              const username = await this.getUsernameFromTelegramId(ctx, telegramId, {
-                allowNetworkLookup,
-              });
-              if (username) {
-                return sanitizeDisplay(username);
+          async ({ telegramId, publicKey }) => {
+            if (telegramId) {
+              try {
+                const username = await this.getUsernameFromTelegramId(ctx, telegramId, {
+                  allowNetworkLookup,
+                });
+                if (username) {
+                  return sanitizeDisplay(username);
+                }
+              } catch {
+                // fall through to wallet or player placeholder
               }
-            } catch {
-              // fall through to placeholder
             }
-            return `Player ${telegramId.slice(0, 6)}...`;
+            return publicKey
+              ? `Wallet ${publicKey.slice(0, 4)}…${publicKey.slice(-4)}`
+              : `Player ${telegramId?.slice(0, 6) ?? "unknown"}...`;
           },
         );
         participantDisplayNames.push(...resolved);

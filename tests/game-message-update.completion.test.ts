@@ -191,4 +191,42 @@ describe("Game message updates during completion", () => {
       },
     ]);
   });
+
+  test("completion updates a web-created game through its stored message target", async () => {
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const winnerAddress = Keypair.generate().publicKey.toBase58();
+    const target = { chatId: 707, messageId: 808 };
+    const gameRecord = {
+      game_address: gameAddress,
+      chat_id: null,
+      message_id: target.messageId,
+      status: "active",
+      game_type: "coinflip",
+      amount: 42_000,
+    } as any;
+    const updates: string[] = [];
+
+    botModule.__test_setGameDatabase({
+      getGame: () => gameRecord,
+      getGameMessages: () => [target],
+      completeGame: () => {
+        gameRecord.status = "completed";
+        gameRecord.winner_address = winnerAddress;
+      },
+      getGameParticipantsCount: () => 2,
+    } as any);
+    botModule.__test_setGameManager({
+      getActiveGameMessages: () => undefined,
+      updateGameMessageFromData: async (_ctx: any, _game: string, status: string) => {
+        updates.push(status);
+      },
+      getPlayerUsername: async () => "Winner",
+      getPrizeDisplay: async () => undefined,
+    } as any);
+    (botModule.wallet as any).getBlockchainTime = async () => 1_000;
+
+    await botModule.__test_processGameCompletion(gameAddress, winnerAddress, 42_000);
+
+    expect(updates).toEqual(["Completed"]);
+  });
 });

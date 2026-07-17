@@ -1469,16 +1469,17 @@ export const __test_shouldSkipSolFeeBuffer = shouldSkipSolFeeBuffer;
  */
 const updateGameMessageSafely = async (
   gameAddress: string,
-  gameData: any,
+  _gameData: any,
   status: string = "Completed",
   winnerAddress?: string,
   totalPot?: number,
   winnerSignature?: string,
 ): Promise<void> => {
-  if (!gameData?.chat_id || !gameData?.message_id) return;
+  const targets = getGameMessageTargets(gameAddress);
+  if (targets.length === 0) return;
 
   try {
-    const ctx = createApiContext(gameData.chat_id);
+    const ctx = createApiContext(targets[0]!.chatId);
     await gameManager.updateGameMessageFromData(
       ctx,
       gameAddress,
