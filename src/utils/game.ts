@@ -3568,6 +3568,15 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           .joinGame()
           .accounts(joinAccounts as any)
           .instruction();
+        if (!isPrivate) {
+          // Anchor resolves an omitted optional signer to the provider wallet. Public games
+          // must encode `None` with the program ID placeholder instead.
+          joinInstruction.keys[2] = {
+            pubkey: this.program.programId,
+            isSigner: false,
+            isWritable: false,
+          };
+        }
         creationInstructions = [gameInstruction, ...setupInstructions, joinInstruction];
       }
 

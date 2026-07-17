@@ -46,8 +46,19 @@ function makeProgram(connection = createConnectionStub()) {
         accounts: (accs: any) => {
           captures["joinGameAccounts"] = accs;
           return {
-            instruction: async () =>
-              new TransactionInstruction({ programId, keys: [], data: Buffer.alloc(0) }),
+            instruction: async () => {
+              const instruction = new TransactionInstruction({
+                programId,
+                keys: [
+                  { pubkey: PublicKey.default, isSigner: false, isWritable: true },
+                  { pubkey: PublicKey.default, isSigner: true, isWritable: true },
+                  { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+                ],
+                data: Buffer.alloc(0),
+              });
+              captures["joinGameInstruction"] = instruction;
+              return instruction;
+            },
           };
         },
       }),
@@ -748,6 +759,11 @@ describe("GameManager.createGame", () => {
     const captures = (program as any).__captures;
     const accounts = captures["initializeGameAccounts"];
     expect(captures["joinGameAccounts"].oracleOperator).toBeUndefined();
+    expect((captures["joinGameInstruction"] as TransactionInstruction).keys[2]).toEqual({
+      pubkey: program.programId,
+      isSigner: false,
+      isWritable: false,
+    });
     expect(accounts).toBeDefined();
     expect(accounts.gameTokenCtx).toBeDefined();
     const ctx = accounts.gameTokenCtx;
