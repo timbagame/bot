@@ -2231,12 +2231,14 @@ export class GameManager {
     }
 
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
+    const gameUrl = winnerSignature
+      ? `https://timba.cc/games/${encodeURIComponent(winnerSignature)}`
+      : null;
     const sanitize = suppressMentions
       ? sanitizeTelegramDisplayNameWithoutMention
       : sanitizeTelegramDisplayName;
     const safeWinner = escapeHtml(sanitize(winnerUsername));
-    const linkLine = solscanUrl ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>` : "";
+    const linkLine = gameUrl ? `\n\n<a href="${gameUrl}">🔗 View game</a>` : "";
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 

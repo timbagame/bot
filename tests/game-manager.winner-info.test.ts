@@ -46,24 +46,16 @@ describe("GameManager.getWinnerInfo", () => {
     expect(line).toContain(sanitizedHandle);
   });
 
-  test("adds Solscan link when transaction signature provided", async () => {
+  test("adds Timba game link when transaction signature provided", async () => {
     resetGM();
     const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
     (gm as any).getPlayerUsername = async () => "@champ";
     const ctx = { chat: { id: 1, type: "private" } } as any;
-    const originalNetwork = process.env.SOLANA_NETWORK;
-    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
-    try {
-      const line = await (gm as any).getWinnerInfo(ctx, "Completed", "SomePubkey", "sig123");
-      expect(line).toContain("Winner:");
-      expect(line).toContain(sanitizeTelegramDisplayName("@champ"));
-      expect(line).toContain("https://solscan.io/tx/sig123");
-    } finally {
-      if (originalNetwork === undefined) {
-        Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
-      } else {
-        process.env.SOLANA_NETWORK = originalNetwork;
-      }
-    }
+    const line = await (gm as any).getWinnerInfo(ctx, "Completed", "SomePubkey", "sig123");
+    expect(line).toContain("Winner:");
+    expect(line).toContain(sanitizeTelegramDisplayName("@champ"));
+    expect(line).toContain("https://timba.cc/games/sig123");
+    expect(line).toContain("🔗 View game");
+    expect(line).not.toContain("solscan.io");
   });
 });
