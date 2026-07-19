@@ -1,6 +1,15 @@
 import { escapeHtml, formatCompactTokenDisplay } from "./format-amount";
 import { formatDuration } from "./format-time";
 
+export function formatPlayerAddress(address: string): string {
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+}
+
+export function buildPlayerProfileLink(address: string, label?: string): string {
+  const profileUrl = `https://timba.cc/players/${encodeURIComponent(address)}`;
+  return `<a href="${escapeHtml(profileUrl)}">${escapeHtml(label ?? formatPlayerAddress(address))}</a>`;
+}
+
 /**
  * Build the status text line for a game based on tickets.
  * Returns a concise human-readable status.
@@ -33,13 +42,16 @@ export function buildGameHeader(
   maxTickets: number,
   usdApproximation?: string | null,
   explorerUrl?: string | null,
+  creatorWalletAddress?: string | null,
 ): string {
   const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
   const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
   const gameLabel = `${escapeHtml(gameTypeLabel)} ${gameExplorerIcon}`;
   const amountDisplay = escapeHtml(formatCompactTokenDisplay(amountFormatted));
   const tickerDisplay = escapeHtml(tokenTicker);
-  const creatorDisplay = escapeHtml(creatorUsername);
+  const creatorDisplay = creatorWalletAddress
+    ? buildPlayerProfileLink(creatorWalletAddress)
+    : escapeHtml(creatorUsername);
   return (
     `<b>${gameLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
     `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} tickets`
@@ -65,9 +77,17 @@ export function buildPrizeLine(
 /**
  * Build participants list given usernames; returns empty when none.
  */
-export function buildParticipantsList(usernames: string[]): string {
-  if (!usernames.length) return "";
-  const lines = usernames.map((u, i) => `${i + 1}. ${escapeHtml(u)}`);
+export type ParticipantDisplay = string | { address: string; label?: string };
+
+export function buildParticipantsList(participants: ParticipantDisplay[]): string {
+  if (!participants.length) return "";
+  const lines = participants.map((participant, i) => {
+    const display =
+      typeof participant === "string"
+        ? escapeHtml(participant)
+        : buildPlayerProfileLink(participant.address, participant.label);
+    return `${i + 1}. ${display}`;
+  });
   return `\n${lines.join("\n")}\n`;
 }
 

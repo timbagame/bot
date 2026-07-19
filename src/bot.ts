@@ -80,6 +80,7 @@ import {
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
 import { formatAmount, escapeHtml, formatRate, formatUsdValue } from "./utils/format-amount";
+import { buildPlayerProfileLink, formatPlayerAddress } from "./utils/game-ui";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
@@ -2122,7 +2123,10 @@ const processGameCompletion = async (
               `${escapeHtml(usdSegment)}`;
           }
         }
-        const safeWinnerDisplay = escapeHtml(winnerDisplay);
+        const safeWinnerDisplay =
+          winnerDisplay === formatPlayerAddress(winnerAddress)
+            ? buildPlayerProfileLink(winnerAddress)
+            : escapeHtml(winnerDisplay);
         const gameTypeLabel =
           gameData?.game_type === "coinflip"
             ? "coinflip"

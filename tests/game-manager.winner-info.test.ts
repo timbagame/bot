@@ -58,4 +58,18 @@ describe("GameManager.getWinnerInfo", () => {
     expect(line).toContain("🔗 View game");
     expect(line).not.toContain("solscan.io");
   });
+
+  test("shortens wallet winners and links their Timba profile", async () => {
+    resetGM();
+    const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+    const winner = "5TGT6bS2LtTLr7oaQtp9hPkfy9XAnDZPgHstLjQjwwwD";
+    (gm as any).getPlayerUsername = async () => `${winner.slice(0, 4)}…${winner.slice(-4)}`;
+    const ctx = { chat: { id: 1, type: "private" } } as any;
+
+    const line = await (gm as any).getWinnerInfo(ctx, "Completed", winner);
+
+    expect(line).toContain(`href="https://timba.cc/players/${winner}"`);
+    expect(line).toContain("5TGT…wwwD");
+    expect(line).not.toContain(`Winner: ${winner}`);
+  });
 });

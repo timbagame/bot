@@ -71,6 +71,7 @@ describe("GameManager participants rendering", () => {
     );
 
     expect(res.messageText).toContain(`Wallet ${webWallet.slice(0, 4)}…${webWallet.slice(-4)}`);
+    expect(res.messageText).toContain(`href="https://timba.cc/players/${webWallet}"`);
     expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user222"));
     expect(res.messageText).toContain("2/2 tickets");
   });

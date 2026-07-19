@@ -68,6 +68,9 @@ import type {
 } from "../types";
 import type { Timba } from "../../idl/idlType";
 import {
+  buildPlayerProfileLink,
+  formatPlayerAddress,
+  type ParticipantDisplay,
   buildGameStatus,
   buildGameHeader,
   buildPrizeLine,
@@ -1923,7 +1926,7 @@ export class GameManager {
    * Format Solana address for display
    */
   private formatAddress(address: string): string {
-    return address;
+    return formatPlayerAddress(address);
   }
 
   /**
@@ -2257,7 +2260,10 @@ export class GameManager {
     const sanitize = suppressMentions
       ? sanitizeTelegramDisplayNameWithoutMention
       : sanitizeTelegramDisplayName;
-    const safeWinner = escapeHtml(sanitize(winnerUsername));
+    const safeWinner =
+      winnerUsername === this.formatAddress(winnerAddress)
+        ? buildPlayerProfileLink(winnerAddress)
+        : escapeHtml(sanitize(winnerUsername));
     const linkLine = gameUrl ? `\n\n<a href="${gameUrl}">🔗 View game</a>` : "";
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
@@ -2432,6 +2438,14 @@ export class GameManager {
     const explorerUrl = NetworkDetector.buildSolscanAccountUrl(gamePda.toBase58());
 
     const safeCreatorUsername = sanitizeDisplay(creatorUsername);
+    const getCreatorInfo = (this.gameDb as any).getCreatorInfo?.bind(this.gameDb) as
+      | ((gameAddress: string) => { publicKey?: string | null } | null)
+      | undefined;
+    const creatorPublicKey = getCreatorInfo?.(gamePda.toBase58())?.publicKey ?? null;
+    const creatorWalletAddress =
+      creatorPublicKey && creatorUsername === this.formatAddress(creatorPublicKey)
+        ? creatorPublicKey
+        : null;
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
       formattedTicketAmount,
@@ -2441,6 +2455,7 @@ export class GameManager {
       maxTickets,
       usdApproximation?.text,
       explorerUrl,
+      creatorWalletAddress,
     );
     // Show current prize if different from base amount
     let prizeUsdApproximation: string | null = null;
@@ -2467,7 +2482,7 @@ export class GameManager {
 
     const baseBeforeParticipants = header + prize;
 
-    const participantDisplayNames: string[] = [];
+    const participantDisplayNames: ParticipantDisplay[] = [];
     let totalParticipants = 0;
     if (currentTickets > 0) {
       try {
@@ -2507,7 +2522,7 @@ export class GameManager {
               }
             }
             return publicKey
-              ? `Wallet ${publicKey.slice(0, 4)}…${publicKey.slice(-4)}`
+              ? { address: publicKey, label: `Wallet ${formatPlayerAddress(publicKey)}` }
               : `Player ${telegramId?.slice(0, 6) ?? "unknown"}...`;
           },
         );
@@ -2521,7 +2536,7 @@ export class GameManager {
       ? `\nStatus: ${buildGameStatus(currentTickets, minTickets, maxTickets)}${expirationInfo}`
       : "";
 
-    const composeMessage = (names: string[], omittedCount: number): string => {
+    const composeMessage = (names: ParticipantDisplay[], omittedCount: number): string => {
       const participantsSection = names.length > 0 ? buildParticipantsList(names) : "";
       let message = baseBeforeParticipants + participantsSection;
       if (isCompleted && participantsSection.endsWith("\n")) {
@@ -3251,7 +3266,10 @@ export class GameManager {
         winnerLine = "";
       } else {
         const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
-        const safeWinner = escapeHtml(sanitizeTelegramDisplayNameWithoutMention(winnerUsername));
+        const safeWinner =
+          winnerUsername === this.formatAddress(gameData.winner_address)
+            ? buildPlayerProfileLink(gameData.winner_address)
+            : escapeHtml(sanitizeTelegramDisplayNameWithoutMention(winnerUsername));
         winnerLine = `Winner: ${safeWinner}`;
       }
 
