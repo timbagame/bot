@@ -22,5 +22,5 @@ test("getGameCreatorUsername falls back to formatted address when no telegram id
     api: { getChatMember: async () => ({ user: {} }) },
   } as any;
   const label = await gm.getGameCreatorUsername(ctx, "11111111111111111111111111111111");
-  expect(label).toBe("BPFLoader1111111111111111111111111111111111");
+  expect(label).toBe("BPFL…1111");
 });

@@ -353,7 +353,7 @@ describe("GameManager Username Resolution", () => {
         api: { getChatMember: async () => ({ user: {} }) },
       } as any;
       const label = await gm.getPlayerUsername(ctx, "BPFLoader1111111111111111111111111111111111");
-      expect(label).toBe("BPFLoader1111111111111111111111111111111111");
+      expect(label).toBe("BPFL…1111");
     });
 
     test("retries until telegram id mapping appears", async () => {
