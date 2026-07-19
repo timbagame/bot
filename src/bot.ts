@@ -1435,13 +1435,16 @@ export const __test_resetProgram = () => {
 // HELPER FUNCTIONS
 // ================================
 
-/**
- * Create a minimal context object for API operations
- */
-const createApiContext = (chatId: number, api?: any): Context =>
+/** Create a context-like adapter for messages sent outside an incoming update. */
+const createApiContext = (chatId: number, api: any = bot.api): Context =>
   ({
-    api: api || bot.api,
+    api,
     chat: { id: chatId },
+    reply: (text: string, options?: any) => api.sendMessage(chatId, text, options),
+    replyWithPhoto: (photo: any, options?: any) => api.sendPhoto(chatId, photo, options),
+    replyWithAnimation: (animation: any, options?: any) =>
+      api.sendAnimation(chatId, animation, options),
+    replyWithVideo: (video: any, options?: any) => api.sendVideo(chatId, video, options),
   }) as unknown as Context;
 
 /**

@@ -221,11 +221,29 @@ describe("Bot helper utilities", () => {
     expect(botModule.__test_isPrivateChat(groupCtx)).toBe(false);
   });
 
-  test("createApiContext builds minimal context with provided api", () => {
-    const customApi = { call: () => Promise.resolve() } as any;
+  test("createApiContext routes replies through the API for its chat", async () => {
+    const calls: any[] = [];
+    const customApi = {
+      sendMessage: (...args: any[]) => calls.push(["message", ...args]),
+      sendPhoto: (...args: any[]) => calls.push(["photo", ...args]),
+      sendAnimation: (...args: any[]) => calls.push(["animation", ...args]),
+      sendVideo: (...args: any[]) => calls.push(["video", ...args]),
+    } as any;
     const ctxWithCustom = botModule.__test_createApiContext(123, customApi);
     expect(ctxWithCustom.api).toBe(customApi);
     expect(ctxWithCustom.chat?.id).toBe(123);
+
+    await ctxWithCustom.reply("hello", { parse_mode: "HTML" });
+    await ctxWithCustom.replyWithPhoto("photo-id", { caption: "photo" });
+    await ctxWithCustom.replyWithAnimation("animation-id", { caption: "animation" });
+    await ctxWithCustom.replyWithVideo("video-id", { caption: "video" });
+
+    expect(calls).toEqual([
+      ["message", 123, "hello", { parse_mode: "HTML" }],
+      ["photo", 123, "photo-id", { caption: "photo" }],
+      ["animation", 123, "animation-id", { caption: "animation" }],
+      ["video", 123, "video-id", { caption: "video" }],
+    ]);
 
     const ctxWithDefault = botModule.__test_createApiContext(456);
     expect(ctxWithDefault.chat?.id).toBe(456);
