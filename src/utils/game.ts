@@ -2439,8 +2439,7 @@ export class GameManager {
 
     const safeCreatorUsername = sanitizeDisplay(creatorUsername);
     const getCreatorInfo = (this.gameDb as any).getCreatorInfo?.bind(this.gameDb) as
-      | ((gameAddress: string) => { publicKey?: string | null } | null)
-      | undefined;
+      ((gameAddress: string) => { publicKey?: string | null } | null) | undefined;
     const creatorPublicKey = getCreatorInfo?.(gamePda.toBase58())?.publicKey ?? null;
     const creatorWalletAddress =
       creatorPublicKey && creatorUsername === this.formatAddress(creatorPublicKey)
