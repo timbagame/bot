@@ -59,6 +59,7 @@ export class ChatDatabase extends BaseDatabase {
       "giveaway_media_type TEXT",
       "join_notifications_external INTEGER",
       "join_notifications_per_minute INTEGER",
+      "global_public_game_feed INTEGER",
     ] as const;
 
     for (const column of columnsToAdd) {
@@ -153,6 +154,10 @@ export class ChatDatabase extends BaseDatabase {
       settings,
       "join_notifications_per_minute",
     );
+    const hasGlobalPublicGameFeed = Object.prototype.hasOwnProperty.call(
+      settings,
+      "global_public_game_feed",
+    );
     const hasSetBy = Object.prototype.hasOwnProperty.call(settings, "set_by_telegram_id");
 
     const next: ChatGameSettings = {
@@ -192,6 +197,11 @@ export class ChatDatabase extends BaseDatabase {
       join_notifications_per_minute: hasJoinNotificationsPerMinute
         ? (settings.join_notifications_per_minute ?? null)
         : (existing?.join_notifications_per_minute ?? null),
+      global_public_game_feed: hasGlobalPublicGameFeed
+        ? (settings.global_public_game_feed ?? null)
+        : existing?.global_public_game_feed != null
+          ? Boolean(existing.global_public_game_feed)
+          : null,
       set_by_telegram_id: hasSetBy
         ? (settings.set_by_telegram_id ?? null)
         : (existing?.set_by_telegram_id ?? null),
@@ -212,9 +222,10 @@ export class ChatDatabase extends BaseDatabase {
           giveaway_media_type,
           join_notifications_external,
           join_notifications_per_minute,
+          global_public_game_feed,
           set_by_telegram_id,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         next.chat_id,
         next.coinflip_max_players ?? null,
@@ -232,6 +243,11 @@ export class ChatDatabase extends BaseDatabase {
             ? 0
             : null,
         next.join_notifications_per_minute ?? null,
+        next.global_public_game_feed === true
+          ? 1
+          : next.global_public_game_feed === false
+            ? 0
+            : null,
         next.set_by_telegram_id ?? null,
         next.updated_at,
       ],
@@ -247,6 +263,17 @@ export class ChatDatabase extends BaseDatabase {
       [chatId],
       "getting chat game settings",
     );
+  }
+
+  public getGlobalPublicGameFeedChatIds(): number[] {
+    const rows = this.all<{ chat_id: number }>(
+      `SELECT chat_id FROM chat_game_settings
+       WHERE global_public_game_feed = 1
+       ORDER BY chat_id ASC`,
+      [],
+      "getting global public game feed chats",
+    );
+    return rows.map(({ chat_id }) => chat_id);
   }
 
   public clearChatGameSettings(chatId: number): void {

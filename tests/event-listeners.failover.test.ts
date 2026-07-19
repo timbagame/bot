@@ -44,15 +44,21 @@ describe("program event listener management", () => {
 
   test("registers and unregisters program listeners", async () => {
     await __test_registerProgramEventListeners();
-    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
+    expect(addCalls).toEqual([
+      "gameInitialized",
+      "gameCompleted",
+      "playerJoined",
+      "playerUnjoined",
+    ]);
     const state = __test_getProgramEventListenerState();
-    expect(state.gameCompletedListenerId).toBe(1);
-    expect(state.playerJoinedListenerId).toBe(2);
-    expect(state.playerUnjoinedListenerId).toBe(3);
+    expect(state.gameInitializedListenerId).toBe(1);
+    expect(state.gameCompletedListenerId).toBe(2);
+    expect(state.playerJoinedListenerId).toBe(3);
+    expect(state.playerUnjoinedListenerId).toBe(4);
     expect(state.programEventListenersReady).toBe(true);
 
     await __test_unregisterProgramEventListeners();
-    expect(removeCalls).toEqual([1, 2, 3]);
+    expect(removeCalls).toEqual([1, 2, 3, 4]);
     const after = __test_getProgramEventListenerState();
     expect(after.gameCompletedListenerId).toBeNull();
     expect(after.playerJoinedListenerId).toBeNull();
@@ -82,8 +88,8 @@ describe("program event listener management", () => {
 
     await expect(__test_registerProgramEventListeners()).rejects.toThrow("boom");
 
-    expect(addCalls).toEqual(["gameCompleted", "playerJoined"]);
-    expect(removeCalls).toEqual([1]);
+    expect(addCalls).toEqual(["gameInitialized", "gameCompleted", "playerJoined"]);
+    expect(removeCalls).toEqual([1, 2]);
     const state = __test_getProgramEventListenerState();
     expect(state.programEventListenersReady).toBe(false);
   });
@@ -107,9 +113,10 @@ describe("program event listener management", () => {
 
     const removed = await __test_unregisterProgramEventListeners();
     expect(removed).toBe(false);
-    expect(removeCalls).toEqual([1, 1, 1, 2, 3]);
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3, 4]);
     const state = __test_getProgramEventListenerState();
-    expect(state.gameCompletedListenerId).toBe(1);
+    expect(state.gameInitializedListenerId).toBe(1);
+    expect(state.gameCompletedListenerId).toBeNull();
     expect(state.playerJoinedListenerId).toBeNull();
     expect(state.playerUnjoinedListenerId).toBeNull();
     expect(state.programEventListenersReady).toBe(false);
@@ -130,7 +137,12 @@ describe("program event listener management", () => {
     };
 
     await __test_registerProgramEventListeners();
-    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
+    expect(addCalls).toEqual([
+      "gameInitialized",
+      "gameCompleted",
+      "playerJoined",
+      "playerUnjoined",
+    ]);
     addCalls = [];
     removeCalls = [];
 
@@ -161,11 +173,12 @@ describe("program event listener management", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(removeCalls).toEqual([1, 1, 1, 2, 3]);
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3, 4]);
     expect(addCalls).toEqual([]);
     const afterFailedRestart = __test_getProgramEventListenerState();
     expect(afterFailedRestart.programEventListenersReady).toBe(false);
-    expect(afterFailedRestart.gameCompletedListenerId).toBe(1);
+    expect(afterFailedRestart.gameInitializedListenerId).toBe(1);
+    expect(afterFailedRestart.gameCompletedListenerId).toBeNull();
     expect(afterFailedRestart.playerJoinedListenerId).toBeNull();
     expect(afterFailedRestart.playerUnjoinedListenerId).toBeNull();
 
@@ -173,12 +186,18 @@ describe("program event listener management", () => {
     failoverCallback?.(change);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(removeCalls).toEqual([1, 1, 1, 2, 3, 1]);
-    expect(addCalls).toEqual(["gameCompleted", "playerJoined", "playerUnjoined"]);
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3, 4, 1]);
+    expect(addCalls).toEqual([
+      "gameInitialized",
+      "gameCompleted",
+      "playerJoined",
+      "playerUnjoined",
+    ]);
     const afterRecovery = __test_getProgramEventListenerState();
-    expect(afterRecovery.gameCompletedListenerId).toBe(4);
-    expect(afterRecovery.playerJoinedListenerId).toBe(5);
-    expect(afterRecovery.playerUnjoinedListenerId).toBe(6);
+    expect(afterRecovery.gameInitializedListenerId).toBe(5);
+    expect(afterRecovery.gameCompletedListenerId).toBe(6);
+    expect(afterRecovery.playerJoinedListenerId).toBe(7);
+    expect(afterRecovery.playerUnjoinedListenerId).toBe(8);
     expect(afterRecovery.programEventListenersReady).toBe(true);
   });
 
@@ -210,20 +229,23 @@ describe("program event listener management", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(removeCalls).toEqual([1, 2, 3]);
+    expect(removeCalls).toEqual([1, 2, 3, 4]);
     expect(addCalls).toEqual([
+      "gameInitialized",
       "gameCompleted",
       "playerJoined",
       "playerUnjoined",
+      "gameInitialized",
       "gameCompleted",
       "playerJoined",
       "playerUnjoined",
     ]);
 
     const state = __test_getProgramEventListenerState();
-    expect(state.gameCompletedListenerId).toBe(4);
-    expect(state.playerJoinedListenerId).toBe(5);
-    expect(state.playerUnjoinedListenerId).toBe(6);
+    expect(state.gameInitializedListenerId).toBe(5);
+    expect(state.gameCompletedListenerId).toBe(6);
+    expect(state.playerJoinedListenerId).toBe(7);
+    expect(state.playerUnjoinedListenerId).toBe(8);
     expect(state.programEventListenersReady).toBe(true);
   });
 });

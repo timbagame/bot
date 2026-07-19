@@ -868,6 +868,8 @@ describe("chat defaults module", () => {
       "chat_defaults_clear_video_coinflip",
       "chat_defaults_clear_timeout",
       "chat_defaults_clear_coinflip",
+      "chat_defaults_public_game_feed",
+      "chat_defaults_set_public_game_feed_on",
     ];
 
     for (const action of restrictedActions) {
@@ -877,5 +879,45 @@ describe("chat defaults module", () => {
       // Reset for next
       while (headers.length > 0) headers.pop();
     }
+  });
+
+  test("global public game feed setting is admin-controlled and disabled by default", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx } = buildMockContext();
+    ctx.callbackQuery = {
+      id: "cb-feed",
+      data: "chat_defaults_public_game_feed",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+
+    let lastText = "";
+    ctx.editMessageText = async (text: string) => {
+      lastText = text;
+      return {};
+    };
+    ctx.answerCallbackQuery = async () => {};
+
+    createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx) =>
+        await handler(callbackCtx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+    });
+
+    await mockBot.dispatch("chat_defaults_public_game_feed", ctx);
+    expect(lastText).toContain("Global Public Game Feed");
+    expect(lastText).toContain("Disabled");
+
+    ctx.callbackQuery.data = "chat_defaults_set_public_game_feed_on";
+    await mockBot.dispatch("chat_defaults_set_public_game_feed_on", ctx);
+    expect(Boolean(chatDb.getChatGameSettings(99)?.global_public_game_feed)).toBe(true);
+    expect(lastText).toContain("Global public game feed: ✅ Enabled");
   });
 });

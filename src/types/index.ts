@@ -67,6 +67,8 @@ export interface ChatGameSettings {
   // - join_notifications_per_minute: rate limit (0 = disabled, null = use default)
   join_notifications_external?: boolean | null;
   join_notifications_per_minute?: number | null;
+  // Whether this chat receives newly created public games from every creation surface.
+  global_public_game_feed?: boolean | null;
   set_by_telegram_id?: string | null;
   updated_at: number;
 }
@@ -147,6 +149,20 @@ export interface GameCompletedEvent {
   winnerAmount: BN;
   feeAmount: BN;
   timestamp: BN;
+}
+
+export interface GameInitializedEvent {
+  gameKey: PublicKey;
+  creator: PublicKey;
+  gameType: { coinflip?: object; giveaway?: object };
+  ticketAmount: BN;
+  totalAmount: BN;
+  maxTickets: number;
+  minTickets: number;
+  tokenMint: PublicKey;
+  isPrivate: boolean;
+  createdAt: BN;
+  timeout: BN;
 }
 
 export interface PlayerJoinedEvent {

@@ -108,6 +108,8 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("🎬 Giveaway video", "chat_defaults_video_giveaway")
     .row()
     .text("📢 Join notifications", "chat_defaults_join_notifications")
+    .row()
+    .text("🌐 Global public game feed", "chat_defaults_public_game_feed")
     .row();
 };
 
@@ -217,6 +219,8 @@ const buildSettingsSummary = async (
     joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
 
   const joinNotificationsLine = `📢 Join notifications: External ${externalDisplay} ${externalSuffix} | Rate: ${rateDisplay} ${rateSuffix}`;
+  const publicGameFeedEnabled = Boolean(chatSettings?.global_public_game_feed);
+  const publicGameFeedLine = `🌐 Global public game feed: ${publicGameFeedEnabled ? "✅ Enabled" : "❌ Disabled"}`;
 
   return [
     "<b>Chat defaults</b>",
@@ -238,6 +242,7 @@ const buildSettingsSummary = async (
     coinflipVideoLine,
     giveawayVideoLine,
     joinNotificationsLine,
+    publicGameFeedLine,
     "",
     "Use the buttons below to update chat defaults.",
   ].join("\n");
@@ -678,10 +683,11 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway|join_notifications)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway|join_notifications|public_game_feed)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
-      const action = ctx.match?.[1] as SettingsTarget | "join_notifications" | undefined;
+      const action = ctx.match?.[1] as
+        SettingsTarget | "join_notifications" | "public_game_feed" | undefined;
       if (!action) return;
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
@@ -725,10 +731,53 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
         await respondWithMenu(ctx, {
           ...buildJoinNotificationsMenu(ctx, deps),
         });
+      } else if (action === "public_game_feed") {
+        const enabled = Boolean(
+          deps.chatDb.getChatGameSettings(ctx.chat.id)?.global_public_game_feed,
+        );
+        await respondWithMenu(ctx, {
+          text: [
+            "<b>Global Public Game Feed</b>",
+            "",
+            "Automatically post new public games created through the bot, web, or external wallets in this group.",
+            "",
+            `Current: ${enabled ? "✅ Enabled" : "❌ Disabled"}`,
+          ].join("\n"),
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text(
+              enabled ? "🔕 Disable" : "🔔 Enable",
+              enabled
+                ? "chat_defaults_set_public_game_feed_off"
+                : "chat_defaults_set_public_game_feed_on",
+            )
+            .row()
+            .text("🔙 Back", "chat_defaults_cancel"),
+        });
       } else {
         await promptForSetting(ctx, deps, action);
       }
       await safeAnswerCallbackQuery(ctx);
+    }),
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_public_game_feed_(on|off)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      const enabled = ctx.match![1] === "on";
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
+        global_public_game_feed: enabled,
+        set_by_telegram_id: getTelegramId(ctx).toString(),
+      });
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(
+        ctx,
+        enabled ? "Global public game feed enabled" : "Global public game feed disabled",
+      );
     }),
   );
 

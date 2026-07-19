@@ -88,6 +88,7 @@ import type {
   GameData,
   PlayerData,
   GameCompletedEvent,
+  GameInitializedEvent,
   PlayerJoinedEvent,
   PlayerUnjoinedEvent,
   PlayerEvent,
@@ -1416,6 +1417,7 @@ export const __test_setTokenManager = (manager: TokenManager): void => {
 let swapManager: SwapManager;
 let swapService: SwapService;
 let gameCompletedListenerId: number | null = null;
+let gameInitializedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
 let playerUnjoinedListenerId: number | null = null;
 let rpcEndpointListenerCleanup: (() => void) | null = null;
@@ -2236,6 +2238,60 @@ const handleGameCompletedAnchorEvent = async (
   }
 };
 
+const handleGameInitializedAnchorEvent = async (event: GameInitializedEvent): Promise<void> => {
+  if (event.isPrivate) return;
+
+  const gameAddress = event.gameKey.toString();
+  try {
+    // Let bot-originated creations persist their origin chat before fan-out so an
+    // opted-in origin does not receive a duplicate copy of its own game message.
+    await sleep(1_000);
+
+    const subscribedChatIds = chatDb.getGlobalPublicGameFeedChatIds();
+    if (subscribedChatIds.length === 0) return;
+
+    const gameData = await gameManager.ensureGameDataFromChain(gameAddress);
+    if (!gameData || gameData.status.toLowerCase() !== "active") return;
+
+    const existingChats = new Set(gameDb.getGameMessages(gameAddress).map(({ chatId }) => chatId));
+    if (typeof gameData.chat_id === "number") {
+      existingChats.add(gameData.chat_id);
+    }
+
+    const targetChatIds = subscribedChatIds.filter((chatId) => !existingChats.has(chatId));
+    if (targetChatIds.length === 0) return;
+
+    const creatorAddress = event.creator.toString();
+    const results = await Promise.allSettled(
+      targetChatIds.map(async (chatId) => {
+        const ctx = createApiContext(chatId, bot.api);
+        const creatorDisplay = await gameManager.getPlayerUsername(ctx, creatorAddress);
+        await gameManager.createGameMessage(
+          ctx,
+          gameAddress,
+          gameData.game_type,
+          gameData.amount,
+          creatorDisplay,
+          gameData.token_ticker || DEFAULT_TOKEN_TICKER,
+        );
+      }),
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        console.error(
+          `Failed to publish public game ${gameAddress} to chat ${targetChatIds[index]}:`,
+          result.reason,
+        );
+      }
+    });
+  } catch (error) {
+    console.error(`Error publishing public game ${gameAddress}:`, error);
+  }
+};
+
+export const __test_handleGameInitializedAnchorEvent = handleGameInitializedAnchorEvent;
+
 const handlePlayerJoinedAnchorEvent = async (event: PlayerJoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
 };
@@ -2244,7 +2300,7 @@ const handlePlayerUnjoinedAnchorEvent = async (event: PlayerUnjoinedEvent): Prom
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
-type ProgramEventName = "gameCompleted" | "playerJoined" | "playerUnjoined";
+type ProgramEventName = "gameInitialized" | "gameCompleted" | "playerJoined" | "playerUnjoined";
 
 type ProgramEventDescriptor = {
   eventName: ProgramEventName;
@@ -2255,6 +2311,15 @@ type ProgramEventDescriptor = {
 };
 
 const programEventDescriptors: ProgramEventDescriptor[] = [
+  {
+    eventName: "gameInitialized",
+    handler: handleGameInitializedAnchorEvent,
+    label: "GameInitialized",
+    getId: () => gameInitializedListenerId,
+    setId: (value) => {
+      gameInitializedListenerId = value;
+    },
+  },
   {
     eventName: "gameCompleted",
     handler: handleGameCompletedAnchorEvent,
@@ -2295,6 +2360,9 @@ export const __test_setSleepImplementation = (
   implementation: (ms: number) => Promise<void>,
 ): void => {
   sleep = implementation;
+};
+export const __test_resetSleepImplementation = (): void => {
+  sleep = defaultSleep;
 };
 
 const hasActiveProgramEventListenerHandles = (): boolean =>
@@ -2430,6 +2498,7 @@ export const __test_registerProgramEventListeners = registerProgramEventListener
 export const __test_unregisterProgramEventListeners = unregisterProgramEventListeners;
 export const __test_attachRpcEndpointFailoverHandler = attachRpcEndpointFailoverHandler;
 export const __test_getProgramEventListenerState = () => ({
+  gameInitializedListenerId,
   gameCompletedListenerId,
   playerJoinedListenerId,
   playerUnjoinedListenerId,

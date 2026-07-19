@@ -64,3 +64,13 @@ test("ChatDatabase stores chat game settings", () => {
   db.clearChatGameSettings(42);
   expect(db.getChatGameSettings(42)).toBeNull();
 });
+
+test("ChatDatabase returns only chats subscribed to the global public game feed", () => {
+  db = ChatDatabase.getInstance();
+
+  db.upsertChatGameSettings(-1001, { global_public_game_feed: true });
+  db.upsertChatGameSettings(-1002, { global_public_game_feed: false });
+  db.upsertChatGameSettings(-1003, { coinflip_max_players: 4 });
+
+  expect(db.getGlobalPublicGameFeedChatIds()).toEqual([-1001]);
+});
