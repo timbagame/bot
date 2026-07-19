@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { Bot } from "grammy";
 import {
   createChatDefaultsModule,
+  __test_buildMenuKeyboard,
   __test_buildSettingsSummary,
 } from "../src/handlers/chat-defaults";
 import { ChatDatabase } from "../src/utils/chat-database";
@@ -97,6 +98,17 @@ describe("chat defaults module", () => {
     gameDb = GameDatabase.getInstance();
   });
 
+  test("uses a compact three-row main keyboard", () => {
+    const keyboard = __test_buildMenuKeyboard();
+    expect(keyboard.inline_keyboard).toHaveLength(3);
+    expect(keyboard.inline_keyboard.every((row) => row.length === 2)).toBe(true);
+    const callbacks = keyboard.inline_keyboard
+      .flat()
+      .map((button) => (button as { callback_data?: string }).callback_data);
+    expect(callbacks).toContain("chat_defaults_game_coinflip");
+    expect(callbacks).toContain("chat_defaults_game_giveaway");
+  });
+
   test("builds summary with chat overrides", async () => {
     const tokenManager = baseTokenManager();
     tokenManager.setChatDefaultToken(99, "mint", "AAA", "1");
@@ -122,8 +134,8 @@ describe("chat defaults module", () => {
     });
 
     expect(summary).toContain("AAA");
-    expect(summary).toContain("7 (chat default)");
-    expect(summary).toContain("20 (chat default)");
+    expect(summary).toContain("Coinflip: 7 players");
+    expect(summary).toContain("Giveaway: 20 players");
     expect(summary).toContain("30m");
   });
 
@@ -450,7 +462,7 @@ describe("chat defaults module", () => {
     expect(settingsPublic?.coinflip_default_privacy).toBe("public");
 
     expect(lastMenu.text).toContain("Chat defaults");
-    expect(lastMenu.text).toContain("Coinflip privacy: Public 🌍 (chat default)");
+    expect(lastMenu.text).toContain("Coinflip: 2 players · Public 🌍");
 
     // 3. Click "Private" for Coinflip
     ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_private";
@@ -458,7 +470,7 @@ describe("chat defaults module", () => {
 
     const settingsPrivate = chatDb.getChatGameSettings(99);
     expect(settingsPrivate?.coinflip_default_privacy).toBe("private");
-    expect(lastMenu.text).toContain("Coinflip privacy: Private 🔒 (chat default)");
+    expect(lastMenu.text).toContain("Coinflip: 2 players · Private 🔒");
 
     // 4. Click "Clear" for Coinflip
     ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_clear";
@@ -467,7 +479,7 @@ describe("chat defaults module", () => {
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.coinflip_default_privacy).toBeNull();
     // Default is Public (bot default)
-    expect(lastMenu.text).toContain("Coinflip privacy: Public 🌍 (bot default)");
+    expect(lastMenu.text).toContain("Coinflip: 2 players · Public 🌍");
 
     // 5. Test Giveaway Privacy (briefly)
     ctx.callbackQuery.data = "chat_defaults_privacy_giveaway";
@@ -480,7 +492,7 @@ describe("chat defaults module", () => {
 
     const settingsGiveaway = chatDb.getChatGameSettings(99);
     expect(settingsGiveaway?.giveaway_default_privacy).toBe("public");
-    expect(lastMenu.text).toContain("Giveaway privacy: Public 🌍 (chat default)");
+    expect(lastMenu.text).toContain("Giveaway: 10 players · Public 🌍");
 
     // 6. Verify distinct settings persistence (Regression Test)
     // Set Coinflip to Public
@@ -697,7 +709,7 @@ describe("chat defaults module", () => {
     // Actually chat-db.ts usually returns number for boolean columns if not mapped.
     // But let's assume the getter does what it says. If strictly mapped:
     // checking functionality directly via re-render check:
-    expect(lastMenu.text).toContain("External ✅ On");
+    expect(lastMenu.text).toContain("External On");
 
     // 3. Set Rate Limit to 5
     ctx.callbackQuery.data = "chat_defaults_set_join_rate_5";
@@ -734,7 +746,7 @@ describe("chat defaults module", () => {
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.join_notifications_external).toBeNull();
     expect(settingsClear?.join_notifications_per_minute).toBeNull();
-    expect(lastMenu.text).toContain("External ❌ Off"); // back to default
+    expect(lastMenu.text).toContain("External Off"); // back to default
     expect(lastMenu.text).toContain("5/min"); // back to default
   });
 
@@ -788,7 +800,7 @@ describe("chat defaults module", () => {
 
     let settings = chatDb.getChatGameSettings(99);
     expect(settings?.coinflip_video_id).toBe("__DISABLED__");
-    expect(lastMenu.text).toContain("Disabled - text only");
+    expect(lastMenu.text).toContain("Text only");
 
     // 3. Clear/Restore Defaults
     ctx.callbackQuery.data = "chat_defaults_clear_video_coinflip";
@@ -797,7 +809,7 @@ describe("chat defaults module", () => {
     settings = chatDb.getChatGameSettings(99);
     expect(settings?.coinflip_video_id).toBe(""); // empty string means "use bot default" as per logic? Or null?
     // Logic says: Clear means use bot default -> set to empty string on db upsert
-    expect(lastMenu.text).toContain("Using bot default");
+    expect(lastMenu.text).toContain("Default media");
 
     // 4. Set Custom Media (Input)
     // Simulate flow: User clicks "Set custom", then sends a file

@@ -117,11 +117,11 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip video: Using bot default (bot default)");
-      expect(summary).toContain("Giveaway video: Using bot default (bot default)");
+      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Default media");
+      expect(summary).toContain("Giveaway: 10 players · Private 🔒 · Default media");
     });
 
-    test("displays custom video with truncated ID", async () => {
+    test("displays a compact custom media state", async () => {
       chatDb.upsertChatGameSettings(123, {
         coinflip_video_id: "AgACAgIAAxkBAAIBZ2dZNpCv", // 26 chars
         coinflip_media_type: "photo",
@@ -131,7 +131,7 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip video: AgACAgIAAxkBAAIBZ2dZ... (chat default)");
+      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Custom media");
     });
 
     test("displays disabled state", async () => {
@@ -144,7 +144,7 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Giveaway video: Disabled - text only (disabled)");
+      expect(summary).toContain("Giveaway: 10 players · Private 🔒 · Text only");
     });
 
     test("displays cleared state as bot default", async () => {
@@ -157,10 +157,10 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip video: Using bot default (bot default)");
+      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Default media");
     });
 
-    test("escapes HTML in video ID display", async () => {
+    test("does not expose custom media IDs in the compact summary", async () => {
       chatDb.upsertChatGameSettings(123, {
         coinflip_video_id: "<script>alert(1)</script>",
         coinflip_media_type: "video",
@@ -172,7 +172,8 @@ describe("Chat defaults video settings handlers", () => {
 
       // Should escape < and >
       expect(summary).not.toContain("<script>");
-      expect(summary).toContain("&lt;script&gt;");
+      expect(summary).not.toContain("&lt;script&gt;");
+      expect(summary).toContain("Custom media");
     });
   });
 

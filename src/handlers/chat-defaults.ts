@@ -46,16 +46,10 @@ const formatDefaultTokenSetMessage = (tokenTicker: string, tokenMint: string) =>
   );
 };
 
-const formatPlayersLine = (label: string, value: number | null, fallback: number): string => {
-  const displayValue = value ?? fallback;
-  const suffix = value == null ? "(bot default)" : "(chat default)";
-  return `${label}: ${displayValue} ${suffix}`;
-};
-
-const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string => {
-  const formatted = formatDuration(timeoutSeconds);
-  const suffix = isDefault ? "(bot default)" : "(chat default)";
-  return `⏱️ Game timeout: ${formatted} ${suffix}`;
+const formatMediaSummary = (mediaId: string | null | undefined): string => {
+  if (mediaId === CHAT_MEDIA_DISABLED_SENTINEL) return "Text only";
+  if (mediaId) return "Custom media";
+  return "Default media";
 };
 
 type SettingsTarget =
@@ -92,25 +86,13 @@ export type ChatDefaultsModule = {
 const buildMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
     .text("🪙 Default token", "chat_defaults_token")
-    .row()
-    .text("👥 Coinflip max players", "chat_defaults_coinflip")
-    .row()
-    .text("🎁 Giveaway max players", "chat_defaults_giveaway")
-    .row()
     .text("⏱️ Game timeout", "chat_defaults_timeout")
     .row()
-    .text("👁️ Coinflip privacy", "chat_defaults_privacy_coinflip")
-    .row()
-    .text("👁️ Giveaway privacy", "chat_defaults_privacy_giveaway")
-    .row()
-    .text("🎬 Coinflip video", "chat_defaults_video_coinflip")
-    .row()
-    .text("🎬 Giveaway video", "chat_defaults_video_giveaway")
+    .text("👥 Coinflip", "chat_defaults_game_coinflip")
+    .text("🎁 Giveaway", "chat_defaults_game_giveaway")
     .row()
     .text("📢 Join notifications", "chat_defaults_join_notifications")
-    .row()
-    .text("🌐 Global public game feed", "chat_defaults_public_game_feed")
-    .row();
+    .text("🌐 Public game feed", "chat_defaults_public_game_feed");
 };
 
 const buildSettingsSummary = async (
@@ -122,7 +104,7 @@ const buildSettingsSummary = async (
   const defaultToken = tokenManager.getDefaultToken();
   const chatSettings = deps.chatDb.getChatGameSettings(chatId);
 
-  let tokenLine = `🪙 Default token: ${escapeHtml(DEFAULT_TOKEN_TICKER)} (bot default)`;
+  let tokenLine = `🪙 Token: ${escapeHtml(DEFAULT_TOKEN_TICKER)}`;
 
   if (chatToken) {
     // Look up display name from game database (username mappings)
@@ -132,13 +114,9 @@ const buildSettingsSummary = async (
         ? escapeHtml(setByDisplayName)
         : `@${escapeHtml(setByDisplayName)}`
       : `User ${chatToken.set_by_telegram_id}`;
-    tokenLine =
-      `🪙 Default token: ${escapeHtml(chatToken.token_ticker)} (set by ${setByDisplay})` +
-      `\n🏷️ Mint: <code>${escapeHtml(chatToken.token_mint)}</code>`;
+    tokenLine = `🪙 Token: ${escapeHtml(chatToken.token_ticker)} (set by ${setByDisplay})\n🏷️ Mint: <code>${escapeHtml(chatToken.token_mint)}</code>`;
   } else if (defaultToken) {
-    tokenLine =
-      `🪙 Default token: ${escapeHtml(defaultToken.tokenTicker)} (bot default)` +
-      `\n🏷️ Mint: <code>${escapeHtml(defaultToken.tokenMint)}</code>`;
+    tokenLine = `🪙 Token: ${escapeHtml(defaultToken.tokenTicker)}\n🏷️ Mint: <code>${escapeHtml(defaultToken.tokenMint)}</code>`;
   }
 
   const coinflipPlayers = resolveChatDefaultPlayers(
@@ -158,67 +136,24 @@ const buildSettingsSummary = async (
 
   const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
   const isCoinflipPrivate = coinflipPrivacy ? coinflipPrivacy !== "public" : false;
-  const coinflipSuffix = coinflipPrivacy ? "(chat default)" : "(bot default)";
-  const coinflipPrivacyLine = `👁️ Coinflip privacy: ${isCoinflipPrivate ? "Private 🔒" : "Public 🌍"} ${coinflipSuffix}`;
+  const coinflipPrivacyDisplay = isCoinflipPrivate ? "Private 🔒" : "Public 🌍";
 
   const giveawayPrivacy = chatSettings?.giveaway_default_privacy;
   const isGiveawayPrivate = giveawayPrivacy !== "public";
-  const giveawaySuffix = giveawayPrivacy ? "(chat default)" : "(bot default)";
-  const giveawayPrivacyLine = `👁️ Giveaway privacy: ${isGiveawayPrivate ? "Private 🔒" : "Public 🌍"} ${giveawaySuffix}`;
-
-  let coinflipVideoSuffix = "(bot default)";
-  let coinflipVideoDisplay = "Using bot default";
-  if (chatSettings) {
-    const videoId = chatSettings.coinflip_video_id;
-    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
-      coinflipVideoSuffix = "(disabled)";
-      coinflipVideoDisplay = "Disabled - text only";
-    } else if (videoId === "") {
-      // Explicitly cleared - use bot default
-      coinflipVideoSuffix = "(bot default)";
-      coinflipVideoDisplay = "Using bot default";
-    } else if (videoId && videoId.length > 0) {
-      coinflipVideoSuffix = "(chat default)";
-      coinflipVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
-    }
-    // If videoId is null, it means not set yet - use bot default (default values already set)
-  }
-  const coinflipVideoLine = `🎬 Coinflip video: ${coinflipVideoDisplay} ${coinflipVideoSuffix}`;
-
-  let giveawayVideoSuffix = "(bot default)";
-  let giveawayVideoDisplay = "Using bot default";
-  if (chatSettings) {
-    const videoId = chatSettings.giveaway_video_id;
-    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
-      giveawayVideoSuffix = "(disabled)";
-      giveawayVideoDisplay = "Disabled - text only";
-    } else if (videoId === "") {
-      // Explicitly cleared - use bot default
-      giveawayVideoSuffix = "(bot default)";
-      giveawayVideoDisplay = "Using bot default";
-    } else if (videoId && videoId.length > 0) {
-      giveawayVideoSuffix = "(chat default)";
-      giveawayVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
-    }
-    // If videoId is null, it means not set yet - use bot default (default values already set)
-  }
-  const giveawayVideoLine = `🎬 Giveaway video: ${giveawayVideoDisplay} ${giveawayVideoSuffix}`;
+  const giveawayPrivacyDisplay = isGiveawayPrivate ? "Private 🔒" : "Public 🌍";
+  const coinflipLine = `👥 Coinflip: ${coinflipPlayers} players · ${coinflipPrivacyDisplay} · ${formatMediaSummary(chatSettings?.coinflip_video_id)}`;
+  const giveawayLine = `🎁 Giveaway: ${giveawayPlayers} players · ${giveawayPrivacyDisplay} · ${formatMediaSummary(chatSettings?.giveaway_video_id)}`;
 
   // Join notification settings
   const joinNotificationsExternal =
     chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
   const joinNotificationsPerMinute =
     chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
-  const externalSuffix =
-    chatSettings?.join_notifications_external != null ? "(chat default)" : "(bot default)";
-  const rateSuffix =
-    chatSettings?.join_notifications_per_minute != null ? "(chat default)" : "(bot default)";
-
-  const externalDisplay = joinNotificationsExternal ? "✅ On" : "❌ Off";
+  const externalDisplay = joinNotificationsExternal ? "On" : "Off";
   const rateDisplay =
     joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
 
-  const joinNotificationsLine = `📢 Join notifications: External ${externalDisplay} ${externalSuffix} | Rate: ${rateDisplay} ${rateSuffix}`;
+  const joinNotificationsLine = `📢 Notifications: External ${externalDisplay} · ${rateDisplay}`;
   const publicGameFeedEnabled = Boolean(chatSettings?.global_public_game_feed);
   const publicGameFeedLine = `🌐 Global public game feed: ${publicGameFeedEnabled ? "✅ Enabled" : "❌ Disabled"}`;
 
@@ -226,25 +161,13 @@ const buildSettingsSummary = async (
     "<b>Chat defaults</b>",
     "",
     tokenLine,
-    formatPlayersLine(
-      "👥 Coinflip players",
-      chatSettings?.coinflip_max_players ?? null,
-      coinflipPlayers,
-    ),
-    formatPlayersLine(
-      "🎁 Giveaway players",
-      chatSettings?.giveaway_max_players ?? null,
-      giveawayPlayers,
-    ),
-    formatTimeoutLine(timeoutSeconds, chatSettings?.timeout_seconds == null),
-    coinflipPrivacyLine,
-    giveawayPrivacyLine,
-    coinflipVideoLine,
-    giveawayVideoLine,
+    `⏱️ Timeout: ${formatDuration(timeoutSeconds)}`,
+    "",
+    coinflipLine,
+    giveawayLine,
+    "",
     joinNotificationsLine,
     publicGameFeedLine,
-    "",
-    "Use the buttons below to update chat defaults.",
   ].join("\n");
 };
 
@@ -303,6 +226,47 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
       .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
       .row()
       .text("❌ Restore defaults", "chat_defaults_clear_join_notifications")
+      .row()
+      .text("🔙 Back", "chat_defaults_cancel"),
+  };
+};
+
+const buildGameSettingsMenu = (
+  ctx: Context,
+  deps: ChatDefaultsModuleDeps,
+  gameType: "coinflip" | "giveaway",
+) => {
+  const settings = deps.chatDb.getChatGameSettings(ctx.chat!.id);
+  const isCoinflip = gameType === "coinflip";
+  const players = resolveChatDefaultPlayers(
+    settings,
+    gameType,
+    isCoinflip ? DEFAULT_COINFLIP_MAX_PLAYERS : DEFAULT_GIVEAWAY_MAX_PLAYERS,
+    deps.getOracleMaxPlayers(),
+  );
+  const privacy = isCoinflip
+    ? settings?.coinflip_default_privacy || "public"
+    : settings?.giveaway_default_privacy || "private";
+  const media = formatMediaSummary(
+    isCoinflip ? settings?.coinflip_video_id : settings?.giveaway_video_id,
+  );
+  const label = isCoinflip ? "Coinflip" : "Giveaway";
+
+  return {
+    text: [
+      `<b>${label} defaults</b>`,
+      "",
+      `👥 Players: ${players}`,
+      `👁️ Privacy: ${privacy === "private" ? "Private 🔒" : "Public 🌍"}`,
+      `🎬 Media: ${media}`,
+    ].join("\n"),
+    parseMode: "HTML" as const,
+    keyboard: new InlineKeyboard()
+      .text("👥 Max players", `chat_defaults_${gameType}`)
+      .row()
+      .text("👁️ Privacy", `chat_defaults_privacy_${gameType}`)
+      .row()
+      .text("🎬 Media", `chat_defaults_video_${gameType}`)
       .row()
       .text("🔙 Back", "chat_defaults_cancel"),
   };
@@ -627,6 +591,18 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
     await handleTokenChange(ctx, tokenInput, deps);
   };
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_game_(coinflip|giveaway)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      const gameType = ctx.match![1] as "coinflip" | "giveaway";
+      await respondWithMenu(ctx, buildGameSettingsMenu(ctx, deps, gameType));
+      await safeAnswerCallbackQuery(ctx);
+    }),
+  );
 
   deps.bot.callbackQuery(
     /^chat_defaults_clear_(token|coinflip|giveaway|timeout|video_coinflip|video_giveaway)$/,
@@ -1067,3 +1043,4 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 };
 
 export const __test_buildSettingsSummary = buildSettingsSummary;
+export const __test_buildMenuKeyboard = buildMenuKeyboard;
