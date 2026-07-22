@@ -4511,9 +4511,7 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
 // ================================
 
 let financeLedgerService: FinanceLedgerService | undefined;
-let financeReadContext:
-  | { connection: Connection; program: anchor.Program<Timba> }
-  | undefined;
+let financeReadContext: { connection: Connection; program: anchor.Program<Timba> } | undefined;
 
 const getFinanceReadContext = () => {
   if (financeReadContext) return financeReadContext;
