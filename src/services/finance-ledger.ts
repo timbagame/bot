@@ -116,7 +116,30 @@ async function signaturesSince(
   return entries;
 }
 
-async function fetchTransactions(
+const TRANSACTION_BATCH_SIZE = 10;
+
+async function getTransactionBatch(
+  connection: Pick<Connection, "getTransactions">,
+  signatures: string[],
+): Promise<Array<VersionedTransactionResponse | null>> {
+  try {
+    return await connection.getTransactions(signatures, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (signatures.length > 1 && /413|payload too large/i.test(message)) {
+      const middle = Math.ceil(signatures.length / 2);
+      const left = await getTransactionBatch(connection, signatures.slice(0, middle));
+      const right = await getTransactionBatch(connection, signatures.slice(middle));
+      return [...left, ...right];
+    }
+    throw error;
+  }
+}
+
+export async function fetchFinanceTransactions(
   connection: Pick<Connection, "getTransactions">,
   signatures: Array<{ signature: string; blockTime?: number | null; slot: number }>,
 ) {
@@ -126,11 +149,11 @@ async function fetchTransactions(
     slot: number;
     transaction: VersionedTransactionResponse;
   }> = [];
-  for (let index = 0; index < signatures.length; index += 50) {
-    const page = signatures.slice(index, index + 50);
-    const transactions = await connection.getTransactions(
+  for (let index = 0; index < signatures.length; index += TRANSACTION_BATCH_SIZE) {
+    const page = signatures.slice(index, index + TRANSACTION_BATCH_SIZE);
+    const transactions = await getTransactionBatch(
+      connection,
       page.map(({ signature }) => signature),
-      { commitment: "confirmed", maxSupportedTransactionVersion: 0 },
     );
     transactions.forEach((transaction, offset) => {
       const entry = page[offset];
@@ -185,7 +208,7 @@ export class FinanceLedgerService {
 
   private async syncProgram(startTimeMs: number): Promise<void> {
     const signatures = await signaturesSince(this.connection, this.program.programId, startTimeMs);
-    const transactions = await fetchTransactions(this.connection, signatures);
+    const transactions = await fetchFinanceTransactions(this.connection, signatures);
     const parser = new EventParser(this.program.programId, this.program.coder);
     const gameMints = new Map<string, string>();
     const parsed = transactions.map((entry) => ({
@@ -283,7 +306,7 @@ export class FinanceLedgerService {
     for (const account of accounts) {
       const address = account.pubkey.toBase58();
       const signatures = await signaturesSince(this.connection, account.pubkey, startTimeMs);
-      const transactions = await fetchTransactions(this.connection, signatures);
+      const transactions = await fetchFinanceTransactions(this.connection, signatures);
       for (const entry of transactions) {
         const delta = referralDeltaFromTransaction(entry.transaction, address);
         if (!delta) continue;
