@@ -119,6 +119,37 @@ test("JupiterClient honors referralApplied returned by Jupiter", async () => {
   expect(quote.referralApplied).toBe(false);
 });
 
+test("JupiterClient does not invent payerApplied from request parameters", async () => {
+  const client = new JupiterClient(
+    "https://api.jup.ag",
+    async () =>
+      new Response(
+        JSON.stringify({
+          inputMint: "MintA",
+          outputMint: "MintB",
+          inAmount: "1000",
+          outAmount: "2000",
+          otherAmountThreshold: "0",
+          swapMode: "ExactIn",
+          slippageBps: 50,
+          priceImpactPct: "0",
+          routePlan,
+          payerApplied: false,
+        }),
+        { status: 200, statusText: "OK" },
+      ),
+  );
+
+  const quote = await client.getQuote({
+    inputMint: "MintA",
+    outputMint: "MintB",
+    amount: "1000",
+    payer: "RequestedPayer",
+  });
+
+  expect(quote.payerApplied).toBe(false);
+});
+
 test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
   const circular: any = { signature: "derp" };
   circular.self = circular;

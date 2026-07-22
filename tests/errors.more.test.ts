@@ -14,7 +14,7 @@ describe("errors extras", () => {
     expect(msg).toContain("Not enough SOL to complete this");
     expect(msg).toContain("The action needs enough SOL for rent and fees");
     expect(msg).toContain("You need about");
-    expect(msg).toContain("Add SOL or reduce the amount and try again.");
+    expect(msg).toContain("Add SOL and try again.");
   });
 
   test("generic insufficient maps to helpful guidance", async () => {

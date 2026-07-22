@@ -27,7 +27,12 @@ import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./constants";
-import type { JustInTimeSwapResult, SwapQuote, SwapRequest } from "./swap/types";
+import type {
+  JustInTimeSwapResult,
+  PreparedJupiterBuild,
+  SwapQuote,
+  SwapRequest,
+} from "./swap/types";
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { calculateDynamicReferralFee } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
@@ -278,7 +283,7 @@ export class SwapManager {
     const outAmount = parseFloat(jupiterQuote.outAmount);
     const estimatedRate = inAmount > 0 ? outAmount / inAmount : 0;
 
-    return {
+    const quote: SwapQuote = {
       inputMint: jupiterQuote.inputMint,
       outputMint: jupiterQuote.outputMint,
       inputAmount: jupiterQuote.inAmount,
@@ -298,6 +303,38 @@ export class SwapManager {
       inputTicker: request.inputTicker,
       outputTicker: request.outputTicker,
     };
+
+    if (jupiterQuote.integratorFallback) {
+      if (!this.canUseAtomicBuildFallback(request, quote)) {
+        throw new Error("Jupiter could not prepare the required sponsored route.");
+      }
+      const operatorKeypair = this.wallet.getOperatorKeypair();
+      const preparedBuild = await this.prepareAtomicBuildFallback({
+        request,
+        quote,
+        jupiterQuote,
+        operatorKeypair,
+      });
+      quote.preparedBuild = preparedBuild;
+      quote.outputAmount = preparedBuild.netOutputAmount;
+      quote.executionOutputAmount = preparedBuild.netOutputAmount;
+      quote.executionSponsorReimbursementLamports = preparedBuild.reimbursementLamports;
+      quote.executionFeeMint = WSOL_MINT;
+      quote.executionReferralApplied = true;
+      quote.providerQuote = {
+        ...jupiterQuote,
+        outAmount: preparedBuild.grossOutputAmount,
+        feeMint: WSOL_MINT,
+        feeBps: Math.max(
+          MIN_JUPITER_SWAP_FEE_BPS,
+          request.integrator?.referralFee ?? MIN_JUPITER_SWAP_FEE_BPS,
+        ),
+        referralApplied: true,
+        payerApplied: true,
+      };
+    }
+
+    return quote;
   }
 
   async performJustInTimeSolSwap(options: {
@@ -966,7 +1003,7 @@ export class SwapManager {
       (quote.providerQuoteTimestamp === undefined ||
         now - quote.providerQuoteTimestamp > jupiterQuoteExpirationMs)
     ) {
-      jupiterQuote = undefined;
+      throw new Error("This swap quote expired. Request a new quote before confirming.");
     }
 
     if (!jupiterQuote) {
@@ -993,6 +1030,16 @@ export class SwapManager {
     // payer must remain so Swap V2 does not fall back to automatic gasless mode and its minimum trade size.
     const integrator = cachedIntegrator;
 
+    if (quote.preparedBuild) {
+      const operatorKeypair = this.wallet.getOperatorKeypair();
+      return this.executeAtomicBuildFallback({
+        request,
+        quote,
+        operatorKeypair,
+        preparedBuild: quote.preparedBuild,
+      });
+    }
+
     let swapResponse: JupiterSwapResponse;
     try {
       swapResponse = await this.jupiterClient.getSwapTransaction({
@@ -1010,11 +1057,8 @@ export class SwapManager {
       ) {
         const operatorKeypair = this.wallet.getOperatorKeypair();
         if (integrator?.payer === operatorKeypair.publicKey.toBase58()) {
-          return this.executeAtomicBuildFallback({
-            request,
-            quote,
-            jupiterQuote,
-            operatorKeypair,
+          throw new Error("The sponsored route changed. Request a new quote before confirming.", {
+            cause: error,
           });
         }
       }
@@ -1022,6 +1066,7 @@ export class SwapManager {
     }
     quote.executionFeeMint = swapResponse.order?.feeMint;
     quote.executionReferralApplied = swapResponse.order?.referralApplied;
+    quote.executionOutputAmount = swapResponse.order?.outAmount ?? quote.outputAmount;
 
     const requiredFeeBps = integrator
       ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee)
@@ -1032,11 +1077,15 @@ export class SwapManager {
       (swapResponse.order?.referralApplied === true &&
         typeof appliedFeeBps === "number" &&
         appliedFeeBps >= requiredFeeBps);
+    const transactionFeePayer =
+      integrator?.payerKind === "admin"
+        ? this.getSerializedTransactionFeePayer(swapResponse.swapTransaction)
+        : null;
     const adminPayerApplied =
       integrator?.payerKind === "admin" &&
       requiredReferralApplied &&
       swapResponse.order?.integratorFallback !== true &&
-      swapResponse.order?.payerApplied !== false;
+      transactionFeePayer === integrator.payer;
 
     if (integrator?.payerKind !== "admin" && !requiredReferralApplied) {
       throw new Error(
@@ -1050,12 +1099,7 @@ export class SwapManager {
         if (payerPublicKey) {
           const operatorKeypair = this.wallet.getOperatorKeypair();
           if (payerPublicKey.equals(operatorKeypair.publicKey)) {
-            return this.executeAtomicBuildFallback({
-              request,
-              quote,
-              jupiterQuote,
-              operatorKeypair,
-            });
+            throw new Error("The sponsored route changed. Request a new quote before confirming.");
           }
         }
       }
@@ -1104,6 +1148,7 @@ export class SwapManager {
         swapResponse.swapTransaction,
         swapResponse.requestId,
         signers,
+        adminPayerApplied ? integrator?.payer : undefined,
       );
       console.log(`✅ JIT swap: Jupiter transaction executed, signature=${sig}`);
       return sig;
@@ -1237,11 +1282,19 @@ export class SwapManager {
     base64Transaction: string,
     requestId: string,
     signers: Keypair[],
+    expectedFeePayer?: string,
   ): Promise<string> {
     try {
       console.log(`🔄 JIT swap: deserializing Jupiter transaction...`);
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
+
+      const actualFeePayer = versionedTx.message.staticAccountKeys[0]?.toBase58();
+      if (expectedFeePayer && actualFeePayer !== expectedFeePayer) {
+        throw new Error(
+          `Jupiter transaction fee payer ${actualFeePayer ?? "missing"} does not match the required operator payer ${expectedFeePayer}.`,
+        );
+      }
 
       const messageAccountKeys = versionedTx.message.staticAccountKeys.map((k) => k.toBase58());
       const relevantSigners = signers.filter((s) =>
@@ -1280,6 +1333,17 @@ export class SwapManager {
     }
   }
 
+  private getSerializedTransactionFeePayer(base64Transaction: string): string | null {
+    try {
+      const transaction = VersionedTransaction.deserialize(
+        Buffer.from(base64Transaction, "base64"),
+      );
+      return transaction.message.staticAccountKeys[0]?.toBase58() ?? null;
+    } catch (error) {
+      throw new Error("Jupiter returned an invalid serialized transaction.", { cause: error });
+    }
+  }
+
   private canUseAtomicBuildFallback(request: SwapRequest, quote: SwapQuote): boolean {
     return (
       quote.integrator?.payerKind === "admin" &&
@@ -1296,7 +1360,7 @@ export class SwapManager {
     if (!order || !this.isSolMint(order.outputMint)) {
       throw new Error("Admin-sponsored Jupiter swaps must output SOL.");
     }
-    if (order.feeMint && !this.isSolMint(order.feeMint)) {
+    if (!order.feeMint || !this.isSolMint(order.feeMint)) {
       throw new Error("Admin-sponsored Jupiter fees must be collected in SOL.");
     }
 
@@ -1339,7 +1403,7 @@ export class SwapManager {
     }
     if (typeof appliedFeeBps !== "number" || appliedFeeBps < requiredFeeBps) {
       throw new Error(
-        `Jupiter sponsor cost requires ${requiredFeeBps} bps, but the confirmed swap fee is ${appliedFeeBps ?? "missing"} bps. Request a new quote.`,
+        `This trade cannot cover the operator's ${requiredFeeBps} bps sponsor cost with the confirmed ${appliedFeeBps ?? "missing"} bps fee. Add SOL or increase the trade size.`,
       );
     }
   }
@@ -1452,12 +1516,39 @@ export class SwapManager {
     return new PublicKey(Uint8Array.from(build.blockhashWithMetadata.blockhash)).toBase58();
   }
 
-  private async executeAtomicBuildFallback(options: {
+  private buildPreparedJupiterMessage(options: {
+    request: SwapRequest;
+    operatorKeypair: Keypair;
+    preparedBuild: PreparedJupiterBuild;
+  }) {
+    const { request, operatorKeypair, preparedBuild } = options;
+    const { build, computeUnitLimit, reimbursementLamports } = preparedBuild;
+    const lookupTables = this.getJupiterBuildLookupTables(build);
+
+    return new TransactionMessage({
+      payerKey: operatorKeypair.publicKey,
+      recentBlockhash: this.getJupiterBuildBlockhash(build),
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+        ...this.getJupiterComputeBudgetInstructions(build),
+        ...this.getJupiterBuildInstructions(
+          build,
+          SystemProgram.transfer({
+            fromPubkey: request.userKeypair.publicKey,
+            toPubkey: operatorKeypair.publicKey,
+            lamports: reimbursementLamports,
+          }),
+        ),
+      ],
+    }).compileToV0Message(lookupTables);
+  }
+
+  private async prepareAtomicBuildFallback(options: {
     request: SwapRequest;
     quote: SwapQuote;
     jupiterQuote: JupiterQuoteResponse;
     operatorKeypair: Keypair;
-  }): Promise<string> {
+  }): Promise<PreparedJupiterBuild> {
     const { request, quote, jupiterQuote, operatorKeypair } = options;
 
     const integrator = quote.integrator;
@@ -1474,15 +1565,6 @@ export class SwapManager {
     const buildFeeAccount = new PublicKey(referralConfig.buildFeeAccount);
     const referralAccount = new PublicKey(referralConfig.referralAccount);
     await this.validateBuildFeeAccount(buildFeeAccount, referralAccount);
-
-    await this.ensureAdminCanCoverRoute(
-      integrator,
-      {
-        ...jupiterQuote,
-        mode: "build",
-      },
-      operatorKeypair.publicKey,
-    );
 
     const build = await this.jupiterClient.getBuildInstructions({
       inputMint: quote.inputMint,
@@ -1561,25 +1643,67 @@ export class SwapManager {
       throw new Error("Unable to estimate the Jupiter build transaction fee.");
     }
 
-    const routeRentLamports = jupiterQuote.rentFeeLamports;
-    if (
-      typeof routeRentLamports !== "number" ||
-      !Number.isSafeInteger(routeRentLamports) ||
-      routeRentLamports < 0
-    ) {
-      throw new Error("Jupiter did not provide a reliable build-route rent estimate.");
-    }
-    const reimbursementLamports = networkFeeLamports + routeRentLamports;
+    // Temporary account rent is returned when those accounts close in this atomic transaction.
+    // The operator only needs reimbursement for the non-refundable network fee.
+    const reimbursementLamports = networkFeeLamports;
     if (!Number.isSafeInteger(reimbursementLamports) || reimbursementLamports <= 0) {
       throw new Error("Jupiter build reimbursement must be a positive safe integer.");
     }
-    if (BigInt(reimbursementLamports) > BigInt(build.outAmount)) {
+    let grossOutputLamports: bigint;
+    try {
+      grossOutputLamports = BigInt(build.outAmount);
+    } catch {
+      throw new Error("Jupiter build returned an invalid output amount.");
+    }
+    if (BigInt(reimbursementLamports) >= grossOutputLamports) {
       throw new Error(
         "Jupiter build fallback output is too small to reimburse admin fees atomically.",
       );
     }
 
-    const finalMessage = buildFinalMessage(reimbursementLamports);
+    await this.ensureAdminCanCoverRoute(
+      integrator,
+      {
+        ...jupiterQuote,
+        mode: "build",
+        signatureFeeLamports: networkFeeLamports,
+        prioritizationFeeLamports: 0,
+        rentFeeLamports: 0,
+      },
+      operatorKeypair.publicKey,
+    );
+
+    return {
+      build,
+      computeUnitLimit,
+      reimbursementLamports,
+      grossOutputAmount: grossOutputLamports.toString(),
+      netOutputAmount: (grossOutputLamports - BigInt(reimbursementLamports)).toString(),
+    };
+  }
+
+  private async executeAtomicBuildFallback(options: {
+    request: SwapRequest;
+    quote: SwapQuote;
+    operatorKeypair: Keypair;
+    preparedBuild: PreparedJupiterBuild;
+  }): Promise<string> {
+    const { request, quote, operatorKeypair, preparedBuild } = options;
+    const integrator = quote.integrator;
+    if (!integrator?.payer || integrator.payer !== operatorKeypair.publicKey.toBase58()) {
+      throw new Error(
+        `Integrator operator payer does not match loaded operator keypair ${operatorKeypair.publicKey.toBase58()}`,
+      );
+    }
+
+    const finalMessage = this.buildPreparedJupiterMessage({
+      request,
+      operatorKeypair,
+      preparedBuild,
+    });
+    if (finalMessage.staticAccountKeys[0]?.toBase58() !== operatorKeypair.publicKey.toBase58()) {
+      throw new Error("Prepared Jupiter build does not use the operator as fee payer.");
+    }
     const transaction = new VersionedTransaction(finalMessage);
     transaction.sign([operatorKeypair, request.userKeypair]);
 
@@ -1591,8 +1715,8 @@ export class SwapManager {
     const confirmation = await this.connection.confirmTransaction(
       {
         signature,
-        blockhash: recentBlockhash,
-        lastValidBlockHeight: build.blockhashWithMetadata.lastValidBlockHeight,
+        blockhash: this.getJupiterBuildBlockhash(preparedBuild.build),
+        lastValidBlockHeight: preparedBuild.build.blockhashWithMetadata.lastValidBlockHeight,
       },
       "confirmed",
     );
@@ -1605,6 +1729,8 @@ export class SwapManager {
 
     quote.executionFeeMint = WSOL_MINT;
     quote.executionReferralApplied = true;
+    quote.executionOutputAmount = preparedBuild.netOutputAmount;
+    quote.executionSponsorReimbursementLamports = preparedBuild.reimbursementLamports;
     return signature;
   }
 

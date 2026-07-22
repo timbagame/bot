@@ -22,6 +22,9 @@ function createConnectionStub(owner: PublicKey = TOKEN_PROGRAM_ID) {
     getParsedAccountInfo: async () => ({
       value: { data: { parsed: { info: { decimals: 6 } } } },
     }),
+    // Individual rent tests provide a size-aware implementation. Other unit tests
+    // use a nominal positive value so rent does not dominate their fixture balances.
+    getMinimumBalanceForRentExemption: async (size: number) => (size === 0 ? 890_880 : 1),
   } as any;
 }
 
@@ -993,8 +996,7 @@ describe("GameManager.createGame", () => {
       ...createConnectionStub(),
       getMinimumBalanceForRentExemption: async (size: number) => {
         capturedRentCalls.push(size);
-        // Return rent proportional to size (approx 6.96 lamports/byte)
-        return Math.ceil(size * 6.96);
+        return 890_880 + size * 6_960;
       },
     };
     const wallet = makeWallet({
@@ -1002,7 +1004,7 @@ describe("GameManager.createGame", () => {
       getConnection: () => connection,
       getTokenMetadata: async () => ({ decimals: 6 }),
       getTokenBalance: async () => 10_000_000,
-      getBalance: async () => 10_000_000,
+      getBalance: async () => 20_000_000,
       sendTransaction: async () => "SIG",
     });
     const db = {
@@ -1057,8 +1059,8 @@ describe("GameManager.createGame", () => {
         firstInitializeAccounts.creator.toBase58(),
       );
 
-      // Base size = 126 bytes + 32 bytes per participant public key
-      const expectedSize2Players = 126 + 2 * 32;
+      // Contract base size (126) + vec prefix (4) + 32 bytes per participant.
+      const expectedSize2Players = 126 + 4 + 2 * 32;
       expect(capturedRentCalls).toContain(expectedSize2Players);
 
       // Reset for next test
@@ -1086,7 +1088,7 @@ describe("GameManager.createGame", () => {
         2n,
       );
 
-      const expectedSize50Players = 126 + 50 * 32;
+      const expectedSize50Players = 126 + 4 + 50 * 32;
       expect(capturedRentCalls).toContain(expectedSize50Players);
       expect(signingCalls).toBe(2);
     } finally {
@@ -1100,7 +1102,7 @@ describe("GameManager.createGame", () => {
     // Native account rent exemption is 890,880 lamports
     const NATIVE_RENT = 890_880;
     const minSolBuffer = 400_000;
-    // For 2 players: 142 bytes * 6.96 ≈ 988 lamports
+    // Fixed test value; account-size correctness is covered above.
     const gameRent = 988;
     const requiredReserve = minSolBuffer + gameRent + NATIVE_RENT;
 
@@ -1250,6 +1252,30 @@ describe("GameManager.createGame", () => {
     expect(rentDifference).toBeGreaterThanOrEqual(expectedRentDifference - 10);
     expect(rentDifference).toBeLessThanOrEqual(expectedRentDifference + 10);
 
+    resetGM();
+  });
+
+  test("explains game funding with rounded shortfall and separate reserves", () => {
+    resetGM();
+    const wallet = makeWallet({});
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {} as any);
+    const plan = (gm as any).buildGameFundingPlan({
+      currentSolLamports: 3_351_920,
+      gameDepositLamports: 2_241_120,
+      feeSafetyReserveLamports: 400_000,
+      retainedWalletReserveLamports: 890_880,
+      stakeRaw: 44_926_141_172,
+      tokenBalanceRaw: 44_926_141_172,
+    });
+
+    const message = (gm as any).buildGameFundingShortfallMessage(plan, "44926.141172", "TIMBA");
+
+    expect(message).toContain("You need 0.000181 SOL more");
+    expect(message).toContain("Game deposit: 0.002242 SOL (returned when the game closes)");
+    expect(message).toContain("Fee safety reserve: 0.0004 SOL");
+    expect(message).toContain("Wallet reserve: 0.000891 SOL");
+    expect(message).toContain("stake uses all available TIMBA");
+    expect(message).not.toContain("SOL more SOL");
     resetGM();
   });
 });

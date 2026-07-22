@@ -15,7 +15,8 @@ test("parseTransactionError formats insufficient lamports message", async () => 
   const error = new Error("insufficient lamports 100, need 200");
   const message = await parseTransactionError(error);
   expect(message).toContain("Not enough SOL to complete this");
-  expect(message).toContain("You need about");
+  expect(message).toContain("You need about 0.000001 SOL more");
+  expect(message).not.toContain("SOL more SOL");
 });
 
 test("parseTransactionError handles transaction timeout with signature", async () => {

@@ -460,7 +460,7 @@ describe("GameManager.joinGame guards", () => {
     );
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not enough SOL to complete this/i);
-    expect(res.error).toMatch(/no spare tokens to convert into SOL fees/i);
+    expect(res.error).toMatch(/no spare tokens to swap for SOL/i);
   });
 
   test("returns error on zero token balance with helpful message", async () => {

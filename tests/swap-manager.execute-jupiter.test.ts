@@ -44,6 +44,64 @@ describe("SwapManager.executeJupiterSwap", () => {
     data: Buffer.from(instruction.data).toString("base64"),
   });
 
+  test("prepares build fallback costs before showing the quote", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, timeNow: () => Date.now() },
+    );
+    const sm = new SwapManager(connection, wallet);
+    const user = Keypair.generate();
+    const admin = Keypair.generate();
+    const inputMint = Keypair.generate().publicKey.toBase58();
+    const fallbackQuote = {
+      inputMint,
+      outputMint: "So11111111111111111111111111111111111111112",
+      inAmount: "1000000",
+      outAmount: "750000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      integratorFallback: true,
+    };
+    const preparedBuild = {
+      build: {} as any,
+      computeUnitLimit: 200_000,
+      reimbursementLamports: 5_000,
+      grossOutputAmount: "740000",
+      netOutputAmount: "735000",
+    };
+
+    Reflect.set(wallet, "getOperatorKeypair", () => admin);
+    Reflect.set(sm, "getJupiterQuoteForRoute", async () => fallbackQuote);
+    Reflect.set(sm, "prepareAtomicBuildFallback", async () => preparedBuild);
+
+    const quote = await sm.getQuote({
+      inputMint,
+      outputMint: fallbackQuote.outputMint,
+      amount: fallbackQuote.inAmount,
+      userKeypair: user,
+      inputDecimals: 6,
+      outputDecimals: 9,
+      inputTicker: "TIMBA",
+      outputTicker: "SOL",
+      integrator: {
+        referralAccount: Keypair.generate().publicKey.toBase58(),
+        referralFee: 100,
+        payer: admin.publicKey.toBase58(),
+        closeAuthority: admin.publicKey.toBase58(),
+        payerKind: "admin",
+      },
+    });
+
+    expect(quote.outputAmount).toBe("735000");
+    expect(quote.providerQuote?.outAmount).toBe("740000");
+    expect(quote.executionSponsorReimbursementLamports).toBe(5_000);
+    expect(quote.preparedBuild).toBe(preparedBuild);
+  });
+
   test("executes serialized Jupiter transaction and returns signature", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
@@ -403,20 +461,26 @@ describe("SwapManager.executeJupiterSwap", () => {
       };
     };
 
-    let capturedTx: VersionedTransaction | null = null;
-    const sig = await sm.executeJupiterSwap(
-      {
-        inputMint: quote.inputMint,
-        outputMint: quote.outputMint,
-        amount: quote.inputAmountRaw,
-        userKeypair: user,
-        inputDecimals: 6,
-        outputDecimals: 9,
-        inputTicker: "TIMBA",
-        outputTicker: "SOL",
-      },
+    const request = {
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      amount: quote.inputAmountRaw,
+      userKeypair: user,
+      inputDecimals: 6,
+      outputDecimals: 9,
+      inputTicker: "TIMBA",
+      outputTicker: "SOL",
+    };
+    const preparedBuild = await (sm as any).prepareAtomicBuildFallback({
+      request,
       quote,
-    );
+      jupiterQuote: quote.providerQuote,
+      operatorKeypair: admin,
+    });
+    (quote as any).preparedBuild = preparedBuild;
+
+    let capturedTx: VersionedTransaction | null = null;
+    const sig = await sm.executeJupiterSwap(request, quote);
 
     expect(sig).toBe("SIG_BUILD_FALLBACK");
     expect(executeCalled).toBe(false);
@@ -454,6 +518,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(computeInstructions.filter((instruction) => instruction.data[0] === 3)).toHaveLength(1);
     expect((quote as any).executionReferralApplied).toBe(true);
     expect((quote as any).executionFeeMint).toBe("So11111111111111111111111111111111111111112");
+    expect((quote as any).executionOutputAmount).toBe("745000");
+    expect((quote as any).executionSponsorReimbursementLamports).toBe(5_000);
   });
 
   test("build fallback throws when simulation fails", async () => {
@@ -548,8 +614,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     });
 
     try {
-      await sm.executeJupiterSwap(
-        {
+      await (sm as any).prepareAtomicBuildFallback({
+        request: {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmountRaw,
@@ -560,7 +626,9 @@ describe("SwapManager.executeJupiterSwap", () => {
           outputTicker: "SOL",
         },
         quote,
-      );
+        jupiterQuote: quote.providerQuote,
+        operatorKeypair: admin,
+      });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
@@ -659,8 +727,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     });
 
     try {
-      await sm.executeJupiterSwap(
-        {
+      await (sm as any).prepareAtomicBuildFallback({
+        request: {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmountRaw,
@@ -671,7 +739,9 @@ describe("SwapManager.executeJupiterSwap", () => {
           outputTicker: "SOL",
         },
         quote,
-      );
+        jupiterQuote: quote.providerQuote,
+        operatorKeypair: admin,
+      });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
@@ -772,19 +842,23 @@ describe("SwapManager.executeJupiterSwap", () => {
     });
 
     try {
-      await sm.executeJupiterSwap(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmountRaw,
-          userKeypair: user,
-          inputDecimals: 6,
-          outputDecimals: 9,
-          inputTicker: "TIMBA",
-          outputTicker: "SOL",
-        },
+      const request = {
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+        userKeypair: user,
+        inputDecimals: 6,
+        outputDecimals: 9,
+        inputTicker: "TIMBA",
+        outputTicker: "SOL",
+      };
+      (quote as any).preparedBuild = await (sm as any).prepareAtomicBuildFallback({
+        request,
         quote,
-      );
+        jupiterQuote: quote.providerQuote,
+        operatorKeypair: admin,
+      });
+      await sm.executeJupiterSwap(request, quote);
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);

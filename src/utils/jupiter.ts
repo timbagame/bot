@@ -379,14 +379,13 @@ export class JupiterClient {
       }
 
       const referralApplied = Boolean(data.referralApplied);
-      const payerApplied = Boolean(params.payer && !data.integratorFallback);
+      const payerApplied = Boolean(data.payerApplied);
       const normalized = {
         ...this.normalizeQuote(data),
         referralApplied,
         payerApplied,
       } satisfies JupiterQuoteResponse;
 
-      data.payerApplied = payerApplied;
       return { raw: data, normalized, referralApplied };
     } catch (error: any) {
       if (error instanceof JupiterReferralUnavailableError) {

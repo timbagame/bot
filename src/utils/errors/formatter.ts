@@ -4,7 +4,7 @@
 
 import type { Connection } from "@solana/web3.js";
 import type { WalletManager } from "../wallet";
-import { LAMPORTS_PER_SOL, CALLBACK_MESSAGE_MAX_LENGTH, SOL_BALANCE_PRECISION } from "../constants";
+import { LAMPORTS_PER_SOL, CALLBACK_MESSAGE_MAX_LENGTH } from "../constants";
 import { FeeBudgetManager } from "../fee-budget";
 import {
   extractLamportsInfo,
@@ -17,10 +17,16 @@ import {
 const RENT_INSUFFICIENT_FUNDS_PATTERNS = ["insufficient funds for rent", "rent-exempt"];
 
 const formatSolAmount = (lamports: number, walletManager?: WalletManager): string => {
-  if (walletManager) {
-    return walletManager.formatSolBalance(lamports);
+  // Round a shortfall up so the displayed amount is sufficient when copied by the user.
+  // Six decimals keeps the message readable while preserving sub-cent fee precision.
+  const roundedUpLamports = Math.ceil(Math.max(lamports, 0) / 1_000) * 1_000;
+  const formatted = (roundedUpLamports / LAMPORTS_PER_SOL).toFixed(6);
+  const concise = formatted.replace(/\.?0+$/u, "");
+
+  if (concise !== "0" || !walletManager) {
+    return concise;
   }
-  return (lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION);
+  return walletManager.formatSolBalance(0);
 };
 
 const sanitizeSentence = (text?: string): string | null => {
@@ -44,14 +50,14 @@ export interface FriendlyShortfallOptions {
 
 export const buildFriendlyShortfallMessage = (options: FriendlyShortfallOptions): string => {
   const missingLamports = Math.max(options.missingLamports, 0);
-  const amount = `${formatSolAmount(missingLamports, options.walletManager)} SOL`;
+  const amount = formatSolAmount(missingLamports, options.walletManager);
   const reasonSentence = sanitizeSentence(options.reason);
   const actionSentence = options.action ?? "Add SOL or reduce the amount and try again.";
 
   return (
     `💰 Not enough SOL to complete this.` +
     `${reasonSentence ? ` ${reasonSentence}.` : ""}\n` +
-    `You need about ${amount} more SOL.\n` +
+    `You need about ${amount} SOL more.\n` +
     actionSentence
   );
 };
@@ -67,6 +73,7 @@ const formatInsufficientFundsError = (
     missingLamports,
     walletManager,
     reason: "The action needs enough SOL for rent and fees",
+    action: "Add SOL and try again.",
   });
 };
 

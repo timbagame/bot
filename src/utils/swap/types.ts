@@ -1,5 +1,5 @@
 import type { Keypair } from "@solana/web3.js";
-import type { JupiterQuoteResponse } from "../jupiter";
+import type { JupiterBuildResponse, JupiterQuoteResponse } from "../jupiter";
 import type { IntegratorSwapParams } from "../integrator-fees";
 
 export interface SwapQuote {
@@ -23,6 +23,17 @@ export interface SwapQuote {
   outputTicker?: string;
   executionFeeMint?: string;
   executionReferralApplied?: boolean;
+  executionOutputAmount?: string;
+  executionSponsorReimbursementLamports?: number;
+  preparedBuild?: PreparedJupiterBuild;
+}
+
+export interface PreparedJupiterBuild {
+  build: JupiterBuildResponse;
+  computeUnitLimit: number;
+  reimbursementLamports: number;
+  grossOutputAmount: string;
+  netOutputAmount: string;
 }
 
 export interface SwapRequest {

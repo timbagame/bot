@@ -110,4 +110,17 @@ describe("formatTradeConfirmationSummary", () => {
     });
     expect(summary.message).toContain("2.00%");
   });
+
+  test("shows the exact sponsored network cost already deducted from output", () => {
+    const summary = formatTradeConfirmationSummary({
+      ...baseInput,
+      quote: {
+        ...defaultQuote,
+        executionSponsorReimbursementLamports: 5_000,
+      },
+    });
+    expect(summary.message).toContain(
+      "<b>Sponsored network cost:</b> 0.000005 SOL (already deducted)",
+    );
+  });
 });

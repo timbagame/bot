@@ -203,7 +203,7 @@ export class SwapService {
         input_ticker: request.inputTicker,
         output_ticker: request.outputTicker,
         amount_in: quote.inputAmountRaw,
-        amount_out: quote.providerQuote?.outAmount ?? quote.outputAmount,
+        amount_out: quote.executionOutputAmount ?? quote.outputAmount,
         referral_applied: quote.executionReferralApplied === true,
         timestamp: Date.now(),
         network: NetworkDetector.getCurrentNetwork(),

@@ -154,9 +154,34 @@ const getWrapBalanceRetryDelays = (): number[] => {
 
 const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
 
-// Minimum balance required to keep a native SOL account rent-exempt (0-byte data account).
-// After game creation, the user's native account must retain at least this balance.
-const NATIVE_ACCOUNT_RENT_LAMPORTS = 890_880;
+// Must match contracts/programs/timba/src/state.rs::GAME_BASE_SIZE.
+const GAME_BASE_ACCOUNT_SIZE =
+  8 + // discriminator
+  32 + // creator
+  1 + // game_type
+  8 + // ticket_amount
+  4 + // max_tickets
+  4 + // min_tickets
+  4 + // tickets_count
+  32 + // token_mint
+  8 + // created_at
+  8 + // timeout
+  8 + // last_slot
+  1 + // is_private
+  8; // total_amount
+const PARTICIPANTS_VECTOR_PREFIX_SIZE = 4;
+const PARTICIPANT_PUBLIC_KEY_SIZE = 32;
+
+interface GameFundingPlan {
+  currentSolLamports: number;
+  gameDepositLamports: number;
+  feeSafetyReserveLamports: number;
+  retainedWalletReserveLamports: number;
+  requiredSolLamports: number;
+  shortfallLamports: number;
+  stakeRaw: number;
+  spareTokenRaw: number;
+}
 
 const PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS = process.env.NODE_ENV === "test" ? 1 : 40;
 const PLAYER_TELEGRAM_ID_POLL_ATTEMPTS = 5;
@@ -1485,6 +1510,51 @@ export class GameManager {
     });
   }
 
+  private buildGameFundingPlan(options: {
+    currentSolLamports: number;
+    gameDepositLamports: number;
+    feeSafetyReserveLamports: number;
+    retainedWalletReserveLamports: number;
+    stakeRaw: number;
+    tokenBalanceRaw: number;
+  }): GameFundingPlan {
+    const requiredSolLamports =
+      options.gameDepositLamports +
+      options.feeSafetyReserveLamports +
+      options.retainedWalletReserveLamports;
+
+    return {
+      currentSolLamports: options.currentSolLamports,
+      gameDepositLamports: options.gameDepositLamports,
+      feeSafetyReserveLamports: options.feeSafetyReserveLamports,
+      retainedWalletReserveLamports: options.retainedWalletReserveLamports,
+      requiredSolLamports,
+      shortfallLamports: Math.max(requiredSolLamports - options.currentSolLamports, 0),
+      stakeRaw: options.stakeRaw,
+      spareTokenRaw: Math.max(options.tokenBalanceRaw - options.stakeRaw, 0),
+    };
+  }
+
+  private buildGameFundingShortfallMessage(
+    plan: GameFundingPlan,
+    formattedStake: string,
+    tokenTicker: string,
+  ): string {
+    const formatSol = (lamports: number): string => {
+      const roundedUp = Math.ceil(Math.max(lamports, 0) / 1_000) * 1_000;
+      return `${this.wallet.formatSolBalance(roundedUp)} SOL`;
+    };
+
+    return (
+      `💰 You need ${formatSol(plan.shortfallLamports)} more to create this game.\n\n` +
+      `Game deposit: ${formatSol(plan.gameDepositLamports)} (returned when the game closes)\n` +
+      `Fee safety reserve: ${formatSol(plan.feeSafetyReserveLamports)}\n` +
+      `Wallet reserve: ${formatSol(plan.retainedWalletReserveLamports)}\n\n` +
+      `Your ${formattedStake} ${tokenTicker} stake uses all available ${tokenTicker}, so there are no spare tokens to swap for SOL.\n` +
+      `Add SOL or lower the stake.`
+    );
+  }
+
   private async confirmTransactionWithRecovery(
     signature: string,
     gamePda: PublicKey,
@@ -1629,6 +1699,7 @@ export class GameManager {
    * - 1 byte game_type (enum)
    * - 8 bytes ticket_amount (u64)
    * - 4 bytes max_tickets (u32)
+   * - 4 bytes min_tickets (u32)
    * - 4 bytes tickets_count (u32)
    * - 32 bytes token_mint (pubkey)
    * - 8 bytes created_at (u64)
@@ -1640,39 +1711,30 @@ export class GameManager {
    * - 32 bytes per participant public key
    */
   private async getGameCreationRentLamports(maxTickets: number): Promise<number> {
-    // Calculate game account size dynamically
-    const BASE_GAME_ACCOUNT_SIZE =
-      8 + // discriminator
-      32 + // creator
-      1 + // game_type
-      8 + // ticket_amount
-      4 + // max_tickets
-      4 + // tickets_count
-      32 + // token_mint
-      8 + // created_at
-      8 + // timeout
-      8 + // last_slot
-      1 + // is_private
-      8 + // total_amount
-      4; // participants vec length prefix
-
-    const BYTES_PER_PARTICIPANT = 32;
-
     const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
-    const accountSize = BASE_GAME_ACCOUNT_SIZE + safeMaxTickets * BYTES_PER_PARTICIPANT;
+    const accountSize =
+      GAME_BASE_ACCOUNT_SIZE +
+      PARTICIPANTS_VECTOR_PREFIX_SIZE +
+      safeMaxTickets * PARTICIPANT_PUBLIC_KEY_SIZE;
 
+    return this.getRentExemptionLamports(accountSize, "game deposit");
+  }
+
+  private async getNativeWalletReserveLamports(): Promise<number> {
+    return this.getRentExemptionLamports(0, "wallet reserve");
+  }
+
+  private async getRentExemptionLamports(accountSize: number, label: string): Promise<number> {
     try {
-      const connection = this.getConnection();
-      const rent = await connection.getMinimumBalanceForRentExemption(accountSize);
+      const rent = await this.getConnection().getMinimumBalanceForRentExemption(accountSize);
       if (Number.isFinite(rent) && rent > 0) {
         return rent;
       }
     } catch (error) {
-      console.warn("⚠️ Failed to determine game account rent lamports:", error);
+      console.warn(`⚠️ Failed to determine ${label} lamports:`, error);
     }
 
-    // Fallback: estimate rent at ~6.96 lamports per byte (standard rate)
-    return Math.ceil(accountSize * 6.96);
+    throw new Error(`Unable to calculate the ${label}. Please try again.`);
   }
 
   private async ensureWrappedSolBalance(
@@ -3376,20 +3438,24 @@ export class GameManager {
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const [minSolBuffer, gameRentLamports] = await Promise.all([
+      const [minSolBuffer, gameRentLamports, nativeWalletReserveLamports] = await Promise.all([
         this.feeBudget.getGameSafetyBufferLamports(),
         this.getGameCreationRentLamports(maxTickets),
+        this.getNativeWalletReserveLamports(),
       ]);
-      // Include native SOL account rent-exemption so the user remains rent-exempt after game creation.
-      // This keeps at least `NATIVE_ACCOUNT_RENT_LAMPORTS` in the user's main SOL account after
-      // paying both the game account rent and the transaction safety buffer.
-      const requiredSolReserveLamports =
-        minSolBuffer + gameRentLamports + NATIVE_ACCOUNT_RENT_LAMPORTS;
-
       let [tokenBalance, solBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint),
         this.wallet.getBalance(telegramId),
       ]);
+
+      let fundingPlan = this.buildGameFundingPlan({
+        currentSolLamports: solBalance,
+        gameDepositLamports: gameRentLamports,
+        feeSafetyReserveLamports: minSolBuffer,
+        retainedWalletReserveLamports: nativeWalletReserveLamports,
+        stakeRaw: amount,
+        tokenBalanceRaw: tokenBalance,
+      });
 
       if (requestedSol) {
         const ensured = await this.ensureWrappedSolBalance(
@@ -3398,7 +3464,7 @@ export class GameManager {
           tokenBalance,
           solBalance,
           "create",
-          requiredSolReserveLamports,
+          fundingPlan.requiredSolLamports,
         );
 
         if (!ensured.success) {
@@ -3407,7 +3473,17 @@ export class GameManager {
 
         tokenBalance = ensured.tokenBalance;
         solBalance = ensured.solBalance;
+        fundingPlan = this.buildGameFundingPlan({
+          currentSolLamports: solBalance,
+          gameDepositLamports: gameRentLamports,
+          feeSafetyReserveLamports: minSolBuffer,
+          retainedWalletReserveLamports: nativeWalletReserveLamports,
+          stakeRaw: amount,
+          tokenBalanceRaw: tokenBalance,
+        });
       }
+
+      debugLog("Game creation funding plan:", fundingPlan);
 
       if (tokenBalance < amount) {
         const friendlyTokenBalance = this.wallet.formatTokenBalance(
@@ -3432,31 +3508,22 @@ export class GameManager {
           error: errorMessage,
         };
       }
-      const reservedTicketAmount = amount;
-      const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+      const reservedTicketAmount = fundingPlan.stakeRaw;
+      const swapAllowanceRaw = fundingPlan.spareTokenRaw;
 
       let lamportsBalance = solBalance;
-      if (lamportsBalance < requiredSolReserveLamports) {
+      if (fundingPlan.shortfallLamports > 0) {
         if (swapAllowanceRaw <= 0) {
           const formattedStake = this.wallet.formatTokenBalance(
             reservedTicketAmount,
             metadata.decimals,
           );
 
-          const shortfallMessage = this.buildSolShortfallMessage({
-            currentLamports: solBalance,
-            requiredLamports: requiredSolReserveLamports,
-            reason: "Creating a game requires a SOL reserve for rent and fees",
-            nextSteps: "Add more SOL or swap extra tokens for fees before trying again.",
-          });
-
           const safeStake = escapeHtml(formattedStake);
           const safeTicker = escapeHtml(tokenTicker);
           return {
             success: false,
-            error: `${shortfallMessage}
-
-You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
+            error: this.buildGameFundingShortfallMessage(fundingPlan, safeStake, safeTicker),
           };
         }
 
@@ -3465,7 +3532,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           tokenMint,
           tokenDecimals: metadata.decimals,
           availableTokenAmountRaw: swapAllowanceRaw,
-          desiredLamports: requiredSolReserveLamports,
+          desiredLamports: fundingPlan.requiredSolLamports,
           tokenTicker,
           logContext: `create ${gameType} game`,
         });
@@ -3501,12 +3568,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         lamportsBalance = await this.wallet.getBalance(telegramId, {
           forceFresh: true,
         });
-        if (lamportsBalance < requiredSolReserveLamports) {
+        if (lamportsBalance < fundingPlan.requiredSolLamports) {
           return {
             success: false,
             error: this.buildSolShortfallMessage({
               currentLamports: lamportsBalance,
-              requiredLamports: requiredSolReserveLamports,
+              requiredLamports: fundingPlan.requiredSolLamports,
               reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
               nextSteps: "Add more SOL to continue.",
             }),
@@ -4002,11 +4069,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
           if (currentGameType === "coinflip") {
             const formattedStake = this.wallet.formatTokenBalance(gameAmount, metadata.decimals);
+            const safeTicker = escapeHtml(gameData.token_ticker);
             return {
               success: false,
               error: `${shortfallMessage}
 
-You currently have ${formattedStake} ${gameData.token_ticker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
+Your ${formattedStake} ${safeTicker} stake uses all available ${safeTicker}, so there are no spare tokens to swap for SOL.`,
             };
           }
 

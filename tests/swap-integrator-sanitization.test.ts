@@ -18,6 +18,7 @@ import * as priceService from "../src/utils/price-service";
 import { SwapService } from "../src/utils/swap/service";
 import type { SwapBackend } from "../src/utils/swap/service";
 import { calculateRouteCosts } from "../src/utils/swap/route-cost";
+import { TransactionHistory } from "../src/utils/transaction-history";
 
 // Minimal mock quote to exercise buffer checks
 const buildQuote = (inputMint: string, routeLamports: number, amountRaw: number) => ({
@@ -582,6 +583,23 @@ describe("SwapService.execute", () => {
 
     expect(txid).toBe("jupiter-tx");
     expect(backend.executeJupiterSwap).toHaveBeenCalledTimes(1);
+  });
+
+  test("records the final executed output instead of the initial provider quote", async () => {
+    const history = TransactionHistory.getInstance();
+    const recordSpy = vi.spyOn(history, "recordSwap").mockImplementation(() => {});
+    const jupiterQuote = {
+      ...baseQuote,
+      provider: "jupiter" as const,
+      outputAmount: "990",
+      executionOutputAmount: "985",
+      providerQuote: { outAmount: "1000" },
+    };
+
+    await service.execute(jupiterQuote as any, user);
+
+    expect(recordSpy).toHaveBeenCalledWith(expect.objectContaining({ amount_out: "985" }));
+    recordSpy.mockRestore();
   });
 });
 

@@ -69,8 +69,15 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
     (sm as any).createTokenAccountsIfNeeded = async () => [];
     (sm as any).executeJupiterTransaction = async () => "SIG";
 
+    const user = Keypair.generate();
+    const message = new TransactionMessage({
+      payerKey: user.publicKey,
+      recentBlockhash: "11111111111111111111111111111111",
+      instructions: [],
+    }).compileToV0Message();
+    const transaction = new VersionedTransaction(message);
     (sm as any).jupiterClient.getSwapTransaction = async () => ({
-      swapTransaction: Buffer.from("fake").toString("base64"),
+      swapTransaction: Buffer.from(transaction.serialize()).toString("base64"),
       requestId: "req-exec",
     });
 
@@ -104,7 +111,7 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount,
-          userKeypair: Keypair.generate(),
+          userKeypair: user,
           inputDecimals: 9,
           outputDecimals: 6,
           inputTicker: "SOL",
@@ -243,15 +250,14 @@ describe("SwapManager sponsor cost recovery", () => {
     outputMint: "So11111111111111111111111111111111111111112",
     inAmount: "1000000",
     outAmount: "1000000",
+    feeMint: "So11111111111111111111111111111111111111112",
     signatureFeeLamports: 5_000,
     prioritizationFeeLamports: 0,
     rentFeeLamports: 0,
   } as JupiterOrderResponse;
 
   test("requires the 1% fee plus the actual Jupiter sponsor cost", () => {
-    expect(() => (swapManager as any).requireSponsorCostRecovery(order, 149)).toThrow(
-      /requires 150 bps/,
-    );
+    expect(() => (swapManager as any).requireSponsorCostRecovery(order, 149)).toThrow(/150 bps/);
     expect(() => (swapManager as any).requireSponsorCostRecovery(order, 150)).not.toThrow();
   });
 

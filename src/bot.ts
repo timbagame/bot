@@ -798,6 +798,14 @@ const formatTradeConfirmationSummary = ({
     lines.push(`<b>Fee:</b> ${feePercentValue.toFixed(2)}%`);
   }
 
+  if ((quote.executionSponsorReimbursementLamports ?? 0) > 0) {
+    const reimbursement = formatAmount(BigInt(quote.executionSponsorReimbursementLamports!), 9, {
+      maxFractionDigits: 9,
+      trim: true,
+    });
+    lines.push(`<b>Sponsored network cost:</b> ${reimbursement} SOL (already deducted)`);
+  }
+
   if (safeContractAddress) {
     lines.push("", `🔗 <b>Contract:</b> <code>${safeContractAddress}</code>`);
   }

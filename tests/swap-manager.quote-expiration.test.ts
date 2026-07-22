@@ -28,7 +28,7 @@ describe("SwapManager quote expiration", () => {
     __test_resetJupiterQuoteExpirationMs();
   });
 
-  test("stale provider quote triggers new Jupiter quote fetch", async () => {
+  test("stale provider quote requires fresh user confirmation", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -66,20 +66,22 @@ describe("SwapManager quote expiration", () => {
       providerQuoteTimestamp: Date.now() - 1000,
     };
 
-    await sm.executeJupiterSwap(
-      {
-        inputMint: quote.inputMint,
-        outputMint: quote.outputMint,
-        amount: quote.inputAmount,
-        userKeypair: Keypair.generate(),
-        inputDecimals: 9,
-        outputDecimals: 6,
-        inputTicker: "SOL",
-        outputTicker: "USDC",
-      },
-      quote,
-    );
+    await expect(
+      sm.executeJupiterSwap(
+        {
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inputAmount,
+          userKeypair: Keypair.generate(),
+          inputDecimals: 9,
+          outputDecimals: 6,
+          inputTicker: "SOL",
+          outputTicker: "USDC",
+        },
+        quote,
+      ),
+    ).rejects.toThrow(/quote expired.*new quote/i);
 
-    expect(quoteFetchCount).toBe(1);
+    expect(quoteFetchCount).toBe(0);
   });
 });
