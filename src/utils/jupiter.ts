@@ -141,6 +141,13 @@ interface JupiterOrderParams {
   closeAuthority?: string;
 }
 
+export class JupiterReferralUnavailableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "JupiterReferralUnavailableError";
+  }
+}
+
 export interface JupiterOrderResponse {
   mode: string;
   inputMint: string;
@@ -318,10 +325,7 @@ export class JupiterClient {
     return url;
   }
 
-  private async fetchOrder(
-    params: JupiterOrderParams,
-    allowReferralFallback = true,
-  ): Promise<JupiterOrderResult> {
+  private async fetchOrder(params: JupiterOrderParams): Promise<JupiterOrderResult> {
     const effectiveParams: JupiterOrderParams = { ...params };
     if (!effectiveParams.taker && effectiveParams.payer) {
       effectiveParams.taker = effectiveParams.payer;
@@ -340,31 +344,10 @@ export class JupiterClient {
       if (!response.ok) {
         const errorText = await response.text();
         const errorMessage = extractJupiterErrorMessage(errorText);
-        if (
-          allowReferralFallback &&
-          params.referralAccount &&
-          errorMessage.includes("Failed to get quotes")
-        ) {
-          console.warn("Integrator order failed, retrying without referral params", {
-            url: url.toString(),
-            errorText,
-          });
-          const fallbackParams: JupiterOrderParams = {
-            inputMint: effectiveParams.inputMint,
-            outputMint: effectiveParams.outputMint,
-            amount: effectiveParams.amount,
-            taker: effectiveParams.taker,
-          };
-          const fallback = await this.fetchOrder(fallbackParams, false);
-          fallback.raw.referralApplied = false;
-          fallback.raw.payerApplied = false;
-          fallback.raw.integratorFallback = true;
-          fallback.raw.integratorFallbackReason = "Failed to get quotes";
-          fallback.normalized.referralApplied = false;
-          fallback.normalized.payerApplied = false;
-          fallback.normalized.integratorFallback = true;
-          fallback.normalized.integratorFallbackReason = "Failed to get quotes";
-          return fallback;
+        if (params.referralAccount && errorMessage.includes("Failed to get quotes")) {
+          throw new JupiterReferralUnavailableError(
+            "Jupiter could not quote this route with referral parameters.",
+          );
         }
         throw new Error(
           `Jupiter order failed: ${response.status} ${response.statusText} - ${errorMessage}`,
@@ -383,14 +366,16 @@ export class JupiterClient {
         params.referralAccount && params.referralFee !== undefined
           ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee)
           : 0;
-      if (
-        requiredReferralFeeBps > 0 &&
-        typeof data.feeBps === "number" &&
-        data.feeBps < requiredReferralFeeBps
-      ) {
-        throw new Error(
-          `Jupiter order did not apply the required ${requiredReferralFeeBps} bps swap fee.`,
-        );
+      if (requiredReferralFeeBps > 0) {
+        const appliedFeeBps = typeof data.feeBps === "number" ? data.feeBps : null;
+        if (data.referralApplied !== true || appliedFeeBps === null) {
+          throw new Error("Jupiter order did not confirm the required swap fee.");
+        }
+        if (appliedFeeBps < requiredReferralFeeBps) {
+          throw new Error(
+            `Jupiter order applied ${appliedFeeBps} bps, below the required ${requiredReferralFeeBps} bps swap fee.`,
+          );
+        }
       }
 
       const referralApplied = Boolean(data.referralApplied);
@@ -404,6 +389,9 @@ export class JupiterClient {
       data.payerApplied = payerApplied;
       return { raw: data, normalized, referralApplied };
     } catch (error: any) {
+      if (error instanceof JupiterReferralUnavailableError) {
+        throw error;
+      }
       console.error("Error requesting Jupiter order:", error);
       throw new Error(`Failed to request Jupiter order: ${error.message}`, { cause: error });
     }

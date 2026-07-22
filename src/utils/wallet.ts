@@ -1761,6 +1761,9 @@ export class WalletManager {
     if (!Number.isSafeInteger(payerRentLamports) || payerRentLamports < 0) {
       throw new Error("WSOL account rent reserve is invalid.");
     }
+    if (remainingLamports > 0 && payerRentLamports === 0) {
+      throw new Error("WSOL account rent reserve is unavailable for a partial unwrap.");
+    }
 
     const instructions: TransactionInstruction[] = [
       createSyncNativeInstruction(wsolAta),
@@ -1901,10 +1904,11 @@ export class WalletManager {
         toPubkey: transactionPayer.publicKey,
         lamports: 0,
       });
-      const networkFeeLamports = await this.estimateFee(transactionPayer.publicKey, [
-        ...unwrapInstructions,
-        reimbursementPlaceholder,
-      ]);
+      const networkFeeLamports = await this.estimateFee(
+        transactionPayer.publicKey,
+        [...unwrapInstructions, reimbursementPlaceholder],
+        { allowFallback: false },
+      );
       const reimbursementLamports = networkFeeLamports + payerRentLamports;
 
       if (!Number.isSafeInteger(reimbursementLamports) || reimbursementLamports <= 0) {
@@ -1925,6 +1929,10 @@ export class WalletManager {
 
     const signature = await this.sendAndConfirmWithResubmits(instructions, signers, {
       operationLabel: "Unwrap WSOL",
+      // Rebuilding a partial unwrap after an ambiguous confirmation can execute
+      // the reimbursement twice. RPC submission already rebroadcasts the same
+      // signed transaction; do not create a fresh one here.
+      ...(isSponsored ? { maxResubmits: 0 } : {}),
     });
 
     return {
@@ -2497,10 +2505,13 @@ export class WalletManager {
   private async estimateFee(
     payer: PublicKey,
     instructions: TransactionInstruction[],
+    options: { allowFallback?: boolean } = {},
   ): Promise<number> {
     if (instructions.length === 0) {
       return 0;
     }
+
+    const allowFallback = options.allowFallback ?? true;
 
     await this.throttle();
     try {
@@ -2516,7 +2527,11 @@ export class WalletManager {
       if (typeof fee === "number" && Number.isFinite(fee)) {
         return fee;
       }
+      throw new Error("RPC returned no transaction fee estimate.");
     } catch (error) {
+      if (!allowFallback) {
+        throw new Error("Unable to estimate the sponsored transaction fee.", { cause: error });
+      }
       console.warn("⚠️ Failed to estimate fee, falling back to default:", error);
     }
 

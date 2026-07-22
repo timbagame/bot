@@ -1,6 +1,13 @@
 import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
+import { AccountLayout, AccountState, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
 import type { JupiterOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";
@@ -226,5 +233,88 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
         Keypair.generate().publicKey,
       ),
     ).rejects.toThrow(new RegExp(`${helperCosts.requiredLamports} lamports`));
+  });
+});
+
+describe("SwapManager sponsor cost recovery", () => {
+  const swapManager = new SwapManager({} as Connection, {} as WalletManager);
+  const order = {
+    inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+    outputMint: "So11111111111111111111111111111111111111112",
+    inAmount: "1000000",
+    outAmount: "1000000",
+    signatureFeeLamports: 5_000,
+    prioritizationFeeLamports: 0,
+    rentFeeLamports: 0,
+  } as JupiterOrderResponse;
+
+  test("requires the 1% fee plus the actual Jupiter sponsor cost", () => {
+    expect(() => (swapManager as any).requireSponsorCostRecovery(order, 149)).toThrow(
+      /requires 150 bps/,
+    );
+    expect(() => (swapManager as any).requireSponsorCostRecovery(order, 150)).not.toThrow();
+  });
+
+  test("rejects missing cost data and uneconomic trades", () => {
+    expect(() =>
+      (swapManager as any).requireSponsorCostRecovery(
+        { ...order, signatureFeeLamports: undefined },
+        255,
+      ),
+    ).toThrow(/reliable sponsor cost estimates/);
+    expect(() =>
+      (swapManager as any).requireSponsorCostRecovery({ ...order, outAmount: "10000" }, 255),
+    ).toThrow(/too small to recover/);
+  });
+});
+
+describe("SwapManager build fee account validation", () => {
+  const makeTokenAccountInfo = (mint: PublicKey, owner: PublicKey) => {
+    const data = Buffer.alloc(AccountLayout.span);
+    AccountLayout.encode(
+      {
+        mint,
+        owner,
+        amount: 0n,
+        delegateOption: 0,
+        delegate: owner,
+        state: AccountState.Initialized,
+        isNativeOption: 0,
+        isNative: 0n,
+        delegatedAmount: 0n,
+        closeAuthorityOption: 0,
+        closeAuthority: owner,
+      } as any,
+      data,
+    );
+    return {
+      data,
+      executable: false,
+      lamports: 2_039_280,
+      owner: TOKEN_PROGRAM_ID,
+      rentEpoch: 0,
+    };
+  };
+
+  test("accepts only a WSOL account owned by the configured referral account", async () => {
+    const feeAccount = Keypair.generate().publicKey;
+    const referralAccount = Keypair.generate().publicKey;
+    const validInfo = makeTokenAccountInfo(
+      new PublicKey("So11111111111111111111111111111111111111112"),
+      referralAccount,
+    );
+    const connection = {
+      getAccountInfo: async () => validInfo,
+    } as unknown as Connection;
+    const swapManager = new SwapManager(connection, {} as WalletManager);
+
+    await expect(
+      (swapManager as any).validateBuildFeeAccount(feeAccount, referralAccount),
+    ).resolves.toBeUndefined();
+
+    const invalidManager = new SwapManager(connection, {} as WalletManager);
+    await expect(
+      (invalidManager as any).validateBuildFeeAccount(feeAccount, Keypair.generate().publicKey),
+    ).rejects.toThrow(/not owned by the configured referral account/);
   });
 });

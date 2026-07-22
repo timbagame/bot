@@ -9,10 +9,13 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, unpackAccount } from "@solana/spl-token";
 import {
   JupiterClient,
+  JupiterReferralUnavailableError,
   type JupiterQuoteResponse,
   type JupiterQuoteRequest,
+  type JupiterSwapResponse,
   type JupiterBuildInstruction,
   type JupiterBuildResponse,
   type JupiterOrderResponse,
@@ -23,7 +26,7 @@ import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
-import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "./constants";
+import { WSOL_MINT } from "./constants";
 import type { JustInTimeSwapResult, SwapQuote, SwapRequest } from "./swap/types";
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { calculateDynamicReferralFee } from "./integrator-fees";
@@ -34,6 +37,7 @@ import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "./swap/rout
 import {
   DEFAULT_REFERRAL_BASE_FEE_BPS,
   DEFAULT_MAX_EXTRA_FEE_BPS,
+  MAX_REFERRAL_FEE_BPS,
   MIN_JUPITER_SWAP_FEE_BPS,
 } from "./admin-payer-surcharge";
 
@@ -124,6 +128,7 @@ export class SwapManager {
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
   private readonly swapService: SwapService;
+  private readonly validatedBuildFeeAccounts = new Set<string>();
 
   constructor(connection: Connection, wallet: WalletManager, feeBudget?: FeeBudgetProvider) {
     this.connection = connection;
@@ -141,6 +146,46 @@ export class SwapManager {
 
   private getJupiterQuote(params: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
     return this.quoteCache.getJupiterQuote(params, () => this.jupiterClient.getQuote(params));
+  }
+
+  private canUseBuildFallbackRoute(
+    inputMint: string,
+    outputMint: string,
+    integrator: IntegratorSwapParams | null | undefined,
+  ): boolean {
+    return (
+      integrator?.payerKind === "admin" && !this.isSolMint(inputMint) && this.isSolMint(outputMint)
+    );
+  }
+
+  private async getJupiterQuoteForRoute(
+    params: JupiterQuoteRequest,
+    allowBuildFallback: boolean,
+  ): Promise<JupiterQuoteResponse> {
+    try {
+      return await this.getJupiterQuote(params);
+    } catch (error) {
+      if (!(error instanceof JupiterReferralUnavailableError) || !allowBuildFallback) {
+        throw error;
+      }
+
+      const fallback = await this.getJupiterQuote({
+        inputMint: params.inputMint,
+        outputMint: params.outputMint,
+        amount: params.amount,
+        taker: params.taker,
+        swapMode: params.swapMode,
+        slippageBps: params.slippageBps,
+      });
+
+      return {
+        ...fallback,
+        referralApplied: false,
+        payerApplied: false,
+        integratorFallback: true,
+        integratorFallbackReason: error.message,
+      };
+    }
   }
 
   /**
@@ -224,7 +269,10 @@ export class SwapManager {
       );
     }
 
-    const jupiterQuote = await this.getJupiterQuote(quoteRequest);
+    const jupiterQuote = await this.getJupiterQuoteForRoute(
+      quoteRequest,
+      this.canUseBuildFallbackRoute(inputMint, outputMint, request.integrator),
+    );
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
     const outAmount = parseFloat(jupiterQuote.outAmount);
@@ -539,16 +587,19 @@ export class SwapManager {
       const probeCandidate = availableRawBig / 20n; // ~5% of balance
       const priceProbeInBig = probeCandidate < minProbe ? minProbe : probeCandidate;
       const priceProbeInStr = priceProbeInBig.toString();
-      const probeQuote = await this.getJupiterQuote({
-        inputMint: tokenMint,
-        outputMint: SOL_MINT,
-        amount: priceProbeInStr,
-        taker: userKeypair.publicKey.toBase58(),
-        referralAccount: integrator?.referralAccount,
-        referralFee: integrator?.referralFee,
-        payer: integrator?.payer,
-        closeAuthority: integrator?.closeAuthority,
-      });
+      const probeQuote = await this.getJupiterQuoteForRoute(
+        {
+          inputMint: tokenMint,
+          outputMint: SOL_MINT,
+          amount: priceProbeInStr,
+          taker: userKeypair.publicKey.toBase58(),
+          referralAccount: integrator?.referralAccount,
+          referralFee: integrator?.referralFee,
+          payer: integrator?.payer,
+          closeAuthority: integrator?.closeAuthority,
+        },
+        this.canUseBuildFallbackRoute(tokenMint, SOL_MINT, integrator),
+      );
 
       const probeIn = BigInt(probeQuote.inAmount);
       const probeOut = BigInt(probeQuote.outAmount);
@@ -932,43 +983,68 @@ export class SwapManager {
         refreshRequest.closeAuthority = cachedIntegrator.closeAuthority;
       }
 
-      jupiterQuote = await this.getJupiterQuote(refreshRequest);
+      jupiterQuote = await this.getJupiterQuoteForRoute(
+        refreshRequest,
+        this.canUseBuildFallbackRoute(quote.inputMint, quote.outputMint, cachedIntegrator),
+      );
     }
 
     // Keep integrator/payer even if Jupiter could not apply referral fees (referralApplied=false);
     // payer must remain so Swap V2 does not fall back to automatic gasless mode and its minimum trade size.
     const integrator = cachedIntegrator;
 
-    const swapResponse = await this.jupiterClient.getSwapTransaction({
-      userPublicKey: userKeypair.publicKey.toString(),
-      quoteResponse: jupiterQuote,
-      referralAccount: integrator?.referralAccount,
-      referralFee: integrator?.referralFee,
-      payer: integrator?.payer,
-      closeAuthority: integrator?.closeAuthority,
-    });
+    let swapResponse: JupiterSwapResponse;
+    try {
+      swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toString(),
+        quoteResponse: jupiterQuote,
+        referralAccount: integrator?.referralAccount,
+        referralFee: integrator?.referralFee,
+        payer: integrator?.payer,
+        closeAuthority: integrator?.closeAuthority,
+      });
+    } catch (error) {
+      if (
+        error instanceof JupiterReferralUnavailableError &&
+        this.canUseAtomicBuildFallback(request, quote)
+      ) {
+        const operatorKeypair = this.wallet.getOperatorKeypair();
+        if (integrator?.payer === operatorKeypair.publicKey.toBase58()) {
+          return this.executeAtomicBuildFallback({
+            request,
+            quote,
+            jupiterQuote,
+            operatorKeypair,
+          });
+        }
+      }
+      throw error;
+    }
     quote.executionFeeMint = swapResponse.order?.feeMint;
     quote.executionReferralApplied = swapResponse.order?.referralApplied;
 
+    const requiredFeeBps = integrator
+      ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee)
+      : 0;
+    const appliedFeeBps = swapResponse.order?.feeBps;
+    const requiredReferralApplied =
+      !integrator ||
+      (swapResponse.order?.referralApplied === true &&
+        typeof appliedFeeBps === "number" &&
+        appliedFeeBps >= requiredFeeBps);
     const adminPayerApplied =
       integrator?.payerKind === "admin" &&
+      requiredReferralApplied &&
       swapResponse.order?.integratorFallback !== true &&
       swapResponse.order?.payerApplied !== false;
 
-    if (integrator?.payerKind !== "admin" && swapResponse.order?.integratorFallback === true) {
+    if (integrator?.payerKind !== "admin" && !requiredReferralApplied) {
       throw new Error(
-        "Jupiter could not apply the required swap fee; refusing a fee-free fallback.",
+        `Jupiter did not confirm the required ${requiredFeeBps} bps swap fee; refusing execution.`,
       );
     }
 
     if (integrator?.payerKind === "admin" && !adminPayerApplied) {
-      const { requiredLamports } = calculateRouteCosts(swapResponse.order, {
-        paddingRatio: 0.25,
-        paddingExtraLamports: 200_000,
-        paddingRounding: "ceil",
-        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-        requiredStrategy: "max",
-      });
       if (this.canUseAtomicBuildFallback(request, quote)) {
         const payerPublicKey = this.tryParsePublicKey(integrator.payer);
         if (payerPublicKey) {
@@ -979,7 +1055,6 @@ export class SwapManager {
               quote,
               jupiterQuote,
               operatorKeypair,
-              reimbursementLamports: requiredLamports,
             });
           }
         }
@@ -988,6 +1063,10 @@ export class SwapManager {
       throw new Error(
         "Jupiter could not apply the required swap fee and admin payer; refusing a fee-free fallback.",
       );
+    }
+
+    if (adminPayerApplied) {
+      this.requireSponsorCostRecovery(swapResponse.order, appliedFeeBps);
     }
 
     // Determine payer and required signer for admin-funded routes
@@ -1210,6 +1289,61 @@ export class SwapManager {
     );
   }
 
+  private requireSponsorCostRecovery(
+    order: JupiterOrderResponse | undefined,
+    appliedFeeBps: number | undefined,
+  ): void {
+    if (!order || !this.isSolMint(order.outputMint)) {
+      throw new Error("Admin-sponsored Jupiter swaps must output SOL.");
+    }
+    if (order.feeMint && !this.isSolMint(order.feeMint)) {
+      throw new Error("Admin-sponsored Jupiter fees must be collected in SOL.");
+    }
+
+    const signatureFeeLamports = order.signatureFeeLamports;
+    const prioritizationFeeLamports = order.prioritizationFeeLamports ?? 0;
+    const rentFeeLamports = order.rentFeeLamports ?? 0;
+    const isValidCost = (cost: unknown): cost is number =>
+      typeof cost === "number" && Number.isSafeInteger(cost) && cost >= 0;
+    if (
+      !isValidCost(signatureFeeLamports) ||
+      !isValidCost(prioritizationFeeLamports) ||
+      !isValidCost(rentFeeLamports)
+    ) {
+      throw new Error("Jupiter did not provide reliable sponsor cost estimates.");
+    }
+
+    const routeLamports = signatureFeeLamports + prioritizationFeeLamports + rentFeeLamports;
+    if (!Number.isSafeInteger(routeLamports) || routeLamports <= 0) {
+      throw new Error("Jupiter did not provide a positive sponsor cost estimate.");
+    }
+
+    let outputLamports: bigint;
+    try {
+      outputLamports = BigInt(order.outAmount);
+    } catch {
+      throw new Error("Jupiter returned an invalid sponsored swap output amount.");
+    }
+    if (outputLamports <= 0n) {
+      throw new Error("Jupiter returned an invalid sponsored swap output amount.");
+    }
+
+    const recoveryBps = Number(
+      (BigInt(routeLamports) * 10_000n + outputLamports - 1n) / outputLamports,
+    );
+    const requiredFeeBps = MIN_JUPITER_SWAP_FEE_BPS + recoveryBps;
+    if (requiredFeeBps > MAX_REFERRAL_FEE_BPS) {
+      throw new Error(
+        "Trade is too small to recover the Jupiter sponsor cost. Add SOL or increase the trade size.",
+      );
+    }
+    if (typeof appliedFeeBps !== "number" || appliedFeeBps < requiredFeeBps) {
+      throw new Error(
+        `Jupiter sponsor cost requires ${requiredFeeBps} bps, but the confirmed swap fee is ${appliedFeeBps ?? "missing"} bps. Request a new quote.`,
+      );
+    }
+  }
+
   private tryParsePublicKey(value: string | undefined): PublicKey | null {
     if (!value) {
       return null;
@@ -1246,8 +1380,53 @@ export class SwapManager {
         : []),
       reimbursementInstruction,
       ...build.otherInstructions.map((instruction) => this.toJupiterBuildInstruction(instruction)),
-      ...(build.tipInstruction ? [this.toJupiterBuildInstruction(build.tipInstruction)] : []),
     ];
+  }
+
+  private getJupiterComputeBudgetInstructions(
+    build: JupiterBuildResponse,
+  ): TransactionInstruction[] {
+    return build.computeBudgetInstructions
+      .map((instruction) => this.toJupiterBuildInstruction(instruction))
+      .filter(
+        (instruction) =>
+          !instruction.programId.equals(ComputeBudgetProgram.programId) ||
+          instruction.data[0] !== 2,
+      );
+  }
+
+  private async validateBuildFeeAccount(
+    feeAccount: PublicKey,
+    referralAccount: PublicKey,
+  ): Promise<void> {
+    const cacheKey = `${feeAccount.toBase58()}:${referralAccount.toBase58()}`;
+    if (this.validatedBuildFeeAccounts.has(cacheKey)) {
+      return;
+    }
+
+    const accountInfo = await this.connection.getAccountInfo(feeAccount, "confirmed");
+    if (!accountInfo) {
+      throw new Error(`Jupiter build fee account ${feeAccount.toBase58()} does not exist.`);
+    }
+
+    let tokenAccount;
+    try {
+      tokenAccount = unpackAccount(feeAccount, accountInfo, TOKEN_PROGRAM_ID);
+    } catch (error) {
+      throw new Error(
+        `Jupiter build fee account ${feeAccount.toBase58()} is not a valid SPL token account.`,
+        { cause: error },
+      );
+    }
+
+    if (!tokenAccount.mint.equals(new PublicKey(WSOL_MINT))) {
+      throw new Error("Jupiter build fee account must be a WSOL token account.");
+    }
+    if (!tokenAccount.owner.equals(referralAccount)) {
+      throw new Error("Jupiter build fee account is not owned by the configured referral account.");
+    }
+
+    this.validatedBuildFeeAccounts.add(cacheKey);
   }
 
   private getJupiterBuildLookupTables(build: JupiterBuildResponse): AddressLookupTableAccount[] {
@@ -1278,14 +1457,8 @@ export class SwapManager {
     quote: SwapQuote;
     jupiterQuote: JupiterQuoteResponse;
     operatorKeypair: Keypair;
-    reimbursementLamports: number;
   }): Promise<string> {
     const { request, quote, jupiterQuote, operatorKeypair } = options;
-    const reimbursementLamports = Math.max(0, Math.trunc(options.reimbursementLamports));
-
-    if (!Number.isSafeInteger(reimbursementLamports)) {
-      throw new Error("Jupiter build reimbursement must be a safe integer.");
-    }
 
     const integrator = quote.integrator;
     if (!integrator?.payer || integrator.payer !== operatorKeypair.publicKey.toBase58()) {
@@ -1298,6 +1471,9 @@ export class SwapManager {
     if (!referralConfig.buildFeeAccount) {
       throw new Error("Jupiter build fee account is not configured.");
     }
+    const buildFeeAccount = new PublicKey(referralConfig.buildFeeAccount);
+    const referralAccount = new PublicKey(referralConfig.referralAccount);
+    await this.validateBuildFeeAccount(buildFeeAccount, referralAccount);
 
     await this.ensureAdminCanCoverRoute(
       integrator,
@@ -1315,24 +1491,24 @@ export class SwapManager {
       taker: request.userKeypair.publicKey.toBase58(),
       payer: operatorKeypair.publicKey.toBase58(),
       platformFeeBps: Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee),
-      feeAccount: referralConfig.buildFeeAccount,
+      feeAccount: buildFeeAccount.toBase58(),
       swapMode: jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
       slippageBps: quote.providerQuote?.slippageBps ?? jupiterQuote.slippageBps,
     });
-    const expectedOutputLamports = BigInt(build.outAmount);
-    if (BigInt(reimbursementLamports) > expectedOutputLamports) {
+    if (build.tipInstruction) {
       throw new Error(
-        "Jupiter build fallback output is too small to reimburse admin fees atomically.",
+        "Jupiter build returned an unreimbursed tip instruction; refusing execution.",
       );
     }
     const recentBlockhash = this.getJupiterBuildBlockhash(build);
     const lookupTables = this.getJupiterBuildLookupTables(build);
-    const reimbursementInstruction = SystemProgram.transfer({
+    const reimbursementPlaceholder = SystemProgram.transfer({
       fromPubkey: request.userKeypair.publicKey,
       toPubkey: operatorKeypair.publicKey,
-      lamports: reimbursementLamports,
+      lamports: 0,
     });
-    const swapInstructions = this.getJupiterBuildInstructions(build, reimbursementInstruction);
+    const swapInstructions = this.getJupiterBuildInstructions(build, reimbursementPlaceholder);
+    const jupiterComputeBudgetInstructions = this.getJupiterComputeBudgetInstructions(build);
     const simulationMessage = new TransactionMessage({
       payerKey: operatorKeypair.publicKey,
       recentBlockhash,
@@ -1340,6 +1516,7 @@ export class SwapManager {
         ComputeBudgetProgram.setComputeUnitLimit({
           units: JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX,
         }),
+        ...jupiterComputeBudgetInstructions,
         ...swapInstructions,
       ],
     }).compileToV0Message(lookupTables);
@@ -1360,17 +1537,49 @@ export class SwapManager {
           JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX,
         )
       : JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX;
-    const finalMessage = new TransactionMessage({
-      payerKey: operatorKeypair.publicKey,
-      recentBlockhash,
-      instructions: [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
-        ...build.computeBudgetInstructions.map((instruction) =>
-          this.toJupiterBuildInstruction(instruction),
-        ),
-        ...swapInstructions,
-      ],
-    }).compileToV0Message(lookupTables);
+    const buildFinalMessage = (reimbursementLamports: number) =>
+      new TransactionMessage({
+        payerKey: operatorKeypair.publicKey,
+        recentBlockhash,
+        instructions: [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+          ...jupiterComputeBudgetInstructions,
+          ...this.getJupiterBuildInstructions(
+            build,
+            SystemProgram.transfer({
+              fromPubkey: request.userKeypair.publicKey,
+              toPubkey: operatorKeypair.publicKey,
+              lamports: reimbursementLamports,
+            }),
+          ),
+        ],
+      }).compileToV0Message(lookupTables);
+
+    const feeResponse = await this.connection.getFeeForMessage(buildFinalMessage(0), "confirmed");
+    const networkFeeLamports = feeResponse.value;
+    if (!Number.isSafeInteger(networkFeeLamports) || networkFeeLamports === null) {
+      throw new Error("Unable to estimate the Jupiter build transaction fee.");
+    }
+
+    const routeRentLamports = jupiterQuote.rentFeeLamports;
+    if (
+      typeof routeRentLamports !== "number" ||
+      !Number.isSafeInteger(routeRentLamports) ||
+      routeRentLamports < 0
+    ) {
+      throw new Error("Jupiter did not provide a reliable build-route rent estimate.");
+    }
+    const reimbursementLamports = networkFeeLamports + routeRentLamports;
+    if (!Number.isSafeInteger(reimbursementLamports) || reimbursementLamports <= 0) {
+      throw new Error("Jupiter build reimbursement must be a positive safe integer.");
+    }
+    if (BigInt(reimbursementLamports) > BigInt(build.outAmount)) {
+      throw new Error(
+        "Jupiter build fallback output is too small to reimburse admin fees atomically.",
+      );
+    }
+
+    const finalMessage = buildFinalMessage(reimbursementLamports);
     const transaction = new VersionedTransaction(finalMessage);
     transaction.sign([operatorKeypair, request.userKeypair]);
 
@@ -1394,6 +1603,8 @@ export class SwapManager {
       );
     }
 
+    quote.executionFeeMint = WSOL_MINT;
+    quote.executionReferralApplied = true;
     return signature;
   }
 

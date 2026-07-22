@@ -1,6 +1,7 @@
 import { Buffer } from "buffer";
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
+  ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
@@ -176,7 +177,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         slippageBps: 100,
         priceImpactPct: "0",
         routePlan: [],
+        rentFeeLamports: 0,
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -256,6 +259,7 @@ describe("SwapManager.executeJupiterSwap", () => {
         priceImpactPct: "0",
         routePlan: [],
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -306,7 +310,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         slippageBps: 100,
         priceImpactPct: "0",
         routePlan: [],
+        rentFeeLamports: 0,
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -318,6 +324,7 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getOperatorKeypair", () => admin);
+    Reflect.set(sm, "validateBuildFeeAccount", async () => {});
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       getLatestBlockhash: async () => ({
@@ -325,6 +332,7 @@ describe("SwapManager.executeJupiterSwap", () => {
         lastValidBlockHeight: 123,
       }),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
+      getFeeForMessage: async () => ({ value: 5_000 }),
       sendTransaction: async (tx: VersionedTransaction) => {
         capturedTx = tx;
         return "SIG_BUILD_FALLBACK";
@@ -366,7 +374,10 @@ describe("SwapManager.executeJupiterSwap", () => {
         swapMode: "ExactIn",
         slippageBps: 100,
         routePlan: [],
-        computeBudgetInstructions: [],
+        computeBudgetInstructions: [
+          apiInstruction(ComputeBudgetProgram.setComputeUnitLimit({ units: 900_000 })),
+          apiInstruction(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 })),
+        ],
         setupInstructions: [],
         swapInstruction: apiInstruction(
           new TransactionInstruction({
@@ -436,6 +447,13 @@ describe("SwapManager.executeJupiterSwap", () => {
       compiledPrograms.lastIndexOf(SystemProgram.programId.toBase58()),
     );
     expect(compiledPrograms.at(-1)).toBe(SystemProgram.programId.toBase58());
+    const computeInstructions = message.compiledInstructions.filter((instruction) =>
+      message.staticAccountKeys[instruction.programIdIndex]!.equals(ComputeBudgetProgram.programId),
+    );
+    expect(computeInstructions.filter((instruction) => instruction.data[0] === 2)).toHaveLength(1);
+    expect(computeInstructions.filter((instruction) => instruction.data[0] === 3)).toHaveLength(1);
+    expect((quote as any).executionReferralApplied).toBe(true);
+    expect((quote as any).executionFeeMint).toBe("So11111111111111111111111111111111111111112");
   });
 
   test("build fallback throws when simulation fails", async () => {
@@ -467,7 +485,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         slippageBps: 100,
         priceImpactPct: "0",
         routePlan: [],
+        rentFeeLamports: 0,
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -479,6 +499,7 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getOperatorKeypair", () => admin);
+    Reflect.set(sm, "validateBuildFeeAccount", async () => {});
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({
@@ -576,7 +597,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         slippageBps: 100,
         priceImpactPct: "0",
         routePlan: [],
+        rentFeeLamports: 0,
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -588,9 +611,11 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getOperatorKeypair", () => admin);
+    Reflect.set(sm, "validateBuildFeeAccount", async () => {});
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
+      getFeeForMessage: async () => ({ value: 5_000 }),
     });
 
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
@@ -683,7 +708,9 @@ describe("SwapManager.executeJupiterSwap", () => {
         slippageBps: 100,
         priceImpactPct: "0",
         routePlan: [],
+        rentFeeLamports: 0,
       },
+      providerQuoteTimestamp: Date.now(),
       integrator: {
         referralAccount: "referral",
         referralFee: 85,
@@ -695,9 +722,11 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
     Reflect.set(wallet, "getOperatorKeypair", () => admin);
+    Reflect.set(sm, "validateBuildFeeAccount", async () => {});
     Object.assign(connection, {
       getBalance: async (address: PublicKey) => (address.equals(user.publicKey) ? 0 : 10_000_000),
       simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
+      getFeeForMessage: async () => ({ value: 5_000 }),
       sendTransaction: async () => "SIG_ERR",
       confirmTransaction: async () => ({ value: { err: "InsufficientFundsForRent" } }),
     });

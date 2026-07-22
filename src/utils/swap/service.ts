@@ -204,10 +204,7 @@ export class SwapService {
         output_ticker: request.outputTicker,
         amount_in: quote.inputAmountRaw,
         amount_out: quote.providerQuote?.outAmount ?? quote.outputAmount,
-        referral_applied:
-          quote.executionReferralApplied === true ||
-          quote.providerQuote?.referralApplied === true ||
-          quote.integratorApplied === true,
+        referral_applied: quote.executionReferralApplied === true,
         timestamp: Date.now(),
         network: NetworkDetector.getCurrentNetwork(),
       });

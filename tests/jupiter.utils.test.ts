@@ -145,6 +145,8 @@ describe("JupiterClient referral URL params", () => {
         ],
         transaction: "AAAA",
         requestId: "req-portal",
+        referralApplied: true,
+        feeBps: 100,
         ...overrides,
       },
     );
@@ -191,47 +193,39 @@ describe("JupiterClient referral URL params", () => {
     expect(capture.url).not.toContain(`taker=${payer}`);
   });
 
-  test("strips payer and closeAuthority on referral fallback", async () => {
+  test("surfaces a typed error instead of silently removing referral parameters", async () => {
     const urls: string[] = [];
     const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
     const client = new JupiterClient(
       "https://api.jup.ag",
-      createJupiterFetchStub({ urls }, async (_, call) => {
-        if (call === 1) {
-          return {
+      createJupiterFetchStub(
+        { urls },
+        async () =>
+          ({
             ok: false,
             status: 400,
             statusText: "Bad Request",
             text: async () => "Failed to get quotes",
-          } as unknown as Response;
-        }
-
-        return makeSuccessResponse();
-      }),
+          }) as unknown as Response,
+      ),
     );
 
-    const quote = await client.getQuote({
-      inputMint,
-      outputMint,
-      amount,
-      referralAccount,
-      referralFee: 85,
-      payer,
-      closeAuthority,
-    });
+    await expect(
+      client.getQuote({
+        inputMint,
+        outputMint,
+        amount,
+        referralAccount,
+        referralFee: 85,
+        payer,
+        closeAuthority,
+      }),
+    ).rejects.toMatchObject({ name: "JupiterReferralUnavailableError" });
 
-    expect(urls.length).toBe(2);
+    expect(urls.length).toBe(1);
     expect(urls[0]).toContain("referralAccount=");
     expect(urls[0]).toContain(`payer=${payer}`);
     expect(urls[0]).toContain(`closeAuthority=${closeAuthority}`);
-    expect(urls[1]).not.toContain("referralAccount=");
-    expect(urls[1]).not.toContain("referralFee=");
-    expect(urls[1]).not.toContain("payer=");
-    expect(urls[1]).not.toContain("closeAuthority=");
-    expect(quote.referralApplied).toBe(false);
-    expect(quote.payerApplied).toBe(false);
-    expect(quote.integratorFallback).toBe(true);
-    expect(quote.integratorFallbackReason).toBe("Failed to get quotes");
   });
 });
 

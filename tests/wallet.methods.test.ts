@@ -275,7 +275,7 @@ test("unwrapSolWithKeypair makes the operator fee payer for sponsored unwraps", 
   expect(ixs[0]).toBe(unwrapPlan.instructions[0]);
   expect(ixs[ixs.length - 1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
   expect(ixs[ixs.length - 1]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
-  expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
+  expect(options).toEqual({ operationLabel: "Unwrap WSOL", maxResubmits: 0 });
 
   expect(result).toEqual({
     signature: "UNWRAP_SIG",
@@ -332,13 +332,43 @@ test("unwrapSolWithKeypair unwraps and reimburses estimated sponsor costs atomic
   expect(ixs[1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
   expect(ixs[1]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
   expect(Number((ixs[1]!.data as Buffer).readBigUInt64LE(4))).toBe(800);
-  expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
+  expect(options).toEqual({ operationLabel: "Unwrap WSOL", maxResubmits: 0 });
 
   expect(result).toEqual({
     signature: "UNWRAP_TX",
     amountLamports: 5_000,
     remainingLamports: 2_000,
   });
+});
+
+test("unwrapSolWithKeypair aborts when the sponsored fee cannot be estimated", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
+  );
+  const payer = Keypair.generate();
+  const operatorKeypair = Keypair.generate();
+  vi.spyOn(wm as any, "buildUnwrapWsolPlan").mockResolvedValue({
+    instructions: [],
+    unwrapLamports: 1_000,
+    remainingLamports: 0,
+    payerRentLamports: 0,
+  });
+  vi.spyOn(wm as any, "estimateFee").mockRejectedValue(
+    new Error("Unable to estimate the sponsored transaction fee"),
+  );
+  const sendSpy = vi.spyOn(wm as any, "sendAndConfirmWithResubmits");
+
+  await expect(
+    wm.unwrapSolWithKeypair({
+      owner: payer.publicKey,
+      payer,
+      operatorKeypair,
+      adminTopUpLamports: 1,
+      amountLamports: 1_000,
+    }),
+  ).rejects.toThrow(/Unable to estimate the sponsored transaction fee/);
+  expect(sendSpy).not.toHaveBeenCalled();
 });
 
 test("buildUnwrapWsolPlan throws when no WSOL account found", async () => {
@@ -403,6 +433,29 @@ test("buildUnwrapWsolPlan throws when unwrap amount exceeds balance", async () =
   await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 2000 })).rejects.toThrow(
     /exceeds current balance/,
   );
+});
+
+test("buildUnwrapWsolPlan rejects a partial unwrap without a known rent reserve", async () => {
+  const accountData = Buffer.alloc(165);
+  accountData.writeBigUInt64LE(1_000n, 64);
+  const connection = {
+    getAccountInfo: vi.fn().mockResolvedValue({
+      data: accountData,
+      owner: TOKEN_PROGRAM_ID,
+    }),
+  };
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
+  );
+
+  await expect(
+    wm.buildUnwrapWsolPlan({
+      owner: Keypair.generate().publicKey,
+      payer: Keypair.generate(),
+      amountLamports: 500,
+    }),
+  ).rejects.toThrow(/rent reserve is unavailable/);
 });
 
 test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
