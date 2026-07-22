@@ -13,6 +13,12 @@ const TIMBA = "timba-mint";
 const USDC = "usdc-mint";
 const SOL = "So11111111111111111111111111111111111111112";
 const NOW = Date.UTC(2026, 6, 22);
+const COMPLETE_BACKFILL = {
+  totalSources: 2,
+  completedSources: 2,
+  processedTransactions: 100,
+  lastError: null,
+};
 
 const event = (overrides: Partial<FinanceEventRecord>): FinanceEventRecord => ({
   eventId: "event-1",
@@ -82,6 +88,7 @@ describe("finance report", () => {
       gameClaimable: [{ mint: TIMBA, amountRaw: 250000n }],
       swapClaimable: [{ mint: USDC, amountRaw: 30000n }],
       coverage: "complete",
+      backfill: COMPLETE_BACKFILL,
       monthlyExpenses: [{ category: "hosting", description: "VPS", amountUsd: 6 }],
       contractRentLamports: FINANCE_CONTRACT_RENT_LAMPORTS,
       resolveTokenMetadata: metadata,
@@ -99,6 +106,18 @@ describe("finance report", () => {
     expect(report.recurringExpensesUsd).toBe(6);
     expect(formatFinanceReport(report)).toContain("complete on-chain history");
     expect(formatFinanceReport(report)).toContain("Game revenue by token");
+    expect(
+      formatFinanceReport({
+        ...report,
+        coverage: "partial",
+        backfill: {
+          totalSources: 4,
+          completedSources: 1,
+          processedTransactions: 30,
+          lastError: "429 Too Many Requests",
+        },
+      }),
+    ).toContain("backfill 1/4 sources, 30 transactions indexed; retrying after an RPC error");
   });
 
   it("subtracts only unreimbursed sponsored transaction costs", async () => {
@@ -122,6 +141,7 @@ describe("finance report", () => {
       gameClaimable: [],
       swapClaimable: [],
       coverage: "complete",
+      backfill: COMPLETE_BACKFILL,
       monthlyExpenses: [],
       contractRentLamports: 0n,
       resolveTokenMetadata: metadata,
@@ -136,7 +156,12 @@ describe("finance report", () => {
 describe("finance authorization", () => {
   const makeDependencies = () => ({
     financeLedger: {
-      sync: async () => ({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const }),
+      getSnapshot: async () => ({
+        gameClaimable: [],
+        swapClaimable: [],
+        coverage: "complete" as const,
+        backfill: COMPLETE_BACKFILL,
+      }),
     },
     transactionHistory: { getFinanceEvents: () => [], getReferralFees: () => [] },
     resolveTokenMetadata: async () => ({ ticker: "SOL", decimals: 9 }),
@@ -182,16 +207,21 @@ describe("finance authorization", () => {
     expect(message).toContain("Timba Finance");
   });
 
-  it("returns after acknowledging while RPC synchronization continues in the background", async () => {
+  it("returns after acknowledging while report assembly continues in the background", async () => {
     const order: string[] = [];
     const backgroundTasks: Promise<void>[] = [];
     let finishSync!: () => void;
     const dependencies = makeDependencies();
-    dependencies.financeLedger.sync = () => {
+    dependencies.financeLedger.getSnapshot = () => {
       order.push("sync");
       return new Promise((resolve) => {
         finishSync = () =>
-          resolve({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const });
+          resolve({
+            gameClaimable: [],
+            swapClaimable: [],
+            coverage: "complete" as const,
+            backfill: COMPLETE_BACKFILL,
+          });
       });
     };
     const handlers = createFinanceHandlers({
@@ -221,11 +251,16 @@ describe("finance authorization", () => {
     let finishSync!: () => void;
     let syncCalls = 0;
     const dependencies = makeDependencies();
-    dependencies.financeLedger.sync = () => {
+    dependencies.financeLedger.getSnapshot = () => {
       syncCalls += 1;
       return new Promise((resolve) => {
         finishSync = () =>
-          resolve({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const });
+          resolve({
+            gameClaimable: [],
+            swapClaimable: [],
+            coverage: "complete" as const,
+            backfill: COMPLETE_BACKFILL,
+          });
       });
     };
     const handlers = createFinanceHandlers({

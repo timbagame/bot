@@ -130,4 +130,39 @@ describe("TransactionHistory", () => {
       txDb.getFinanceEvents(1000, 2000).filter(({ eventId }) => eventId === financeEvent.eventId),
     ).toHaveLength(1);
   });
+
+  it("persists resumable finance backfill cursors and progress", () => {
+    const txDb = TransactionHistory.getInstance();
+    txDb.ensureFinanceBackfillSource({
+      sourceKey: "program:test",
+      sourceType: "program",
+      address: "11111111111111111111111111111111",
+      startTimeMs: 1_000,
+    });
+
+    expect(txDb.getNextFinanceBackfillSource()).toMatchObject({
+      sourceKey: "program:test",
+      beforeSignature: null,
+      completed: false,
+      processedTransactions: 0,
+    });
+
+    txDb.advanceFinanceBackfillSource("program:test", "signature-1", false, 1);
+    txDb.recordFinanceBackfillError("program:test", "429 Too Many Requests");
+    expect(txDb.getFinanceBackfillProgress()).toEqual({
+      totalSources: 1,
+      completedSources: 0,
+      processedTransactions: 1,
+      lastError: "429 Too Many Requests",
+    });
+
+    txDb.advanceFinanceBackfillSource("program:test", "signature-2", true, 1);
+    expect(txDb.getNextFinanceBackfillSource()).toBeNull();
+    expect(txDb.getFinanceBackfillProgress()).toEqual({
+      totalSources: 1,
+      completedSources: 1,
+      processedTransactions: 2,
+      lastError: null,
+    });
+  });
 });

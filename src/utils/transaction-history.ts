@@ -72,6 +72,26 @@ export interface FinanceEventRecord {
   slot?: number | null;
 }
 
+export type FinanceBackfillSourceType = "discovery" | "program" | "jupiter";
+
+export interface FinanceBackfillSource {
+  sourceKey: string;
+  sourceType: FinanceBackfillSourceType;
+  address: string;
+  beforeSignature: string | null;
+  startTimeMs: number;
+  completed: boolean;
+  processedTransactions: number;
+  lastError: string | null;
+}
+
+export interface FinanceBackfillProgress {
+  totalSources: number;
+  completedSources: number;
+  processedTransactions: number;
+  lastError: string | null;
+}
+
 export interface SwapTokenStat {
   mint: string;
   inputSwaps: number;
@@ -159,6 +179,19 @@ export class TransactionHistory extends BaseDatabase {
         )`,
         `CREATE INDEX IF NOT EXISTS idx_finance_events_period
           ON finance_events(timestamp, category, kind)`,
+        `CREATE TABLE IF NOT EXISTS finance_backfill_state (
+          source_key TEXT PRIMARY KEY,
+          source_type TEXT NOT NULL,
+          address TEXT NOT NULL,
+          before_signature TEXT,
+          start_time_ms INTEGER NOT NULL,
+          completed INTEGER NOT NULL DEFAULT 0,
+          processed_transactions INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          updated_at INTEGER NOT NULL
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_finance_backfill_pending
+          ON finance_backfill_state(completed, updated_at)`,
       ],
       "TransactionHistory",
     );
@@ -300,6 +333,99 @@ export class TransactionHistory extends BaseDatabase {
       [startTimeMs, endTimeMs],
       "getting finance events",
     );
+  }
+
+  ensureFinanceBackfillSource(
+    source: Pick<FinanceBackfillSource, "sourceKey" | "sourceType" | "address" | "startTimeMs">,
+  ): void {
+    this.run(
+      `INSERT OR IGNORE INTO finance_backfill_state (
+        source_key, source_type, address, start_time_ms, updated_at
+      ) VALUES (?, ?, ?, ?, ?)`,
+      [source.sourceKey, source.sourceType, source.address, source.startTimeMs, Date.now()],
+      "registering finance backfill source",
+    );
+  }
+
+  getNextFinanceBackfillSource(): FinanceBackfillSource | null {
+    const source = this.get<Omit<FinanceBackfillSource, "completed"> & { completed: number }>(
+      `SELECT
+         source_key AS sourceKey,
+         source_type AS sourceType,
+         address,
+         before_signature AS beforeSignature,
+         start_time_ms AS startTimeMs,
+         completed,
+         processed_transactions AS processedTransactions,
+         last_error AS lastError
+       FROM finance_backfill_state
+       WHERE completed = 0
+       ORDER BY updated_at ASC, source_key ASC
+       LIMIT 1`,
+      [],
+      "getting next finance backfill source",
+    );
+    return source ? { ...source, completed: source.completed === 1 } : null;
+  }
+
+  advanceFinanceBackfillSource(
+    sourceKey: string,
+    beforeSignature: string | null,
+    completed: boolean,
+    processedDelta: number,
+  ): void {
+    this.run(
+      `UPDATE finance_backfill_state
+       SET before_signature = ?,
+           completed = ?,
+           processed_transactions = processed_transactions + ?,
+           last_error = NULL,
+           updated_at = ?
+       WHERE source_key = ?`,
+      [beforeSignature, completed ? 1 : 0, processedDelta, Date.now(), sourceKey],
+      "advancing finance backfill source",
+    );
+  }
+
+  recordFinanceBackfillError(sourceKey: string, error: string): void {
+    this.run(
+      `UPDATE finance_backfill_state
+       SET last_error = ?, updated_at = ?
+       WHERE source_key = ?`,
+      [error.slice(0, 500), Date.now(), sourceKey],
+      "recording finance backfill error",
+    );
+  }
+
+  getFinanceBackfillProgress(): FinanceBackfillProgress {
+    const totals = this.get<{
+      totalSources: number;
+      completedSources: number;
+      processedTransactions: number;
+    }>(
+      `SELECT
+         COUNT(*) AS totalSources,
+         COALESCE(SUM(completed), 0) AS completedSources,
+         COALESCE(SUM(processed_transactions), 0) AS processedTransactions
+       FROM finance_backfill_state`,
+      [],
+      "getting finance backfill totals",
+    );
+    const error = this.get<{ lastError: string | null }>(
+      `SELECT last_error AS lastError
+       FROM finance_backfill_state
+       WHERE last_error IS NOT NULL
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [],
+      "getting finance backfill error",
+    );
+    return {
+      totalSources: totals?.totalSources ?? 0,
+      completedSources: totals?.completedSources ?? 0,
+      processedTransactions: totals?.processedTransactions ?? 0,
+      lastError: error?.lastError ?? null,
+    };
   }
 
   getSwapTokenStats(): SwapTokenStat[] {

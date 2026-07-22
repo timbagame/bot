@@ -1,5 +1,9 @@
 import type { FinanceBalance } from "./finance-ledger";
-import type { FinanceEventRecord, ReferralFeeRecord } from "../utils/transaction-history";
+import type {
+  FinanceBackfillProgress,
+  FinanceEventRecord,
+  ReferralFeeRecord,
+} from "../utils/transaction-history";
 
 export type FinancePeriod = "7d" | "30d" | "90d";
 
@@ -21,6 +25,7 @@ export interface FinanceReportDependencies {
   gameClaimable: FinanceBalance[];
   swapClaimable: FinanceBalance[];
   coverage: "complete" | "partial";
+  backfill: FinanceBackfillProgress;
   monthlyExpenses: MonthlyFinanceExpense[];
   contractRentLamports: bigint;
   contractRentEstimated?: boolean;
@@ -67,6 +72,7 @@ export interface FinanceReport {
   hasUnpricedTokens: boolean;
   hasEstimatedSponsorExpenses: boolean;
   coverage: "complete" | "partial";
+  backfill: FinanceBackfillProgress;
 }
 
 const DAY_MS = 86_400_000;
@@ -264,5 +270,6 @@ export async function buildFinanceReport(
     hasUnpricedTokens: allTokens.some((total) => total.usdValue === null),
     hasEstimatedSponsorExpenses,
     coverage: dependencies.coverage,
+    backfill: dependencies.backfill,
   };
 }

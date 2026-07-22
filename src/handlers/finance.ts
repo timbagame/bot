@@ -11,7 +11,7 @@ import { escapeHtml } from "../utils/format-amount";
 import type { TransactionHistory } from "../utils/transaction-history";
 
 type FinanceHandlerDependencies = {
-  financeLedger: Pick<FinanceLedgerService, "sync">;
+  financeLedger: Pick<FinanceLedgerService, "getSnapshot">;
   transactionHistory: Pick<TransactionHistory, "getFinanceEvents" | "getReferralFees">;
   resolveTokenMetadata: FinanceReportDependencies["resolveTokenMetadata"];
   resolveTokenPriceUsd: FinanceReportDependencies["resolveTokenPriceUsd"];
@@ -101,7 +101,13 @@ export function formatFinanceReport(report: FinanceReport): string {
     ...tokenLines("Game revenue by token", report.gameRevenue),
     ...tokenLines("Swap revenue by token", report.swapRevenue),
     "",
-    `<i>Data coverage: ${report.coverage === "complete" ? "complete on-chain history" : "partial; RPC synchronization failed"}.</i>`,
+    `<i>Data coverage: ${
+      report.coverage === "complete"
+        ? "complete on-chain history"
+        : report.backfill.totalSources === 0
+          ? "partial; historical backfill has not started"
+          : `partial; backfill ${report.backfill.completedSources}/${report.backfill.totalSources} sources, ${report.backfill.processedTransactions} transactions indexed${report.backfill.lastError ? "; retrying after an RPC error" : ""}`
+    }.</i>`,
     ...(report.hasUnpricedTokens ? ["<i>Unpriced tokens are excluded from USD totals.</i>"] : []),
     `<i>Token values use current market prices.</i>`,
   ].join("\n");
@@ -142,7 +148,7 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
     const now = dependencies.now?.() ?? Date.now();
     const window = resolveFinanceWindow(period, now);
     const [snapshot, contractCapital] = await Promise.all([
-      dependencies.financeLedger.sync(now - 90 * 86_400_000),
+      dependencies.financeLedger.getSnapshot(),
       loadContractCapital(),
     ]);
     const report = await buildFinanceReport(period, {
@@ -158,6 +164,7 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
       gameClaimable: snapshot.gameClaimable,
       swapClaimable: snapshot.swapClaimable,
       coverage: snapshot.coverage,
+      backfill: snapshot.backfill,
       monthlyExpenses,
       contractRentLamports: contractCapital.lamports,
       contractRentEstimated: contractCapital.estimated,

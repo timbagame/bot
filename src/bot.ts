@@ -130,6 +130,7 @@ import {
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
 import { FinanceLedgerService } from "./services/finance-ledger";
+import { FinanceBackfillWorker } from "./services/finance-backfill-worker";
 import { getContractCapitalLamports } from "./services/contract-capital";
 import { TransactionHistory } from "./utils/transaction-history";
 import { getConfirmedTransactionFeeLamports } from "./utils/transaction-fee";
@@ -4528,18 +4529,30 @@ const getFinanceReadContext = () => {
   return financeReadContext;
 };
 
+const getFinanceLedgerService = () => {
+  if (financeLedgerService) return financeLedgerService;
+  const finance = getFinanceReadContext();
+  financeLedgerService = new FinanceLedgerService(
+    finance.connection,
+    finance.program,
+    TransactionHistory.getInstance(),
+    wallet.getOperatorKeypair().publicKey,
+    undefined,
+    {
+      resolveGameMint: (gameAddress) => gameDb.getGame(gameAddress)?.token_mint,
+    },
+  );
+  return financeLedgerService;
+};
+
+const financeBackfillStartTimeMs = Date.now() - 90 * 86_400_000;
+const financeBackfillWorker = new FinanceBackfillWorker(() =>
+  getFinanceLedgerService().backfillNextBatch(financeBackfillStartTimeMs),
+);
+
 const financeHandlers = createFinanceHandlers({
   financeLedger: {
-    sync: (startTimeMs) => {
-      const finance = getFinanceReadContext();
-      financeLedgerService ??= new FinanceLedgerService(
-        finance.connection,
-        finance.program,
-        TransactionHistory.getInstance(),
-        wallet.getOperatorKeypair().publicKey,
-      );
-      return financeLedgerService.sync(startTimeMs);
-    },
+    getSnapshot: () => getFinanceLedgerService().getSnapshot(),
   },
   transactionHistory: TransactionHistory.getInstance(),
   resolveTokenMetadata: async (mint) => {
@@ -6066,6 +6079,8 @@ if (process.env.NODE_ENV !== "test") {
 
       await registerProgramEventListeners();
       attachRpcEndpointFailoverHandler();
+      financeBackfillWorker.start();
+      console.log("Finance history backfill worker scheduled");
 
       const scheduleFeeSweeper = () => {
         if (!ENABLE_FEE_SWEEPER) {
@@ -6290,6 +6305,7 @@ if (process.env.NODE_ENV !== "test") {
         try {
           rpcEndpointListenerCleanup?.();
           rpcEndpointListenerCleanup = null;
+          financeBackfillWorker.stop();
           await unregisterProgramEventListeners();
           await handle?.stop();
           internalServer?.stop();
