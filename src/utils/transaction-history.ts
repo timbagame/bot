@@ -33,8 +33,20 @@ export interface SwapStatRecord {
   amount_in: string;
   amount_out?: string;
   referral_applied: boolean;
+  fee_amount?: string;
+  fee_bps?: number;
   timestamp: number;
   network?: string;
+}
+
+export interface ReferralFeeRecord {
+  feeMint: string;
+  inputMint: string;
+  outputMint: string;
+  amountIn: string;
+  amountOut: string | null;
+  feeAmount: string | null;
+  feeBps: number | null;
 }
 
 export interface SwapTokenStat {
@@ -97,6 +109,8 @@ export class TransactionHistory extends BaseDatabase {
           amount_in TEXT NOT NULL,
           amount_out TEXT,
           referral_applied INTEGER NOT NULL DEFAULT 0,
+          fee_amount TEXT,
+          fee_bps INTEGER,
           timestamp INTEGER NOT NULL,
           network TEXT NOT NULL DEFAULT 'mainnet',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -106,6 +120,23 @@ export class TransactionHistory extends BaseDatabase {
       ],
       "TransactionHistory",
     );
+
+    this.ensureSwapFinanceSchema();
+  }
+
+  private ensureSwapFinanceSchema(): void {
+    const columns = this.all<{ name: string }>(
+      "PRAGMA table_info(swap_stats)",
+      [],
+      "reading swap finance schema",
+    );
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("fee_amount")) {
+      this.run("ALTER TABLE swap_stats ADD COLUMN fee_amount TEXT", [], "adding swap fee amount");
+    }
+    if (!names.has("fee_bps")) {
+      this.run("ALTER TABLE swap_stats ADD COLUMN fee_bps INTEGER", [], "adding swap fee bps");
+    }
   }
 
   recordSwap(record: SwapStatRecord): void {
@@ -113,8 +144,8 @@ export class TransactionHistory extends BaseDatabase {
       `INSERT OR IGNORE INTO swap_stats (
         signature, wallet, input_mint, output_mint, fee_mint,
         input_ticker, output_ticker, amount_in, amount_out,
-        referral_applied, timestamp, network
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        referral_applied, fee_amount, fee_bps, timestamp, network
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.signature,
         record.wallet,
@@ -126,10 +157,33 @@ export class TransactionHistory extends BaseDatabase {
         record.amount_in,
         record.amount_out || null,
         record.referral_applied ? 1 : 0,
+        record.fee_amount || null,
+        record.fee_bps ?? null,
         record.timestamp,
         record.network || "mainnet",
       ],
       "recording swap statistics",
+    );
+  }
+
+  getReferralFees(startTimeMs: number, endTimeMs: number): ReferralFeeRecord[] {
+    return this.all<ReferralFeeRecord>(
+      `SELECT
+         fee_mint AS feeMint,
+         input_mint AS inputMint,
+         output_mint AS outputMint,
+         amount_in AS amountIn,
+         amount_out AS amountOut,
+         fee_amount AS feeAmount,
+         fee_bps AS feeBps
+       FROM swap_stats
+       WHERE referral_applied = 1
+         AND fee_mint IS NOT NULL
+         AND timestamp >= ?
+         AND timestamp < ?
+       ORDER BY timestamp DESC`,
+      [startTimeMs, endTimeMs],
+      "getting referral fee finance totals",
     );
   }
 

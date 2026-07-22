@@ -50,6 +50,14 @@ src/
 - `/tip @username <amount>` - Tip tokens by replying or tagging a user
 - **Private Key** in the wallet menu - Reveal the current user's wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
 
+### Operator Commands
+
+- `/finance` - Show private revenue, expense, and profit reporting. This command only works in a private chat for the finance administrator configured in `src/handlers/finance.ts`.
+
+The report currently includes the $7/month DigitalOcean VPS cost and the timba.cc domain renewal amortized from $8/year. Game fees and Jupiter referral fees are derived from the bot databases; legacy referral rows and completion network costs are explicitly shown as estimates.
+
+The finance output also shows the current 2.43778872 SOL contract rent allocation as locked capital. It is valued at the live SOL price but is not deducted from monthly profit.
+
 ## 🏗️ Architecture
 
 ### Game Lifecycle

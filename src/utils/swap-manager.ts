@@ -1065,6 +1065,8 @@ export class SwapManager {
       throw error;
     }
     quote.executionFeeMint = swapResponse.order?.feeMint;
+    quote.executionFeeAmount = swapResponse.order?.platformFee?.amount;
+    quote.executionFeeBps = swapResponse.order?.feeBps ?? swapResponse.order?.platformFee?.feeBps;
     quote.executionReferralApplied = swapResponse.order?.referralApplied;
     quote.executionOutputAmount = swapResponse.order?.outAmount ?? quote.outputAmount;
 

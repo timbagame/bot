@@ -22,6 +22,8 @@ export interface SwapQuote {
   inputTicker?: string;
   outputTicker?: string;
   executionFeeMint?: string;
+  executionFeeAmount?: string;
+  executionFeeBps?: number;
   executionReferralApplied?: boolean;
   executionOutputAmount?: string;
   executionSponsorReimbursementLamports?: number;

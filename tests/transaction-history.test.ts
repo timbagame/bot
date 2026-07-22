@@ -73,6 +73,8 @@ describe("TransactionHistory", () => {
       amount_in: "1000000",
       amount_out: "2000000",
       referral_applied: true,
+      fee_amount: "10000",
+      fee_bps: 100,
       timestamp: 1234,
     });
 
@@ -87,5 +89,17 @@ describe("TransactionHistory", () => {
       outputSwaps: 1,
       feeMintSelections: 0,
     });
+
+    expect(txDb.getReferralFees(1000, 2000)).toEqual([
+      {
+        feeMint: "USDC-mint",
+        inputMint: "USDC-mint",
+        outputMint: "TOKEN-mint",
+        amountIn: "1000000",
+        amountOut: "2000000",
+        feeAmount: "10000",
+        feeBps: 100,
+      },
+    ]);
   });
 });

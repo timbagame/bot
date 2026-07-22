@@ -99,6 +99,27 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator"]);
 });
 
+test("getCompletedGameFinance groups completed pots and excludes cancellations", () => {
+  const db = GameDatabase.getInstance();
+  const now = Date.now();
+
+  db.saveGame("finance-1", "creator", 100, "coinflip", "mint", "TOK");
+  db.completeGame("finance-1", "winner", now - 100, 2_000);
+  db.saveGame("finance-2", "creator", 100, "coinflip", "mint", "TOK");
+  db.completeGame("finance-2", "winner", now - 50, 3_000);
+  db.saveGame("finance-cancelled", "creator", 100, "coinflip", "mint", "TOK");
+  db.completeGame("finance-cancelled", "cancelled", now - 25, 4_000);
+
+  expect(db.getCompletedGameFinance(now - 1_000, now + 1)).toEqual([
+    {
+      tokenMint: "mint",
+      tokenTicker: "TOK",
+      games: 2,
+      totalAmountRaw: "5000",
+    },
+  ]);
+});
+
 test("saveGameMessage preserves origin chat_id when message created in different chat", () => {
   const db = GameDatabase.getInstance();
 

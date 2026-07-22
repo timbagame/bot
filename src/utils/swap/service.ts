@@ -205,6 +205,16 @@ export class SwapService {
         amount_in: quote.inputAmountRaw,
         amount_out: quote.executionOutputAmount ?? quote.outputAmount,
         referral_applied: quote.executionReferralApplied === true,
+        fee_amount:
+          quote.executionFeeAmount ??
+          quote.providerQuote?.platformFee?.amount ??
+          quote.platformFee?.amount,
+        fee_bps:
+          quote.executionFeeBps ??
+          quote.providerQuote?.feeBps ??
+          quote.providerQuote?.platformFee?.feeBps ??
+          quote.platformFee?.feeBps ??
+          quote.integrator?.referralFee,
         timestamp: Date.now(),
         network: NetworkDetector.getCurrentNetwork(),
       });

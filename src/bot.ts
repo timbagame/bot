@@ -128,6 +128,8 @@ import {
   type WalletCacheSnapshot as WalletCacheSnapshotData,
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
+import { createFinanceHandlers } from "./handlers/finance";
+import { TransactionHistory } from "./utils/transaction-history";
 import { generateTransactionId } from "./utils/transaction-id";
 import type { TokenBalanceLike } from "./types/wallet";
 import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
@@ -4443,6 +4445,42 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
 // ================================
 // SECURE COMMANDS
 // ================================
+
+const financeHandlers = createFinanceHandlers({
+  gameDb,
+  transactionHistory: TransactionHistory.getInstance(),
+  getFeePercentage: async () => {
+    const oraclePda = PDAManager.getOraclePDA(program.programId);
+    const oracleAccount = await program.account.oracle.fetch(oraclePda);
+    return oracleAccount.feePercentage;
+  },
+  resolveTokenMetadata: async (mint) => {
+    const metadata = await tokenManager.autoDiscoverTokenInfo(mint);
+    return metadata ? { ticker: metadata.ticker, decimals: metadata.decimals } : null;
+  },
+  resolveTokenPriceUsd: async (mint) => (await getUsdPrice({ tokenMint: mint }))?.price ?? null,
+});
+
+registerCaseInsensitiveCommand("finance", async (ctx: Context) => {
+  try {
+    await financeHandlers.handleCommand(ctx);
+  } catch (error) {
+    await handleCommandError(ctx, error, "finance");
+  }
+});
+
+bot.callbackQuery(
+  /^finance:(7d|30d|month)$/,
+  wrapCallbackHandler(
+    async (ctx: Context) => {
+      const period = ctx.match?.[1];
+      if (period === "7d" || period === "30d" || period === "month") {
+        await financeHandlers.handleCallback(ctx, period);
+      }
+    },
+    { action: "finance report", errorAck: "Unable to load finance report" },
+  ),
+);
 
 registerCaseInsensitiveCommand("oracle", async (ctx: Context) => {
   try {

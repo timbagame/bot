@@ -17,6 +17,13 @@ export interface LeaderboardStatsRecord {
   lostAmountByToken?: Record<string, number>;
 }
 
+export interface CompletedGameFinanceRecord {
+  tokenMint: string;
+  tokenTicker: string;
+  games: number;
+  totalAmountRaw: string;
+}
+
 /**
  * Database service for storing game-related data
  */
@@ -248,6 +255,31 @@ export class GameDatabase extends BaseDatabase {
 
   public getAllGames(): GameData[] {
     return this.all<GameData>("SELECT * FROM games", [], "getting all games");
+  }
+
+  public getCompletedGameFinance(
+    startTimeMs: number,
+    endTimeMs: number,
+  ): CompletedGameFinanceRecord[] {
+    return this.all<CompletedGameFinanceRecord>(
+      `SELECT
+         token_mint AS tokenMint,
+         COALESCE(token_ticker, token_mint) AS tokenTicker,
+         COUNT(*) AS games,
+         CAST(SUM(total_amount) AS TEXT) AS totalAmountRaw
+       FROM games
+       WHERE status = 'completed'
+         AND winner_address != 'cancelled'
+         AND total_amount > 0
+         AND token_mint IS NOT NULL
+         AND token_mint != ''
+         AND completed_at >= ?
+         AND completed_at < ?
+       GROUP BY token_mint, token_ticker
+       ORDER BY games DESC`,
+      [startTimeMs, endTimeMs],
+      "getting completed game finance totals",
+    );
   }
 
   /**
