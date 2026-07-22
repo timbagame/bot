@@ -783,9 +783,9 @@ export class SwapManager {
       lendingLamports = 0,
     } = options;
 
-    const loanLamports = Math.max(0, Math.trunc(lendingLamports));
-    if (loanLamports > 0 && !operatorKeypair) {
-      throw new Error("Operator keypair required when lending lamports for WSOL unwrap.");
+    const sponsorshipLamports = Math.max(0, Math.trunc(lendingLamports));
+    if (sponsorshipLamports > 0 && !operatorKeypair) {
+      throw new Error("Operator keypair required when sponsoring WSOL unwrap fees.");
     }
 
     if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
@@ -800,8 +800,8 @@ export class SwapManager {
       owner,
       payer: userKeypair,
       amountLamports: unwrapLamports,
-      adminTopUpLamports: loanLamports,
-      operatorKeypair: loanLamports > 0 ? operatorKeypair : undefined,
+      adminTopUpLamports: sponsorshipLamports,
+      operatorKeypair: sponsorshipLamports > 0 ? operatorKeypair : undefined,
     });
 
     const formattedUnwrap = formatAmount(BigInt(unwrapResult.amountLamports), SOL_DECIMALS, {

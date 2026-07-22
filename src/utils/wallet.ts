@@ -1720,6 +1720,7 @@ export class WalletManager {
     instructions: TransactionInstruction[];
     unwrapLamports: number;
     remainingLamports: number;
+    payerRentLamports: number;
   }> {
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(wsolMint, owner, false, TOKEN_PROGRAM_ID);
@@ -1754,6 +1755,12 @@ export class WalletManager {
     }
 
     const remainingLamports = availableLamports - unwrapLamports;
+    const payerRentLamports =
+      remainingLamports > 0 ? Number(accountInfo.rentExemptReserve ?? 0n) : 0;
+
+    if (!Number.isSafeInteger(payerRentLamports) || payerRentLamports < 0) {
+      throw new Error("WSOL account rent reserve is invalid.");
+    }
 
     const instructions: TransactionInstruction[] = [
       createSyncNativeInstruction(wsolAta),
@@ -1784,6 +1791,7 @@ export class WalletManager {
       instructions,
       unwrapLamports,
       remainingLamports,
+      payerRentLamports,
     };
   }
 
@@ -1858,56 +1866,59 @@ export class WalletManager {
     amountLamports: number;
     remainingLamports: number;
   }> {
-    // When an admin lends lamports for the unwrap fee, we still keep the user
-    // (payer) as the transaction fee payer. The admin funds are front-loaded
-    // via a transfer, the unwrap instructions run with the user payer, and the
-    // same transaction returns the loaned lamports back to the admin.
-    const loanLamports =
+    // A positive admin top-up requests a sponsored unwrap. The operator becomes
+    // the actual fee payer and is reimbursed atomically after the WSOL account
+    // is closed, so users with no native SOL can still complete the transaction.
+    const requestedSponsorshipLamports =
       typeof adminTopUpLamports === "bigint"
         ? Number(adminTopUpLamports > 0n ? adminTopUpLamports : 0n)
         : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
 
-    if (loanLamports > 0 && !operatorKeypair) {
-      throw new Error("Operator keypair required when lending lamports for WSOL unwrap.");
+    if (requestedSponsorshipLamports > 0 && !operatorKeypair) {
+      throw new Error("Operator keypair required when sponsoring WSOL unwrap fees.");
     }
 
     if (!owner.equals(payer.publicKey)) {
-      throw new Error(
-        "Unwrap payer must match the WSOL owner; admin funds are lent via transfer, not as the fee payer.",
-      );
+      throw new Error("Unwrap owner signer must match the WSOL owner.");
     }
+
+    const isSponsored = requestedSponsorshipLamports > 0;
+    const transactionPayer = isSponsored ? operatorKeypair! : payer;
 
     const {
       instructions: unwrapInstructions,
       unwrapLamports,
       remainingLamports,
-    } = await this.buildUnwrapWsolPlan({ owner, payer, amountLamports });
+      payerRentLamports,
+    } = await this.buildUnwrapWsolPlan({ owner, payer: transactionPayer, amountLamports });
 
-    const instructions: TransactionInstruction[] = [];
-    const signers: Keypair[] = [payer];
+    const instructions: TransactionInstruction[] = [...unwrapInstructions];
+    const signers: Keypair[] = isSponsored ? [transactionPayer, payer] : [payer];
 
-    if (loanLamports > 0) {
-      if (operatorKeypair) {
-        signers.push(operatorKeypair);
+    if (isSponsored) {
+      const reimbursementPlaceholder = SystemProgram.transfer({
+        fromPubkey: payer.publicKey,
+        toPubkey: transactionPayer.publicKey,
+        lamports: 0,
+      });
+      const networkFeeLamports = await this.estimateFee(transactionPayer.publicKey, [
+        ...unwrapInstructions,
+        reimbursementPlaceholder,
+      ]);
+      const reimbursementLamports = networkFeeLamports + payerRentLamports;
+
+      if (!Number.isSafeInteger(reimbursementLamports) || reimbursementLamports <= 0) {
+        throw new Error("Sponsored WSOL unwrap reimbursement is invalid.");
+      }
+      if (unwrapLamports < networkFeeLamports) {
+        throw new Error("WSOL unwrap amount is too small to reimburse the sponsored network fee.");
       }
 
       instructions.push(
         SystemProgram.transfer({
-          fromPubkey: operatorKeypair!.publicKey,
-          toPubkey: payer.publicKey,
-          lamports: loanLamports,
-        }),
-      );
-    }
-
-    instructions.push(...unwrapInstructions);
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
           fromPubkey: payer.publicKey,
-          toPubkey: operatorKeypair!.publicKey,
-          lamports: loanLamports,
+          toPubkey: transactionPayer.publicKey,
+          lamports: reimbursementLamports,
         }),
       );
     }

@@ -204,7 +204,7 @@ test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
   });
 });
 
-test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", async () => {
+test("unwrapSolWithKeypair rejects a non-owner user signer", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
@@ -221,10 +221,10 @@ test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", asy
       adminTopUpLamports: 500,
       amountLamports: 1_000,
     }),
-  ).rejects.toThrow(/payer must match the wsol owner/i);
+  ).rejects.toThrow(/owner signer must match the wsol owner/i);
 });
 
-test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () => {
+test("unwrapSolWithKeypair makes the operator fee payer for sponsored unwraps", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
@@ -242,9 +242,11 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
     ],
     unwrapLamports: 2_000,
     remainingLamports: 500,
+    payerRentLamports: 0,
   };
 
-  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  const buildPlanSpy = vi.spyOn(wm as any, "buildUnwrapWsolPlan").mockResolvedValue(unwrapPlan);
+  vi.spyOn(wm as any, "estimateFee").mockResolvedValue(500);
   const sendSpy = vi
     .spyOn(wm as any, "sendAndConfirmWithResubmits")
     .mockResolvedValue("UNWRAP_SIG");
@@ -258,15 +260,21 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   });
 
   expect(sendSpy).toHaveBeenCalledTimes(1);
+  expect(buildPlanSpy).toHaveBeenCalledWith({
+    owner: payer.publicKey,
+    payer: operatorKeypair,
+    amountLamports: 2_000,
+  });
   const [ixs, signers, options] = sendSpy.mock.calls[0] as [
     TransactionInstruction[],
     Keypair[],
     Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
   ];
 
-  expect(signers).toEqual([payer, operatorKeypair]);
-  expect(ixs[0]!.keys[0]!.pubkey).toEqual(operatorKeypair.publicKey);
+  expect(signers).toEqual([operatorKeypair, payer]);
+  expect(ixs[0]).toBe(unwrapPlan.instructions[0]);
   expect(ixs[ixs.length - 1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
+  expect(ixs[ixs.length - 1]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
   expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
 
   expect(result).toEqual({
@@ -276,7 +284,7 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   });
 });
 
-test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", async () => {
+test("unwrapSolWithKeypair unwraps and reimburses estimated sponsor costs atomically", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
@@ -297,7 +305,9 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
     instructions: [unwrapInstruction],
     unwrapLamports: 5_000,
     remainingLamports: 2_000,
+    payerRentLamports: 300,
   });
+  vi.spyOn(wm as any, "estimateFee").mockResolvedValue(500);
 
   const sendSpy = vi.spyOn(wm as any, "sendAndConfirmWithResubmits").mockResolvedValue("UNWRAP_TX");
 
@@ -316,13 +326,12 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
     Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
   ];
 
-  expect(signers).toEqual([payer, operatorKeypair]);
-  expect(ixs).toHaveLength(3);
-  expect(ixs[0]!.keys[0]!.pubkey).toEqual(operatorKeypair.publicKey);
-  expect(ixs[0]!.keys[1]!.pubkey).toEqual(payer.publicKey);
-  expect(ixs[1]).toBe(unwrapInstruction);
-  expect(ixs[2]!.keys[0]!.pubkey).toEqual(payer.publicKey);
-  expect(ixs[2]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
+  expect(signers).toEqual([operatorKeypair, payer]);
+  expect(ixs).toHaveLength(2);
+  expect(ixs[0]).toBe(unwrapInstruction);
+  expect(ixs[1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
+  expect(ixs[1]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
+  expect(Number((ixs[1]!.data as Buffer).readBigUInt64LE(4))).toBe(800);
   expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
 
   expect(result).toEqual({
@@ -423,7 +432,7 @@ test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
   );
 });
 
-test("unwrapSolWithKeypair throws if operator lending is requested without operator keypair", async () => {
+test("unwrapSolWithKeypair throws if sponsorship is requested without operator keypair", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
@@ -439,7 +448,7 @@ test("unwrapSolWithKeypair throws if operator lending is requested without opera
       adminTopUpLamports: 1000,
       // No operatorKeypair provided
     }),
-  ).rejects.toThrow("Operator keypair required when lending lamports");
+  ).rejects.toThrow("Operator keypair required when sponsoring WSOL unwrap fees");
 });
 
 test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
@@ -454,9 +463,11 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
     instructions: [],
     unwrapLamports: 1000,
     remainingLamports: 0,
+    payerRentLamports: 0,
   };
 
   (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  vi.spyOn(wm as any, "estimateFee").mockResolvedValue(500);
   const sendSpy = vi.spyOn(wm as any, "sendAndConfirmWithResubmits").mockResolvedValue("SIG");
 
   await wm.unwrapSolWithKeypair({
