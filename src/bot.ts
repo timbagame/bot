@@ -129,6 +129,7 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { FinanceLedgerService } from "./services/finance-ledger";
 import { getContractCapitalLamports } from "./services/contract-capital";
 import { TransactionHistory } from "./utils/transaction-history";
 import { getConfirmedTransactionFeeLamports } from "./utils/transaction-fee";
@@ -4499,14 +4500,20 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
 // SECURE COMMANDS
 // ================================
 
+let financeLedgerService: FinanceLedgerService | undefined;
 const financeHandlers = createFinanceHandlers({
-  gameDb,
-  transactionHistory: TransactionHistory.getInstance(),
-  getFeePercentage: async () => {
-    const oraclePda = PDAManager.getOraclePDA(program.programId);
-    const oracleAccount = await program.account.oracle.fetch(oraclePda);
-    return oracleAccount.feePercentage;
+  financeLedger: {
+    sync: (startTimeMs) => {
+      financeLedgerService ??= new FinanceLedgerService(
+        wallet.getConnection(),
+        program,
+        TransactionHistory.getInstance(),
+        wallet.getOperatorKeypair().publicKey,
+      );
+      return financeLedgerService.sync(startTimeMs);
+    },
   },
+  transactionHistory: TransactionHistory.getInstance(),
   resolveTokenMetadata: async (mint) => {
     const metadata = await tokenManager.autoDiscoverTokenInfo(mint);
     return metadata ? { ticker: metadata.ticker, decimals: metadata.decimals } : null;
@@ -4526,11 +4533,11 @@ registerCaseInsensitiveCommand("finance", async (ctx: Context) => {
 });
 
 bot.callbackQuery(
-  /^finance:(7d|30d|month)$/,
+  /^finance:(7d|30d|90d)$/,
   wrapCallbackHandler(
     async (ctx: Context) => {
       const period = ctx.match?.[1];
-      if (period === "7d" || period === "30d" || period === "month") {
+      if (period === "7d" || period === "30d" || period === "90d") {
         await financeHandlers.handleCallback(ctx, period);
       }
     },

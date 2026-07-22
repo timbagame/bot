@@ -1,7 +1,7 @@
-import type { CompletedGameFinanceRecord } from "../utils/game-database";
-import type { ReferralFeeRecord } from "../utils/transaction-history";
+import type { FinanceBalance } from "./finance-ledger";
+import type { FinanceEventRecord, ReferralFeeRecord } from "../utils/transaction-history";
 
-export type FinancePeriod = "7d" | "30d" | "month";
+export type FinancePeriod = "7d" | "30d" | "90d";
 
 export interface MonthlyFinanceExpense {
   category: string;
@@ -16,9 +16,11 @@ export interface FinanceTokenMetadata {
 
 export interface FinanceReportDependencies {
   now?: number;
-  feePercentage: number;
-  games: CompletedGameFinanceRecord[];
-  referralFees: ReferralFeeRecord[];
+  financeEvents: FinanceEventRecord[];
+  sponsorRecords: ReferralFeeRecord[];
+  gameClaimable: FinanceBalance[];
+  swapClaimable: FinanceBalance[];
+  coverage: "complete" | "partial";
   monthlyExpenses: MonthlyFinanceExpense[];
   contractRentLamports: bigint;
   contractRentEstimated?: boolean;
@@ -26,13 +28,12 @@ export interface FinanceReportDependencies {
   resolveTokenPriceUsd: (mint: string) => Promise<number | null>;
 }
 
-type TokenTotal = {
+export type FinanceTokenTotal = {
   mint: string;
   ticker: string;
   decimals: number;
   rawAmount: bigint;
   usdValue: number | null;
-  estimated: boolean;
 };
 
 export interface FinanceReport {
@@ -43,12 +44,17 @@ export interface FinanceReport {
   endTimeMs: number;
   completedGames: number;
   feeGeneratingSwaps: number;
-  gameRevenue: TokenTotal[];
-  swapRevenue: TokenTotal[];
+  gameRevenue: FinanceTokenTotal[];
+  swapRevenue: FinanceTokenTotal[];
+  gameClaimed: FinanceTokenTotal[];
+  swapClaimed: FinanceTokenTotal[];
+  gameClaimable: FinanceTokenTotal[];
+  swapClaimable: FinanceTokenTotal[];
   gameRevenueUsd: number;
   swapRevenueUsd: number;
   completionNetworkExpensesUsd: number;
   sponsorNetworkExpensesUsd: number;
+  collectionNetworkExpensesUsd: number;
   networkExpensesUsd: number;
   recurringExpensesUsd: number;
   grossRevenueUsd: number;
@@ -59,34 +65,20 @@ export interface FinanceReport {
   contractRentEstimated: boolean;
   monthlyExpenses: MonthlyFinanceExpense[];
   hasUnpricedTokens: boolean;
-  hasEstimatedSwapRevenue: boolean;
-  hasEstimatedGameRevenue: boolean;
-  hasEstimatedNetworkExpenses: boolean;
   hasEstimatedSponsorExpenses: boolean;
+  coverage: "complete" | "partial";
 }
 
 const DAY_MS = 86_400_000;
-const AVERAGE_MONTH_DAYS = 365.25 / 12;
-const DEFAULT_SIGNATURE_FEE_LAMPORTS = 5_000n;
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 export function resolveFinanceWindow(period: FinancePeriod, now: number = Date.now()) {
-  const date = new Date(now);
-  if (period === "month") {
-    return {
-      startTimeMs: Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1),
-      endTimeMs: now + 1,
-      label: "This month",
-      monthlyExpenseFactor: 1,
-    };
-  }
-
-  const days = period === "7d" ? 7 : 30;
+  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
   return {
     startTimeMs: now - days * DAY_MS,
     endTimeMs: now + 1,
     label: `Last ${days} days`,
-    monthlyExpenseFactor: period === "30d" ? 1 : days / AVERAGE_MONTH_DAYS,
+    monthlyExpenseFactor: period === "7d" ? 7 / 30 : period === "30d" ? 1 : 3,
   };
 }
 
@@ -101,28 +93,65 @@ const safeBigInt = (value: string | null | undefined): bigint => {
 const decimalAmount = (rawAmount: bigint, decimals: number): number =>
   Number(rawAmount) / 10 ** decimals;
 
-async function priceTokenTotals(
-  rawTotals: Map<string, { ticker: string; rawAmount: bigint; estimated: boolean }>,
+function aggregateEvents(
+  events: FinanceEventRecord[],
+  category: FinanceEventRecord["category"],
+  kind: FinanceEventRecord["kind"],
+): FinanceBalance[] {
+  const totals = new Map<string, bigint>();
+  for (const event of events) {
+    if (event.category !== category || event.kind !== kind) continue;
+    totals.set(event.mint, (totals.get(event.mint) ?? 0n) + safeBigInt(event.amountRaw));
+  }
+  return [...totals].map(([mint, amountRaw]) => ({ mint, amountRaw }));
+}
+
+function combineBalances(balances: FinanceBalance[]): FinanceBalance[] {
+  const totals = new Map<string, bigint>();
+  for (const balance of balances) {
+    totals.set(balance.mint, (totals.get(balance.mint) ?? 0n) + balance.amountRaw);
+  }
+  return [...totals]
+    .map(([mint, amountRaw]) => ({ mint, amountRaw }))
+    .filter(({ amountRaw }) => amountRaw > 0n);
+}
+
+async function priceBalances(
+  balances: FinanceBalance[],
   dependencies: Pick<FinanceReportDependencies, "resolveTokenMetadata" | "resolveTokenPriceUsd">,
-): Promise<TokenTotal[]> {
-  return await Promise.all(
-    Array.from(rawTotals.entries()).map(async ([mint, total]) => {
-      const metadata = await dependencies.resolveTokenMetadata(mint);
+): Promise<FinanceTokenTotal[]> {
+  return Promise.all(
+    combineBalances(balances).map(async ({ mint, amountRaw }) => {
+      const [metadata, price] = await Promise.all([
+        dependencies.resolveTokenMetadata(mint),
+        dependencies.resolveTokenPriceUsd(mint),
+      ]);
       const decimals = metadata?.decimals ?? 0;
-      const price = await dependencies.resolveTokenPriceUsd(mint);
       return {
         mint,
-        ticker: metadata?.ticker ?? total.ticker,
+        ticker: metadata?.ticker ?? mint,
         decimals,
-        rawAmount: total.rawAmount,
+        rawAmount: amountRaw,
         usdValue:
           price !== null && Number.isFinite(price)
-            ? decimalAmount(total.rawAmount, decimals) * price
+            ? decimalAmount(amountRaw, decimals) * price
             : null,
-        estimated: total.estimated,
       };
     }),
   );
+}
+
+function uniqueNetworkFees(
+  events: FinanceEventRecord[],
+  predicate: (event: FinanceEventRecord) => boolean,
+): bigint {
+  const bySignature = new Map<string, bigint>();
+  for (const event of events) {
+    if (!predicate(event)) continue;
+    const fee = safeBigInt(event.networkFeeLamports);
+    if (fee > (bySignature.get(event.signature) ?? 0n)) bySignature.set(event.signature, fee);
+  }
+  return [...bySignature.values()].reduce((sum, fee) => sum + fee, 0n);
 }
 
 export async function buildFinanceReport(
@@ -131,77 +160,71 @@ export async function buildFinanceReport(
 ): Promise<FinanceReport> {
   const now = dependencies.now ?? Date.now();
   const window = resolveFinanceWindow(period, now);
-  const gameTotals = new Map<string, { ticker: string; rawAmount: bigint; estimated: boolean }>();
-  let completedGames = 0;
-  let completionNetworkFeeLamports = 0n;
-  let estimatedNetworkTransactions = 0;
+  const events = dependencies.financeEvents.filter(
+    ({ timestamp }) => timestamp >= window.startTimeMs && timestamp < window.endTimeMs,
+  );
 
-  for (const game of dependencies.games) {
-    const exactFee = safeBigInt(game.exactFeeAmountRaw);
-    const estimatedFee =
-      (safeBigInt(game.estimatedTotalAmountRaw) * BigInt(dependencies.feePercentage)) / 100n;
-    const current = gameTotals.get(game.tokenMint);
-    gameTotals.set(game.tokenMint, {
-      ticker: game.tokenTicker,
-      rawAmount: (current?.rawAmount ?? 0n) + exactFee + estimatedFee,
-      estimated: (current?.estimated ?? false) || game.estimatedGames > 0,
-    });
-    completedGames += game.games;
-    completionNetworkFeeLamports += safeBigInt(game.networkFeeLamports);
-    estimatedNetworkTransactions += game.estimatedNetworkTransactions;
-  }
+  const [
+    gameRevenue,
+    swapRevenue,
+    gameClaimed,
+    swapClaimed,
+    gameClaimable,
+    swapClaimable,
+    solPrice,
+  ] = await Promise.all([
+    priceBalances(aggregateEvents(events, "game_fee", "earned"), dependencies),
+    priceBalances(aggregateEvents(events, "swap_fee", "earned"), dependencies),
+    priceBalances(aggregateEvents(events, "game_fee", "claimed"), dependencies),
+    priceBalances(aggregateEvents(events, "swap_fee", "claimed"), dependencies),
+    priceBalances(dependencies.gameClaimable, dependencies),
+    priceBalances(dependencies.swapClaimable, dependencies),
+    dependencies.resolveTokenPriceUsd(WSOL_MINT),
+  ]);
 
-  completionNetworkFeeLamports +=
-    BigInt(estimatedNetworkTransactions) * DEFAULT_SIGNATURE_FEE_LAMPORTS;
-
-  const swapTotals = new Map<string, { ticker: string; rawAmount: bigint; estimated: boolean }>();
   let sponsorCostLamports = 0n;
   let sponsorReimbursementLamports = 0n;
   let hasEstimatedSponsorExpenses = false;
-  for (const swap of dependencies.referralFees) {
-    const exactFee = safeBigInt(swap.feeAmount);
-    const feeBps = BigInt(swap.feeBps ?? 100);
-    const feeBase =
-      swap.feeMint === swap.inputMint ? safeBigInt(swap.amountIn) : safeBigInt(swap.amountOut);
-    const estimated = exactFee <= 0n;
-    const feeAmount = estimated ? (feeBase * feeBps) / 10_000n : exactFee;
-    const current = swapTotals.get(swap.feeMint);
-    swapTotals.set(swap.feeMint, {
-      ticker: swap.feeMint,
-      rawAmount: (current?.rawAmount ?? 0n) + feeAmount,
-      estimated: (current?.estimated ?? false) || estimated,
-    });
+  for (const swap of dependencies.sponsorRecords) {
     sponsorCostLamports += safeBigInt(swap.sponsorCostLamports);
     sponsorReimbursementLamports += safeBigInt(swap.sponsorReimbursementLamports);
     hasEstimatedSponsorExpenses ||= swap.sponsorCostEstimated === 1;
   }
 
-  const [gameRevenue, swapRevenue, solPrice] = await Promise.all([
-    priceTokenTotals(gameTotals, dependencies),
-    priceTokenTotals(swapTotals, dependencies),
-    dependencies.resolveTokenPriceUsd(WSOL_MINT),
-  ]);
-  const sumUsd = (totals: TokenTotal[]) =>
-    totals.reduce((sum, total) => sum + (total.usdValue ?? 0), 0);
-  const gameRevenueUsd = sumUsd(gameRevenue);
-  const swapRevenueUsd = sumUsd(swapRevenue);
   const unrecoveredSponsorLamports =
     sponsorCostLamports > sponsorReimbursementLamports
       ? sponsorCostLamports - sponsorReimbursementLamports
       : 0n;
-  const completionNetworkExpensesUsd =
-    solPrice === null ? 0 : decimalAmount(completionNetworkFeeLamports, 9) * solPrice;
-  const sponsorNetworkExpensesUsd =
-    solPrice === null ? 0 : decimalAmount(unrecoveredSponsorLamports, 9) * solPrice;
-  const networkExpensesUsd = completionNetworkExpensesUsd + sponsorNetworkExpensesUsd;
+  const completionFeeLamports = uniqueNetworkFees(
+    events,
+    (event) => event.category === "game_fee" && event.kind === "earned",
+  );
+  const collectionFeeLamports = uniqueNetworkFees(events, (event) => event.kind === "claimed");
+  const lamportsToUsd = (lamports: bigint) =>
+    solPrice === null ? 0 : decimalAmount(lamports, 9) * solPrice;
+  const completionNetworkExpensesUsd = lamportsToUsd(completionFeeLamports);
+  const sponsorNetworkExpensesUsd = lamportsToUsd(unrecoveredSponsorLamports);
+  const collectionNetworkExpensesUsd = lamportsToUsd(collectionFeeLamports);
+  const networkExpensesUsd =
+    completionNetworkExpensesUsd + sponsorNetworkExpensesUsd + collectionNetworkExpensesUsd;
   const recurringExpensesUsd = dependencies.monthlyExpenses.reduce(
     (sum, expense) => sum + expense.amountUsd * window.monthlyExpenseFactor,
     0,
   );
+  const sumUsd = (totals: FinanceTokenTotal[]) =>
+    totals.reduce((sum, total) => sum + (total.usdValue ?? 0), 0);
+  const gameRevenueUsd = sumUsd(gameRevenue);
+  const swapRevenueUsd = sumUsd(swapRevenue);
   const grossRevenueUsd = gameRevenueUsd + swapRevenueUsd;
   const totalExpensesUsd = networkExpensesUsd + recurringExpensesUsd;
-  const contractRentUsd =
-    solPrice === null ? null : decimalAmount(dependencies.contractRentLamports, 9) * solPrice;
+  const allTokens = [
+    ...gameRevenue,
+    ...swapRevenue,
+    ...gameClaimed,
+    ...swapClaimed,
+    ...gameClaimable,
+    ...swapClaimable,
+  ];
 
   return {
     period,
@@ -209,27 +232,37 @@ export async function buildFinanceReport(
     expenseFactor: window.monthlyExpenseFactor,
     startTimeMs: window.startTimeMs,
     endTimeMs: window.endTimeMs,
-    completedGames,
-    feeGeneratingSwaps: dependencies.referralFees.length,
+    completedGames: events.filter(
+      (event) => event.category === "game_fee" && event.kind === "earned",
+    ).length,
+    feeGeneratingSwaps: new Set(
+      events
+        .filter((event) => event.category === "swap_fee" && event.kind === "earned")
+        .map((event) => event.signature),
+    ).size,
     gameRevenue,
     swapRevenue,
+    gameClaimed,
+    swapClaimed,
+    gameClaimable,
+    swapClaimable,
     gameRevenueUsd,
     swapRevenueUsd,
     completionNetworkExpensesUsd,
     sponsorNetworkExpensesUsd,
+    collectionNetworkExpensesUsd,
     networkExpensesUsd,
     recurringExpensesUsd,
     grossRevenueUsd,
     totalExpensesUsd,
     netProfitUsd: grossRevenueUsd - totalExpensesUsd,
     contractRentLamports: dependencies.contractRentLamports,
-    contractRentUsd,
+    contractRentUsd:
+      solPrice === null ? null : decimalAmount(dependencies.contractRentLamports, 9) * solPrice,
     contractRentEstimated: dependencies.contractRentEstimated ?? false,
     monthlyExpenses: dependencies.monthlyExpenses,
-    hasUnpricedTokens: [...gameRevenue, ...swapRevenue].some((total) => total.usdValue === null),
-    hasEstimatedSwapRevenue: swapRevenue.some((total) => total.estimated),
-    hasEstimatedGameRevenue: gameRevenue.some((total) => total.estimated),
-    hasEstimatedNetworkExpenses: estimatedNetworkTransactions > 0,
+    hasUnpricedTokens: allTokens.some((total) => total.usdValue === null),
     hasEstimatedSponsorExpenses,
+    coverage: dependencies.coverage,
   };
 }

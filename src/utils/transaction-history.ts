@@ -55,6 +55,23 @@ export interface ReferralFeeRecord {
   sponsorCostEstimated?: number | null;
 }
 
+export type FinanceEventCategory = "game_fee" | "swap_fee";
+export type FinanceEventKind = "earned" | "claimed";
+
+export interface FinanceEventRecord {
+  eventId: string;
+  source: "program" | "jupiter" | "sweeper";
+  category: FinanceEventCategory;
+  kind: FinanceEventKind;
+  signature: string;
+  account?: string | null;
+  mint: string;
+  amountRaw: string;
+  networkFeeLamports?: string | null;
+  timestamp: number;
+  slot?: number | null;
+}
+
 export interface SwapTokenStat {
   mint: string;
   inputSwaps: number;
@@ -126,6 +143,22 @@ export class TransactionHistory extends BaseDatabase {
         )`,
         `CREATE INDEX IF NOT EXISTS idx_swap_stats_timestamp ON swap_stats(timestamp DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_swap_stats_fee_mint ON swap_stats(fee_mint)`,
+        `CREATE TABLE IF NOT EXISTS finance_events (
+          event_id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          category TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          signature TEXT NOT NULL,
+          account TEXT,
+          mint TEXT NOT NULL,
+          amount_raw TEXT NOT NULL,
+          network_fee_lamports TEXT,
+          timestamp INTEGER NOT NULL,
+          slot INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_finance_events_period
+          ON finance_events(timestamp, category, kind)`,
       ],
       "TransactionHistory",
     );
@@ -221,6 +254,51 @@ export class TransactionHistory extends BaseDatabase {
        ORDER BY timestamp DESC`,
       [startTimeMs, endTimeMs],
       "getting referral fee finance totals",
+    );
+  }
+
+  recordFinanceEvent(event: FinanceEventRecord): void {
+    this.run(
+      `INSERT OR IGNORE INTO finance_events (
+        event_id, source, category, kind, signature, account, mint,
+        amount_raw, network_fee_lamports, timestamp, slot
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        event.eventId,
+        event.source,
+        event.category,
+        event.kind,
+        event.signature,
+        event.account ?? null,
+        event.mint,
+        event.amountRaw,
+        event.networkFeeLamports ?? null,
+        event.timestamp,
+        event.slot ?? null,
+      ],
+      "recording finance event",
+    );
+  }
+
+  getFinanceEvents(startTimeMs: number, endTimeMs: number): FinanceEventRecord[] {
+    return this.all<FinanceEventRecord>(
+      `SELECT
+         event_id AS eventId,
+         source,
+         category,
+         kind,
+         signature,
+         account,
+         mint,
+         amount_raw AS amountRaw,
+         network_fee_lamports AS networkFeeLamports,
+         timestamp,
+         slot
+       FROM finance_events
+       WHERE timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp DESC`,
+      [startTimeMs, endTimeMs],
+      "getting finance events",
     );
   }
 

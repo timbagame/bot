@@ -6,14 +6,13 @@ import {
   type FinanceReport,
   type FinanceReportDependencies,
 } from "../services/finance-report";
+import type { FinanceLedgerService } from "../services/finance-ledger";
 import { escapeHtml } from "../utils/format-amount";
-import type { GameDatabase } from "../utils/game-database";
 import type { TransactionHistory } from "../utils/transaction-history";
 
 type FinanceHandlerDependencies = {
-  gameDb: Pick<GameDatabase, "getCompletedGameFinance">;
-  transactionHistory: Pick<TransactionHistory, "getReferralFees">;
-  getFeePercentage: () => Promise<number>;
+  financeLedger: Pick<FinanceLedgerService, "sync">;
+  transactionHistory: Pick<TransactionHistory, "getFinanceEvents" | "getReferralFees">;
   resolveTokenMetadata: FinanceReportDependencies["resolveTokenMetadata"];
   resolveTokenPriceUsd: FinanceReportDependencies["resolveTokenPriceUsd"];
   resolveContractCapital?: () => Promise<{ lamports: bigint; estimated?: boolean }>;
@@ -51,8 +50,7 @@ export function formatFinanceReport(report: FinanceReport): string {
           ...totals.map(
             (total) =>
               `${formatTokenAmount(total.rawAmount, total.decimals)} ${escapeHtml(total.ticker)}` +
-              `${total.usdValue === null ? " (unpriced)" : ` ≈ ${formatUsd(total.usdValue)}`}` +
-              `${total.estimated ? " <i>estimated</i>" : ""}`,
+              `${total.usdValue === null ? " (unpriced)" : ` ≈ ${formatUsd(total.usdValue)}`}`,
           ),
         ];
 
@@ -61,45 +59,43 @@ export function formatFinanceReport(report: FinanceReport): string {
       `${escapeHtml(expense.description)}: ${formatUsd(expense.amountUsd * report.expenseFactor)}`,
   );
 
-  const estimatedGame = report.hasEstimatedGameRevenue ? " <i>estimated</i>" : "";
-  const estimatedCompletion = report.hasEstimatedNetworkExpenses ? " <i>estimated</i>" : "";
   const estimatedSponsor = report.hasEstimatedSponsorExpenses ? " <i>estimated</i>" : "";
-  const hasEstimates =
-    report.hasEstimatedGameRevenue ||
-    report.hasEstimatedSwapRevenue ||
-    report.hasEstimatedNetworkExpenses ||
-    report.hasEstimatedSponsorExpenses ||
-    report.contractRentEstimated;
 
   return [
     `📊 <b>Timba Finance — ${escapeHtml(report.label)}</b>`,
     "",
     `<b>Revenue</b>`,
-    `Game fees: ${formatUsd(report.gameRevenueUsd)}${estimatedGame}`,
-    `Swap fees: ${formatUsd(report.swapRevenueUsd)}${report.hasEstimatedSwapRevenue ? " <i>estimated</i>" : ""}`,
+    `Game fees earned: ${formatUsd(report.gameRevenueUsd)}`,
+    `Swap fees earned: ${formatUsd(report.swapRevenueUsd)}`,
     `<b>Total: ${formatUsd(report.grossRevenueUsd)}</b>`,
     "",
     `<b>Expenses</b>`,
-    `Game completion transactions: ${formatUsd(report.completionNetworkExpensesUsd)}${estimatedCompletion}`,
+    `Game completion transactions: ${formatUsd(report.completionNetworkExpensesUsd)}`,
     `Sponsored swap transactions: ${formatUsd(report.sponsorNetworkExpensesUsd)}${estimatedSponsor}`,
+    `Fee collection transactions: ${formatUsd(report.collectionNetworkExpensesUsd)}`,
     ...expenseLines,
     `<b>Total: ${formatUsd(report.totalExpensesUsd)}</b>`,
     "",
-    `<b>Estimated result: ${formatUsd(report.netProfitUsd)}</b>`,
+    `<b>Result: ${formatUsd(report.netProfitUsd)}</b>`,
     "",
     `<b>Activity</b>`,
     `${report.completedGames} completed games`,
     `${report.feeGeneratingSwaps} fee-generating swaps`,
     "",
-    `<b>Assets — not profit</b>`,
+    `<b>Fee status</b>`,
+    ...tokenLines("Game fees claimable", report.gameClaimable),
+    ...tokenLines("Swap fees claimable", report.swapClaimable),
+    ...tokenLines("Game fees claimed in this period", report.gameClaimed),
+    ...tokenLines("Swap fees claimed in this period", report.swapClaimed),
+    "",
+    `<b>Capital — not profit</b>`,
     `Contract deposits: ${formatTokenAmount(report.contractRentLamports, 9)} SOL${
       report.contractRentUsd === null ? "" : ` ≈ ${formatUsd(report.contractRentUsd)}`
     }${report.contractRentEstimated ? " <i>estimated</i>" : ""}`,
-    ...tokenLines("Game fee assets", report.gameRevenue),
-    ...tokenLines("Swap fee assets", report.swapRevenue),
-    ...(hasEstimates
-      ? ["", "<i>Older records use estimates; new activity stores exact fees.</i>"]
-      : []),
+    ...tokenLines("Game revenue by token", report.gameRevenue),
+    ...tokenLines("Swap revenue by token", report.swapRevenue),
+    "",
+    `<i>Data coverage: ${report.coverage === "complete" ? "complete on-chain history" : "partial; RPC synchronization failed"}.</i>`,
     ...(report.hasUnpricedTokens ? ["<i>Unpriced tokens are excluded from USD totals.</i>"] : []),
     `<i>Token values use current market prices.</i>`,
   ].join("\n");
@@ -109,7 +105,7 @@ const keyboard = () =>
   new InlineKeyboard()
     .text("7 days", "finance:7d")
     .text("30 days", "finance:30d")
-    .text("This month", "finance:month");
+    .text("90 days", "finance:90d");
 
 export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) {
   const adminIds = dependencies.adminIds ?? FINANCE_ADMIN_TELEGRAM_IDS;
@@ -138,18 +134,23 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
 
     const now = dependencies.now?.() ?? Date.now();
     const window = resolveFinanceWindow(period, now);
-    const [feePercentage, contractCapital] = await Promise.all([
-      dependencies.getFeePercentage(),
+    const [snapshot, contractCapital] = await Promise.all([
+      dependencies.financeLedger.sync(now - 90 * 86_400_000),
       loadContractCapital(),
     ]);
     const report = await buildFinanceReport(period, {
       now,
-      feePercentage,
-      games: dependencies.gameDb.getCompletedGameFinance(window.startTimeMs, window.endTimeMs),
-      referralFees: dependencies.transactionHistory.getReferralFees(
+      financeEvents: dependencies.transactionHistory.getFinanceEvents(
         window.startTimeMs,
         window.endTimeMs,
       ),
+      sponsorRecords: dependencies.transactionHistory.getReferralFees(
+        window.startTimeMs,
+        window.endTimeMs,
+      ),
+      gameClaimable: snapshot.gameClaimable,
+      swapClaimable: snapshot.swapClaimable,
+      coverage: snapshot.coverage,
       monthlyExpenses,
       contractRentLamports: contractCapital.lamports,
       contractRentEstimated: contractCapital.estimated,

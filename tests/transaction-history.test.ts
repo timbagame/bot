@@ -105,4 +105,29 @@ describe("TransactionHistory", () => {
       },
     ]);
   });
+
+  it("stores finance events once in the append-only ledger", () => {
+    const txDb = TransactionHistory.getInstance();
+    const financeEvent = {
+      eventId: "program:sig-finance:game:game-1",
+      source: "program" as const,
+      category: "game_fee" as const,
+      kind: "earned" as const,
+      signature: "sig-finance",
+      account: "game-1",
+      mint: "TIMBA-mint",
+      amountRaw: "12345",
+      networkFeeLamports: "5000",
+      timestamp: 1500,
+      slot: 42,
+    };
+
+    txDb.recordFinanceEvent(financeEvent);
+    txDb.recordFinanceEvent(financeEvent);
+
+    expect(txDb.getFinanceEvents(1000, 2000)).toContainEqual(financeEvent);
+    expect(
+      txDb.getFinanceEvents(1000, 2000).filter(({ eventId }) => eventId === financeEvent.eventId),
+    ).toHaveLength(1);
+  });
 });

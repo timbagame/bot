@@ -32,6 +32,8 @@ import {
 import { createAnchorContext } from "../utils/anchor-context";
 import { SwapManager } from "../utils/swap-manager";
 import type { SwapRequest } from "../utils/swap/types";
+import { TransactionHistory } from "../utils/transaction-history";
+import { referralDeltaFromTransaction } from "./finance-ledger";
 
 export interface FeeSweepOptions {
   rpcUrl?: string;
@@ -399,6 +401,29 @@ async function processTokenFee(
   );
 
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
+  let confirmedWithdrawal = null;
+  try {
+    confirmedWithdrawal = await connection.getTransaction(tx, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+  } catch (error) {
+    console.warn(`Unable to load withdrawal transaction ${tx} for finance accounting:`, error);
+  }
+  if (confirmedWithdrawal) {
+    TransactionHistory.getInstance().recordFinanceEvent({
+      eventId: `program:${tx}:claim:${mint.toBase58()}`,
+      source: "sweeper",
+      category: "game_fee",
+      kind: "claimed",
+      signature: tx,
+      mint: mint.toBase58(),
+      amountRaw: pendingFees.toString(),
+      networkFeeLamports: String(confirmedWithdrawal.meta?.fee ?? 0),
+      timestamp: (confirmedWithdrawal.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
+      slot: confirmedWithdrawal.slot,
+    });
+  }
   return true;
 }
 
@@ -489,6 +514,34 @@ async function runReferralSweep(
     );
     processedClaims += 1;
     console.log(`   ✅ Referral claim ${i + 1}/${transactions.length}: ${sig}`);
+    try {
+      const confirmed = await connection.getTransaction(sig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (confirmed) {
+        for (const tokenAccount of allTokenAccounts) {
+          const address = tokenAccount.pubkey.toBase58();
+          const delta = referralDeltaFromTransaction(confirmed, address);
+          if (!delta || delta.delta >= 0n) continue;
+          TransactionHistory.getInstance().recordFinanceEvent({
+            eventId: `jupiter:${sig}:${address}:claimed`,
+            source: "sweeper",
+            category: "swap_fee",
+            kind: "claimed",
+            signature: sig,
+            account: address,
+            mint: delta.mint,
+            amountRaw: (-delta.delta).toString(),
+            networkFeeLamports: String(confirmed.meta?.fee ?? 0),
+            timestamp: (confirmed.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
+            slot: confirmed.slot,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(`Unable to record referral claim ${sig} in the finance ledger:`, error);
+    }
   }
 
   return processedClaims;

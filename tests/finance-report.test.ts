@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildFinanceReport } from "../src/services/finance-report";
+import { buildFinanceReport, resolveFinanceWindow } from "../src/services/finance-report";
 import {
   createFinanceHandlers,
   FINANCE_ADMIN_TELEGRAM_IDS,
@@ -7,10 +7,33 @@ import {
   FINANCE_MONTHLY_EXPENSES,
   formatFinanceReport,
 } from "../src/handlers/finance";
+import type { FinanceEventRecord } from "../src/utils/transaction-history";
 
 const TIMBA = "timba-mint";
 const USDC = "usdc-mint";
 const SOL = "So11111111111111111111111111111111111111112";
+const NOW = Date.UTC(2026, 6, 22);
+
+const event = (overrides: Partial<FinanceEventRecord>): FinanceEventRecord => ({
+  eventId: "event-1",
+  source: "program",
+  category: "game_fee",
+  kind: "earned",
+  signature: "signature-1",
+  mint: TIMBA,
+  amountRaw: "1000000",
+  networkFeeLamports: "10000",
+  timestamp: NOW - 1_000,
+  ...overrides,
+});
+
+const metadata = async (mint: string) =>
+  mint === TIMBA
+    ? { ticker: "TIMBA", decimals: 6 }
+    : mint === USDC
+      ? { ticker: "USDC", decimals: 6 }
+      : { ticker: "SOL", decimals: 9 };
+const price = async (mint: string) => (mint === TIMBA ? 0.01 : mint === SOL ? 100 : 1);
 
 describe("finance configuration", () => {
   it("keeps finance access and expenses in code", () => {
@@ -21,88 +44,68 @@ describe("finance configuration", () => {
     ]);
     expect(FINANCE_CONTRACT_RENT_LAMPORTS).toBe(2_437_788_720n);
   });
+
+  it("offers rolling 7, 30, and 90 day windows", () => {
+    expect(resolveFinanceWindow("7d", NOW).label).toBe("Last 7 days");
+    expect(resolveFinanceWindow("30d", NOW).monthlyExpenseFactor).toBe(1);
+    expect(resolveFinanceWindow("90d", NOW)).toMatchObject({
+      label: "Last 90 days",
+      monthlyExpenseFactor: 3,
+    });
+  });
 });
 
 describe("finance report", () => {
-  it("combines game fees, exact swap fees, and operating expenses", async () => {
+  it("separates earned, claimed, and currently claimable fees", async () => {
     const report = await buildFinanceReport("30d", {
-      now: Date.UTC(2026, 6, 22),
-      feePercentage: 1,
-      games: [
-        {
-          tokenMint: TIMBA,
-          tokenTicker: "TIMBA",
-          games: 2,
-          exactFeeAmountRaw: "1000000",
-          estimatedTotalAmountRaw: "0",
-          estimatedGames: 0,
-          networkFeeLamports: "10000",
-          estimatedNetworkTransactions: 0,
-        },
+      now: NOW,
+      financeEvents: [
+        event({}),
+        event({
+          eventId: "swap-earned",
+          source: "jupiter",
+          category: "swap_fee",
+          signature: "swap-1",
+          mint: USDC,
+          amountRaw: "100000",
+          networkFeeLamports: null,
+        }),
+        event({
+          eventId: "game-claimed",
+          kind: "claimed",
+          signature: "claim-1",
+          amountRaw: "500000",
+          networkFeeLamports: "5000",
+        }),
       ],
-      referralFees: [
-        {
-          feeMint: USDC,
-          inputMint: USDC,
-          outputMint: TIMBA,
-          amountIn: "10000000",
-          amountOut: "2000000000",
-          feeAmount: "100000",
-          feeBps: 100,
-        },
-      ],
+      sponsorRecords: [],
+      gameClaimable: [{ mint: TIMBA, amountRaw: 250000n }],
+      swapClaimable: [{ mint: USDC, amountRaw: 30000n }],
+      coverage: "complete",
       monthlyExpenses: [{ category: "hosting", description: "VPS", amountUsd: 6 }],
       contractRentLamports: FINANCE_CONTRACT_RENT_LAMPORTS,
-      resolveTokenMetadata: async (mint) =>
-        mint === TIMBA
-          ? { ticker: "TIMBA", decimals: 6 }
-          : mint === USDC
-            ? { ticker: "USDC", decimals: 6 }
-            : { ticker: "SOL", decimals: 9 },
-      resolveTokenPriceUsd: async (mint) => (mint === TIMBA ? 0.01 : mint === SOL ? 100 : 1),
+      resolveTokenMetadata: metadata,
+      resolveTokenPriceUsd: price,
     });
 
-    expect(report.completedGames).toBe(2);
+    expect(report.completedGames).toBe(1);
+    expect(report.feeGeneratingSwaps).toBe(1);
     expect(report.gameRevenueUsd).toBeCloseTo(0.01);
     expect(report.swapRevenueUsd).toBeCloseTo(0.1);
-    expect(report.networkExpensesUsd).toBeCloseTo(0.001);
-    expect(report.recurringExpensesUsd).toBeCloseTo(6);
-    expect(report.netProfitUsd).toBeLessThan(-5.8);
-    expect(report.contractRentUsd).toBeCloseTo(243.778872);
-    expect(report.hasEstimatedSwapRevenue).toBeFalse();
-    expect(formatFinanceReport(report)).toContain("Estimated result:");
-  });
-
-  it("labels legacy referral fees as estimated", async () => {
-    const report = await buildFinanceReport("7d", {
-      feePercentage: 1,
-      games: [],
-      referralFees: [
-        {
-          feeMint: USDC,
-          inputMint: USDC,
-          outputMint: TIMBA,
-          amountIn: "1000000",
-          amountOut: "1000000",
-          feeAmount: null,
-          feeBps: null,
-        },
-      ],
-      monthlyExpenses: [],
-      contractRentLamports: FINANCE_CONTRACT_RENT_LAMPORTS,
-      resolveTokenMetadata: async () => ({ ticker: "USDC", decimals: 6 }),
-      resolveTokenPriceUsd: async (mint) => (mint === SOL ? 100 : 1),
-    });
-
-    expect(report.swapRevenueUsd).toBeCloseTo(0.01);
-    expect(report.hasEstimatedSwapRevenue).toBeTrue();
+    expect(report.gameClaimed[0]?.rawAmount).toBe(500000n);
+    expect(report.gameClaimable[0]?.rawAmount).toBe(250000n);
+    expect(report.completionNetworkExpensesUsd).toBeCloseTo(0.001);
+    expect(report.collectionNetworkExpensesUsd).toBeCloseTo(0.0005);
+    expect(report.recurringExpensesUsd).toBe(6);
+    expect(formatFinanceReport(report)).toContain("complete on-chain history");
+    expect(formatFinanceReport(report)).toContain("Game revenue by token");
   });
 
   it("subtracts only unreimbursed sponsored transaction costs", async () => {
     const report = await buildFinanceReport("30d", {
-      feePercentage: 1,
-      games: [],
-      referralFees: [
+      now: NOW,
+      financeEvents: [],
+      sponsorRecords: [
         {
           feeMint: USDC,
           inputMint: USDC,
@@ -116,10 +119,13 @@ describe("finance report", () => {
           sponsorCostEstimated: 0,
         },
       ],
+      gameClaimable: [],
+      swapClaimable: [],
+      coverage: "complete",
       monthlyExpenses: [],
       contractRentLamports: 0n,
-      resolveTokenMetadata: async () => ({ ticker: "USDC", decimals: 6 }),
-      resolveTokenPriceUsd: async (mint) => (mint === SOL ? 100 : 1),
+      resolveTokenMetadata: metadata,
+      resolveTokenPriceUsd: price,
     });
 
     expect(report.sponsorNetworkExpensesUsd).toBeCloseTo(0.0005);
@@ -129,9 +135,10 @@ describe("finance report", () => {
 
 describe("finance authorization", () => {
   const makeDependencies = () => ({
-    gameDb: { getCompletedGameFinance: () => [] },
-    transactionHistory: { getReferralFees: () => [] },
-    getFeePercentage: async () => 1,
+    financeLedger: {
+      sync: async () => ({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const }),
+    },
+    transactionHistory: { getFinanceEvents: () => [], getReferralFees: () => [] },
     resolveTokenMetadata: async () => ({ ticker: "SOL", decimals: 9 }),
     resolveTokenPriceUsd: async () => 100,
     adminIds: new Set(["123"]),
