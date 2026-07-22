@@ -15,7 +15,7 @@ import {
   type JupiterQuoteRequest,
   type JupiterBuildInstruction,
   type JupiterBuildResponse,
-  type JupiterUltraOrderResponse,
+  type JupiterOrderResponse,
 } from "./jupiter";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
@@ -929,7 +929,7 @@ export class SwapManager {
     }
 
     // Keep integrator/payer even if Jupiter could not apply referral fees (referralApplied=false);
-    // payer must remain so Ultra does not fall back to gasless $10 minimum.
+    // payer must remain so Swap V2 does not fall back to automatic gasless mode and its minimum trade size.
     const integrator = cachedIntegrator;
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
@@ -1392,7 +1392,7 @@ export class SwapManager {
 
   private async ensureAdminCanCoverRoute(
     integrator: IntegratorSwapParams | null | undefined,
-    quote: JupiterUltraOrderResponse | undefined,
+    quote: JupiterOrderResponse | undefined,
     adminPublicKey: PublicKey,
   ): Promise<void> {
     if (integrator?.payerKind !== "admin" || !quote) {

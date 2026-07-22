@@ -5,7 +5,7 @@ import {
   validateSlippage,
   JupiterClient,
   type JupiterQuoteResponse,
-  type JupiterUltraOrderResponse,
+  type JupiterOrderResponse,
 } from "../src/utils/jupiter";
 import { createJupiterFetchStub } from "./helpers/test-stubs";
 import { makeJupiterOrderResponse } from "./helpers/jupiter-factories";
@@ -115,7 +115,7 @@ describe("JupiterClient referral URL params", () => {
     console.debug = savedConsoleDebug;
   });
 
-  const makeSuccessResponse = (overrides?: Partial<JupiterUltraOrderResponse>) =>
+  const makeSuccessResponse = (overrides?: Partial<JupiterOrderResponse>) =>
     makeJupiterOrderResponse(
       { inputMint, outputMint, amount },
       {

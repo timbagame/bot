@@ -87,7 +87,7 @@ export interface JupiterSwapResponse {
   priceImpactPct?: string;
   priceImpact?: number;
   routePlan?: JupiterQuoteResponse["routePlan"];
-  order?: JupiterUltraOrderResponse;
+  order?: JupiterOrderResponse;
 }
 
 export interface JupiterBuildInstruction {
@@ -139,7 +139,7 @@ interface JupiterOrderParams {
   closeAuthority?: string;
 }
 
-export interface JupiterUltraOrderResponse {
+export interface JupiterOrderResponse {
   mode: string;
   inputMint: string;
   outputMint: string;
@@ -180,7 +180,7 @@ export interface JupiterUltraOrderResponse {
 }
 
 interface JupiterOrderResult {
-  raw: JupiterUltraOrderResponse;
+  raw: JupiterOrderResponse;
   normalized: JupiterQuoteResponse;
   referralApplied: boolean;
 }
@@ -245,7 +245,7 @@ export class JupiterClient {
     return `${this.baseUrl}/swap/v2/build`;
   }
 
-  private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
+  private normalizeQuote(data: JupiterOrderResponse): JupiterQuoteResponse {
     const priceImpactPct =
       typeof data.priceImpactPct === "string"
         ? data.priceImpactPct
@@ -366,7 +366,7 @@ export class JupiterClient {
         );
       }
 
-      const data = (await response.json()) as JupiterUltraOrderResponse;
+      const data = (await response.json()) as JupiterOrderResponse;
 
       if (data.error || data.errorMessage) {
         const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";

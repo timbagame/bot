@@ -2,7 +2,7 @@ import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
 import { Connection, Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
-import type { JupiterUltraOrderResponse } from "../src/utils/jupiter";
+import type { JupiterOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "../src/utils/swap/route-cost";
@@ -121,9 +121,7 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
     return new SwapManager({} as Connection, walletStub);
   };
 
-  const buildBaseOrder = (
-    overrides?: Partial<JupiterUltraOrderResponse>,
-  ): JupiterUltraOrderResponse => ({
+  const buildBaseOrder = (overrides?: Partial<JupiterOrderResponse>): JupiterOrderResponse => ({
     mode: "ExactIn",
     inputMint: "So11111111111111111111111111111111111111112",
     outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
