@@ -167,10 +167,35 @@ describe("finance authorization", () => {
     await handlers.handleCommand({
       chat: { type: "private" },
       from: { id: 123 },
-      reply: async (text: string) => {
-        message = text;
+      reply: async () => ({ chat: { id: 123 }, message_id: 456 }),
+      api: {
+        editMessageText: async (_chatId: number, _messageId: number, text: string) => {
+          message = text;
+        },
       },
     } as any);
     expect(message).toContain("Timba Finance");
+  });
+
+  it("acknowledges an authorized command before starting RPC synchronization", async () => {
+    const order: string[] = [];
+    const dependencies = makeDependencies();
+    dependencies.financeLedger.sync = async () => {
+      order.push("sync");
+      return { gameClaimable: [], swapClaimable: [], coverage: "complete" as const };
+    };
+    const handlers = createFinanceHandlers(dependencies);
+
+    await handlers.handleCommand({
+      chat: { type: "private" },
+      from: { id: 123 },
+      reply: async () => {
+        order.push("ack");
+        return { chat: { id: 123 }, message_id: 456 };
+      },
+      api: { editMessageText: async () => undefined },
+    } as any);
+
+    expect(order.slice(0, 2)).toEqual(["ack", "sync"]);
   });
 });

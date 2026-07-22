@@ -85,6 +85,21 @@ describe("Bot Main Entry Point Tests", () => {
 
       expect((botModule.bot as any).errorHandler).toBe(handler);
     });
+
+    test("isolates slow finance updates from the user's normal command queue", () => {
+      expect(
+        botModule.__test_getSequentializationKey({
+          from: { id: 42 },
+          message: { text: "/finance" },
+        } as any),
+      ).toBe("finance_42");
+      expect(
+        botModule.__test_getSequentializationKey({
+          from: { id: 42 },
+          message: { text: "/start" },
+        } as any),
+      ).toBe("42");
+    });
   });
 
   describe("Global State Management", () => {

@@ -132,6 +132,13 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
       return;
     }
 
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery();
+    }
+
+    const loadingMessage = edit
+      ? null
+      : await ctx.reply("⏳ Building the finance report. You can continue using the bot.");
     const now = dependencies.now?.() ?? Date.now();
     const window = resolveFinanceWindow(period, now);
     const [snapshot, contractCapital] = await Promise.all([
@@ -167,10 +174,16 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
         const message = error instanceof Error ? error.message : String(error);
         if (!/message is not modified/i.test(message)) throw error;
       }
-      await ctx.answerCallbackQuery();
       return;
     }
-    await ctx.reply(text, options);
+    if (loadingMessage) {
+      await ctx.api.editMessageText(
+        loadingMessage.chat.id,
+        loadingMessage.message_id,
+        text,
+        options,
+      );
+    }
   };
 
   return {

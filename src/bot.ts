@@ -10,7 +10,7 @@ import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@anchor-lang/core";
 import { EventParser } from "@anchor-lang/core";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import { contractIdl } from "./utils/contract-idl";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
@@ -2847,6 +2847,14 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
   const userId = getTelegramIdString(ctx);
   if (!userId) return undefined;
 
+  const messageText = ctx.message?.text;
+  if (
+    ctx.callbackQuery?.data?.startsWith("finance:") ||
+    (typeof messageText === "string" && /^\/finance(?:@[\w_]+)?(?:\s|$)/i.test(messageText))
+  ) {
+    return `finance_${userId}`;
+  }
+
   if (ctx.callbackQuery?.data) {
     const callbackData = ctx.callbackQuery.data;
     if (callbackData.startsWith("join_") || callbackData.startsWith("refresh_")) {
@@ -2857,6 +2865,8 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
 
   return userId;
 };
+
+export const __test_getSequentializationKey = getSequentializationKey;
 
 bot.use(sequentialize(getSequentializationKey));
 // Drop stale updates to avoid reacting to old messages/callbacks
@@ -4501,12 +4511,40 @@ registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
 // ================================
 
 let financeLedgerService: FinanceLedgerService | undefined;
+let financeReadContext:
+  | { connection: Connection; program: anchor.Program<Timba> }
+  | undefined;
+
+const getFinanceReadContext = () => {
+  if (financeReadContext) return financeReadContext;
+
+  const connection = new Connection(wallet.getConnection().rpcEndpoint, {
+    commitment: "confirmed",
+    disableRetryOnRateLimit: true,
+  });
+  const operatorWallet = new anchor.Wallet(
+    wallet.getOperatorKeypair() as unknown as anchor.web3.Keypair,
+  );
+  const provider = new anchor.AnchorProvider(connection, operatorWallet, {
+    commitment: "confirmed",
+    preflightCommitment: "confirmed",
+    skipPreflight: false,
+    maxRetries: 0,
+  });
+  financeReadContext = {
+    connection,
+    program: new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>,
+  };
+  return financeReadContext;
+};
+
 const financeHandlers = createFinanceHandlers({
   financeLedger: {
     sync: (startTimeMs) => {
+      const finance = getFinanceReadContext();
       financeLedgerService ??= new FinanceLedgerService(
-        wallet.getConnection(),
-        program,
+        finance.connection,
+        finance.program,
         TransactionHistory.getInstance(),
         wallet.getOperatorKeypair().publicKey,
       );
@@ -4519,9 +4557,12 @@ const financeHandlers = createFinanceHandlers({
     return metadata ? { ticker: metadata.ticker, decimals: metadata.decimals } : null;
   },
   resolveTokenPriceUsd: async (mint) => (await getUsdPrice({ tokenMint: mint }))?.price ?? null,
-  resolveContractCapital: async () => ({
-    lamports: await getContractCapitalLamports(wallet.getConnection(), program),
-  }),
+  resolveContractCapital: async () => {
+    const finance = getFinanceReadContext();
+    return {
+      lamports: await getContractCapitalLamports(finance.connection, finance.program),
+    };
+  },
 });
 
 registerCaseInsensitiveCommand("finance", async (ctx: Context) => {

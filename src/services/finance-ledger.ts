@@ -116,11 +116,17 @@ async function signaturesSince(
   return entries;
 }
 
-const TRANSACTION_FETCH_CONCURRENCY = 4;
+const TRANSACTION_FETCH_DELAY_MS = 250;
+
+type FinanceTransactionFetchOptions = {
+  delayMs?: number;
+  sleep?: (milliseconds: number) => Promise<void>;
+};
 
 export async function fetchFinanceTransactions(
   connection: Pick<Connection, "getTransaction">,
   signatures: Array<{ signature: string; blockTime?: number | null; slot: number }>,
+  options: FinanceTransactionFetchOptions = {},
 ) {
   const result: Array<{
     signature: string;
@@ -128,21 +134,20 @@ export async function fetchFinanceTransactions(
     slot: number;
     transaction: VersionedTransactionResponse;
   }> = [];
-  for (let index = 0; index < signatures.length; index += TRANSACTION_FETCH_CONCURRENCY) {
-    const page = signatures.slice(index, index + TRANSACTION_FETCH_CONCURRENCY);
-    const transactions = await Promise.all(
-      page.map(({ signature }) =>
-        connection.getTransaction(signature, {
-          commitment: "confirmed",
-          maxSupportedTransactionVersion: 0,
-        }),
-      ),
-    );
-    transactions.forEach((transaction, offset) => {
-      const entry = page[offset];
-      if (!transaction) throw new Error(`RPC did not return transaction ${entry?.signature ?? ""}`);
-      if (!transaction.meta?.err && entry) result.push({ ...entry, transaction });
+  const delayMs = options.delayMs ?? TRANSACTION_FETCH_DELAY_MS;
+  const sleep = options.sleep ?? ((milliseconds) => Bun.sleep(milliseconds));
+
+  for (const [index, entry] of signatures.entries()) {
+    const transaction = await connection.getTransaction(entry.signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
     });
+    if (!transaction) throw new Error(`RPC did not return transaction ${entry.signature}`);
+    if (!transaction.meta?.err) result.push({ ...entry, transaction });
+
+    if (delayMs > 0 && index < signatures.length - 1) {
+      await sleep(delayMs);
+    }
   }
   return result;
 }

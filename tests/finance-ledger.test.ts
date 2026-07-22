@@ -39,10 +39,11 @@ describe("Jupiter referral ledger", () => {
 });
 
 describe("finance RPC history", () => {
-  it("uses bounded individual requests supported by free RPC plans", async () => {
+  it("paces individual requests supported by free RPC plans", async () => {
     let activeRequests = 0;
     let maximumConcurrency = 0;
     const requestedSignatures: string[] = [];
+    const delays: number[] = [];
     const connection = {
       getTransaction: async (signature: string) => {
         requestedSignatures.push(signature);
@@ -59,10 +60,15 @@ describe("finance RPC history", () => {
       slot: index,
     }));
 
-    const result = await fetchFinanceTransactions(connection as any, signatures);
+    const result = await fetchFinanceTransactions(connection as any, signatures, {
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds);
+      },
+    });
 
     expect(result).toHaveLength(9);
     expect(requestedSignatures).toHaveLength(9);
-    expect(maximumConcurrency).toBe(4);
+    expect(maximumConcurrency).toBe(1);
+    expect(delays).toEqual(Array(8).fill(250));
   });
 });
