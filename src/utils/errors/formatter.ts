@@ -68,13 +68,9 @@ const formatInsufficientFundsError = (
   walletManager?: WalletManager,
 ): string => {
   const missingLamports = Math.max(neededLamports - currentLamports, 0);
+  const amount = formatSolAmount(missingLamports, walletManager);
 
-  return buildFriendlyShortfallMessage({
-    missingLamports,
-    walletManager,
-    reason: "The action needs enough SOL for rent and fees",
-    action: "Add SOL and try again.",
-  });
+  return `💰 This transaction needs about ${amount} SOL more.\n\nAdd SOL and try again.`;
 };
 
 const handleTransactionTimeoutError = (errorMessage: string): string => {

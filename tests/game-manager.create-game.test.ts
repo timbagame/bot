@@ -1255,7 +1255,7 @@ describe("GameManager.createGame", () => {
     resetGM();
   });
 
-  test("explains game funding with rounded shortfall and separate reserves", () => {
+  test("explains game funding with a concise shortfall and action", () => {
     resetGM();
     const wallet = makeWallet({});
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {} as any);
@@ -1268,13 +1268,13 @@ describe("GameManager.createGame", () => {
       tokenBalanceRaw: 44_926_141_172,
     });
 
-    const message = (gm as any).buildGameFundingShortfallMessage(plan, "44926.141172", "TIMBA");
+    const message = (gm as any).buildGameCreationShortfallMessage(plan, "44926.141172", "TIMBA");
 
-    expect(message).toContain("You need 0.000181 SOL more");
-    expect(message).toContain("Game deposit: 0.002242 SOL (returned when the game closes)");
-    expect(message).toContain("Fee safety reserve: 0.0004 SOL");
-    expect(message).toContain("Wallet reserve: 0.000891 SOL");
-    expect(message).toContain("stake uses all available TIMBA");
+    expect(message).toContain("You need about 0.000181 SOL more");
+    expect(message).toContain("TIMBA balance only covers the stake");
+    expect(message).toContain("Add SOL or create a smaller game");
+    expect(message).not.toContain("Game deposit");
+    expect(message).not.toContain("reserve");
     expect(message).not.toContain("SOL more SOL");
     resetGM();
   });

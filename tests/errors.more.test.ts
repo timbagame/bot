@@ -6,15 +6,14 @@ const walletStub = {
 } as any;
 
 describe("errors extras", () => {
-  test("lamports error with wallet shows detailed balances", async () => {
+  test("lamports error gives a concise shortfall and action", async () => {
     const msg = await parseTransactionError(
       new Error("insufficient lamports 100, need 200"),
       walletStub,
     );
-    expect(msg).toContain("Not enough SOL to complete this");
-    expect(msg).toContain("The action needs enough SOL for rent and fees");
-    expect(msg).toContain("You need about");
+    expect(msg).toContain("This transaction needs about 0.000001 SOL more");
     expect(msg).toContain("Add SOL and try again.");
+    expect(msg).not.toContain("rent and fees");
   });
 
   test("generic insufficient maps to helpful guidance", async () => {

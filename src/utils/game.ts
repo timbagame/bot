@@ -1535,24 +1535,55 @@ export class GameManager {
     };
   }
 
-  private buildGameFundingShortfallMessage(
+  private formatRoundedSol(lamports: number): string {
+    const roundedUp = Math.ceil(Math.max(lamports, 0) / 1_000) * 1_000;
+    return `${this.wallet.formatSolBalance(roundedUp)} SOL`;
+  }
+
+  private buildGameSolShortfallMessage(options: {
+    currentLamports: number;
+    requiredLamports: number;
+    action: "create this game" | "join this game";
+    explanation?: string;
+    nextSteps?: string;
+  }): string {
+    const shortfallLamports = Math.max(options.requiredLamports - options.currentLamports, 0);
+    const explanation = options.explanation ? `\n\n${options.explanation}` : "";
+
+    return (
+      `💰 You need about ${this.formatRoundedSol(shortfallLamports)} more to ${options.action}.` +
+      explanation +
+      `\n\n${options.nextSteps ?? "Add SOL and try again."}`
+    );
+  }
+
+  private buildGameCreationShortfallMessage(
     plan: GameFundingPlan,
     formattedStake: string,
     tokenTicker: string,
   ): string {
-    const formatSol = (lamports: number): string => {
-      const roundedUp = Math.ceil(Math.max(lamports, 0) / 1_000) * 1_000;
-      return `${this.wallet.formatSolBalance(roundedUp)} SOL`;
-    };
+    return this.buildGameSolShortfallMessage({
+      currentLamports: plan.currentSolLamports,
+      requiredLamports: plan.requiredSolLamports,
+      action: "create this game",
+      explanation: `Your ${formattedStake} ${tokenTicker} balance only covers the stake, so the bot cannot swap extra ${tokenTicker} for SOL.`,
+      nextSteps: "Add SOL or create a smaller game.",
+    });
+  }
 
-    return (
-      `💰 You need ${formatSol(plan.shortfallLamports)} more to create this game.\n\n` +
-      `Game deposit: ${formatSol(plan.gameDepositLamports)} (returned when the game closes)\n` +
-      `Fee safety reserve: ${formatSol(plan.feeSafetyReserveLamports)}\n` +
-      `Wallet reserve: ${formatSol(plan.retainedWalletReserveLamports)}\n\n` +
-      `Your ${formattedStake} ${tokenTicker} stake uses all available ${tokenTicker}, so there are no spare tokens to swap for SOL.\n` +
-      `Add SOL or lower the stake.`
-    );
+  private buildGameJoinShortfallMessage(
+    currentLamports: number,
+    requiredLamports: number,
+    stake?: { amount: string; ticker: string },
+  ): string {
+    return this.buildGameSolShortfallMessage({
+      currentLamports,
+      requiredLamports,
+      action: "join this game",
+      explanation: stake
+        ? `Your ${stake.amount} ${stake.ticker} balance only covers the stake, so the bot cannot swap extra ${stake.ticker} for SOL.`
+        : undefined,
+    });
   }
 
   private async confirmTransactionWithRecovery(
@@ -1788,11 +1819,13 @@ export class GameManager {
       );
       return {
         success: false,
-        error: this.buildSolShortfallMessage({
+        error: this.buildGameSolShortfallMessage({
           currentLamports: currentSolBalance,
           requiredLamports: requiredReserve,
-          reason: "Wrapping this amount would leave too little SOL for rent and fees",
-          nextSteps: "Add more SOL or reduce the amount to continue.",
+          action: context === "create" ? "create this game" : "join this game",
+          explanation: "Using SOL for the stake would leave too little SOL for the transaction.",
+          nextSteps:
+            context === "create" ? "Add SOL or create a smaller game." : "Add SOL and try again.",
         }),
       };
     }
@@ -1870,11 +1903,10 @@ export class GameManager {
       );
       return {
         success: false,
-        error: this.buildSolShortfallMessage({
+        error: this.buildGameSolShortfallMessage({
           currentLamports: updatedSolBalance,
           requiredLamports: minSolBuffer,
-          reason: "Wrapping reduced your SOL below the fee reserve threshold",
-          nextSteps: "Add more SOL before trying again.",
+          action: context === "create" ? "create this game" : "join this game",
         }),
       };
     }
@@ -3523,7 +3555,7 @@ export class GameManager {
           const safeTicker = escapeHtml(tokenTicker);
           return {
             success: false,
-            error: this.buildGameFundingShortfallMessage(fundingPlan, safeStake, safeTicker),
+            error: this.buildGameCreationShortfallMessage(fundingPlan, safeStake, safeTicker),
           };
         }
 
@@ -3571,11 +3603,10 @@ export class GameManager {
         if (lamportsBalance < fundingPlan.requiredSolLamports) {
           return {
             success: false,
-            error: this.buildSolShortfallMessage({
+            error: this.buildGameSolShortfallMessage({
               currentLamports: lamportsBalance,
               requiredLamports: fundingPlan.requiredSolLamports,
-              reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
-              nextSteps: "Add more SOL to continue.",
+              action: "create this game",
             }),
           };
         }
@@ -4060,11 +4091,12 @@ export class GameManager {
       const lamportsBalance = solBalance;
       if (lamportsBalance < minSolBuffer) {
         if (swapAllowanceRaw <= 0) {
-          const shortfallMessage = this.buildSolShortfallMessage({
-            currentLamports: solBalance,
-            requiredLamports: minSolBuffer,
-            reason: "Joining this game requires SOL for transaction fees",
-            nextSteps: "Add more SOL before trying again.",
+          debugLog("Game join funding shortfall:", {
+            currentSolLamports: solBalance,
+            feeSafetyReserveLamports: minSolBuffer,
+            shortfallLamports: Math.max(minSolBuffer - solBalance, 0),
+            stakeRaw: reservedTicketAmount,
+            spareTokenRaw: swapAllowanceRaw,
           });
 
           if (currentGameType === "coinflip") {
@@ -4072,15 +4104,16 @@ export class GameManager {
             const safeTicker = escapeHtml(gameData.token_ticker);
             return {
               success: false,
-              error: `${shortfallMessage}
-
-Your ${formattedStake} ${safeTicker} stake uses all available ${safeTicker}, so there are no spare tokens to swap for SOL.`,
+              error: this.buildGameJoinShortfallMessage(solBalance, minSolBuffer, {
+                amount: formattedStake,
+                ticker: safeTicker,
+              }),
             };
           }
 
           return {
             success: false,
-            error: shortfallMessage,
+            error: this.buildGameJoinShortfallMessage(solBalance, minSolBuffer),
           };
         }
 
@@ -4123,11 +4156,10 @@ Your ${formattedStake} ${safeTicker} stake uses all available ${safeTicker}, so 
           if (refreshedLamports < minSolBuffer) {
             return {
               success: false,
-              error: this.buildSolShortfallMessage({
+              error: this.buildGameSolShortfallMessage({
                 currentLamports: refreshedLamports,
                 requiredLamports: minSolBuffer,
-                reason: "Just-in-time swap did not leave enough SOL for transaction fees",
-                nextSteps: "Add more SOL to continue.",
+                action: "join this game",
               }),
             };
           }

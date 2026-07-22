@@ -459,8 +459,9 @@ describe("GameManager.joinGame guards", () => {
       1n,
     );
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/Not enough SOL to complete this/i);
-    expect(res.error).toMatch(/no spare tokens to swap for SOL/i);
+    expect(res.error).toMatch(/need about .* SOL more to join this game/i);
+    expect(res.error).toMatch(/TOK balance only covers the stake/i);
+    expect(res.error).toMatch(/Add SOL and try again/i);
   });
 
   test("returns error on zero token balance with helpful message", async () => {
@@ -547,8 +548,8 @@ describe("GameManager.joinGame guards", () => {
       1n,
     );
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/Not enough SOL/i);
-    expect(res.error).toMatch(/transaction fees/i);
+    expect(res.error).toMatch(/need about .* SOL more to join this game/i);
+    expect(res.error).toMatch(/Add SOL and try again/i);
   });
 
   test("attempts JIT swap for giveaway when user has tokens but no SOL", async () => {
