@@ -30,6 +30,10 @@ const createCompletionEvent = (
     winnerAmount: {
       toNumber: () => 24_000,
     },
+    feeAmount: {
+      toNumber: () => 240,
+      toString: () => "240",
+    },
     ...overrides,
   },
 });
@@ -72,7 +76,9 @@ describe("Game completion recovery", () => {
 
     expect(parsed).toEqual({
       winnerAddress: "WinnerPubkey",
-      totalPot: 24_000,
+      totalPot: 24_240,
+      feeAmountRaw: "240",
+      winnerAmount: 24_000,
     });
   });
 
@@ -87,6 +93,7 @@ describe("Game completion recovery", () => {
       getTransaction: async () => ({
         meta: {
           logMessages: ["Program log"],
+          fee: 7_000,
         },
       }),
     };
@@ -109,8 +116,11 @@ describe("Game completion recovery", () => {
 
       expect(details).toEqual({
         winnerAddress: "WinnerPubkey",
-        totalPot: 24_000,
+        totalPot: 24_240,
         signature: "completion-signature",
+        feeAmountRaw: "240",
+        networkFeeLamports: 7_000,
+        winnerAmount: 24_000,
       });
     } finally {
       botModule.wallet.getConnection = originalGetConnection;
@@ -167,8 +177,10 @@ describe("Game completion recovery", () => {
 
       expect(details).toEqual({
         winnerAddress: "WinnerPubkey",
-        totalPot: 24_000,
+        totalPot: 24_240,
         signature: "completion-4",
+        feeAmountRaw: "240",
+        winnerAmount: 24_000,
       });
     } finally {
       botModule.wallet.getConnection = originalGetConnection;

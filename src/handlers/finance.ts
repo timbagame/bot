@@ -16,6 +16,7 @@ type FinanceHandlerDependencies = {
   getFeePercentage: () => Promise<number>;
   resolveTokenMetadata: FinanceReportDependencies["resolveTokenMetadata"];
   resolveTokenPriceUsd: FinanceReportDependencies["resolveTokenPriceUsd"];
+  resolveContractCapital?: () => Promise<{ lamports: bigint; estimated?: boolean }>;
   adminIds?: Set<string>;
   monthlyExpenses?: FinanceReportDependencies["monthlyExpenses"];
   now?: () => number;
@@ -27,8 +28,7 @@ export const FINANCE_MONTHLY_EXPENSES = [
   // timba.cc renews for $8/year; current expiration date is 2027-05-04.
   { category: "domain", description: "timba.cc domain", amountUsd: 8 / 12 },
 ] as const;
-// Mainnet snapshot: program, ProgramData, Oracle, five GameToken accounts, and five vault ATAs.
-// This is locked capital and is not included in monthly operating expenses.
+// Used only when a live account lookup fails.
 export const FINANCE_CONTRACT_RENT_LAMPORTS = 2_437_788_720n;
 
 const formatUsd = (amount: number): string => {
@@ -56,40 +56,52 @@ export function formatFinanceReport(report: FinanceReport): string {
           ),
         ];
 
-  const monthlyExpenseFactor =
-    report.period === "month" ? 1 : (report.period === "7d" ? 7 : 30) / (365.25 / 12);
   const expenseLines = report.monthlyExpenses.map(
     (expense) =>
-      `${escapeHtml(expense.description)}: ${formatUsd(expense.amountUsd * monthlyExpenseFactor)}`,
+      `${escapeHtml(expense.description)}: ${formatUsd(expense.amountUsd * report.expenseFactor)}`,
   );
+
+  const estimatedGame = report.hasEstimatedGameRevenue ? " <i>estimated</i>" : "";
+  const estimatedCompletion = report.hasEstimatedNetworkExpenses ? " <i>estimated</i>" : "";
+  const estimatedSponsor = report.hasEstimatedSponsorExpenses ? " <i>estimated</i>" : "";
+  const hasEstimates =
+    report.hasEstimatedGameRevenue ||
+    report.hasEstimatedSwapRevenue ||
+    report.hasEstimatedNetworkExpenses ||
+    report.hasEstimatedSponsorExpenses ||
+    report.contractRentEstimated;
 
   return [
     `📊 <b>Timba Finance — ${escapeHtml(report.label)}</b>`,
     "",
     `<b>Revenue</b>`,
-    `Games (${report.completedGames} completed): ${formatUsd(report.gameRevenueUsd)}`,
-    `Jupiter referrals: ${formatUsd(report.swapRevenueUsd)}`,
-    `<b>Total revenue: ${formatUsd(report.grossRevenueUsd)}</b>`,
+    `Game fees: ${formatUsd(report.gameRevenueUsd)}${estimatedGame}`,
+    `Swap fees: ${formatUsd(report.swapRevenueUsd)}${report.hasEstimatedSwapRevenue ? " <i>estimated</i>" : ""}`,
+    `<b>Total: ${formatUsd(report.grossRevenueUsd)}</b>`,
     "",
     `<b>Expenses</b>`,
-    `Completion network fees: ${formatUsd(report.networkExpensesUsd)} <i>estimated</i>`,
+    `Game completion transactions: ${formatUsd(report.completionNetworkExpensesUsd)}${estimatedCompletion}`,
+    `Sponsored swap transactions: ${formatUsd(report.sponsorNetworkExpensesUsd)}${estimatedSponsor}`,
     ...expenseLines,
-    `<b>Total expenses: ${formatUsd(report.totalExpensesUsd)}</b>`,
+    `<b>Total: ${formatUsd(report.totalExpensesUsd)}</b>`,
     "",
-    `<b>Net profit: ${formatUsd(report.netProfitUsd)}</b>`,
+    `<b>Estimated result: ${formatUsd(report.netProfitUsd)}</b>`,
     "",
-    `<b>Locked capital</b>`,
-    `Contract rent: ${formatTokenAmount(report.contractRentLamports, 9)} SOL${
+    `<b>Activity</b>`,
+    `${report.completedGames} completed games`,
+    `${report.feeGeneratingSwaps} fee-generating swaps`,
+    "",
+    `<b>Assets — not profit</b>`,
+    `Contract deposits: ${formatTokenAmount(report.contractRentLamports, 9)} SOL${
       report.contractRentUsd === null ? "" : ` ≈ ${formatUsd(report.contractRentUsd)}`
-    }`,
-    ...tokenLines("Game fees by token", report.gameRevenue),
-    ...tokenLines("Swap fees by token", report.swapRevenue),
-    ...(report.hasEstimatedSwapRevenue
-      ? ["", "<i>Historical swap fees are estimated; new swaps store exact fee amounts.</i>"]
+    }${report.contractRentEstimated ? " <i>estimated</i>" : ""}`,
+    ...tokenLines("Game fee assets", report.gameRevenue),
+    ...tokenLines("Swap fee assets", report.swapRevenue),
+    ...(hasEstimates
+      ? ["", "<i>Older records use estimates; new activity stores exact fees.</i>"]
       : []),
     ...(report.hasUnpricedTokens ? ["<i>Unpriced tokens are excluded from USD totals.</i>"] : []),
-    "",
-    `<i>Token revenue is valued at current market prices.</i>`,
+    `<i>Token values use current market prices.</i>`,
   ].join("\n");
 }
 
@@ -103,6 +115,18 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
   const adminIds = dependencies.adminIds ?? FINANCE_ADMIN_TELEGRAM_IDS;
   const monthlyExpenses = dependencies.monthlyExpenses ?? [...FINANCE_MONTHLY_EXPENSES];
 
+  const loadContractCapital = async () => {
+    if (!dependencies.resolveContractCapital) {
+      return { lamports: FINANCE_CONTRACT_RENT_LAMPORTS, estimated: true };
+    }
+    try {
+      return await dependencies.resolveContractCapital();
+    } catch (error) {
+      console.warn("Unable to load live contract capital; using fallback:", error);
+      return { lamports: FINANCE_CONTRACT_RENT_LAMPORTS, estimated: true };
+    }
+  };
+
   const isAuthorized = (ctx: Context): boolean =>
     ctx.chat?.type === "private" && ctx.from?.id !== undefined && adminIds.has(String(ctx.from.id));
 
@@ -114,16 +138,21 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
 
     const now = dependencies.now?.() ?? Date.now();
     const window = resolveFinanceWindow(period, now);
+    const [feePercentage, contractCapital] = await Promise.all([
+      dependencies.getFeePercentage(),
+      loadContractCapital(),
+    ]);
     const report = await buildFinanceReport(period, {
       now,
-      feePercentage: await dependencies.getFeePercentage(),
+      feePercentage,
       games: dependencies.gameDb.getCompletedGameFinance(window.startTimeMs, window.endTimeMs),
       referralFees: dependencies.transactionHistory.getReferralFees(
         window.startTimeMs,
         window.endTimeMs,
       ),
       monthlyExpenses,
-      contractRentLamports: FINANCE_CONTRACT_RENT_LAMPORTS,
+      contractRentLamports: contractCapital.lamports,
+      contractRentEstimated: contractCapital.estimated,
       resolveTokenMetadata: dependencies.resolveTokenMetadata,
       resolveTokenPriceUsd: dependencies.resolveTokenPriceUsd,
     });

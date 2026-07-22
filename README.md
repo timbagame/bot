@@ -54,9 +54,9 @@ src/
 
 - `/finance` - Show private revenue, expense, and profit reporting. This command only works in a private chat for the finance administrator configured in `src/handlers/finance.ts`.
 
-The report currently includes the $7/month DigitalOcean VPS cost and the timba.cc domain renewal amortized from $8/year. Game fees and Jupiter referral fees are derived from the bot databases; legacy referral rows and completion network costs are explicitly shown as estimates.
+The report includes the $7/month DigitalOcean VPS cost and the timba.cc domain renewal amortized from $8/year. A 30-day report uses one full monthly charge; the 7-day report prorates it. New game completions and swaps store exact fee data and transaction costs, while older records remain explicitly marked as estimates.
 
-The finance output also shows the current 2.43778872 SOL contract rent allocation as locked capital. It is valued at the live SOL price but is not deducted from monthly profit.
+Contract deposits are read from the live program, ProgramData, oracle, game-token, and vault accounts. They are valued at the current SOL price and shown as assets, not expenses or profit.
 
 ## 🏗️ Architecture
 

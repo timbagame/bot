@@ -601,6 +601,38 @@ describe("SwapService.execute", () => {
     expect(recordSpy).toHaveBeenCalledWith(expect.objectContaining({ amount_out: "985" }));
     recordSpy.mockRestore();
   });
+
+  test("records actual sponsored network cost and atomic reimbursement", async () => {
+    const history = TransactionHistory.getInstance();
+    const recordSpy = vi.spyOn(history, "recordSwap").mockImplementation(() => {});
+    const originalGetConnection = wallet.getConnection.bind(wallet);
+    (wallet as any).getConnection = () => ({
+      getTransaction: async () => ({ meta: { fee: 7_000 } }),
+    });
+
+    try {
+      await service.execute(
+        {
+          ...baseQuote,
+          provider: "jupiter",
+          integrator: { payerKind: "admin" },
+          executionSponsorReimbursementLamports: 5_000,
+        } as any,
+        user,
+      );
+
+      expect(recordSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sponsor_cost_lamports: "7000",
+          sponsor_reimbursement_lamports: "5000",
+          sponsor_cost_estimated: false,
+        }),
+      );
+    } finally {
+      (wallet as any).getConnection = originalGetConnection;
+      recordSpy.mockRestore();
+    }
+  });
 });
 
 describe("buildAdminIntegratorConfig", () => {

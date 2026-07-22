@@ -99,6 +99,9 @@ describe("TransactionHistory", () => {
         amountOut: "2000000",
         feeAmount: "10000",
         feeBps: 100,
+        sponsorCostLamports: null,
+        sponsorReimbursementLamports: null,
+        sponsorCostEstimated: null,
       },
     ]);
   });

@@ -9,6 +9,7 @@ import type { SwapQuote, SwapRequest } from "./types";
 import { calculateRouteCosts, type RouteLikeCosts } from "./route-cost";
 import { TransactionHistory } from "../transaction-history";
 import { NetworkDetector } from "../network-detector";
+import { getConfirmedTransactionFeeLamports } from "../transaction-fee";
 
 export interface SwapBackend {
   getQuote(request: SwapRequest & { integrator?: IntegratorSwapParams | null }): Promise<SwapQuote>;
@@ -44,6 +45,30 @@ export class SwapService {
   }
 
   private readonly feeBudget: FeeBudgetManager | null;
+
+  private async getSponsorAccounting(quote: SwapQuote, signature: string) {
+    if (quote.integrator?.payerKind !== "admin") {
+      return {};
+    }
+
+    const exactCost = await getConfirmedTransactionFeeLamports(
+      this.wallet.getConnection(),
+      signature,
+    );
+    const quotedCost =
+      (quote.providerQuote?.signatureFeeLamports ?? 0) +
+      (quote.providerQuote?.prioritizationFeeLamports ?? 0);
+    const cost = exactCost ?? (quotedCost > 0 ? quotedCost : null);
+
+    return {
+      sponsor_cost_lamports: cost === null ? undefined : String(cost),
+      sponsor_reimbursement_lamports:
+        quote.executionSponsorReimbursementLamports === undefined
+          ? undefined
+          : String(quote.executionSponsorReimbursementLamports),
+      sponsor_cost_estimated: exactCost === null && cost !== null,
+    };
+  }
 
   async prepareSwap(
     request: SwapRequest,
@@ -194,6 +219,7 @@ export class SwapService {
 
     const signature = await this.backend.executeJupiterSwap(request, quote);
     try {
+      const sponsorAccounting = await this.getSponsorAccounting(quote, signature);
       TransactionHistory.getInstance().recordSwap({
         signature,
         wallet: userKeypair.publicKey.toBase58(),
@@ -215,6 +241,7 @@ export class SwapService {
           quote.providerQuote?.platformFee?.feeBps ??
           quote.platformFee?.feeBps ??
           quote.integrator?.referralFee,
+        ...sponsorAccounting,
         timestamp: Date.now(),
         network: NetworkDetector.getCurrentNetwork(),
       });

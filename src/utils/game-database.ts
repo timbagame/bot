@@ -21,7 +21,17 @@ export interface CompletedGameFinanceRecord {
   tokenMint: string;
   tokenTicker: string;
   games: number;
-  totalAmountRaw: string;
+  exactFeeAmountRaw: string;
+  estimatedTotalAmountRaw: string;
+  estimatedGames: number;
+  networkFeeLamports: string;
+  estimatedNetworkTransactions: number;
+}
+
+export interface GameCompletionFinance {
+  feeAmountRaw?: string;
+  signature?: string;
+  networkFeeLamports?: number;
 }
 
 /**
@@ -57,7 +67,10 @@ export class GameDatabase extends BaseDatabase {
           last_slot TEXT,
           last_slot_timestamp INTEGER,
           total_amount INTEGER,
-          participant_addresses TEXT
+          participant_addresses TEXT,
+          fee_amount_raw TEXT,
+          completion_signature TEXT,
+          completion_network_fee_lamports TEXT
         )`,
         `CREATE TABLE IF NOT EXISTS player_mappings (
           public_key TEXT PRIMARY KEY,
@@ -253,6 +266,32 @@ export class GameDatabase extends BaseDatabase {
     this.run(sql, params, "completing game");
   }
 
+  public recordGameCompletionFinance(gameAddress: string, finance: GameCompletionFinance): void {
+    const updates: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (finance.feeAmountRaw !== undefined) {
+      updates.push("fee_amount_raw = ?");
+      params.push(finance.feeAmountRaw);
+    }
+    if (finance.signature !== undefined) {
+      updates.push("completion_signature = ?");
+      params.push(finance.signature);
+    }
+    if (finance.networkFeeLamports !== undefined) {
+      updates.push("completion_network_fee_lamports = ?");
+      params.push(String(finance.networkFeeLamports));
+    }
+    if (updates.length === 0) return;
+
+    params.push(gameAddress);
+    this.run(
+      `UPDATE games SET ${updates.join(", ")} WHERE game_address = ?`,
+      params,
+      "recording game completion finance",
+    );
+  }
+
   public getAllGames(): GameData[] {
     return this.all<GameData>("SELECT * FROM games", [], "getting all games");
   }
@@ -266,7 +305,24 @@ export class GameDatabase extends BaseDatabase {
          token_mint AS tokenMint,
          COALESCE(token_ticker, token_mint) AS tokenTicker,
          COUNT(*) AS games,
-         CAST(SUM(total_amount) AS TEXT) AS totalAmountRaw
+         CAST(SUM(CASE
+           WHEN fee_amount_raw IS NOT NULL THEN CAST(fee_amount_raw AS INTEGER)
+           ELSE 0
+         END) AS TEXT) AS exactFeeAmountRaw,
+         CAST(SUM(CASE
+           WHEN fee_amount_raw IS NULL THEN total_amount
+           ELSE 0
+         END) AS TEXT) AS estimatedTotalAmountRaw,
+         SUM(CASE WHEN fee_amount_raw IS NULL THEN 1 ELSE 0 END) AS estimatedGames,
+         CAST(SUM(CASE
+           WHEN completion_network_fee_lamports IS NOT NULL
+             THEN CAST(completion_network_fee_lamports AS INTEGER)
+           ELSE 0
+         END) AS TEXT) AS networkFeeLamports,
+         SUM(CASE
+           WHEN completion_network_fee_lamports IS NULL THEN 1
+           ELSE 0
+         END) AS estimatedNetworkTransactions
        FROM games
        WHERE status = 'completed'
          AND winner_address != 'cancelled'
@@ -771,6 +827,30 @@ export class GameDatabase extends BaseDatabase {
           "ALTER TABLE games ADD COLUMN participant_addresses TEXT",
           [],
           "adding participant_addresses column to games",
+        );
+      }
+
+      if (!columnNames.has("fee_amount_raw")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN fee_amount_raw TEXT",
+          [],
+          "adding fee_amount_raw column to games",
+        );
+      }
+
+      if (!columnNames.has("completion_signature")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN completion_signature TEXT",
+          [],
+          "adding completion_signature column to games",
+        );
+      }
+
+      if (!columnNames.has("completion_network_fee_lamports")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN completion_network_fee_lamports TEXT",
+          [],
+          "adding completion_network_fee_lamports column to games",
         );
       }
 

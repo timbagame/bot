@@ -105,6 +105,11 @@ test("getCompletedGameFinance groups completed pots and excludes cancellations",
 
   db.saveGame("finance-1", "creator", 100, "coinflip", "mint", "TOK");
   db.completeGame("finance-1", "winner", now - 100, 2_000);
+  db.recordGameCompletionFinance("finance-1", {
+    feeAmountRaw: "20",
+    signature: "finance-signature",
+    networkFeeLamports: 7_000,
+  });
   db.saveGame("finance-2", "creator", 100, "coinflip", "mint", "TOK");
   db.completeGame("finance-2", "winner", now - 50, 3_000);
   db.saveGame("finance-cancelled", "creator", 100, "coinflip", "mint", "TOK");
@@ -115,9 +120,19 @@ test("getCompletedGameFinance groups completed pots and excludes cancellations",
       tokenMint: "mint",
       tokenTicker: "TOK",
       games: 2,
-      totalAmountRaw: "5000",
+      exactFeeAmountRaw: "20",
+      estimatedTotalAmountRaw: "3000",
+      estimatedGames: 1,
+      networkFeeLamports: "7000",
+      estimatedNetworkTransactions: 1,
     },
   ]);
+
+  expect(db.getGame("finance-1")).toMatchObject({
+    fee_amount_raw: "20",
+    completion_signature: "finance-signature",
+    completion_network_fee_lamports: "7000",
+  });
 });
 
 test("saveGameMessage preserves origin chat_id when message created in different chat", () => {

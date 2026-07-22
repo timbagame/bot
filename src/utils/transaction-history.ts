@@ -35,6 +35,9 @@ export interface SwapStatRecord {
   referral_applied: boolean;
   fee_amount?: string;
   fee_bps?: number;
+  sponsor_cost_lamports?: string;
+  sponsor_reimbursement_lamports?: string;
+  sponsor_cost_estimated?: boolean;
   timestamp: number;
   network?: string;
 }
@@ -47,6 +50,9 @@ export interface ReferralFeeRecord {
   amountOut: string | null;
   feeAmount: string | null;
   feeBps: number | null;
+  sponsorCostLamports?: string | null;
+  sponsorReimbursementLamports?: string | null;
+  sponsorCostEstimated?: number | null;
 }
 
 export interface SwapTokenStat {
@@ -111,6 +117,9 @@ export class TransactionHistory extends BaseDatabase {
           referral_applied INTEGER NOT NULL DEFAULT 0,
           fee_amount TEXT,
           fee_bps INTEGER,
+          sponsor_cost_lamports TEXT,
+          sponsor_reimbursement_lamports TEXT,
+          sponsor_cost_estimated INTEGER,
           timestamp INTEGER NOT NULL,
           network TEXT NOT NULL DEFAULT 'mainnet',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -137,6 +146,27 @@ export class TransactionHistory extends BaseDatabase {
     if (!names.has("fee_bps")) {
       this.run("ALTER TABLE swap_stats ADD COLUMN fee_bps INTEGER", [], "adding swap fee bps");
     }
+    if (!names.has("sponsor_cost_lamports")) {
+      this.run(
+        "ALTER TABLE swap_stats ADD COLUMN sponsor_cost_lamports TEXT",
+        [],
+        "adding swap sponsor cost",
+      );
+    }
+    if (!names.has("sponsor_reimbursement_lamports")) {
+      this.run(
+        "ALTER TABLE swap_stats ADD COLUMN sponsor_reimbursement_lamports TEXT",
+        [],
+        "adding swap sponsor reimbursement",
+      );
+    }
+    if (!names.has("sponsor_cost_estimated")) {
+      this.run(
+        "ALTER TABLE swap_stats ADD COLUMN sponsor_cost_estimated INTEGER",
+        [],
+        "adding swap sponsor cost accuracy",
+      );
+    }
   }
 
   recordSwap(record: SwapStatRecord): void {
@@ -144,8 +174,9 @@ export class TransactionHistory extends BaseDatabase {
       `INSERT OR IGNORE INTO swap_stats (
         signature, wallet, input_mint, output_mint, fee_mint,
         input_ticker, output_ticker, amount_in, amount_out,
-        referral_applied, fee_amount, fee_bps, timestamp, network
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        referral_applied, fee_amount, fee_bps, sponsor_cost_lamports,
+        sponsor_reimbursement_lamports, sponsor_cost_estimated, timestamp, network
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.signature,
         record.wallet,
@@ -159,6 +190,9 @@ export class TransactionHistory extends BaseDatabase {
         record.referral_applied ? 1 : 0,
         record.fee_amount || null,
         record.fee_bps ?? null,
+        record.sponsor_cost_lamports ?? null,
+        record.sponsor_reimbursement_lamports ?? null,
+        record.sponsor_cost_estimated === undefined ? null : record.sponsor_cost_estimated ? 1 : 0,
         record.timestamp,
         record.network || "mainnet",
       ],
@@ -175,7 +209,10 @@ export class TransactionHistory extends BaseDatabase {
          amount_in AS amountIn,
          amount_out AS amountOut,
          fee_amount AS feeAmount,
-         fee_bps AS feeBps
+         fee_bps AS feeBps,
+         sponsor_cost_lamports AS sponsorCostLamports,
+         sponsor_reimbursement_lamports AS sponsorReimbursementLamports,
+         sponsor_cost_estimated AS sponsorCostEstimated
        FROM swap_stats
        WHERE referral_applied = 1
          AND fee_mint IS NOT NULL

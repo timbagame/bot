@@ -169,7 +169,7 @@ describe("Game completion announcements", () => {
     expect(sendCalls[0]?.text).toContain("won the coinflip");
   });
 
-  test("prize calculation uses totalPot when provided", async () => {
+  test("prize calculation uses winner amount instead of the pre-fee pot", async () => {
     const winnerPubkey = Keypair.generate().publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
@@ -201,9 +201,15 @@ describe("Game completion announcements", () => {
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 100;
-    await botModule.__test_processGameCompletion("GAME_WITH_TOTAL_POT", winnerPubkey, 1_000);
+    await botModule.__test_processGameCompletion(
+      "GAME_WITH_TOTAL_POT",
+      winnerPubkey,
+      1_000,
+      undefined,
+      990,
+    );
 
-    expect(receivedPot).toBe(1_000);
+    expect(receivedPot).toBe(990);
   });
 
   test("prize calculation falls back to total_amount when totalPot not provided", async () => {

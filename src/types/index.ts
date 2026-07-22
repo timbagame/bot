@@ -31,6 +31,9 @@ export interface GameData {
   expires_at?: number;
   total_amount?: number;
   participant_addresses?: string | null;
+  fee_amount_raw?: string | null;
+  completion_signature?: string | null;
+  completion_network_fee_lamports?: string | null;
 }
 
 export interface PlayerMapping {

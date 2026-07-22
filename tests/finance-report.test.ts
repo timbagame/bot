@@ -33,7 +33,11 @@ describe("finance report", () => {
           tokenMint: TIMBA,
           tokenTicker: "TIMBA",
           games: 2,
-          totalAmountRaw: "100000000",
+          exactFeeAmountRaw: "1000000",
+          estimatedTotalAmountRaw: "0",
+          estimatedGames: 0,
+          networkFeeLamports: "10000",
+          estimatedNetworkTransactions: 0,
         },
       ],
       referralFees: [
@@ -62,11 +66,11 @@ describe("finance report", () => {
     expect(report.gameRevenueUsd).toBeCloseTo(0.01);
     expect(report.swapRevenueUsd).toBeCloseTo(0.1);
     expect(report.networkExpensesUsd).toBeCloseTo(0.001);
-    expect(report.recurringExpensesUsd).toBeCloseTo(6 * (30 / (365.25 / 12)));
+    expect(report.recurringExpensesUsd).toBeCloseTo(6);
     expect(report.netProfitUsd).toBeLessThan(-5.8);
     expect(report.contractRentUsd).toBeCloseTo(243.778872);
     expect(report.hasEstimatedSwapRevenue).toBeFalse();
-    expect(formatFinanceReport(report)).toContain("Net profit:");
+    expect(formatFinanceReport(report)).toContain("Estimated result:");
   });
 
   it("labels legacy referral fees as estimated", async () => {
@@ -92,6 +96,34 @@ describe("finance report", () => {
 
     expect(report.swapRevenueUsd).toBeCloseTo(0.01);
     expect(report.hasEstimatedSwapRevenue).toBeTrue();
+  });
+
+  it("subtracts only unreimbursed sponsored transaction costs", async () => {
+    const report = await buildFinanceReport("30d", {
+      feePercentage: 1,
+      games: [],
+      referralFees: [
+        {
+          feeMint: USDC,
+          inputMint: USDC,
+          outputMint: TIMBA,
+          amountIn: "1000000",
+          amountOut: "1000000",
+          feeAmount: "10000",
+          feeBps: 100,
+          sponsorCostLamports: "10000",
+          sponsorReimbursementLamports: "5000",
+          sponsorCostEstimated: 0,
+        },
+      ],
+      monthlyExpenses: [],
+      contractRentLamports: 0n,
+      resolveTokenMetadata: async () => ({ ticker: "USDC", decimals: 6 }),
+      resolveTokenPriceUsd: async (mint) => (mint === SOL ? 100 : 1),
+    });
+
+    expect(report.sponsorNetworkExpensesUsd).toBeCloseTo(0.0005);
+    expect(report.totalExpensesUsd).toBeCloseTo(0.0005);
   });
 });
 

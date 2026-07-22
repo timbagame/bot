@@ -129,7 +129,9 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { getContractCapitalLamports } from "./services/contract-capital";
 import { TransactionHistory } from "./utils/transaction-history";
+import { getConfirmedTransactionFeeLamports } from "./utils/transaction-fee";
 import { generateTransactionId } from "./utils/transaction-id";
 import type { TokenBalanceLike } from "./types/wallet";
 import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
@@ -2066,6 +2068,7 @@ const processGameCompletion = async (
   winnerAddress: string,
   totalPot?: number,
   winnerTxSignature?: string,
+  winnerAmount?: number,
 ): Promise<void> => {
   cancelPendingGameMessageUpdate(gameAddress);
 
@@ -2114,15 +2117,17 @@ const processGameCompletion = async (
         let prizeDetails = "";
         const participantCount = gameDb.getGameParticipantsCount(gameAddress);
         const prizePot =
-          typeof totalPot === "number"
-            ? totalPot
-            : typeof gameData?.total_amount === "number"
-              ? gameData.total_amount
-              : typeof gameData?.amount === "number" && participantCount > 0
-                ? gameData.game_type === "giveaway"
-                  ? gameData.amount
-                  : gameData.amount * participantCount
-                : null;
+          typeof winnerAmount === "number"
+            ? winnerAmount
+            : typeof totalPot === "number"
+              ? totalPot
+              : typeof gameData?.total_amount === "number"
+                ? gameData.total_amount
+                : typeof gameData?.amount === "number" && participantCount > 0
+                  ? gameData.game_type === "giveaway"
+                    ? gameData.amount
+                    : gameData.amount * participantCount
+                  : null;
         if (typeof prizePot === "number" && prizePot > 0) {
           const prizeInfo = await gameManager.getPrizeDisplay(
             gameAddress,
@@ -2184,25 +2189,52 @@ const runProcessGameCompletion = async (
   winnerAddress: string,
   totalPot?: number,
   winnerTxSignature?: string,
+  feeAmountRaw?: string,
+  networkFeeLamports?: number,
+  winnerAmount?: number,
 ): Promise<boolean> => {
   const now = Date.now();
   pruneStaleCompletionJob(gameAddress, now);
 
   cancelPendingGameMessageUpdate(gameAddress);
-
-  if (inFlightCompletionJobs.has(gameAddress)) {
-    console.log(
-      `⏳ Skipping duplicate completion processing for ${gameAddress}; job already in-flight`,
-    );
-    return false;
+  const ownsCompletionJob = !inFlightCompletionJobs.has(gameAddress);
+  if (ownsCompletionJob) {
+    inFlightCompletionJobs.set(gameAddress, now);
   }
 
-  inFlightCompletionJobs.set(gameAddress, now);
   try {
-    await processGameCompletionHandler(gameAddress, winnerAddress, totalPot, winnerTxSignature);
+    // Finance data is idempotent and must survive the Anchor event/oracle callback race,
+    // even when the user-facing completion work is already running.
+    if (typeof gameDb.recordGameCompletionFinance === "function") {
+      const resolvedNetworkFee =
+        networkFeeLamports ??
+        (await getConfirmedTransactionFeeLamports(wallet.getConnection(), winnerTxSignature));
+      gameDb.recordGameCompletionFinance(gameAddress, {
+        feeAmountRaw,
+        signature: winnerTxSignature,
+        networkFeeLamports: resolvedNetworkFee ?? undefined,
+      });
+    }
+
+    if (!ownsCompletionJob) {
+      console.log(
+        `⏳ Skipping duplicate completion processing for ${gameAddress}; job already in-flight`,
+      );
+      return false;
+    }
+
+    await processGameCompletionHandler(
+      gameAddress,
+      winnerAddress,
+      totalPot,
+      winnerTxSignature,
+      winnerAmount,
+    );
     return true;
   } finally {
-    inFlightCompletionJobs.delete(gameAddress);
+    if (ownsCompletionJob) {
+      inFlightCompletionJobs.delete(gameAddress);
+    }
   }
 };
 
@@ -2236,12 +2268,17 @@ const handleGameCompletedAnchorEvent = async (
       console.log(`🔗 Completion signature: ${signature}`);
     }
 
-    const totalPot = Number(event.winnerAmount);
+    const winnerAmount = Number(event.winnerAmount.toString());
+    const feeAmountRaw = event.feeAmount.toString();
+    const totalPot = winnerAmount + Number(feeAmountRaw);
     const processed = await runProcessGameCompletion(
       gameAddress,
       winnerAddress,
       totalPot,
       signature,
+      feeAmountRaw,
+      undefined,
+      winnerAmount,
     );
 
     if (processed) {
@@ -2532,6 +2569,9 @@ type CompletionDetails = {
   winnerAddress: string;
   totalPot?: number;
   signature?: string;
+  feeAmountRaw?: string;
+  networkFeeLamports?: number;
+  winnerAmount?: number;
 };
 
 const toBase58String = (value: unknown): string => {
@@ -2632,11 +2672,18 @@ const parseCompletionEventFromLogs = (
       continue;
     }
 
-    const totalPot = bnLikeToNumber(data["winnerAmount"]);
+    const winnerAmount = bnLikeToNumber(data["winnerAmount"]);
+    const feeAmount = bnLikeToNumber(data["feeAmount"]);
+    const totalPot =
+      winnerAmount === undefined
+        ? undefined
+        : winnerAmount + (feeAmount === undefined ? 0 : feeAmount);
 
     return {
       winnerAddress,
       totalPot,
+      winnerAmount,
+      feeAmountRaw: data["feeAmount"] === undefined ? undefined : toBase58String(data["feeAmount"]),
     };
   }
 
@@ -2695,6 +2742,9 @@ const fetchCompletionDetailsFromHistory = async (
           return {
             ...parsed,
             signature,
+            ...(transaction.meta?.fee === undefined
+              ? {}
+              : { networkFeeLamports: transaction.meta.fee }),
           };
         }
       }
@@ -2766,6 +2816,9 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
       completionDetails.winnerAddress,
       completionDetails.totalPot,
       completionDetails.signature,
+      completionDetails.feeAmountRaw,
+      completionDetails.networkFeeLamports,
+      completionDetails.winnerAmount,
     );
 
     if (!processed) {
@@ -4459,6 +4512,9 @@ const financeHandlers = createFinanceHandlers({
     return metadata ? { ticker: metadata.ticker, decimals: metadata.decimals } : null;
   },
   resolveTokenPriceUsd: async (mint) => (await getUsdPrice({ tokenMint: mint }))?.price ?? null,
+  resolveContractCapital: async () => ({
+    lamports: await getContractCapitalLamports(wallet.getConnection(), program),
+  }),
 });
 
 registerCaseInsensitiveCommand("finance", async (ctx: Context) => {

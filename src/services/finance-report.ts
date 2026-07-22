@@ -21,6 +21,7 @@ export interface FinanceReportDependencies {
   referralFees: ReferralFeeRecord[];
   monthlyExpenses: MonthlyFinanceExpense[];
   contractRentLamports: bigint;
+  contractRentEstimated?: boolean;
   resolveTokenMetadata: (mint: string) => Promise<FinanceTokenMetadata | null>;
   resolveTokenPriceUsd: (mint: string) => Promise<number | null>;
 }
@@ -37,13 +38,17 @@ type TokenTotal = {
 export interface FinanceReport {
   period: FinancePeriod;
   label: string;
+  expenseFactor: number;
   startTimeMs: number;
   endTimeMs: number;
   completedGames: number;
+  feeGeneratingSwaps: number;
   gameRevenue: TokenTotal[];
   swapRevenue: TokenTotal[];
   gameRevenueUsd: number;
   swapRevenueUsd: number;
+  completionNetworkExpensesUsd: number;
+  sponsorNetworkExpensesUsd: number;
   networkExpensesUsd: number;
   recurringExpensesUsd: number;
   grossRevenueUsd: number;
@@ -51,9 +56,13 @@ export interface FinanceReport {
   netProfitUsd: number;
   contractRentLamports: bigint;
   contractRentUsd: number | null;
+  contractRentEstimated: boolean;
   monthlyExpenses: MonthlyFinanceExpense[];
   hasUnpricedTokens: boolean;
   hasEstimatedSwapRevenue: boolean;
+  hasEstimatedGameRevenue: boolean;
+  hasEstimatedNetworkExpenses: boolean;
+  hasEstimatedSponsorExpenses: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -77,7 +86,7 @@ export function resolveFinanceWindow(period: FinancePeriod, now: number = Date.n
     startTimeMs: now - days * DAY_MS,
     endTimeMs: now + 1,
     label: `Last ${days} days`,
-    monthlyExpenseFactor: days / AVERAGE_MONTH_DAYS,
+    monthlyExpenseFactor: period === "30d" ? 1 : days / AVERAGE_MONTH_DAYS,
   };
 }
 
@@ -124,20 +133,31 @@ export async function buildFinanceReport(
   const window = resolveFinanceWindow(period, now);
   const gameTotals = new Map<string, { ticker: string; rawAmount: bigint; estimated: boolean }>();
   let completedGames = 0;
+  let completionNetworkFeeLamports = 0n;
+  let estimatedNetworkTransactions = 0;
 
   for (const game of dependencies.games) {
-    const totalAmount = safeBigInt(game.totalAmountRaw);
-    const feeAmount = (totalAmount * BigInt(dependencies.feePercentage)) / 100n;
+    const exactFee = safeBigInt(game.exactFeeAmountRaw);
+    const estimatedFee =
+      (safeBigInt(game.estimatedTotalAmountRaw) * BigInt(dependencies.feePercentage)) / 100n;
     const current = gameTotals.get(game.tokenMint);
     gameTotals.set(game.tokenMint, {
       ticker: game.tokenTicker,
-      rawAmount: (current?.rawAmount ?? 0n) + feeAmount,
-      estimated: false,
+      rawAmount: (current?.rawAmount ?? 0n) + exactFee + estimatedFee,
+      estimated: (current?.estimated ?? false) || game.estimatedGames > 0,
     });
     completedGames += game.games;
+    completionNetworkFeeLamports += safeBigInt(game.networkFeeLamports);
+    estimatedNetworkTransactions += game.estimatedNetworkTransactions;
   }
 
+  completionNetworkFeeLamports +=
+    BigInt(estimatedNetworkTransactions) * DEFAULT_SIGNATURE_FEE_LAMPORTS;
+
   const swapTotals = new Map<string, { ticker: string; rawAmount: bigint; estimated: boolean }>();
+  let sponsorCostLamports = 0n;
+  let sponsorReimbursementLamports = 0n;
+  let hasEstimatedSponsorExpenses = false;
   for (const swap of dependencies.referralFees) {
     const exactFee = safeBigInt(swap.feeAmount);
     const feeBps = BigInt(swap.feeBps ?? 100);
@@ -151,6 +171,9 @@ export async function buildFinanceReport(
       rawAmount: (current?.rawAmount ?? 0n) + feeAmount,
       estimated: (current?.estimated ?? false) || estimated,
     });
+    sponsorCostLamports += safeBigInt(swap.sponsorCostLamports);
+    sponsorReimbursementLamports += safeBigInt(swap.sponsorReimbursementLamports);
+    hasEstimatedSponsorExpenses ||= swap.sponsorCostEstimated === 1;
   }
 
   const [gameRevenue, swapRevenue, solPrice] = await Promise.all([
@@ -162,10 +185,15 @@ export async function buildFinanceReport(
     totals.reduce((sum, total) => sum + (total.usdValue ?? 0), 0);
   const gameRevenueUsd = sumUsd(gameRevenue);
   const swapRevenueUsd = sumUsd(swapRevenue);
-  const networkExpensesUsd =
-    solPrice === null
-      ? 0
-      : decimalAmount(BigInt(completedGames) * DEFAULT_SIGNATURE_FEE_LAMPORTS, 9) * solPrice;
+  const unrecoveredSponsorLamports =
+    sponsorCostLamports > sponsorReimbursementLamports
+      ? sponsorCostLamports - sponsorReimbursementLamports
+      : 0n;
+  const completionNetworkExpensesUsd =
+    solPrice === null ? 0 : decimalAmount(completionNetworkFeeLamports, 9) * solPrice;
+  const sponsorNetworkExpensesUsd =
+    solPrice === null ? 0 : decimalAmount(unrecoveredSponsorLamports, 9) * solPrice;
+  const networkExpensesUsd = completionNetworkExpensesUsd + sponsorNetworkExpensesUsd;
   const recurringExpensesUsd = dependencies.monthlyExpenses.reduce(
     (sum, expense) => sum + expense.amountUsd * window.monthlyExpenseFactor,
     0,
@@ -178,13 +206,17 @@ export async function buildFinanceReport(
   return {
     period,
     label: window.label,
+    expenseFactor: window.monthlyExpenseFactor,
     startTimeMs: window.startTimeMs,
     endTimeMs: window.endTimeMs,
     completedGames,
+    feeGeneratingSwaps: dependencies.referralFees.length,
     gameRevenue,
     swapRevenue,
     gameRevenueUsd,
     swapRevenueUsd,
+    completionNetworkExpensesUsd,
+    sponsorNetworkExpensesUsd,
     networkExpensesUsd,
     recurringExpensesUsd,
     grossRevenueUsd,
@@ -192,8 +224,12 @@ export async function buildFinanceReport(
     netProfitUsd: grossRevenueUsd - totalExpensesUsd,
     contractRentLamports: dependencies.contractRentLamports,
     contractRentUsd,
+    contractRentEstimated: dependencies.contractRentEstimated ?? false,
     monthlyExpenses: dependencies.monthlyExpenses,
     hasUnpricedTokens: [...gameRevenue, ...swapRevenue].some((total) => total.usdValue === null),
     hasEstimatedSwapRevenue: swapRevenue.some((total) => total.estimated),
+    hasEstimatedGameRevenue: gameRevenue.some((total) => total.estimated),
+    hasEstimatedNetworkExpenses: estimatedNetworkTransactions > 0,
+    hasEstimatedSponsorExpenses,
   };
 }
