@@ -116,31 +116,10 @@ async function signaturesSince(
   return entries;
 }
 
-const TRANSACTION_BATCH_SIZE = 10;
-
-async function getTransactionBatch(
-  connection: Pick<Connection, "getTransactions">,
-  signatures: string[],
-): Promise<Array<VersionedTransactionResponse | null>> {
-  try {
-    return await connection.getTransactions(signatures, {
-      commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (signatures.length > 1 && /413|payload too large/i.test(message)) {
-      const middle = Math.ceil(signatures.length / 2);
-      const left = await getTransactionBatch(connection, signatures.slice(0, middle));
-      const right = await getTransactionBatch(connection, signatures.slice(middle));
-      return [...left, ...right];
-    }
-    throw error;
-  }
-}
+const TRANSACTION_FETCH_CONCURRENCY = 4;
 
 export async function fetchFinanceTransactions(
-  connection: Pick<Connection, "getTransactions">,
+  connection: Pick<Connection, "getTransaction">,
   signatures: Array<{ signature: string; blockTime?: number | null; slot: number }>,
 ) {
   const result: Array<{
@@ -149,11 +128,15 @@ export async function fetchFinanceTransactions(
     slot: number;
     transaction: VersionedTransactionResponse;
   }> = [];
-  for (let index = 0; index < signatures.length; index += TRANSACTION_BATCH_SIZE) {
-    const page = signatures.slice(index, index + TRANSACTION_BATCH_SIZE);
-    const transactions = await getTransactionBatch(
-      connection,
-      page.map(({ signature }) => signature),
+  for (let index = 0; index < signatures.length; index += TRANSACTION_FETCH_CONCURRENCY) {
+    const page = signatures.slice(index, index + TRANSACTION_FETCH_CONCURRENCY);
+    const transactions = await Promise.all(
+      page.map(({ signature }) =>
+        connection.getTransaction(signature, {
+          commitment: "confirmed",
+          maxSupportedTransactionVersion: 0,
+        }),
+      ),
     );
     transactions.forEach((transaction, offset) => {
       const entry = page[offset];

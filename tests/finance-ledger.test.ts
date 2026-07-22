@@ -38,17 +38,22 @@ describe("Jupiter referral ledger", () => {
   });
 });
 
-describe("finance RPC batching", () => {
-  it("splits batches rejected as too large without losing transactions", async () => {
-    const requestedBatchSizes: number[] = [];
+describe("finance RPC history", () => {
+  it("uses bounded individual requests supported by free RPC plans", async () => {
+    let activeRequests = 0;
+    let maximumConcurrency = 0;
+    const requestedSignatures: string[] = [];
     const connection = {
-      getTransactions: async (signatures: string[]) => {
-        requestedBatchSizes.push(signatures.length);
-        if (signatures.length > 2) throw new Error("413 Payload Too Large");
-        return signatures.map(() => ({ meta: { err: null } }));
+      getTransaction: async (signature: string) => {
+        requestedSignatures.push(signature);
+        activeRequests += 1;
+        maximumConcurrency = Math.max(maximumConcurrency, activeRequests);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeRequests -= 1;
+        return { meta: { err: null } };
       },
     };
-    const signatures = Array.from({ length: 5 }, (_, index) => ({
+    const signatures = Array.from({ length: 9 }, (_, index) => ({
       signature: `signature-${index}`,
       blockTime: 1,
       slot: index,
@@ -56,10 +61,8 @@ describe("finance RPC batching", () => {
 
     const result = await fetchFinanceTransactions(connection as any, signatures);
 
-    expect(result).toHaveLength(5);
-    expect(requestedBatchSizes[0]).toBe(5);
-    expect(
-      requestedBatchSizes.filter((size) => size <= 2).reduce((sum, size) => sum + size, 0),
-    ).toBe(5);
+    expect(result).toHaveLength(9);
+    expect(requestedSignatures).toHaveLength(9);
+    expect(maximumConcurrency).toBe(4);
   });
 });
