@@ -134,13 +134,16 @@ export const GAMES_PER_PAGE = 5; // Games per page in /games command output
 export const GAMES_HISTORY_LIMIT = 50; // Max games to fetch for history
 export const MAX_ACTIVE_GAMES_PER_CREATOR = parsePositiveInteger(
   "MAX_ACTIVE_GAMES_PER_CREATOR",
-  10,
+  20,
 );
 export const GAME_CREATION_RATE_LIMIT_WINDOW_MS = parsePositiveDuration(
   "GAME_CREATION_RATE_LIMIT_WINDOW_MS",
   60_000,
 );
-export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger("MAX_GAMES_PER_CREATOR_WINDOW", 3);
+export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger(
+  "MAX_GAMES_PER_CREATOR_WINDOW",
+  10,
+);
 export const JOIN_CALLBACK_ANSWER_SUPPRESS_MS = 7_000;
 
 // ================================

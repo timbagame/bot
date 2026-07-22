@@ -322,21 +322,21 @@ describe("GameManager.createGame", () => {
       sharedTimestamp,
     ];
 
-    const first = gm.createGame(...baseArgs);
-    const second = gm.createGame(...baseArgs);
-    const third = gm.createGame(...baseArgs);
+    const pendingRequests = Array.from({ length: MAX_GAMES_PER_CREATOR_WINDOW }, () =>
+      gm.createGame(...baseArgs),
+    );
 
-    expect(metadataDeferrals.length).toBe(3);
+    expect(metadataDeferrals.length).toBe(MAX_GAMES_PER_CREATOR_WINDOW);
 
-    const fourthResult = await gm.createGame(...baseArgs);
-    expect(fourthResult.success).toBe(false);
-    const fourthError = String(fourthResult.error || "");
-    expect(fourthError.toLowerCase()).toContain("rate limit");
-    expect(fourthError).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
-    expect(fourthError).toContain("Some requests are still processing.");
+    const blockedResult = await gm.createGame(...baseArgs);
+    expect(blockedResult.success).toBe(false);
+    const blockedError = String(blockedResult.error || "");
+    expect(blockedError.toLowerCase()).toContain("rate limit");
+    expect(blockedError).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+    expect(blockedError).toContain("Some requests are still processing.");
 
     metadataDeferrals.forEach((reject) => reject(new Error("abort")));
-    await Promise.allSettled([first, second, third]);
+    await Promise.allSettled(pendingRequests);
   });
 
   test("evaluates stale request timestamps against the current rate-limit window", async () => {
