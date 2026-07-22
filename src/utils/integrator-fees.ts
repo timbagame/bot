@@ -7,6 +7,7 @@ import {
   DEFAULT_REFERRAL_BASE_FEE_BPS,
   DEFAULT_MAX_EXTRA_FEE_BPS,
   MAX_REFERRAL_FEE_BPS,
+  MIN_JUPITER_SWAP_FEE_BPS,
 } from "./admin-payer-surcharge";
 
 export type IntegratorPayerKind = "user" | "admin";
@@ -185,7 +186,7 @@ export const resolveIntegratorSwapParams = async (
 
   const baseFeeBps = clampReferralFeeBps(
     referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
-    50,
+    MIN_JUPITER_SWAP_FEE_BPS,
     MAX_REFERRAL_FEE_BPS,
   );
 

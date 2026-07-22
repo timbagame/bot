@@ -112,6 +112,7 @@ import { getReferralConfig, type ReferralConfig } from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
+  DEFAULT_REFERRAL_BASE_FEE_BPS,
 } from "./utils/admin-payer-surcharge";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage, NetworkDetector } from "./utils/network-detector";
@@ -4930,7 +4931,8 @@ const resolveAdminIntegratorConfig = async (
   } = options;
 
   let config = integratorConfig;
-  const baseFeeBps = config?.referralFee ?? referralConfig.baseFeeBps ?? 85;
+  const baseFeeBps =
+    config?.referralFee ?? referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS;
 
   const shouldForceAdminForMax =
     amountResolution.normalizedAmount === "max" &&

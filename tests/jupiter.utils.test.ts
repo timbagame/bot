@@ -166,6 +166,7 @@ describe("JupiterClient referral URL params", () => {
     });
 
     expect(capture.url).toContain(`taker=${payer}`);
+    expect(capture.url).toContain("referralFee=100");
   });
 
   test("keeps explicit taker instead of overriding with payer", async () => {

@@ -1,6 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
+import { MIN_JUPITER_SWAP_FEE_BPS } from "./admin-payer-surcharge";
 import type { FetchLike } from "../types";
 
 // ================================
@@ -13,6 +14,7 @@ export interface JupiterQuoteRequest {
   amount: string;
   taker?: string;
   platformFeeBps?: number;
+  feeAccount?: string;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
   swapMode?: "ExactIn" | "ExactOut";
@@ -288,7 +290,10 @@ export class JupiterClient {
       url.searchParams.set("referralAccount", params.referralAccount);
     }
     if (params.referralFee !== undefined) {
-      url.searchParams.set("referralFee", params.referralFee.toString());
+      url.searchParams.set(
+        "referralFee",
+        Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee).toString(),
+      );
     }
     if (params.payer) {
       url.searchParams.set("payer", params.payer);
@@ -372,6 +377,20 @@ export class JupiterClient {
         const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
         const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
+      }
+
+      const requiredReferralFeeBps =
+        params.referralAccount && params.referralFee !== undefined
+          ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee)
+          : 0;
+      if (
+        requiredReferralFeeBps > 0 &&
+        typeof data.feeBps === "number" &&
+        data.feeBps < requiredReferralFeeBps
+      ) {
+        throw new Error(
+          `Jupiter order did not apply the required ${requiredReferralFeeBps} bps swap fee.`,
+        );
       }
 
       const referralApplied = Boolean(data.referralApplied);
@@ -473,7 +492,13 @@ export class JupiterClient {
       url.searchParams.set("maxAccounts", request.maxAccounts.toString());
     }
     if (request.platformFeeBps !== undefined) {
-      url.searchParams.set("platformFeeBps", request.platformFeeBps.toString());
+      url.searchParams.set(
+        "platformFeeBps",
+        Math.max(MIN_JUPITER_SWAP_FEE_BPS, request.platformFeeBps).toString(),
+      );
+    }
+    if (request.feeAccount) {
+      url.searchParams.set("feeAccount", request.feeAccount);
     }
 
     try {

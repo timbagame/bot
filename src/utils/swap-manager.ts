@@ -31,7 +31,11 @@ import { SwapQuoteCache } from "./swap/quote-cache";
 import { getReferralConfig } from "./token-registry";
 import { SwapService } from "./swap/service";
 import { calculateRouteCosts, DEFAULT_ROUTE_LAMPORTS_PADDING } from "./swap/route-cost";
-import { DEFAULT_REFERRAL_BASE_FEE_BPS, DEFAULT_MAX_EXTRA_FEE_BPS } from "./admin-payer-surcharge";
+import {
+  DEFAULT_REFERRAL_BASE_FEE_BPS,
+  DEFAULT_MAX_EXTRA_FEE_BPS,
+  MIN_JUPITER_SWAP_FEE_BPS,
+} from "./admin-payer-surcharge";
 
 export type { SwapQuote, SwapRequest, JustInTimeSwapResult } from "./swap/types";
 
@@ -420,7 +424,10 @@ export class SwapManager {
     }
 
     const admin = operatorKeypair.publicKey.toBase58();
-    const baseFeeBps = ref.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS;
+    const baseFeeBps = Math.max(
+      MIN_JUPITER_SWAP_FEE_BPS,
+      ref.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
+    );
     const maxExtraBps = ref.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
 
     // Use unified fee calculation
@@ -948,8 +955,13 @@ export class SwapManager {
       swapResponse.order?.integratorFallback !== true &&
       swapResponse.order?.payerApplied !== false;
 
+    if (integrator?.payerKind !== "admin" && swapResponse.order?.integratorFallback === true) {
+      throw new Error(
+        "Jupiter could not apply the required swap fee; refusing a fee-free fallback.",
+      );
+    }
+
     if (integrator?.payerKind === "admin" && !adminPayerApplied) {
-      const userBalance = await this.connection.getBalance(userKeypair.publicKey);
       const { requiredLamports } = calculateRouteCosts(swapResponse.order, {
         paddingRatio: 0.25,
         paddingExtraLamports: 200_000,
@@ -957,37 +969,25 @@ export class SwapManager {
         baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
         requiredStrategy: "max",
       });
-      const inputLamports = this.isSolMint(quote.inputMint)
-        ? Number(BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0"))
-        : 0;
-      const requiredUserLamports = inputLamports + requiredLamports;
-
-      if (userBalance < requiredUserLamports) {
-        if (this.canUseAtomicBuildFallback(request, quote)) {
-          const payerPublicKey = this.tryParsePublicKey(integrator.payer);
-          if (payerPublicKey) {
-            const operatorKeypair = this.wallet.getOperatorKeypair();
-            if (payerPublicKey.equals(operatorKeypair.publicKey)) {
-              return this.executeAtomicBuildFallback({
-                request,
-                quote,
-                jupiterQuote,
-                operatorKeypair,
-                reimbursementLamports: requiredLamports,
-              });
-            }
+      if (this.canUseAtomicBuildFallback(request, quote)) {
+        const payerPublicKey = this.tryParsePublicKey(integrator.payer);
+        if (payerPublicKey) {
+          const operatorKeypair = this.wallet.getOperatorKeypair();
+          if (payerPublicKey.equals(operatorKeypair.publicKey)) {
+            return this.executeAtomicBuildFallback({
+              request,
+              quote,
+              jupiterQuote,
+              operatorKeypair,
+              reimbursementLamports: requiredLamports,
+            });
           }
         }
-
-        throw new Error(
-          "Jupiter admin payer fallback requires user-paid SOL fees, but the user balance is too low.",
-        );
       }
 
-      console.warn("Jupiter admin payer unavailable; executing user-paid fallback", {
-        requestId: swapResponse.requestId,
-        fallbackReason: swapResponse.order?.integratorFallbackReason,
-      });
+      throw new Error(
+        "Jupiter could not apply the required swap fee and admin payer; refusing a fee-free fallback.",
+      );
     }
 
     // Determine payer and required signer for admin-funded routes
@@ -1294,6 +1294,11 @@ export class SwapManager {
       );
     }
 
+    const referralConfig = getReferralConfig();
+    if (!referralConfig.buildFeeAccount) {
+      throw new Error("Jupiter build fee account is not configured.");
+    }
+
     await this.ensureAdminCanCoverRoute(
       integrator,
       {
@@ -1309,6 +1314,8 @@ export class SwapManager {
       amount: quote.inputAmountRaw,
       taker: request.userKeypair.publicKey.toBase58(),
       payer: operatorKeypair.publicKey.toBase58(),
+      platformFeeBps: Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee),
+      feeAccount: referralConfig.buildFeeAccount,
       swapMode: jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
       slippageBps: quote.providerQuote?.slippageBps ?? jupiterQuote.slippageBps,
     });

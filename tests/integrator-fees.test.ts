@@ -31,6 +31,21 @@ describe("Integrator fee calculations", () => {
     vi.restoreAllMocks();
   });
 
+  test("uses a 1% base fee for user-funded manual swaps", async () => {
+    const result = await resolveIntegratorSwapParams({
+      inputMint: CLAMP_REF_MINT,
+      outputMint: WSOL_MINT,
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000,
+      userPublicKey: "ManualSwapUser",
+      availableSolLamports: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+    });
+
+    expect(result?.payerKind).toBe("user");
+    expect(result?.referralFee).toBe(100);
+  });
+
   test("throws when trade is too small to cover admin payer shortfall", async () => {
     __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
@@ -88,7 +103,7 @@ describe("Integrator fee calculations", () => {
     expect(priceSpy).toHaveBeenCalledTimes(2);
     expect(result).not.toBeNull();
     expect(result?.payerKind).toBe("admin");
-    expect(result?.referralFee).toBe(88);
+    expect(result?.referralFee).toBe(103);
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
   });
 
@@ -172,7 +187,7 @@ describe("Integrator fee calculations", () => {
 
     expect(priceSpy).toHaveBeenCalledTimes(2);
     expect(result?.payerKind).toBe("admin");
-    expect(result?.referralFee).toBe(185);
+    expect(result?.referralFee).toBe(200);
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
     expect(result?.closeAuthority).toBe("AdminCloseAuthority2222222222222222222222222222");
   });
@@ -237,7 +252,7 @@ describe("Integrator fee calculations", () => {
     expect(result?.referralFee).toBeGreaterThan(85);
   });
 
-  test("clamps referral fee floor to 50 bps when configured lower", async () => {
+  test("clamps referral fee floor to 100 bps when configured lower", async () => {
     __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
       baseFeeBps: 10,
@@ -254,7 +269,7 @@ describe("Integrator fee calculations", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result?.referralFee).toBe(50);
+    expect(result?.referralFee).toBe(100);
   });
 });
 
@@ -389,7 +404,7 @@ describe("calculateDynamicReferralFee", () => {
     ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
   });
 
-  test("uses default baseFeeBps of 85 when not specified", async () => {
+  test("uses default baseFeeBps of 100 when not specified", async () => {
     const result = await calculateDynamicReferralFee({
       inputMint: "SomeMint111111111111111111111111111111111",
       inputTicker: "TKN",
@@ -398,7 +413,7 @@ describe("calculateDynamicReferralFee", () => {
       shortfallLamports: 0,
     });
 
-    expect(result).toBe(85);
+    expect(result).toBe(100);
   });
 
   test("returns base fee when price resolution throws", async () => {

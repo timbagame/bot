@@ -9,6 +9,7 @@ export type BuiltinTokenMetadata = TokenConfig & {
 
 export interface ReferralConfig {
   referralAccount: string;
+  buildFeeAccount?: string;
   baseFeeBps?: number;
   adminPayer?: string;
   adminCloseAuthority?: string;
@@ -195,6 +196,8 @@ export function requireTokenByMint(mint: string, options: TokenRegistryOptions =
 
 const DEFAULT_REFERRAL_CONFIG: ReferralConfig = {
   referralAccount: "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U",
+  // Initialized WSOL token account owned by the referral account, used by Swap V2 /build fees.
+  buildFeeAccount: "3Zakc3mEdWa6v4Sd5ywDJgUrcz5VK7FrdnHnV4DT1hbQ",
 };
 
 let referralConfig = DEFAULT_REFERRAL_CONFIG;

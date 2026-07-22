@@ -112,7 +112,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(typeof capturedExecuteRequest.signedTransaction).toBe("string");
   });
 
-  test("executes fallback Jupiter transaction without admin signer", async () => {
+  test("rejects a fee-free fallback Jupiter transaction", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -186,9 +186,8 @@ describe("SwapManager.executeJupiterSwap", () => {
       },
     };
 
-    const sig = await sm.executeJupiterSwap(req, quote);
-    expect(sig).toBe("SIG_FALLBACK");
-    expect(capturedExecuteRequest.requestId).toBe("req-fallback");
+    await expect(sm.executeJupiterSwap(req, quote)).rejects.toThrow(/required swap fee/);
+    expect(capturedExecuteRequest.requestId).toBe("");
   });
 
   test("blocks user-paid fallback when user lacks SOL for route costs", async () => {
@@ -271,7 +270,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/user-paid SOL fees/);
+      expect((error as Error).message).toMatch(/required swap fee/);
     }
     expect(executeCalled).toBe(false);
   });
@@ -418,6 +417,8 @@ describe("SwapManager.executeJupiterSwap", () => {
       payer: admin.publicKey.toBase58(),
       swapMode: "ExactIn",
       slippageBps: 100,
+      platformFeeBps: 100,
+      feeAccount: "3Zakc3mEdWa6v4Sd5ywDJgUrcz5VK7FrdnHnV4DT1hbQ",
     });
     expect(capturedTx).not.toBeNull();
     const message = capturedTx!.message;
