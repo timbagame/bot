@@ -19,6 +19,12 @@ type FinanceHandlerDependencies = {
   adminIds?: Set<string>;
   monthlyExpenses?: FinanceReportDependencies["monthlyExpenses"];
   now?: () => number;
+  trackBackgroundTask?: (task: Promise<void>) => void;
+};
+
+type FinanceLoadingMessage = {
+  chat: { id: number };
+  message_id: number;
 };
 
 export const FINANCE_ADMIN_TELEGRAM_IDS = new Set(["5162530"]);
@@ -110,6 +116,7 @@ const keyboard = () =>
 export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) {
   const adminIds = dependencies.adminIds ?? FINANCE_ADMIN_TELEGRAM_IDS;
   const monthlyExpenses = dependencies.monthlyExpenses ?? [...FINANCE_MONTHLY_EXPENSES];
+  const activeReports = new Set<string>();
 
   const loadContractCapital = async () => {
     if (!dependencies.resolveContractCapital) {
@@ -126,19 +133,12 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
   const isAuthorized = (ctx: Context): boolean =>
     ctx.chat?.type === "private" && ctx.from?.id !== undefined && adminIds.has(String(ctx.from.id));
 
-  const render = async (ctx: Context, period: FinancePeriod, edit: boolean): Promise<void> => {
-    if (!isAuthorized(ctx)) {
-      if (ctx.callbackQuery) await ctx.answerCallbackQuery();
-      return;
-    }
-
-    if (ctx.callbackQuery) {
-      await ctx.answerCallbackQuery();
-    }
-
-    const loadingMessage = edit
-      ? null
-      : await ctx.reply("⏳ Building the finance report. You can continue using the bot.");
+  const render = async (
+    ctx: Context,
+    period: FinancePeriod,
+    edit: boolean,
+    loadingMessage?: FinanceLoadingMessage,
+  ): Promise<void> => {
     const now = dependencies.now?.() ?? Date.now();
     const window = resolveFinanceWindow(period, now);
     const [snapshot, contractCapital] = await Promise.all([
@@ -186,9 +186,70 @@ export function createFinanceHandlers(dependencies: FinanceHandlerDependencies) 
     }
   };
 
+  const runInBackground = (
+    ctx: Context,
+    key: string,
+    task: Promise<void>,
+    loadingMessage?: FinanceLoadingMessage,
+  ) => {
+    activeReports.add(key);
+    const guardedTask = task
+      .catch(async (error) => {
+        console.error("Unable to build finance report:", error);
+        const text = "❌ Unable to build the finance report right now. Please try again later.";
+        try {
+          if (loadingMessage) {
+            await ctx.api.editMessageText(loadingMessage.chat.id, loadingMessage.message_id, text);
+          } else {
+            await ctx.reply(text);
+          }
+        } catch (replyError) {
+          console.error("Unable to report finance background failure:", replyError);
+        }
+      })
+      .finally(() => activeReports.delete(key));
+
+    if (dependencies.trackBackgroundTask) {
+      dependencies.trackBackgroundTask(guardedTask);
+    } else {
+      void guardedTask;
+    }
+  };
+
+  const handleCommand = async (ctx: Context): Promise<void> => {
+    if (!isAuthorized(ctx)) return;
+
+    const key = String(ctx.from!.id);
+    if (activeReports.has(key)) {
+      await ctx.reply("⏳ Your finance report is already being built.");
+      return;
+    }
+
+    const loadingMessage = await ctx.reply(
+      "⏳ Building the finance report. You can continue using the bot.",
+    );
+    runInBackground(ctx, key, render(ctx, "30d", false, loadingMessage), loadingMessage);
+  };
+
+  const handleCallback = async (ctx: Context, period: FinancePeriod): Promise<void> => {
+    if (!isAuthorized(ctx)) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const key = String(ctx.from!.id);
+    if (activeReports.has(key)) {
+      await ctx.answerCallbackQuery("Your finance report is already being built.");
+      return;
+    }
+
+    await ctx.answerCallbackQuery("Refreshing finance report…");
+    runInBackground(ctx, key, render(ctx, period, true));
+  };
+
   return {
-    handleCommand: (ctx: Context) => render(ctx, "30d", false),
-    handleCallback: (ctx: Context, period: FinancePeriod) => render(ctx, period, true),
+    handleCommand,
+    handleCallback,
     isAuthorized,
   };
 }

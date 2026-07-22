@@ -86,13 +86,13 @@ describe("Bot Main Entry Point Tests", () => {
       expect((botModule.bot as any).errorHandler).toBe(handler);
     });
 
-    test("isolates slow finance updates from the user's normal command queue", () => {
+    test("uses the default user queue for finance and normal commands", () => {
       expect(
         botModule.__test_getSequentializationKey({
           from: { id: 42 },
           message: { text: "/finance" },
         } as any),
-      ).toBe("finance_42");
+      ).toBe("42");
       expect(
         botModule.__test_getSequentializationKey({
           from: { id: 42 },

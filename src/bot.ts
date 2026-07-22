@@ -2847,14 +2847,6 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
   const userId = getTelegramIdString(ctx);
   if (!userId) return undefined;
 
-  const messageText = ctx.message?.text;
-  if (
-    ctx.callbackQuery?.data?.startsWith("finance:") ||
-    (typeof messageText === "string" && /^\/finance(?:@[\w_]+)?(?:\s|$)/i.test(messageText))
-  ) {
-    return `finance_${userId}`;
-  }
-
   if (ctx.callbackQuery?.data) {
     const callbackData = ctx.callbackQuery.data;
     if (callbackData.startsWith("join_") || callbackData.startsWith("refresh_")) {

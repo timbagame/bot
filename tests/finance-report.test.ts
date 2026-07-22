@@ -162,7 +162,11 @@ describe("finance authorization", () => {
   });
 
   it("returns the report to an allowlisted private-chat admin", async () => {
-    const handlers = createFinanceHandlers(makeDependencies());
+    const backgroundTasks: Promise<void>[] = [];
+    const handlers = createFinanceHandlers({
+      ...makeDependencies(),
+      trackBackgroundTask: (task) => backgroundTasks.push(task),
+    });
     let message = "";
     await handlers.handleCommand({
       chat: { type: "private" },
@@ -174,17 +178,26 @@ describe("finance authorization", () => {
         },
       },
     } as any);
+    await Promise.all(backgroundTasks);
     expect(message).toContain("Timba Finance");
   });
 
-  it("acknowledges an authorized command before starting RPC synchronization", async () => {
+  it("returns after acknowledging while RPC synchronization continues in the background", async () => {
     const order: string[] = [];
+    const backgroundTasks: Promise<void>[] = [];
+    let finishSync!: () => void;
     const dependencies = makeDependencies();
-    dependencies.financeLedger.sync = async () => {
+    dependencies.financeLedger.sync = () => {
       order.push("sync");
-      return { gameClaimable: [], swapClaimable: [], coverage: "complete" as const };
+      return new Promise((resolve) => {
+        finishSync = () =>
+          resolve({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const });
+      });
     };
-    const handlers = createFinanceHandlers(dependencies);
+    const handlers = createFinanceHandlers({
+      ...dependencies,
+      trackBackgroundTask: (task) => backgroundTasks.push(task),
+    });
 
     await handlers.handleCommand({
       chat: { type: "private" },
@@ -197,5 +210,44 @@ describe("finance authorization", () => {
     } as any);
 
     expect(order.slice(0, 2)).toEqual(["ack", "sync"]);
+    expect(backgroundTasks).toHaveLength(1);
+    finishSync();
+    await Promise.all(backgroundTasks);
+  });
+
+  it("does not start a second background report for the same admin", async () => {
+    const backgroundTasks: Promise<void>[] = [];
+    const replies: string[] = [];
+    let finishSync!: () => void;
+    let syncCalls = 0;
+    const dependencies = makeDependencies();
+    dependencies.financeLedger.sync = () => {
+      syncCalls += 1;
+      return new Promise((resolve) => {
+        finishSync = () =>
+          resolve({ gameClaimable: [], swapClaimable: [], coverage: "complete" as const });
+      });
+    };
+    const handlers = createFinanceHandlers({
+      ...dependencies,
+      trackBackgroundTask: (task) => backgroundTasks.push(task),
+    });
+    const ctx = {
+      chat: { type: "private" },
+      from: { id: 123 },
+      reply: async (text: string) => {
+        replies.push(text);
+        return { chat: { id: 123 }, message_id: replies.length };
+      },
+      api: { editMessageText: async () => undefined },
+    } as any;
+
+    await handlers.handleCommand(ctx);
+    await handlers.handleCommand(ctx);
+
+    expect(syncCalls).toBe(1);
+    expect(replies.at(-1)).toContain("already being built");
+    finishSync();
+    await Promise.all(backgroundTasks);
   });
 });
