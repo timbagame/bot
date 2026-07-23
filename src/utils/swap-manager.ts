@@ -1067,18 +1067,23 @@ export class SwapManager {
     quote.executionFeeMint = swapResponse.order?.feeMint;
     quote.executionFeeAmount = swapResponse.order?.platformFee?.amount;
     quote.executionFeeBps = swapResponse.order?.feeBps ?? swapResponse.order?.platformFee?.feeBps;
-    quote.executionReferralApplied = swapResponse.order?.referralApplied;
     quote.executionOutputAmount = swapResponse.order?.outAmount ?? quote.outputAmount;
 
     const requiredFeeBps = integrator
       ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee)
       : 0;
-    const appliedFeeBps = swapResponse.order?.feeBps;
+    // Jupiter Swap v2 confirms fees via feeBps; referralApplied is not always returned.
+    const appliedFeeBps =
+      typeof swapResponse.order?.feeBps === "number"
+        ? swapResponse.order.feeBps
+        : typeof swapResponse.order?.platformFee?.feeBps === "number"
+          ? swapResponse.order.platformFee.feeBps
+          : undefined;
     const requiredReferralApplied =
-      !integrator ||
-      (swapResponse.order?.referralApplied === true &&
-        typeof appliedFeeBps === "number" &&
-        appliedFeeBps >= requiredFeeBps);
+      !integrator || (typeof appliedFeeBps === "number" && appliedFeeBps >= requiredFeeBps);
+    quote.executionReferralApplied =
+      swapResponse.order?.referralApplied === true ||
+      (typeof appliedFeeBps === "number" && appliedFeeBps >= requiredFeeBps);
     const transactionFeePayer =
       integrator?.payerKind === "admin"
         ? this.getSerializedTransactionFeePayer(swapResponse.swapTransaction)

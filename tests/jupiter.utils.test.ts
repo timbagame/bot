@@ -4,6 +4,7 @@ import {
   isPriceImpactTooHigh,
   validateSlippage,
   JupiterClient,
+  resolveAppliedFeeBps,
   type JupiterQuoteResponse,
   type JupiterOrderResponse,
 } from "../src/utils/jupiter";
@@ -226,6 +227,91 @@ describe("JupiterClient referral URL params", () => {
     expect(urls[0]).toContain("referralAccount=");
     expect(urls[0]).toContain(`payer=${payer}`);
     expect(urls[0]).toContain(`closeAuthority=${closeAuthority}`);
+  });
+
+  test("accepts live Swap v2 fee confirmation via feeBps without referralApplied", async () => {
+    // Real Jupiter /swap/v2/order responses return feeBps + platformFee, but do
+    // not set referralApplied. Fee confirmation must rely on feeBps.
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({
+          referralApplied: undefined,
+          feeBps: 100,
+          platformFee: { feeBps: 100, amount: "0" },
+        }),
+      ),
+    );
+
+    const quote = await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFee: 100,
+      payer,
+    });
+
+    expect(quote.feeBps).toBe(100);
+    expect(quote.referralApplied).toBe(true);
+  });
+
+  test("rejects when required fee bps are missing from the order response", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({
+          referralApplied: undefined,
+          feeBps: undefined,
+          platformFee: null,
+        }),
+      ),
+    );
+
+    await expect(
+      client.getQuote({
+        inputMint,
+        outputMint,
+        amount,
+        referralAccount,
+        referralFee: 100,
+        payer,
+      }),
+    ).rejects.toThrow(/did not confirm the required swap fee/);
+  });
+
+  test("rejects when applied fee bps are below the required amount", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({
+          feeBps: 50,
+          platformFee: { feeBps: 50, amount: "0" },
+        }),
+      ),
+    );
+
+    await expect(
+      client.getQuote({
+        inputMint,
+        outputMint,
+        amount,
+        referralAccount,
+        referralFee: 100,
+        payer,
+      }),
+    ).rejects.toThrow(/below the required 100 bps/);
+  });
+});
+
+describe("resolveAppliedFeeBps", () => {
+  test("prefers top-level feeBps then platformFee.feeBps", () => {
+    expect(resolveAppliedFeeBps({ feeBps: 100 })).toBe(100);
+    expect(resolveAppliedFeeBps({ platformFee: { feeBps: 85, amount: "1" } })).toBe(85);
+    expect(resolveAppliedFeeBps({ feeBps: 100, platformFee: { feeBps: 50, amount: "1" } })).toBe(
+      100,
+    );
+    expect(resolveAppliedFeeBps({})).toBe(null);
   });
 });
 

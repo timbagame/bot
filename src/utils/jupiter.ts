@@ -213,6 +213,23 @@ const extractJupiterErrorMessage = (errorText: string): string => {
   return errorText.trim() || "Unknown Jupiter error";
 };
 
+/**
+ * Resolve the fee rate Jupiter actually applied on an order response.
+ * Swap v2 confirms integrator fees via feeBps (and platformFee.feeBps);
+ * referralApplied is not always present in live responses.
+ */
+export const resolveAppliedFeeBps = (
+  data: Pick<JupiterOrderResponse, "feeBps" | "platformFee">,
+): number | null => {
+  if (typeof data.feeBps === "number" && Number.isFinite(data.feeBps)) {
+    return data.feeBps;
+  }
+  if (typeof data.platformFee?.feeBps === "number" && Number.isFinite(data.platformFee.feeBps)) {
+    return data.platformFee.feeBps;
+  }
+  return null;
+};
+
 export interface JupiterExecuteResponse {
   status?: string;
   signature?: string;
@@ -366,9 +383,11 @@ export class JupiterClient {
         params.referralAccount && params.referralFee !== undefined
           ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee)
           : 0;
+      // Jupiter Swap v2 documents fee confirmation via top-level feeBps /
+      // platformFee.feeBps. It does not reliably return referralApplied.
+      const appliedFeeBps = resolveAppliedFeeBps(data);
       if (requiredReferralFeeBps > 0) {
-        const appliedFeeBps = typeof data.feeBps === "number" ? data.feeBps : null;
-        if (data.referralApplied !== true || appliedFeeBps === null) {
+        if (appliedFeeBps === null) {
           throw new Error("Jupiter order did not confirm the required swap fee.");
         }
         if (appliedFeeBps < requiredReferralFeeBps) {
@@ -378,10 +397,15 @@ export class JupiterClient {
         }
       }
 
-      const referralApplied = Boolean(data.referralApplied);
+      const referralApplied =
+        data.referralApplied === true ||
+        (requiredReferralFeeBps > 0 &&
+          appliedFeeBps !== null &&
+          appliedFeeBps >= requiredReferralFeeBps);
       const payerApplied = Boolean(data.payerApplied);
       const normalized = {
         ...this.normalizeQuote(data),
+        feeBps: data.feeBps ?? appliedFeeBps ?? undefined,
         referralApplied,
         payerApplied,
       } satisfies JupiterQuoteResponse;
