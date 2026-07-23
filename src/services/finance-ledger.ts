@@ -283,30 +283,53 @@ export class FinanceLedgerService {
     return processed;
   }
 
+  private parseProgramEvents(
+    transaction: VersionedTransactionResponse,
+    signature: string,
+  ): Array<{ name: string; data: Record<string, unknown> }> {
+    try {
+      const parser = new EventParser(this.program.programId, this.program.coder);
+      return [...parser.parseLogs([...(transaction.meta?.logMessages ?? [])])].map((event) => ({
+        name: event.name,
+        data: event.data as Record<string, unknown>,
+      }));
+    } catch (error) {
+      // Historical program logs can fail to decode after event layout changes
+      // (e.g. PlayerUnjoined gained moved_participant). Finance only needs
+      // GameCompleted / TokenFeeWithdrawn, so skip the whole tx rather than stall.
+      console.warn(
+        `Skipping program transaction ${signature}: unable to parse event logs (${error})`,
+      );
+      return [];
+    }
+  }
+
   private recordProgramEvents(
     entry: { signature: string; blockTime?: number | null; slot: number },
     transaction: VersionedTransactionResponse,
   ): void {
-    const parser = new EventParser(this.program.programId, this.program.coder);
+    const events = this.parseProgramEvents(transaction, entry.signature);
     const gameMints = new Map<string, string>();
-    const events = [...parser.parseLogs([...(transaction.meta?.logMessages ?? [])])];
 
     for (const event of events) {
       if (event.name.toLowerCase() !== "gameinitialized") continue;
-      const data = event.data as Record<string, unknown>;
-      gameMints.set(asString(data["gameKey"]), asString(data["tokenMint"]));
+      gameMints.set(asString(event.data["gameKey"]), asString(event.data["tokenMint"]));
     }
 
     for (const event of events) {
       const name = event.name.toLowerCase();
-      const data = event.data as Record<string, unknown>;
+      const data = event.data;
       let financeEvent: FinanceEventRecord | null = null;
       if (name === "gamecompleted") {
         const game = asString(data["gameKey"]);
         const mint =
           gameMints.get(game) ?? this.resolveGameMint?.(game) ?? inferTransactionMint(transaction);
         if (!mint) {
-          throw new Error(`Unable to resolve token mint for completed game ${game}`);
+          // Permanent for this cursor — skip rather than retry forever.
+          console.warn(
+            `Skipping game fee for completed game ${game} in ${entry.signature}: unable to resolve token mint`,
+          );
+          continue;
         }
         financeEvent = {
           eventId: `program:${entry.signature}:game:${game}`,

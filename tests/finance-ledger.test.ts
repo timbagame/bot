@@ -149,4 +149,66 @@ describe("incremental finance backfill", () => {
     ]);
     expect(history.errors.at(-1)).toContain("429 Too Many Requests");
   });
+
+  it("skips program transactions whose event logs no longer match the IDL", async () => {
+    const programSource = {
+      sourceKey: `program:${OTHER.toBase58()}`,
+      sourceType: "program" as const,
+      address: OTHER.toBase58(),
+      beforeSignature: null,
+      startTimeMs: 0,
+      completed: false,
+      processedTransactions: 0,
+      lastError: null,
+    };
+    const history = createHistory();
+    history.store.getNextFinanceBackfillSource = () => programSource;
+
+    const throwingProgram = {
+      ...program,
+      coder: {
+        events: {
+          decode: () => {
+            throw new Error("Invalid option movedParticipant");
+          },
+        },
+      },
+    };
+    const connection = {
+      getSignaturesForAddress: async () => [
+        { signature: "legacy-unjoin", blockTime: 100, slot: 1 },
+        { signature: "older-tx", blockTime: 90, slot: 2 },
+      ],
+      getTransaction: async () => ({
+        transaction: { message: { staticAccountKeys: [OTHER] } },
+        meta: {
+          err: null,
+          logMessages: [
+            `Program ${OTHER.toBase58()} invoke [1]`,
+            "Program data: AAAA",
+            `Program ${OTHER.toBase58()} success`,
+          ],
+        },
+        blockTime: 100,
+      }),
+    };
+    const service = new FinanceLedgerService(
+      connection as any,
+      throwingProgram as any,
+      history.store as any,
+      undefined,
+      referralReader,
+      { batchSize: 2, requestDelayMs: 0 },
+    );
+
+    const result = await service.backfillNextBatch(0);
+
+    expect(result.processedTransactions).toBe(2);
+    expect(history.errors).toEqual([]);
+    expect(history.events).toEqual([]);
+    expect(history.advances).toEqual([
+      { signature: "legacy-unjoin", completed: false, processed: 1 },
+      { signature: "older-tx", completed: false, processed: 1 },
+    ]);
+  });
 });
