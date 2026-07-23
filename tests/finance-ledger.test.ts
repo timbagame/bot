@@ -47,7 +47,18 @@ describe("incremental finance backfill", () => {
     lastError: null,
   };
 
-  const createHistory = () => {
+  const createHistory = (
+    nextSource: {
+      sourceKey: string;
+      sourceType: "discovery" | "program" | "jupiter";
+      address: string;
+      beforeSignature: string | null;
+      startTimeMs: number;
+      completed: boolean;
+      processedTransactions: number;
+      lastError: string | null;
+    } = source,
+  ) => {
     const advances: Array<{
       signature: string | null;
       completed: boolean;
@@ -62,7 +73,7 @@ describe("incremental finance backfill", () => {
       store: {
         recordFinanceEvent: (event: any) => events.push(event),
         ensureFinanceBackfillSource: () => undefined,
-        getNextFinanceBackfillSource: () => source,
+        getNextFinanceBackfillSource: () => nextSource,
         advanceFinanceBackfillSource: (
           _key: string,
           signature: string | null,
@@ -152,17 +163,12 @@ describe("incremental finance backfill", () => {
 
   it("skips program transactions whose event logs no longer match the IDL", async () => {
     const programSource = {
+      ...source,
       sourceKey: `program:${OTHER.toBase58()}`,
       sourceType: "program" as const,
       address: OTHER.toBase58(),
-      beforeSignature: null,
-      startTimeMs: 0,
-      completed: false,
-      processedTransactions: 0,
-      lastError: null,
     };
-    const history = createHistory();
-    history.store.getNextFinanceBackfillSource = () => programSource;
+    const history = createHistory(programSource);
 
     const throwingProgram = {
       ...program,
