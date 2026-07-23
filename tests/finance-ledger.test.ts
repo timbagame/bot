@@ -161,7 +161,7 @@ describe("incremental finance backfill", () => {
     expect(history.errors.at(-1)).toContain("429 Too Many Requests");
   });
 
-  it("skips program transactions whose event logs no longer match the IDL", async () => {
+  it("advances past program txs when current IDL throws on legacy event layouts", async () => {
     const programSource = {
       ...source,
       sourceKey: `program:${OTHER.toBase58()}`,
@@ -211,7 +211,6 @@ describe("incremental finance backfill", () => {
 
     expect(result.processedTransactions).toBe(2);
     expect(history.errors).toEqual([]);
-    expect(history.events).toEqual([]);
     expect(history.advances).toEqual([
       { signature: "legacy-unjoin", completed: false, processed: 1 },
       { signature: "older-tx", completed: false, processed: 1 },

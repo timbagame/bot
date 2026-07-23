@@ -1,4 +1,4 @@
-import { EventParser, type Program } from "@anchor-lang/core";
+import type { Program } from "@anchor-lang/core";
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import {
   PublicKey,
@@ -7,6 +7,7 @@ import {
   type VersionedTransactionResponse,
 } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
+import { parseProgramEventsFromTransaction } from "../utils/program-event-parser";
 import type {
   FinanceBackfillProgress,
   FinanceBackfillSource,
@@ -283,32 +284,11 @@ export class FinanceLedgerService {
     return processed;
   }
 
-  private parseProgramEvents(
-    transaction: VersionedTransactionResponse,
-    signature: string,
-  ): Array<{ name: string; data: Record<string, unknown> }> {
-    try {
-      const parser = new EventParser(this.program.programId, this.program.coder);
-      return [...parser.parseLogs([...(transaction.meta?.logMessages ?? [])])].map((event) => ({
-        name: event.name,
-        data: event.data as Record<string, unknown>,
-      }));
-    } catch (error) {
-      // Historical program logs can fail to decode after event layout changes
-      // (e.g. PlayerUnjoined gained moved_participant). Finance only needs
-      // GameCompleted / TokenFeeWithdrawn, so skip the whole tx rather than stall.
-      console.warn(
-        `Skipping program transaction ${signature}: unable to parse event logs (${error})`,
-      );
-      return [];
-    }
-  }
-
   private recordProgramEvents(
     entry: { signature: string; blockTime?: number | null; slot: number },
     transaction: VersionedTransactionResponse,
   ): void {
-    const events = this.parseProgramEvents(transaction, entry.signature);
+    const events = parseProgramEventsFromTransaction(this.program, transaction.meta?.logMessages);
     const gameMints = new Map<string, string>();
 
     for (const event of events) {
@@ -325,7 +305,7 @@ export class FinanceLedgerService {
         const mint =
           gameMints.get(game) ?? this.resolveGameMint?.(game) ?? inferTransactionMint(transaction);
         if (!mint) {
-          // Permanent for this cursor — skip rather than retry forever.
+          // Cannot invent a mint; skip this event so the backfill cursor can advance.
           console.warn(
             `Skipping game fee for completed game ${game} in ${entry.signature}: unable to resolve token mint`,
           );
