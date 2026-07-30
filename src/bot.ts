@@ -1,5 +1,4 @@
 import "./utils/logging";
-import { randomBytes } from "node:crypto";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
@@ -3389,37 +3388,10 @@ const faucetModule = createFaucetModule({
       ? wallet.getBalance(telegramId, { forceFresh: true })
       : wallet.getTokenBalance(telegramId, parsed.tokenMint, { createIfMissing: false }),
   getRecipientPublicKey: (telegramId) => wallet.getPublicKey(telegramId),
-  createEscrowIndex: () => -BigInt(`0x${randomBytes(16).toString("hex")}`),
-  fundEscrow: (creatorId, recipient, parsed, onPrepared) =>
+  transfer: (creatorId, recipient, parsed, onPrepared) =>
     parsed.isSol
       ? wallet.transferSol(creatorId, recipient, parsed.amount, onPrepared)
       : wallet.transferToken(creatorId, recipient, parsed.amount, parsed.tokenMint, onPrepared),
-  transferFromEscrow: (escrowIndex, recipient, parsed, onPrepared) => {
-    const operator = wallet.getOperatorKeypair();
-    return parsed.isSol
-      ? wallet.transferSolWithFeePayer(escrowIndex, operator, recipient, parsed.amount, onPrepared)
-      : wallet.transferTokenWithFeePayer(
-          escrowIndex,
-          operator,
-          recipient,
-          parsed.amount,
-          parsed.tokenMint,
-          onPrepared,
-        );
-  },
-  refundEscrow: (escrowIndex, recipient, parsed, onPrepared) => {
-    const operator = wallet.getOperatorKeypair();
-    return parsed.isSol
-      ? wallet.transferSolWithFeePayer(escrowIndex, operator, recipient, parsed.amount, onPrepared)
-      : wallet.transferTokenWithFeePayer(
-          escrowIndex,
-          operator,
-          recipient,
-          parsed.amount,
-          parsed.tokenMint,
-          onPrepared,
-        );
-  },
   getTransactionOutcome: (signature) => wallet.getTransactionOutcome(signature),
   isTransactionOutcomeUnknown: (error) => error instanceof TransactionOutcomeUnknownError,
   formatAmountError: (result) =>

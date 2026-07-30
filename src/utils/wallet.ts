@@ -2036,67 +2036,6 @@ export class WalletManager {
     });
   }
 
-  public async transferTokenWithFeePayer(
-    fromWalletIndex: bigint,
-    feePayer: Keypair,
-    toAddress: PublicKey,
-    amount: number,
-    tokenMint: string,
-    onPrepared?: PreparedTransactionCallback,
-  ): Promise<string> {
-    const authority = this.getKeyPair(fromWalletIndex);
-    const mint = new PublicKey(tokenMint);
-    const { decimals } = await this.getTokenMetadata(tokenMint);
-    const detection = await detectTokenProgram(this.connection, mint);
-    if (!detection) throw new Error(`Token mint ${tokenMint} was not found`);
-    const { programId } = detection;
-    const [
-      { address: fromTokenAccount, instructions: fromInstructions },
-      { address: toTokenAccount, instructions: toInstructions },
-    ] = await Promise.all([
-      this.findOrCreateAssociatedTokenAccount(authority.publicKey, mint, feePayer, programId),
-      this.findOrCreateAssociatedTokenAccount(toAddress, mint, feePayer, programId),
-    ]);
-    const transferInstruction = createTransferCheckedInstruction(
-      fromTokenAccount,
-      mint,
-      toTokenAccount,
-      authority.publicKey,
-      amount,
-      decimals,
-      [],
-      programId,
-    );
-    return this.sendAndConfirmWithResubmits(
-      [...fromInstructions, ...toInstructions, transferInstruction],
-      [feePayer, authority],
-      { operationLabel: "Sponsored token transfer", onPrepared, maxResubmits: 0 },
-    );
-  }
-
-  public async transferSolWithFeePayer(
-    fromWalletIndex: bigint,
-    feePayer: Keypair,
-    toAddress: PublicKey,
-    amountLamports: number,
-    onPrepared?: PreparedTransactionCallback,
-  ): Promise<string> {
-    if (!Number.isSafeInteger(amountLamports) || amountLamports <= 0) {
-      throw new Error("Transfer amount must be a positive integer number of lamports");
-    }
-    const authority = this.getKeyPair(fromWalletIndex);
-    const instruction = SystemProgram.transfer({
-      fromPubkey: authority.publicKey,
-      toPubkey: toAddress,
-      lamports: amountLamports,
-    });
-    return this.sendAndConfirmWithResubmits([instruction], [feePayer, authority], {
-      operationLabel: "Sponsored SOL transfer",
-      onPrepared,
-      maxResubmits: 0,
-    });
-  }
-
   public async getTransactionOutcome(
     signature: string,
   ): Promise<"confirmed" | "failed" | "unknown"> {

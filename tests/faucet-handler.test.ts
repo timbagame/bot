@@ -32,10 +32,7 @@ const createHarness = (
   const replies: Array<{ text: string; options: any }> = [];
   const edits: Array<{ text: string; options: any }> = [];
   const answers: string[] = [];
-  const funded: number[] = [];
-  const paidFromEscrow: number[] = [];
-  const refunded: number[] = [];
-  let availableBalance = options.balance ?? 10_000;
+  const transferSenders: bigint[] = [];
   const bot = {
     api: {
       editMessageText: async (_chat: number, _message: number, text: string, options: any) => {
@@ -55,26 +52,13 @@ const createHarness = (
     }),
     inferMaxPlayers,
     getRequiredTelegramId: async () => 10n,
-    getBalance: async () => availableBalance,
+    getBalance: async () => options.balance ?? 10_000,
     getRecipientPublicKey: () => publicKey,
-    createEscrowIndex: () => -100n,
-    fundEscrow: async (_creator, _escrow, _parsed, onPrepared) => {
-      funded.push(_parsed.amount);
-      availableBalance -= _parsed.amount;
-      onPrepared("funding-signature");
-      return "funding-signature";
-    },
-    transferFromEscrow: async (_escrow, _recipient, _parsed, onPrepared) => {
-      paidFromEscrow.push(_parsed.amount);
+    transfer: async (creatorId, _recipient, _parsed, onPrepared) => {
+      transferSenders.push(creatorId);
       if (options.transfer) return options.transfer(onPrepared);
       onPrepared("transaction-signature");
       return "transaction-signature";
-    },
-    refundEscrow: async (_escrow, _recipient, _parsed, onPrepared) => {
-      refunded.push(_parsed.amount);
-      availableBalance += _parsed.amount;
-      onPrepared("refund-signature");
-      return "refund-signature";
     },
     getTransactionOutcome: options.outcome ?? (async () => "unknown"),
     isTransactionOutcomeUnknown: (error) =>
@@ -96,16 +80,7 @@ const createHarness = (
         replies.push({ text: replyText, options: replyOptions });
         return { message_id: 55 };
       },
-      api: {
-        editMessageText: async (
-          _chat: number,
-          _message: number,
-          editText: string,
-          options: any,
-        ) => {
-          edits.push({ text: editText, options });
-        },
-      },
+      api: {},
     }) as any;
   const callbackContext = (userId: number) =>
     ({
@@ -130,17 +105,7 @@ const createHarness = (
       },
     }) as any;
 
-  return {
-    module,
-    replies,
-    edits,
-    answers,
-    funded,
-    paidFromEscrow,
-    refunded,
-    commandContext,
-    callbackContext,
-  };
+  return { module, replies, edits, answers, transferSenders, commandContext, callbackContext };
 };
 
 beforeEach(() => {
@@ -173,7 +138,6 @@ describe("faucet handler", () => {
     const faucet = db.getFaucet(1);
     expect(faucet?.max_claims).toBe(claims);
     expect(faucet?.display_amount).toBe(display);
-    expect(harness.funded).toEqual([400]);
     expect(harness.replies.at(-1)?.text).toContain("Collected by: <b>0/4 users</b>");
   });
 
@@ -205,7 +169,7 @@ describe("faucet handler", () => {
       transaction_signature: "transaction-signature",
     });
     expect(db.getFaucet(1)?.status).toBe("completed");
-    expect(harness.paidFromEscrow).toEqual([100]);
+    expect(harness.transferSenders).toEqual([10n]);
     expect(harness.edits.at(-1)?.text).toContain("Collected by: <b>1/1 users</b>");
   });
 
@@ -243,7 +207,7 @@ describe("faucet handler", () => {
     });
   });
 
-  test("keeps ambiguous payouts submitted and reconciles them without retrying", async () => {
+  test("reconciles an ambiguous direct transfer without paying twice", async () => {
     const harness = createHarness({
       transfer: async (onPrepared) => {
         onPrepared("ambiguous-signature");
@@ -257,10 +221,9 @@ describe("faucet handler", () => {
       status: "submitted",
       transaction_signature: "ambiguous-signature",
     });
-    expect(harness.replies.at(-1)?.text).toContain("verify it automatically");
     await harness.module.reconcile();
     expect(db.getClaim(1, 20n)?.status).toBe("paid");
-    expect(harness.paidFromEscrow).toEqual([100]);
+    expect(harness.transferSenders).toEqual([10n]);
   });
 
   test("enforces creator-only cancellation", async () => {
@@ -271,17 +234,6 @@ describe("faucet handler", () => {
     expect(harness.answers.at(-1)).toContain("Only the faucet creator");
     await harness.module.handleCancel(harness.callbackContext(10), 1);
     expect(db.getFaucet(1)?.status).toBe("cancelled");
-    expect(harness.refunded).toEqual([200]);
     expect(harness.edits.at(-1)?.text).toContain("Cancelled");
-  });
-
-  test("refunds the unused escrow balance when a faucet expires", async () => {
-    let currentTime = 1_000;
-    const harness = createHarness({ now: () => currentTime });
-    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
-    currentTime += 24 * 60 * 60 * 1_000;
-    expect(await harness.module.expireDue()).toBe(1);
-    expect(db.getFaucet(1)?.status).toBe("expired");
-    expect(harness.refunded).toEqual([200]);
   });
 });
