@@ -30,14 +30,30 @@ export interface FaucetModuleDeps {
   getRequiredTelegramId: (ctx: Context, label: string) => Promise<bigint | null>;
   getBalance: (telegramId: bigint, parsed: ParsedAmount) => Promise<number>;
   getRecipientPublicKey: (telegramId: bigint) => PublicKey;
-  transfer: (
+  createEscrowIndex?: () => bigint;
+  fundEscrow: (
     creatorId: bigint,
-    recipient: PublicKey,
+    escrow: PublicKey,
     parsed: {
       amount: number;
       isSol: boolean;
       tokenMint: string;
     },
+    onPrepared: (signature: string) => void,
+  ) => Promise<string>;
+  transferFromEscrow: (
+    escrowIndex: bigint,
+    recipient: PublicKey,
+    parsed: { amount: number; isSol: boolean; tokenMint: string },
+    onPrepared: (signature: string) => void,
+  ) => Promise<string>;
+  getTransactionOutcome: (signature: string) => Promise<"confirmed" | "failed" | "unknown">;
+  isTransactionOutcomeUnknown: (error: unknown) => boolean;
+  refundEscrow: (
+    escrowIndex: bigint,
+    recipient: PublicKey,
+    parsed: { amount: number; isSol: boolean; tokenMint: string },
+    onPrepared: (signature: string) => void,
   ) => Promise<string>;
   formatAmountError: (result: Exclude<ParseAmountResult, { success: true }>) => string;
   now?: () => number;
@@ -89,13 +105,21 @@ export const buildFaucetMessage = (progress: FaucetProgress): string => {
   const formatRaw = (raw: number) =>
     (raw / scale).toLocaleString("en-US", { maximumFractionDigits: faucet.decimals });
   const status =
-    faucet.status === "completed"
-      ? "✅ Completed"
-      : faucet.status === "cancelled"
-        ? "🚫 Cancelled"
-        : faucet.status === "expired"
-          ? "⌛ Expired"
-          : null;
+    faucet.status === "funding"
+      ? "⏳ Funding"
+      : faucet.status === "funding_failed"
+        ? "❌ Funding failed"
+        : faucet.status === "completed"
+          ? "✅ Completed"
+          : faucet.status === "cancelled"
+            ? "🚫 Cancelled"
+            : faucet.status === "expired"
+              ? "⌛ Expired"
+              : faucet.status === "cancelling"
+                ? "⏳ Refunding"
+                : faucet.status === "expiring"
+                  ? "⏳ Expiring and refunding"
+                  : null;
 
   return [
     `🚰 <b>Collect ${escapeHtml(faucet.display_amount)}</b>`,
@@ -111,6 +135,13 @@ export const buildFaucetMessage = (progress: FaucetProgress): string => {
 
 export const createFaucetModule = (deps: FaucetModuleDeps) => {
   const now = deps.now ?? Date.now;
+  let nextTestEscrowIndex = -9_000_000_000_000_000n;
+  const createEscrowIndex =
+    deps.createEscrowIndex ??
+    (() => {
+      nextTestEscrowIndex -= 1n;
+      return nextTestEscrowIndex - BigInt(now());
+    });
   const answer =
     deps.answerCallback ??
     ((ctx: Context, text?: string, showAlert?: boolean) =>
@@ -141,10 +172,97 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
   const render = (ctx: Context, faucetId: number): Promise<void> =>
     renderWithApi(ctx.api, faucetId);
 
+  const remainingAmount = (progress: FaucetProgress): number =>
+    Number(progress.faucet.amount_per_claim) *
+    Math.max(0, progress.faucet.max_claims - progress.paidClaims);
+
+  const refund = async (faucet: FaucetRecord, state: "cancelling" | "expiring"): Promise<void> => {
+    const progress = deps.database.getProgress(faucet.id);
+    if (!progress) return;
+    const amount = remainingAmount(progress);
+    if (amount <= 0) {
+      deps.database.finishTerminalState(faucet.id, state);
+      return;
+    }
+    try {
+      await deps.refundEscrow(
+        BigInt(faucet.escrow_index),
+        deps.getRecipientPublicKey(BigInt(faucet.creator_id)),
+        { amount, isSol: faucet.is_sol === 1, tokenMint: faucet.token_mint },
+        (signature) => deps.database.recordTerminalSignature(faucet.id, state, signature),
+      );
+      deps.database.finishTerminalState(faucet.id, state);
+    } catch (error) {
+      const current = deps.database.getFaucet(faucet.id);
+      if (!current?.terminal_signature || !deps.isTransactionOutcomeUnknown(error)) {
+        deps.database.reopenTerminalState(faucet.id, state);
+        throw error;
+      }
+      console.warn(`Faucet ${faucet.id} refund is awaiting reconciliation`, error);
+    }
+  };
+
+  const reconcile = async (): Promise<number> => {
+    const currentTime = now();
+    let changed = deps.database.releaseStaleProcessing(currentTime - 5 * 60_000, currentTime);
+    const affected = new Set<number>();
+    for (const claim of deps.database.getSubmittedClaims()) {
+      const signature = claim.transaction_signature!;
+      const outcome = await deps.getTransactionOutcome(signature);
+      if (outcome === "confirmed") {
+        deps.database.completeClaim(
+          claim.faucet_id,
+          BigInt(claim.telegram_id),
+          signature,
+          currentTime,
+        );
+        affected.add(claim.faucet_id);
+        changed += 1;
+      } else if (outcome === "failed") {
+        deps.database.failClaim(
+          claim.faucet_id,
+          BigInt(claim.telegram_id),
+          "submitted transaction failed",
+          currentTime,
+        );
+        affected.add(claim.faucet_id);
+        changed += 1;
+      }
+    }
+    for (const faucet of deps.database.getPendingFunding()) {
+      const outcome = await deps.getTransactionOutcome(faucet.funding_signature!);
+      if (outcome === "confirmed") {
+        deps.database.activateFaucet(faucet.id, faucet.funding_signature!);
+        affected.add(faucet.id);
+        changed += 1;
+      } else if (outcome === "failed") {
+        deps.database.failFunding(faucet.id, faucet.funding_signature!);
+        affected.add(faucet.id);
+        changed += 1;
+      }
+    }
+    for (const faucet of deps.database.getPendingTerminalRefunds()) {
+      const outcome = await deps.getTransactionOutcome(faucet.terminal_signature!);
+      if (outcome === "confirmed") {
+        deps.database.finishTerminalState(faucet.id, faucet.status as "cancelling" | "expiring");
+        affected.add(faucet.id);
+        changed += 1;
+      } else if (outcome === "failed") {
+        deps.database.reopenTerminalState(faucet.id, faucet.status as "cancelling" | "expiring");
+        affected.add(faucet.id);
+        changed += 1;
+      }
+    }
+    for (const id of affected) await renderWithApi(deps.bot.api, id);
+    return changed;
+  };
+
   const expireDue = async (): Promise<number> => {
-    const expired = deps.database.expireDue(now());
+    await reconcile();
+    const expired = deps.database.beginDueExpirations(now());
     for (const faucet of expired) {
       try {
+        await refund(faucet, "expiring");
         await renderWithApi(deps.bot.api, faucet.id);
       } catch (error) {
         console.warn(`Failed to update expired faucet ${faucet.id}:`, error);
@@ -194,13 +312,7 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       return;
     }
     const balance = await deps.getBalance(creatorId, parsed);
-    const alreadyReserved = deps.database.getReservedAmount(
-      creatorId,
-      parsed.tokenMint,
-      parsed.isSol,
-      now(),
-    );
-    if (balance - alreadyReserved < total) {
+    if (balance < total) {
       await ctx.reply(
         `❌ Not enough ${escapeHtml(parsed.tokenTicker)}. The faucet needs the full amount for all ${inferred.value} claims.`,
         { parse_mode: "HTML" },
@@ -209,6 +321,7 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     }
 
     const createdAt = now();
+    const escrowIndex = createEscrowIndex();
     const faucet = deps.database.createFaucet({
       creatorId,
       chatId: ctx.chat.id,
@@ -221,16 +334,35 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       displayAmount: buildDisplayAmount(args, parsed),
       createdAt,
       expiresAt: createdAt + (deps.lifetimeMs ?? DEFAULT_LIFETIME_MS),
+      escrowIndex,
     });
     const progress = deps.database.getProgress(faucet.id)!;
+    let message;
     try {
-      const message = await ctx.reply(buildFaucetMessage(progress), {
+      message = await ctx.reply(buildFaucetMessage(progress), {
         parse_mode: "HTML",
-        reply_markup: buildFaucetKeyboard(faucet),
+        reply_markup: new InlineKeyboard(),
       });
-      deps.database.setMessageId(faucet.id, message.message_id);
     } catch (error) {
-      deps.database.cancelFaucet(faucet.id, creatorId);
+      deps.database.failFunding(faucet.id);
+      throw error;
+    }
+    deps.database.setMessageId(faucet.id, message.message_id);
+    try {
+      const signature = await deps.fundEscrow(
+        creatorId,
+        deps.getRecipientPublicKey(escrowIndex),
+        { amount: total, isSol: parsed.isSol, tokenMint: parsed.tokenMint },
+        (prepared) => deps.database.recordFundingSignature(faucet.id, prepared),
+      );
+      deps.database.activateFaucet(faucet.id, signature);
+      await render(ctx, faucet.id);
+    } catch (error) {
+      const current = deps.database.getFaucet(faucet.id);
+      if (!current?.funding_signature || !deps.isTransactionOutcomeUnknown(error)) {
+        deps.database.failFunding(faucet.id, current?.funding_signature ?? undefined);
+        await render(ctx, faucet.id);
+      }
       throw error;
     }
   };
@@ -268,23 +400,34 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     await answer(ctx, "Processing your claim…");
     const faucet = reserved.faucet;
     try {
-      const signature = await deps.transfer(
-        BigInt(faucet.creator_id),
+      const signature = await deps.transferFromEscrow(
+        BigInt(faucet.escrow_index),
         deps.getRecipientPublicKey(claimantId),
         {
           amount: Number(faucet.amount_per_claim),
           isSol: faucet.is_sol === 1,
           tokenMint: faucet.token_mint,
         },
+        (prepared) => deps.database.recordClaimSignature(faucetId, claimantId, prepared, now()),
       );
       deps.database.completeClaim(faucetId, claimantId, signature, now());
       await render(ctx, faucetId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      deps.database.failClaim(faucetId, claimantId, message, now());
-      await ctx.reply("❌ Payment failed. Your faucet slot was released; please try again.", {
-        reply_to_message_id: faucet.message_id ?? undefined,
-      });
+      const claim = deps.database.getClaim(faucetId, claimantId);
+      if (claim?.status === "submitted" && deps.isTransactionOutcomeUnknown(error)) {
+        await ctx.reply(
+          "⏳ Payment confirmation is delayed. The bot will verify it automatically.",
+          {
+            reply_to_message_id: faucet.message_id ?? undefined,
+          },
+        );
+      } else {
+        deps.database.failClaim(faucetId, claimantId, message, now());
+        await ctx.reply("❌ Payment failed. Your faucet slot was released; please try again.", {
+          reply_to_message_id: faucet.message_id ?? undefined,
+        });
+      }
       await render(ctx, faucetId);
     }
   };
@@ -302,7 +445,8 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       await answer(ctx, messages[result.reason], true);
       return;
     }
-    await answer(ctx, "Faucet cancelled.");
+    await answer(ctx, "Refunding the unused faucet balance…");
+    await refund(result.faucet, "cancelling");
     await render(ctx, faucetId);
   };
 
@@ -315,5 +459,13 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     });
   };
 
-  return { handleCommand, handleClaim, handleCancel, registerCallbacks, render, expireDue };
+  return {
+    handleCommand,
+    handleClaim,
+    handleCancel,
+    registerCallbacks,
+    render,
+    expireDue,
+    reconcile,
+  };
 };

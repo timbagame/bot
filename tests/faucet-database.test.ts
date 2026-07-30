@@ -4,8 +4,8 @@ import { resetTestDatabase } from "./helpers/database";
 
 let db: FaucetDatabase;
 
-const createFaucet = (overrides: Partial<Parameters<FaucetDatabase["createFaucet"]>[0]> = {}) =>
-  db.createFaucet({
+const createFaucet = (overrides: Partial<Parameters<FaucetDatabase["createFaucet"]>[0]> = {}) => {
+  const faucet = db.createFaucet({
     creatorId: 10n,
     chatId: -100,
     tokenMint: "mint",
@@ -17,8 +17,11 @@ const createFaucet = (overrides: Partial<Parameters<FaucetDatabase["createFaucet
     displayAmount: "1 TOK",
     createdAt: 1_000,
     expiresAt: 10_000,
+    escrowIndex: -100n,
     ...overrides,
   });
+  return db.activateFaucet(faucet.id, `funding-${faucet.id}`);
+};
 
 beforeEach(() => {
   resetTestDatabase("faucets.sqlite");
@@ -74,18 +77,36 @@ describe("FaucetDatabase", () => {
     expect(db.reserveClaim(faucet.id, 7n, 2_004)).toMatchObject({ ok: true, retry: true });
   });
 
+  test("persists submitted signatures and releases only unsigned interrupted claims", () => {
+    const faucet = createFaucet({ maxClaims: 2 });
+    db.reserveClaim(faucet.id, 7n, 2_000);
+    db.recordClaimSignature(faucet.id, 7n, "submitted-signature", 2_001);
+    db.reserveClaim(faucet.id, 8n, 2_000);
+
+    expect(db.releaseStaleProcessing(2_000, 3_000)).toBe(1);
+    expect(db.getClaim(faucet.id, 7n)).toMatchObject({
+      status: "submitted",
+      transaction_signature: "submitted-signature",
+    });
+    expect(db.getClaim(faucet.id, 8n)?.status).toBe("failed");
+  });
+
   test("expires old faucets before reserving a claim", () => {
     const faucet = createFaucet({ expiresAt: 2_000 });
     expect(db.reserveClaim(faucet.id, 1n, 2_000)).toEqual(
       expect.objectContaining({ ok: false, reason: "expired" }),
     );
-    expect(db.getFaucet(faucet.id)?.status).toBe("expired");
+    expect(db.getFaucet(faucet.id)?.status).toBe("active");
+    expect(db.beginDueExpirations(2_000)).toHaveLength(1);
+    expect(db.getFaucet(faucet.id)?.status).toBe("expiring");
   });
 
   test("expires active faucets in a scheduled batch", () => {
     const due = createFaucet({ expiresAt: 2_000 });
     const future = createFaucet({ expiresAt: 4_000 });
-    expect(db.expireDue(3_000).map((faucet) => faucet.id)).toEqual([due.id]);
+    expect(db.beginDueExpirations(3_000).map((faucet) => faucet.id)).toEqual([due.id]);
+    expect(db.getFaucet(due.id)?.status).toBe("expiring");
+    db.finishTerminalState(due.id, "expiring");
     expect(db.getFaucet(due.id)?.status).toBe("expired");
     expect(db.getFaucet(future.id)?.status).toBe("active");
   });
@@ -99,18 +120,14 @@ describe("FaucetDatabase", () => {
     expect(db.cancelFaucet(faucet.id, 10n)).toEqual(
       expect.objectContaining({ ok: false, reason: "processing" }),
     );
-    db.failClaim(faucet.id, 1n, "failed", 2_001);
+    db.recordClaimSignature(faucet.id, 1n, "pending-signature", 2_001);
+    expect(db.cancelFaucet(faucet.id, 10n)).toEqual(
+      expect.objectContaining({ ok: false, reason: "processing" }),
+    );
+    db.failClaim(faucet.id, 1n, "failed", 2_002);
     expect(db.cancelFaucet(faucet.id, 10n)).toMatchObject({ ok: true });
+    expect(db.getFaucet(faucet.id)?.status).toBe("cancelling");
+    db.finishTerminalState(faucet.id, "cancelling");
     expect(db.getFaucet(faucet.id)?.status).toBe("cancelled");
-  });
-
-  test("tracks the unpaid amount as a creator balance reservation", () => {
-    const faucet = createFaucet();
-    expect(db.getReservedAmount(10n, "mint", false, 2_000)).toBe(200);
-    db.reserveClaim(faucet.id, 1n, 2_001);
-    db.completeClaim(faucet.id, 1n, "sig", 2_002);
-    expect(db.getReservedAmount(10n, "mint", false, 2_003)).toBe(100);
-    db.cancelFaucet(faucet.id, 10n);
-    expect(db.getReservedAmount(10n, "mint", false, 2_004)).toBe(0);
   });
 });

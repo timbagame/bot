@@ -21,6 +21,7 @@
     "@solana/web3.js": "^1.98.4",
     "bip39": "^3.1.0",
     "bn.js": "^5.2.5",
+    "bs58": "^4.0.1",
     "grammy": "^1.44.0"
   },
   "devDependencies": {

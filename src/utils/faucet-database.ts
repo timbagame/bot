@@ -1,13 +1,24 @@
 import { createDatabaseSingleton, BaseDatabase } from "./base-database";
 
-export type FaucetStatus = "active" | "cancelled" | "completed" | "expired";
-export type FaucetClaimStatus = "processing" | "paid" | "failed";
+export type FaucetStatus =
+  | "funding"
+  | "active"
+  | "cancelling"
+  | "expiring"
+  | "cancelled"
+  | "completed"
+  | "expired"
+  | "funding_failed";
+export type FaucetClaimStatus = "processing" | "submitted" | "paid" | "failed";
 
 export interface FaucetRecord {
   id: number;
   creator_id: string;
   chat_id: string;
   message_id: number | null;
+  escrow_index: string;
+  funding_signature: string | null;
+  terminal_signature: string | null;
   token_mint: string;
   token_ticker: string;
   decimals: number;
@@ -72,6 +83,9 @@ export class FaucetDatabase extends BaseDatabase {
           creator_id TEXT NOT NULL,
           chat_id TEXT NOT NULL,
           message_id INTEGER,
+          escrow_index TEXT NOT NULL,
+          funding_signature TEXT,
+          terminal_signature TEXT,
           token_mint TEXT NOT NULL,
           token_ticker TEXT NOT NULL,
           decimals INTEGER NOT NULL,
@@ -79,7 +93,7 @@ export class FaucetDatabase extends BaseDatabase {
           amount_per_claim TEXT NOT NULL,
           max_claims INTEGER NOT NULL,
           display_amount TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'active',
+          status TEXT NOT NULL DEFAULT 'funding',
           created_at INTEGER NOT NULL,
           expires_at INTEGER NOT NULL
         )`,
@@ -117,15 +131,17 @@ export class FaucetDatabase extends BaseDatabase {
     displayAmount: string;
     createdAt: number;
     expiresAt: number;
+    escrowIndex: bigint;
   }): FaucetRecord {
     const result = this.run(
       `INSERT INTO faucets (
-        creator_id, chat_id, token_mint, token_ticker, decimals, is_sol,
+        creator_id, chat_id, escrow_index, token_mint, token_ticker, decimals, is_sol,
         amount_per_claim, max_claims, display_amount, status, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'funding', ?, ?)`,
       [
         input.creatorId.toString(),
         String(input.chatId),
+        input.escrowIndex.toString(),
         input.tokenMint,
         input.tokenTicker,
         input.decimals,
@@ -139,6 +155,41 @@ export class FaucetDatabase extends BaseDatabase {
       "creating faucet",
     );
     return this.getFaucet(Number(result.lastInsertRowid))!;
+  }
+
+  activateFaucet(id: number, fundingSignature: string): FaucetRecord {
+    this.run(
+      `UPDATE faucets SET status = 'active', funding_signature = ?
+       WHERE id = ? AND status = 'funding'`,
+      [fundingSignature, id],
+      "activating funded faucet",
+    );
+    return this.getFaucet(id)!;
+  }
+
+  recordFundingSignature(id: number, signature: string): void {
+    this.run(
+      "UPDATE faucets SET funding_signature = ? WHERE id = ? AND status = 'funding'",
+      [signature, id],
+      "recording faucet funding signature",
+    );
+  }
+
+  getPendingFunding(): FaucetRecord[] {
+    return this.all<FaucetRecord>(
+      "SELECT * FROM faucets WHERE status = 'funding' AND funding_signature IS NOT NULL",
+      [],
+      "loading pending faucet funding",
+    );
+  }
+
+  failFunding(id: number, fundingSignature?: string): void {
+    this.run(
+      `UPDATE faucets SET status = 'funding_failed', funding_signature = COALESCE(?, funding_signature)
+       WHERE id = ? AND status = 'funding'`,
+      [fundingSignature ?? null, id],
+      "failing faucet funding",
+    );
   }
 
   setMessageId(id: number, messageId: number): void {
@@ -179,35 +230,14 @@ export class FaucetDatabase extends BaseDatabase {
     };
   }
 
-  getReservedAmount(
-    creatorId: bigint,
-    tokenMint: string,
-    isSol: boolean,
-    now: number = Date.now(),
-  ): number {
-    const faucets = this.all<Pick<FaucetRecord, "id" | "amount_per_claim" | "max_claims">>(
-      `SELECT id, amount_per_claim, max_claims
-       FROM faucets
-       WHERE creator_id = ? AND token_mint = ? AND is_sol = ?
-         AND status = 'active' AND expires_at > ?`,
-      [creatorId.toString(), tokenMint, isSol ? 1 : 0, now],
-      "loading reserved faucet amounts",
-    );
-    let reserved = 0;
-    for (const faucet of faucets) {
-      const paid = this.getCount(
-        "SELECT COUNT(*) AS count FROM faucet_claims WHERE faucet_id = ? AND status = 'paid'",
-        [faucet.id],
-        "counting paid faucet claims",
-      );
-      reserved += Number(faucet.amount_per_claim) * Math.max(0, faucet.max_claims - paid);
-    }
-    return reserved;
-  }
-
-  expireDue(now: number): FaucetRecord[] {
+  beginDueExpirations(now: number): FaucetRecord[] {
     const due = this.all<FaucetRecord>(
-      "SELECT * FROM faucets WHERE status = 'active' AND expires_at <= ?",
+      `SELECT f.* FROM faucets f
+       WHERE f.status = 'active' AND f.expires_at <= ?
+       AND NOT EXISTS (
+         SELECT 1 FROM faucet_claims c
+         WHERE c.faucet_id = f.id AND c.status IN ('processing', 'submitted')
+       )`,
       [now],
       "loading expired faucets",
     );
@@ -215,14 +245,48 @@ export class FaucetDatabase extends BaseDatabase {
     const expire = this.db.transaction(() => {
       for (const faucet of due) {
         this.run(
-          "UPDATE faucets SET status = 'expired' WHERE id = ? AND status = 'active'",
+          "UPDATE faucets SET status = 'expiring' WHERE id = ? AND status = 'active'",
           [faucet.id],
-          "expiring faucet",
+          "reserving faucet expiry",
         );
       }
     });
     expire();
-    return due.map((faucet) => ({ ...faucet, status: "expired" }));
+    return due.map((faucet) => ({ ...faucet, status: "expiring" }));
+  }
+
+  finishTerminalState(id: number, from: "cancelling" | "expiring"): void {
+    const terminal = from === "cancelling" ? "cancelled" : "expired";
+    this.run(
+      "UPDATE faucets SET status = ? WHERE id = ? AND status = ?",
+      [terminal, id, from],
+      `finishing faucet ${terminal}`,
+    );
+  }
+
+  recordTerminalSignature(id: number, state: "cancelling" | "expiring", signature: string): void {
+    this.run(
+      "UPDATE faucets SET terminal_signature = ? WHERE id = ? AND status = ?",
+      [signature, id, state],
+      "recording faucet refund signature",
+    );
+  }
+
+  getPendingTerminalRefunds(): FaucetRecord[] {
+    return this.all<FaucetRecord>(
+      `SELECT * FROM faucets
+       WHERE status IN ('cancelling', 'expiring') AND terminal_signature IS NOT NULL`,
+      [],
+      "loading pending faucet refunds",
+    );
+  }
+
+  reopenTerminalState(id: number, from: "cancelling" | "expiring"): void {
+    this.run(
+      "UPDATE faucets SET status = 'active', terminal_signature = NULL WHERE id = ? AND status = ?",
+      [id, from],
+      "reopening faucet after refund failure",
+    );
   }
 
   reserveClaim(faucetId: number, telegramId: bigint, now: number): ReserveClaimResult {
@@ -234,12 +298,7 @@ export class FaucetDatabase extends BaseDatabase {
         return { ok: false, reason: "creator", faucet };
       }
       if (faucet.expires_at <= now) {
-        this.run(
-          "UPDATE faucets SET status = 'expired' WHERE id = ? AND status = 'active'",
-          [faucetId],
-          "expiring faucet",
-        );
-        return { ok: false, reason: "expired", faucet: { ...faucet, status: "expired" } };
+        return { ok: false, reason: "expired", faucet };
       }
 
       const existing = this.getClaim(faucetId, telegramId);
@@ -248,7 +307,7 @@ export class FaucetDatabase extends BaseDatabase {
 
       const allocated = this.getCount(
         `SELECT COUNT(*) AS count FROM faucet_claims
-         WHERE faucet_id = ? AND status IN ('processing', 'paid')`,
+         WHERE faucet_id = ? AND status IN ('processing', 'submitted', 'paid')`,
         [faucetId],
         "counting allocated claims",
       );
@@ -276,12 +335,40 @@ export class FaucetDatabase extends BaseDatabase {
     return reserve();
   }
 
+  recordClaimSignature(faucetId: number, telegramId: bigint, signature: string, now: number): void {
+    const result = this.run(
+      `UPDATE faucet_claims
+       SET status = 'submitted', transaction_signature = ?, updated_at = ?
+       WHERE faucet_id = ? AND telegram_id = ? AND status = 'processing'`,
+      [signature, now, faucetId, telegramId.toString()],
+      "recording submitted faucet transaction",
+    );
+    if (result.changes !== 1) throw new Error("Faucet claim is no longer processing");
+  }
+
+  getSubmittedClaims(): FaucetClaimRecord[] {
+    return this.all<FaucetClaimRecord>(
+      "SELECT * FROM faucet_claims WHERE status = 'submitted' AND transaction_signature IS NOT NULL",
+      [],
+      "loading submitted faucet claims",
+    );
+  }
+
+  releaseStaleProcessing(cutoff: number, now: number): number {
+    return this.run(
+      `UPDATE faucet_claims SET status = 'failed', last_error = 'interrupted before submission',
+       updated_at = ? WHERE status = 'processing' AND updated_at <= ?`,
+      [now, cutoff],
+      "releasing interrupted faucet claims",
+    ).changes;
+  }
+
   completeClaim(faucetId: number, telegramId: bigint, signature: string, now: number): void {
     const complete = this.db.transaction(() => {
       this.run(
         `UPDATE faucet_claims
          SET status = 'paid', transaction_signature = ?, last_error = NULL, updated_at = ?
-         WHERE faucet_id = ? AND telegram_id = ? AND status = 'processing'`,
+         WHERE faucet_id = ? AND telegram_id = ? AND status IN ('processing', 'submitted')`,
         [signature, now, faucetId, telegramId.toString()],
         "completing faucet claim",
       );
@@ -307,7 +394,7 @@ export class FaucetDatabase extends BaseDatabase {
     this.run(
       `UPDATE faucet_claims
        SET status = 'failed', last_error = ?, updated_at = ?
-       WHERE faucet_id = ? AND telegram_id = ? AND status = 'processing'`,
+       WHERE faucet_id = ? AND telegram_id = ? AND status IN ('processing', 'submitted')`,
       [error.slice(0, 500), now, faucetId, telegramId.toString()],
       "failing faucet claim",
     );
@@ -322,17 +409,18 @@ export class FaucetDatabase extends BaseDatabase {
       }
       if (faucet.status !== "active") return { ok: false, reason: "inactive", faucet };
       const processing = this.getCount(
-        "SELECT COUNT(*) AS count FROM faucet_claims WHERE faucet_id = ? AND status = 'processing'",
+        `SELECT COUNT(*) AS count FROM faucet_claims
+         WHERE faucet_id = ? AND status IN ('processing', 'submitted')`,
         [faucetId],
         "counting processing claims",
       );
       if (processing > 0) return { ok: false, reason: "processing", faucet };
       this.run(
-        "UPDATE faucets SET status = 'cancelled' WHERE id = ? AND status = 'active'",
+        "UPDATE faucets SET status = 'cancelling' WHERE id = ? AND status = 'active'",
         [faucetId],
         "cancelling faucet",
       );
-      return { ok: true, faucet: { ...faucet, status: "cancelled" } };
+      return { ok: true, faucet: { ...faucet, status: "cancelling" } };
     });
     return cancel();
   }
