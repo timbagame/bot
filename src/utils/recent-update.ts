@@ -48,7 +48,10 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   // These callbacks are safe to process even for older messages because
   // we validate game status on-chain and in the DB in their handlers.
   const cbData = (ctx as any).callbackQuery?.data as string | undefined;
-  if (cbData && (cbData.startsWith("join_") || cbData.startsWith("refresh_"))) {
+  if (
+    cbData &&
+    (cbData.startsWith("join_") || cbData.startsWith("refresh_") || cbData.startsWith("faucet:"))
+  ) {
     return next();
   }
   const updateUnix = getUpdateUnixSeconds(ctx);

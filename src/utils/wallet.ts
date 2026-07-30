@@ -1,4 +1,5 @@
 import { mnemonicToSeedSync } from "bip39";
+import bs58 from "bs58";
 import {
   Connection,
   Keypair,
@@ -91,6 +92,19 @@ export type KeypairCacheOptions = {
   ttlMs?: number;
   timeNow?: () => number;
 };
+
+export type PreparedTransactionCallback = (signature: string) => void;
+
+export class TransactionOutcomeUnknownError extends Error {
+  constructor(
+    public readonly signature: string,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "TransactionOutcomeUnknownError";
+  }
+}
 
 class KeypairCache {
   private readonly cache = new Map<string, KeypairCacheEntry>();
@@ -1947,6 +1961,7 @@ export class WalletManager {
     toAddress: PublicKey,
     amount: number,
     tokenMint: string,
+    onPrepared?: PreparedTransactionCallback,
   ): Promise<string> {
     const fromKeypair = this.getKeyPair(fromTelegramId);
     const tokenMintPubkey = new PublicKey(tokenMint);
@@ -1992,6 +2007,8 @@ export class WalletManager {
     const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
     return await this.sendAndConfirmWithResubmits(allInstructions, [fromKeypair], {
       operationLabel: "Token transfer",
+      onPrepared,
+      ...(onPrepared ? { maxResubmits: 0 } : {}),
     });
   }
 
@@ -1999,6 +2016,7 @@ export class WalletManager {
     fromTelegramId: bigint,
     toAddress: PublicKey,
     amountLamports: number,
+    onPrepared?: PreparedTransactionCallback,
   ): Promise<string> {
     if (!Number.isSafeInteger(amountLamports) || amountLamports <= 0) {
       throw new Error("Transfer amount must be a positive integer number of lamports");
@@ -2013,7 +2031,23 @@ export class WalletManager {
 
     return await this.sendAndConfirmWithResubmits([transferInstruction], [fromKeypair], {
       operationLabel: "SOL transfer",
+      onPrepared,
+      ...(onPrepared ? { maxResubmits: 0 } : {}),
     });
+  }
+
+  public async getTransactionOutcome(
+    signature: string,
+  ): Promise<"confirmed" | "failed" | "unknown"> {
+    const response = await this.connection.getSignatureStatus(signature, {
+      searchTransactionHistory: true,
+    });
+    const status = response.value;
+    if (!status) return "unknown";
+    if (status.err) return "failed";
+    return status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized"
+      ? "confirmed"
+      : "unknown";
   }
 
   public async withdrawAllSol(
@@ -2323,7 +2357,8 @@ export class WalletManager {
       );
     }
 
-    throw new Error(
+    throw new TransactionOutcomeUnknownError(
+      signature,
       `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`,
     );
   }
@@ -2334,6 +2369,7 @@ export class WalletManager {
   public async sendTransaction(
     instructions: TransactionInstruction[],
     signers: Keypair[],
+    options: { onPrepared?: PreparedTransactionCallback } = {},
   ): Promise<string> {
     await this.throttle();
 
@@ -2350,6 +2386,8 @@ export class WalletManager {
 
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
+    const preparedSignature = bs58.encode(tx.signatures[0]!);
+    options.onPrepared?.(preparedSignature);
 
     let signature: string;
     try {
@@ -2392,7 +2430,12 @@ export class WalletManager {
           `ℹ️ Caught error in sendTransaction is NOT SendTransactionError (Type: ${error?.constructor?.name})`,
         );
       }
-      throw error;
+      if (isSendTransactionError) throw error;
+      throw new TransactionOutcomeUnknownError(
+        preparedSignature,
+        `Transaction submission outcome is unknown for ${preparedSignature}`,
+        { cause: error },
+      );
     }
 
     console.log(`📤 Transaction sent: ${signature}`);
@@ -2433,6 +2476,7 @@ export class WalletManager {
       operationLabel?: string;
       initialSignature?: string;
       skipConfirmation?: boolean;
+      onPrepared?: PreparedTransactionCallback;
     } = {},
   ): Promise<string> {
     if (instructions.length === 0) {
@@ -2448,12 +2492,13 @@ export class WalletManager {
       operationLabel = "Transaction",
       initialSignature,
       skipConfirmation = false,
+      onPrepared,
     } = options;
 
     const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
-        : await this.sendTransaction(instructions, signers);
+        : await this.sendTransaction(instructions, signers, { onPrepared });
 
     if (skipConfirmation) {
       return startingSignature;

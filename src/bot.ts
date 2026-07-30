@@ -5,7 +5,7 @@ import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { CommandGroup } from "@grammyjs/commands";
-import { WalletManager } from "./utils/wallet";
+import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
 import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@anchor-lang/core";
@@ -129,6 +129,7 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { createFaucetModule } from "./handlers/faucet";
 import { FinanceLedgerService } from "./services/finance-ledger";
 import { FinanceBackfillWorker } from "./services/finance-backfill-worker";
 import { getContractCapitalLamports } from "./services/contract-capital";
@@ -142,6 +143,7 @@ import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
 import { getVerifiedTokenMints } from "./utils/verified-token-registry";
 import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
+import { FaucetDatabase } from "./utils/faucet-database";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -3374,6 +3376,37 @@ registerCaseInsensitiveCommand(["giveaway", "ga"], async (ctx) => {
   await handleGiveawayCommand(ctx as Context & { message?: any });
 });
 
+const faucetModule = createFaucetModule({
+  bot,
+  database: FaucetDatabase.getInstance(),
+  parseAmount: (args, index, chatId, context) =>
+    tokenManager.parseAmount(args, index, chatId, context),
+  inferMaxPlayers,
+  getRequiredTelegramId: getRequiredTelegramIdForContext,
+  getBalance: (telegramId, parsed) =>
+    parsed.isSol
+      ? wallet.getBalance(telegramId, { forceFresh: true })
+      : wallet.getTokenBalance(telegramId, parsed.tokenMint, { createIfMissing: false }),
+  getRecipientPublicKey: (telegramId) => wallet.getPublicKey(telegramId),
+  transfer: (creatorId, recipient, parsed, onPrepared) =>
+    parsed.isSol
+      ? wallet.transferSol(creatorId, recipient, parsed.amount, onPrepared)
+      : wallet.transferToken(creatorId, recipient, parsed.amount, parsed.tokenMint, onPrepared),
+  getTransactionOutcome: (signature) => wallet.getTransactionOutcome(signature),
+  isTransactionOutcomeUnknown: (error) => error instanceof TransactionOutcomeUnknownError,
+  formatAmountError: (result) =>
+    formatParseAmountError(
+      result,
+      "Usage: <code>/faucet &lt;amount&gt; [USD|TOKEN] [users]</code>",
+    ),
+  answerCallback: (ctx, text) => safeAnswerCallbackQuery(ctx, text),
+});
+faucetModule.registerCallbacks();
+
+registerCaseInsensitiveCommand(["faucet", "rain"], async (ctx: Context) => {
+  await faucetModule.handleCommand(ctx);
+});
+
 // ================================
 // WALLET COMMANDS
 // ================================
@@ -3840,6 +3873,8 @@ registerCaseInsensitiveCommand("help", async (ctx: Context) => {
 
     "/giveaway &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
+    "/faucet &lt;amount&gt; [USD|TOKEN] [users] - First-come token distribution",
+    "/rain &lt;amount&gt; [USD|TOKEN] [users] - Shorthand for faucet command",
 
     "/active - Show active games in this chat",
     "/public - Show all active public games",
@@ -6081,6 +6116,17 @@ if (process.env.NODE_ENV !== "test") {
       attachRpcEndpointFailoverHandler();
       financeBackfillWorker.start();
       console.log("Finance history backfill worker scheduled");
+
+      const expireFaucets = async () => {
+        try {
+          const count = await faucetModule.expireDue();
+          if (count > 0) console.log(`⌛ Expired ${count} faucet${count === 1 ? "" : "s"}`);
+        } catch (error) {
+          console.error("❌ Faucet expiry check failed:", error);
+        }
+      };
+      await expireFaucets();
+      setInterval(expireFaucets, 60_000);
 
       const scheduleFeeSweeper = () => {
         if (!ENABLE_FEE_SWEEPER) {
