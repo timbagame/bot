@@ -3355,20 +3355,31 @@ const caseInsensitiveCommands = new CommandGroup<Context>({
 });
 bot.use(caseInsensitiveCommands);
 
+const botMenuCommandNames = new Set<string>();
+
 const registerCaseInsensitiveCommand =
-  (command: string | string[], description: string) =>
+  (
+    command: string | string[],
+    description: string,
+    { showInMenu = true }: { showInMenu?: boolean } = {},
+  ) =>
   (handler: (ctx: Context) => Promise<unknown> | unknown): void => {
     const commands = Array.isArray(command) ? command : [command];
     for (const commandName of commands) {
       caseInsensitiveCommands.command(commandName, description, handler);
+      if (showInMenu) {
+        botMenuCommandNames.add(commandName);
+      }
     }
   };
 
-export const __test_getRegisteredBotCommands = () =>
-  caseInsensitiveCommands.toElementals("default").map(({ command, description }) => ({
-    command,
-    description,
-  }));
+const getBotMenuCommands = () =>
+  caseInsensitiveCommands
+    .toElementals("default")
+    .filter(({ command }) => botMenuCommandNames.has(command))
+    .map(({ command, description }) => ({ command, description }));
+
+export const __test_getRegisteredBotCommands = getBotMenuCommands;
 
 registerCaseInsensitiveCommand(
   ["start", "balance"],
@@ -4658,16 +4669,15 @@ const financeHandlers = createFinanceHandlers({
   },
 });
 
-registerCaseInsensitiveCommand(
-  "finance",
-  "Show the bot finance report",
-)(async (ctx: Context) => {
-  try {
-    await financeHandlers.handleCommand(ctx);
-  } catch (error) {
-    await handleCommandError(ctx, error, "finance");
-  }
-});
+registerCaseInsensitiveCommand("finance", "Show the bot finance report", { showInMenu: false })(
+  async (ctx: Context) => {
+    try {
+      await financeHandlers.handleCommand(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "finance");
+    }
+  },
+);
 
 bot.callbackQuery(
   /^finance:(7d|30d|90d)$/,
@@ -6170,7 +6180,7 @@ if (process.env.NODE_ENV !== "test") {
       console.log("Starting bot...");
 
       try {
-        await caseInsensitiveCommands.setCommands(bot);
+        await bot.api.setMyCommands(getBotMenuCommands());
         console.log("Registered bot commands in the Telegram command menu");
       } catch (error) {
         console.error("Failed to register bot commands in the Telegram command menu:", error);
