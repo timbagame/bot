@@ -3345,15 +3345,48 @@ const caseInsensitiveCommands = new CommandGroup<Context>({
 });
 bot.use(caseInsensitiveCommands);
 
+const BOT_COMMAND_DESCRIPTIONS: Record<string, string> = {
+  start: "Open your wallet and show balances",
+  balance: "Open your wallet and show balances",
+  coinflip: "Create a coinflip game",
+  cf: "Create a coinflip game",
+  giveaway: "Create a random giveaway",
+  ga: "Create a random giveaway",
+  faucet: "Create a first-come token faucet",
+  rain: "Create a first-come token faucet",
+  withdraw: "Withdraw tokens from your bot wallet",
+  wh: "Withdraw tokens from your bot wallet",
+  tip: "Tip another Telegram user",
+  default: "Configure the chat default token",
+  help: "Show available commands",
+  active: "Show your active games",
+  public: "Show active public games",
+  games: "Show your recent games",
+  leaderboard: "Show this group's leaderboard",
+  lb: "Show this group's leaderboard",
+  globalboard: "Show the global leaderboard",
+  gb: "Show the global leaderboard",
+  finance: "Show the bot finance report",
+  oracle: "Show oracle configuration",
+};
+
 const registerCaseInsensitiveCommand = (
   command: string | string[],
   handler: (ctx: Context) => Promise<unknown> | unknown,
 ) => {
   const commands = Array.isArray(command) ? command : [command];
   for (const commandName of commands) {
-    caseInsensitiveCommands.command(commandName, "", handler);
+    const description = BOT_COMMAND_DESCRIPTIONS[commandName];
+    if (!description) throw new Error(`Missing Telegram menu description for /${commandName}`);
+    caseInsensitiveCommands.command(commandName, description, handler);
   }
 };
+
+export const __test_getRegisteredBotCommands = () =>
+  caseInsensitiveCommands.toElementals("default").map(({ command, description }) => ({
+    command,
+    description,
+  }));
 
 registerCaseInsensitiveCommand(["start", "balance"], async (ctx: Context) => {
   if (ctx.chat?.id) {
@@ -6107,6 +6140,13 @@ if (process.env.NODE_ENV !== "test") {
   setupAnchor()
     .then(async () => {
       console.log("Starting bot...");
+
+      try {
+        await caseInsensitiveCommands.setCommands(bot);
+        console.log("Registered bot commands in the Telegram command menu");
+      } catch (error) {
+        console.error("Failed to register bot commands in the Telegram command menu:", error);
+      }
 
       // Reload game message mappings from database
       await gameManager.reloadGameMessages();
