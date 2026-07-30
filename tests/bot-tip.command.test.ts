@@ -461,3 +461,89 @@ test("handleTipCommand reports shortage for SOL when tipping SOL", async () => {
     botModule.wallet.getBalance = originalBalanceCall;
   }
 });
+
+test("handleTipCommand notifies the recipient after showing confirmed success", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  tokenManager.parseAmount = async () => ({
+    success: true,
+    data: {
+      amount: 100,
+      isSol: true,
+      formattedAmount: "0.0000001 SOL",
+      tokenMint: "SOL",
+      tokenTicker: "SOL",
+      decimals: 9,
+      tokenWasSpecified: false,
+      requestedNativeSol: true,
+    },
+  });
+
+  const original = {
+    getKeyPair: botModule.wallet.getKeyPair,
+    getTokenBalance: botModule.wallet.getTokenBalance,
+    getBalance: botModule.wallet.getBalance,
+    getPublicKey: botModule.wallet.getPublicKey,
+    transferSol: botModule.wallet.transferSol,
+    sendMessage: botModule.bot.api.sendMessage.bind(botModule.bot.api),
+  };
+
+  const events: string[] = [];
+  const directMessages: Array<{ chatId: number; text: string; options: any }> = [];
+  try {
+    botModule.__test_setGameManager({ primeUsernameCache: () => {} } as any);
+    botModule.wallet.getKeyPair = (() => ({
+      publicKey: { toBase58: () => "sender-wallet" },
+    })) as any;
+    botModule.wallet.getTokenBalance = (async () => 0) as any;
+    botModule.wallet.getBalance = (async () => 1_000) as any;
+    botModule.wallet.getPublicKey = (() => ({ toBase58: () => "recipient-wallet" })) as any;
+    botModule.wallet.transferSol = (async () => {
+      events.push("transfer");
+      return "confirmed-tip-signature";
+    }) as any;
+    (botModule.bot.api as any).sendMessage = async (chatId: number, text: string, options: any) => {
+      events.push("dm");
+      directMessages.push({ chatId, text, options });
+      return { message_id: 902 };
+    };
+
+    const edits: string[] = [];
+    const ctx: any = {
+      chat: { id: 88, type: "group" },
+      from: { id: 444, is_bot: false, first_name: "<Sender & Friend>" },
+      message: {
+        message_id: 2,
+        text: "/tip 0.0000001",
+        reply_to_message: {
+          from: { id: 555, is_bot: false, first_name: "Recipient" },
+        },
+      },
+      reply: async () => ({ message_id: 901 }),
+      api: {
+        editMessageText: async (_chatId: number, _messageId: number, text: string) => {
+          events.push("edit");
+          edits.push(text);
+        },
+      },
+    };
+
+    await botModule.__test_handleTipCommand(ctx);
+
+    expect(events).toEqual(["transfer", "edit", "dm"]);
+    expect(edits[0]).toContain("successful");
+    expect(directMessages).toEqual([
+      expect.objectContaining({
+        chatId: 555,
+        text: expect.stringContaining("&lt;Sender &amp; Friend&gt;"),
+        options: { parse_mode: "HTML" },
+      }),
+    ]);
+  } finally {
+    botModule.wallet.getKeyPair = original.getKeyPair;
+    botModule.wallet.getTokenBalance = original.getTokenBalance;
+    botModule.wallet.getBalance = original.getBalance;
+    botModule.wallet.getPublicKey = original.getPublicKey;
+    botModule.wallet.transferSol = original.transferSol;
+    (botModule.bot.api as any).sendMessage = original.sendMessage;
+  }
+});

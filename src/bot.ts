@@ -3085,14 +3085,6 @@ const validateAndProcessTransaction = async (
       overrideMessage = txResult.message;
     }
 
-    if (onSuccess) {
-      try {
-        await onSuccess(txString);
-      } catch (error) {
-        console.warn("Post-transaction action failed:", error);
-      }
-    }
-
     // Debug: Log transaction details when creating Solscan link
     if (showSolscanLink) {
       console.log(
@@ -3127,6 +3119,14 @@ const validateAndProcessTransaction = async (
       parse_mode: "HTML",
       link_preview_options: { is_disabled: disablePreview },
     });
+
+    if (onSuccess) {
+      try {
+        await onSuccess(txString);
+      } catch (error) {
+        console.warn("Post-transaction action failed:", error);
+      }
+    }
   } catch (error: any) {
     await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
     throw error;
@@ -3355,42 +3355,14 @@ const caseInsensitiveCommands = new CommandGroup<Context>({
 });
 bot.use(caseInsensitiveCommands);
 
-const BOT_COMMAND_DESCRIPTIONS: Record<string, string> = {
-  start: "Open your wallet and show balances",
-  balance: "Open your wallet and show balances",
-  coinflip: "Create a coinflip game",
-  cf: "Create a coinflip game",
-  giveaway: "Create a random giveaway",
-  ga: "Create a random giveaway",
-  faucet: "Create a first-come token faucet",
-  rain: "Create a first-come token faucet",
-  withdraw: "Withdraw tokens from your bot wallet",
-  wh: "Withdraw tokens from your bot wallet",
-  tip: "Tip another Telegram user",
-  default: "Configure the chat default token",
-  help: "Show available commands",
-  active: "Show your active games",
-  public: "Show active public games",
-  games: "Show your recent games",
-  leaderboard: "Show this group's leaderboard",
-  lb: "Show this group's leaderboard",
-  globalboard: "Show the global leaderboard",
-  gb: "Show the global leaderboard",
-  finance: "Show the bot finance report",
-  oracle: "Show oracle configuration",
-};
-
-const registerCaseInsensitiveCommand = (
-  command: string | string[],
-  handler: (ctx: Context) => Promise<unknown> | unknown,
-) => {
-  const commands = Array.isArray(command) ? command : [command];
-  for (const commandName of commands) {
-    const description = BOT_COMMAND_DESCRIPTIONS[commandName];
-    if (!description) throw new Error(`Missing Telegram menu description for /${commandName}`);
-    caseInsensitiveCommands.command(commandName, description, handler);
-  }
-};
+const registerCaseInsensitiveCommand =
+  (command: string | string[], description: string) =>
+  (handler: (ctx: Context) => Promise<unknown> | unknown): void => {
+    const commands = Array.isArray(command) ? command : [command];
+    for (const commandName of commands) {
+      caseInsensitiveCommands.command(commandName, description, handler);
+    }
+  };
 
 export const __test_getRegisteredBotCommands = () =>
   caseInsensitiveCommands.toElementals("default").map(({ command, description }) => ({
@@ -3398,7 +3370,10 @@ export const __test_getRegisteredBotCommands = () =>
     description,
   }));
 
-registerCaseInsensitiveCommand(["start", "balance"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  ["start", "balance"],
+  "Open your wallet and show balances",
+)(async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
   }
@@ -3406,7 +3381,10 @@ registerCaseInsensitiveCommand(["start", "balance"], async (ctx: Context) => {
   await onBalance(ctx as any, createBalanceDeps());
 });
 
-registerCaseInsensitiveCommand(["coinflip", "cf"], async (ctx) => {
+registerCaseInsensitiveCommand(
+  ["coinflip", "cf"],
+  "Create a coinflip game",
+)(async (ctx) => {
   try {
     await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
   } catch (error) {
@@ -3415,7 +3393,10 @@ registerCaseInsensitiveCommand(["coinflip", "cf"], async (ctx) => {
   }
 });
 
-registerCaseInsensitiveCommand(["giveaway", "ga"], async (ctx) => {
+registerCaseInsensitiveCommand(
+  ["giveaway", "ga"],
+  "Create a random giveaway",
+)(async (ctx) => {
   await handleGiveawayCommand(ctx as Context & { message?: any });
 });
 
@@ -3446,7 +3427,10 @@ const faucetModule = createFaucetModule({
 });
 faucetModule.registerCallbacks();
 
-registerCaseInsensitiveCommand(["faucet", "rain"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  ["faucet", "rain"],
+  "Create a first-come token faucet",
+)(async (ctx: Context) => {
   await faucetModule.handleCommand(ctx);
 });
 
@@ -3454,7 +3438,10 @@ registerCaseInsensitiveCommand(["faucet", "rain"], async (ctx: Context) => {
 // WALLET COMMANDS
 // ================================
 
-registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  ["withdraw", "wh"],
+  "Withdraw tokens from your bot wallet",
+)(async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "withdraw command");
   if (telegramId == null) {
     return;
@@ -3868,7 +3855,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   }
 };
 
-registerCaseInsensitiveCommand("tip", handleTipCommand);
+registerCaseInsensitiveCommand("tip", "Tip another Telegram user")(handleTipCommand);
 
 export const __test_handleTipCommand = handleTipCommand;
 
@@ -3899,7 +3886,10 @@ export const __test_clearTransactionCache = (): void => {
 // TOKEN MANAGEMENT COMMANDS
 // ================================
 
-registerCaseInsensitiveCommand("default", async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  "default",
+  "Configure the chat default token",
+)(async (ctx: Context) => {
   if (!ctx.from || !ctx.chat) return;
 
   const args = ctx.message?.text?.split(" ");
@@ -3910,7 +3900,10 @@ registerCaseInsensitiveCommand("default", async (ctx: Context) => {
 // INFORMATION COMMANDS
 // ================================
 
-registerCaseInsensitiveCommand("help", async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  "help",
+  "Show available commands",
+)(async (ctx: Context) => {
   const helpSections = [
     "<b>📝 Available Commands:</b>",
     "",
@@ -4028,7 +4021,7 @@ const handleActiveCommand = async (ctx: Context) => {
   }
 };
 
-registerCaseInsensitiveCommand("active", handleActiveCommand);
+registerCaseInsensitiveCommand("active", "Show your active games")(handleActiveCommand);
 
 const handlePublicCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "public command");
@@ -4081,10 +4074,13 @@ const handlePublicCommand = async (ctx: Context) => {
   }
 };
 
-registerCaseInsensitiveCommand("public", handlePublicCommand);
+registerCaseInsensitiveCommand("public", "Show active public games")(handlePublicCommand);
 export const __test_handlePublicCommand = handlePublicCommand;
 
-registerCaseInsensitiveCommand("games", async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  "games",
+  "Show your recent games",
+)(async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "games command");
   if (telegramId == null) {
     return;
@@ -4420,7 +4416,10 @@ const resolveLeaderboardPlayers = async (
     .sort((a, b) => b.netWonUsd - a.netWonUsd);
 };
 
-registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  ["leaderboard", "lb"],
+  "Show this group's leaderboard",
+)(async (ctx: Context) => {
   if (!isGroupChat(ctx)) {
     return ctx.reply("❌ Leaderboard is only available in group chats.");
   }
@@ -4540,7 +4539,10 @@ registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
   return undefined;
 });
 
-registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  ["globalboard", "gb"],
+  "Show the global leaderboard",
+)(async (ctx: Context) => {
   try {
     console.log("🌐 Generating global leaderboard");
 
@@ -4656,7 +4658,10 @@ const financeHandlers = createFinanceHandlers({
   },
 });
 
-registerCaseInsensitiveCommand("finance", async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  "finance",
+  "Show the bot finance report",
+)(async (ctx: Context) => {
   try {
     await financeHandlers.handleCommand(ctx);
   } catch (error) {
@@ -4677,7 +4682,10 @@ bot.callbackQuery(
   ),
 );
 
-registerCaseInsensitiveCommand("oracle", async (ctx: Context) => {
+registerCaseInsensitiveCommand(
+  "oracle",
+  "Show oracle configuration",
+)(async (ctx: Context) => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);

@@ -4,11 +4,13 @@ import type { ParseAmountResult } from "../types";
 import type { FaucetDatabase, FaucetProgress, FaucetRecord } from "../utils/faucet-database";
 import type { InferPlayersResult } from "../utils/arg-parsing";
 import { getTelegramUserDisplayName } from "../utils/telegram-display";
+import { isBotInitiationForbidden } from "../utils/telegram-errors";
 
 const DEFAULT_MAX_CLAIMS = 4;
 const MAX_CLAIMS = 100;
 const MAX_VISIBLE_COLLECTORS = 20;
 const DEFAULT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
+const NOTIFICATION_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 
 type ParsedAmount = Extract<ParseAmountResult, { success: true }>["data"];
 
@@ -75,6 +77,13 @@ const progressBar = (paid: number, max: number): string => {
   const cells = Math.min(16, Math.max(4, max));
   const filled = Math.round((paid / max) * cells);
   return `${"🟩".repeat(filled)}${"⬜".repeat(cells - filled)}`;
+};
+
+const isPermanentDirectMessageError = (error: unknown): boolean => {
+  if (isBotInitiationForbidden(error)) return true;
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { error_code?: unknown }).error_code;
+  return code === 400 || code === 403;
 };
 
 const buildCollectorsLine = (progress: FaucetProgress): string | null => {
@@ -174,16 +183,21 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         )}</b>.`,
         { parse_mode: "HTML" },
       );
-      deps.database.finishNotification(faucetId, claimantId, "sent");
+      deps.database.markNotificationSent(faucetId, claimantId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      deps.database.finishNotification(faucetId, claimantId, "failed", message);
+      const retryDelay = NOTIFICATION_RETRY_DELAYS_MS[claim.notification_attempts];
+      const nextAttemptAt =
+        isPermanentDirectMessageError(error) || retryDelay === undefined
+          ? null
+          : now() + retryDelay;
+      deps.database.recordNotificationFailure(faucetId, claimantId, message, nextAttemptAt);
       console.warn(`Failed to notify faucet claimant ${claim.telegram_id}:`, error);
     }
   };
 
   const deliverPendingClaimNotifications = async (): Promise<void> => {
-    for (const claim of deps.database.getPendingNotifications()) {
+    for (const claim of deps.database.getPendingNotifications(now())) {
       await deliverClaimNotification(claim.faucet_id, BigInt(claim.telegram_id));
     }
   };
@@ -215,8 +229,14 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         changed += 1;
       }
     }
+    for (const id of affected) {
+      try {
+        await renderWithApi(deps.bot.api, id);
+      } catch (error) {
+        console.warn(`Failed to update reconciled faucet ${id}:`, error);
+      }
+    }
     await deliverPendingClaimNotifications();
-    for (const id of affected) await renderWithApi(deps.bot.api, id);
     return changed;
   };
 
@@ -382,8 +402,8 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       await render(ctx, faucetId);
       return;
     }
-    await deliverClaimNotification(faucetId, claimantId);
     await render(ctx, faucetId);
+    await deliverClaimNotification(faucetId, claimantId);
   };
 
   const handleCancel = async (ctx: Context, faucetId: number): Promise<void> => {

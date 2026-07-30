@@ -577,12 +577,14 @@ describe("Bot helper utilities", () => {
 
       const edits: string[] = [];
       const signatures: string[] = [];
+      const events: string[] = [];
       const ctx: any = {
         chat: { id: 42 },
         message: { message_id: 7 },
         reply: async () => ({ message_id: 999 }),
         api: {
           editMessageText: async (_chatId: number, _msgId: number, text: string) => {
+            events.push("edit");
             edits.push(text);
           },
         },
@@ -597,6 +599,7 @@ describe("Bot helper utilities", () => {
         async () => "confirmed-signature",
         {
           onSuccess: async (signature) => {
+            events.push("callback");
             signatures.push(signature);
             throw new Error("recipient blocked the bot");
           },
@@ -605,6 +608,7 @@ describe("Bot helper utilities", () => {
 
       expect(signatures).toEqual(["confirmed-signature"]);
       expect(edits).toEqual(["Test payment successful! 💸"]);
+      expect(events).toEqual(["edit", "callback"]);
     } finally {
       botModule.wallet.getKeyPair = original.getKeyPair;
       botModule.wallet.getTokenBalance = original.getTokenBalance;

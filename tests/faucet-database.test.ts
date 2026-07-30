@@ -123,7 +123,7 @@ describe("FaucetDatabase", () => {
     expect(db.getProgress(faucet.id)?.collectors).toEqual([
       { telegramId: "1", displayName: "@collector" },
     ]);
-    expect(db.getPendingNotifications()).toEqual([
+    expect(db.getPendingNotifications(2_001)).toEqual([
       expect.objectContaining({
         faucet_id: faucet.id,
         telegram_id: "1",
@@ -131,7 +131,7 @@ describe("FaucetDatabase", () => {
       }),
     ]);
 
-    db.finishNotification(faucet.id, 1n, "sent");
-    expect(db.getPendingNotifications()).toEqual([]);
+    db.markNotificationSent(faucet.id, 1n);
+    expect(db.getPendingNotifications(2_001)).toEqual([]);
   });
 });
