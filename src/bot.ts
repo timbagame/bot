@@ -118,6 +118,7 @@ import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage, NetworkDetector } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
+import { getTelegramUserDisplayName } from "./utils/telegram-display";
 import { handleCoinflipCommand } from "./handlers/game";
 import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
@@ -3038,6 +3039,7 @@ interface ValidateTransactionOptions {
   showSolscanLink?: boolean;
   tokenMint?: string;
   balanceLabel?: string;
+  onSuccess?: (signature: string) => Promise<void> | void;
 }
 
 const validateAndProcessTransaction = async (
@@ -3051,7 +3053,7 @@ const validateAndProcessTransaction = async (
   ) => Promise<string | { signature: string; message?: string }>,
   options?: ValidateTransactionOptions,
 ): Promise<void> => {
-  const { showSolscanLink = false, tokenMint, balanceLabel } = options ?? {};
+  const { showSolscanLink = false, tokenMint, balanceLabel, onSuccess } = options ?? {};
   const playerData = await getPlayerData(telegramId, isSol ? undefined : tokenMint);
   // Validate balance
   const totalBalance = isSol
@@ -3081,6 +3083,14 @@ const validateAndProcessTransaction = async (
     } else if (txResult && typeof txResult === "object" && typeof txResult.signature === "string") {
       txString = txResult.signature.trim();
       overrideMessage = txResult.message;
+    }
+
+    if (onSuccess) {
+      try {
+        await onSuccess(txString);
+      } catch (error) {
+        console.warn("Post-transaction action failed:", error);
+      }
     }
 
     // Debug: Log transaction details when creating Solscan link
@@ -3841,6 +3851,16 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       {
         tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
         balanceLabel: parsedAmount.tokenTicker,
+        onSuccess: async () => {
+          const senderName = escapeHtml(getTelegramUserDisplayName(ctx.from, `User ${telegramId}`));
+          await bot.api.sendMessage(
+            Number(recipientTelegramId),
+            `💸 <a href="tg://user?id=${telegramId}">${senderName}</a> sent you <b>${escapeHtml(
+              parsedAmount.formattedAmount,
+            )}${escapeHtml(usdSuffix)}</b>.`,
+            { parse_mode: "HTML" },
+          );
+        },
       },
     );
   } catch (error: any) {
