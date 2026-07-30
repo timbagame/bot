@@ -559,6 +559,64 @@ describe("Bot helper utilities", () => {
     }
   });
 
+  test("runs post-confirmation actions without turning their failure into a payment failure", async () => {
+    const original = {
+      getKeyPair: botModule.wallet.getKeyPair,
+      getTokenBalance: botModule.wallet.getTokenBalance,
+      getBalance: botModule.wallet.getBalance,
+    };
+    const originalWarn = console.warn;
+
+    try {
+      botModule.wallet.getKeyPair = (() => ({
+        publicKey: { toBase58: () => "test-player" },
+      })) as any;
+      botModule.wallet.getTokenBalance = (async () => 0) as any;
+      botModule.wallet.getBalance = (async () => 1_000) as any;
+      console.warn = () => {};
+
+      const edits: string[] = [];
+      const signatures: string[] = [];
+      const events: string[] = [];
+      const ctx: any = {
+        chat: { id: 42 },
+        message: { message_id: 7 },
+        reply: async () => ({ message_id: 999 }),
+        api: {
+          editMessageText: async (_chatId: number, _msgId: number, text: string) => {
+            events.push("edit");
+            edits.push(text);
+          },
+        },
+      };
+
+      await botModule.__test_validateAndProcessTransaction(
+        ctx,
+        123n,
+        100,
+        true,
+        "Test payment",
+        async () => "confirmed-signature",
+        {
+          onSuccess: async (signature) => {
+            events.push("callback");
+            signatures.push(signature);
+            throw new Error("recipient blocked the bot");
+          },
+        },
+      );
+
+      expect(signatures).toEqual(["confirmed-signature"]);
+      expect(edits).toEqual(["Test payment successful! 💸"]);
+      expect(events).toEqual(["edit", "callback"]);
+    } finally {
+      botModule.wallet.getKeyPair = original.getKeyPair;
+      botModule.wallet.getTokenBalance = original.getTokenBalance;
+      botModule.wallet.getBalance = original.getBalance;
+      console.warn = originalWarn;
+    }
+  });
+
   test("buildSwapConfirmationKeyboard includes confirm and cancel actions", () => {
     const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
       txId: "tx_test",

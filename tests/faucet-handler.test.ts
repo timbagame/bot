@@ -25,6 +25,7 @@ const createHarness = (
     balance?: number;
     transfer?: (onPrepared: (signature: string) => void) => Promise<string>;
     outcome?: () => Promise<"confirmed" | "failed" | "unknown">;
+    notify?: (chatId: number, text: string) => Promise<void>;
     now?: () => number;
   } = {},
 ) => {
@@ -33,10 +34,19 @@ const createHarness = (
   const edits: Array<{ text: string; options: any }> = [];
   const answers: string[] = [];
   const transferSenders: bigint[] = [];
+  const privateMessages: Array<{ chatId: number; text: string; options: any }> = [];
+  const events: string[] = [];
   const bot = {
     api: {
       editMessageText: async (_chat: number, _message: number, text: string, options: any) => {
+        events.push("edit");
         edits.push({ text, options });
+      },
+      sendMessage: async (chatId: number, text: string, messageOptions: any) => {
+        events.push("dm");
+        if (options.notify) await options.notify(chatId, text);
+        privateMessages.push({ chatId, text, options: messageOptions });
+        return { message_id: 999 };
       },
     },
     callbackQuery: (pattern: RegExp, handler: (ctx: any) => Promise<void>) => {
@@ -74,7 +84,7 @@ const createHarness = (
   const commandContext = (text: string) =>
     ({
       chat: { id: -100 },
-      from: { id: 10 },
+      from: { id: 10, username: "creator" },
       message: { text },
       reply: async (replyText: string, replyOptions: any) => {
         replies.push({ text: replyText, options: replyOptions });
@@ -84,7 +94,7 @@ const createHarness = (
     }) as any;
   const callbackContext = (userId: number) =>
     ({
-      from: { id: userId },
+      from: { id: userId, username: `collector${userId}` },
       callbackQuery: {
         id: `callback-${userId}`,
         message: { message_id: 55, chat: { id: -100 } },
@@ -96,6 +106,7 @@ const createHarness = (
           text: string,
           editOptions: any,
         ) => {
+          events.push("edit");
           edits.push({ text, options: editOptions });
         },
       },
@@ -105,7 +116,17 @@ const createHarness = (
       },
     }) as any;
 
-  return { module, replies, edits, answers, transferSenders, commandContext, callbackContext };
+  return {
+    module,
+    replies,
+    edits,
+    answers,
+    transferSenders,
+    privateMessages,
+    events,
+    commandContext,
+    callbackContext,
+  };
 };
 
 beforeEach(() => {
@@ -171,6 +192,15 @@ describe("faucet handler", () => {
     expect(db.getFaucet(1)?.status).toBe("completed");
     expect(harness.transferSenders).toEqual([10n]);
     expect(harness.edits.at(-1)?.text).toContain("Collected by: <b>1/1 users</b>");
+    expect(harness.edits.at(-1)?.text).toContain('<a href="tg://user?id=20">@collector20</a>');
+    expect(harness.privateMessages).toEqual([
+      expect.objectContaining({
+        chatId: 20,
+        text: expect.stringContaining("from <b>@creator</b>"),
+      }),
+    ]);
+    expect(db.getClaim(1, 20n)?.notification_status).toBe("sent");
+    expect(harness.events.slice(-2)).toEqual(["edit", "dm"]);
   });
 
   test("rejects creator claims and copied faucet buttons", async () => {
@@ -224,6 +254,96 @@ describe("faucet handler", () => {
     await harness.module.reconcile();
     expect(db.getClaim(1, 20n)?.status).toBe("paid");
     expect(harness.transferSenders).toEqual([10n]);
+    expect(harness.privateMessages).toHaveLength(1);
+    expect(harness.privateMessages[0]?.chatId).toBe(20);
+  });
+
+  test("keeps a confirmed faucet payment successful when private messaging is forbidden", async () => {
+    const harness = createHarness({
+      notify: async () => {
+        throw Object.assign(new Error("bot was blocked"), {
+          error_code: 403,
+          description: "Forbidden: bot was blocked by the user",
+        });
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getClaim(1, 20n)).toMatchObject({
+      status: "paid",
+      notification_status: "failed",
+      notification_error: "bot was blocked",
+    });
+    expect(db.getFaucet(1)?.status).toBe("completed");
+    expect(harness.edits.at(-1)?.text).toContain("Completed");
+  });
+
+  test("retries transient private notification failures without paying twice", async () => {
+    let currentTime = 1_000;
+    let notificationAttempts = 0;
+    const harness = createHarness({
+      now: () => currentTime,
+      notify: async () => {
+        notificationAttempts += 1;
+        if (notificationAttempts === 1) throw new Error("temporary Telegram failure");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getClaim(1, 20n)).toMatchObject({
+      status: "paid",
+      notification_status: "pending",
+      notification_attempts: 1,
+      notification_next_attempt_at: 61_000,
+    });
+    expect(harness.privateMessages).toHaveLength(0);
+
+    currentTime = 61_000;
+    await harness.module.reconcile();
+
+    expect(db.getClaim(1, 20n)).toMatchObject({
+      status: "paid",
+      notification_status: "sent",
+      notification_attempts: 1,
+      notification_next_attempt_at: null,
+    });
+    expect(notificationAttempts).toBe(2);
+    expect(harness.privateMessages).toHaveLength(1);
+    expect(harness.transferSenders).toEqual([10n]);
+  });
+
+  test("stops retrying a private notification after five transient failures", async () => {
+    let currentTime = 1_000;
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    const harness = createHarness({
+      now: () => currentTime,
+      notify: async () => {
+        throw new Error("temporary Telegram failure");
+      },
+    });
+
+    try {
+      await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+      await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+      for (let attempt = 1; attempt < 5; attempt += 1) {
+        currentTime = db.getClaim(1, 20n)?.notification_next_attempt_at ?? currentTime;
+        await harness.module.reconcile();
+      }
+
+      expect(db.getClaim(1, 20n)).toMatchObject({
+        status: "paid",
+        notification_status: "failed",
+        notification_attempts: 5,
+        notification_next_attempt_at: null,
+      });
+      expect(harness.transferSenders).toEqual([10n]);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   test("enforces creator-only cancellation", async () => {

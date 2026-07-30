@@ -8,6 +8,7 @@ export interface FaucetRecord {
   creator_id: string;
   chat_id: string;
   message_id: number | null;
+  creator_display_name: string | null;
   token_mint: string;
   token_ticker: string;
   decimals: number;
@@ -23,9 +24,14 @@ export interface FaucetRecord {
 export interface FaucetClaimRecord {
   faucet_id: number;
   telegram_id: string;
+  claimant_display_name: string | null;
   status: FaucetClaimStatus;
   transaction_signature: string | null;
   last_error: string | null;
+  notification_status: "pending" | "sent" | "failed" | null;
+  notification_error: string | null;
+  notification_attempts: number;
+  notification_next_attempt_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -51,6 +57,10 @@ export interface FaucetProgress {
   faucet: FaucetRecord;
   paidClaims: number;
   processingClaims: number;
+  collectors: Array<{
+    telegramId: string;
+    displayName: string | null;
+  }>;
 }
 
 export class FaucetDatabase extends BaseDatabase {
@@ -72,6 +82,7 @@ export class FaucetDatabase extends BaseDatabase {
           creator_id TEXT NOT NULL,
           chat_id TEXT NOT NULL,
           message_id INTEGER,
+          creator_display_name TEXT,
           token_mint TEXT NOT NULL,
           token_ticker TEXT NOT NULL,
           decimals INTEGER NOT NULL,
@@ -90,9 +101,14 @@ export class FaucetDatabase extends BaseDatabase {
         `CREATE TABLE IF NOT EXISTS faucet_claims (
           faucet_id INTEGER NOT NULL,
           telegram_id TEXT NOT NULL,
+          claimant_display_name TEXT,
           status TEXT NOT NULL,
           transaction_signature TEXT,
           last_error TEXT,
+          notification_status TEXT,
+          notification_error TEXT,
+          notification_attempts INTEGER NOT NULL DEFAULT 0,
+          notification_next_attempt_at INTEGER,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
           PRIMARY KEY (faucet_id, telegram_id),
@@ -103,11 +119,46 @@ export class FaucetDatabase extends BaseDatabase {
       ],
       "Faucet",
     );
+    this.ensureNotificationColumns();
+  }
+
+  private ensureNotificationColumns(): void {
+    const faucetColumns = new Set(
+      this.all<{ name: string }>("PRAGMA table_info(faucets)").map(({ name }) => name),
+    );
+    if (!faucetColumns.has("creator_display_name")) {
+      this.run(
+        "ALTER TABLE faucets ADD COLUMN creator_display_name TEXT",
+        [],
+        "adding faucet creator display name",
+      );
+    }
+
+    const claimColumns = new Set(
+      this.all<{ name: string }>("PRAGMA table_info(faucet_claims)").map(({ name }) => name),
+    );
+    const additions = [
+      ["claimant_display_name", "TEXT"],
+      ["notification_status", "TEXT"],
+      ["notification_error", "TEXT"],
+      ["notification_attempts", "INTEGER NOT NULL DEFAULT 0"],
+      ["notification_next_attempt_at", "INTEGER"],
+    ] as const;
+    for (const [column, type] of additions) {
+      if (!claimColumns.has(column)) {
+        this.run(
+          `ALTER TABLE faucet_claims ADD COLUMN ${column} ${type}`,
+          [],
+          `adding faucet claim ${column}`,
+        );
+      }
+    }
   }
 
   createFaucet(input: {
     creatorId: bigint;
     chatId: number;
+    creatorDisplayName: string;
     tokenMint: string;
     tokenTicker: string;
     decimals: number;
@@ -120,12 +171,13 @@ export class FaucetDatabase extends BaseDatabase {
   }): FaucetRecord {
     const result = this.run(
       `INSERT INTO faucets (
-        creator_id, chat_id, token_mint, token_ticker, decimals, is_sol,
+        creator_id, chat_id, creator_display_name, token_mint, token_ticker, decimals, is_sol,
         amount_per_claim, max_claims, display_amount, status, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       [
         input.creatorId.toString(),
         String(input.chatId),
+        input.creatorDisplayName,
         input.tokenMint,
         input.tokenTicker,
         input.decimals,
@@ -176,6 +228,17 @@ export class FaucetDatabase extends BaseDatabase {
       faucet,
       paidClaims: Number(counts?.paid ?? 0),
       processingClaims: Number(counts?.processing ?? 0),
+      collectors: this.all<{
+        telegramId: string;
+        displayName: string | null;
+      }>(
+        `SELECT telegram_id AS telegramId, claimant_display_name AS displayName
+         FROM faucet_claims
+         WHERE faucet_id = ? AND status = 'paid'
+         ORDER BY created_at ASC, telegram_id ASC`,
+        [id],
+        "loading faucet collectors",
+      ),
     };
   }
 
@@ -225,7 +288,12 @@ export class FaucetDatabase extends BaseDatabase {
     return due.map((faucet) => ({ ...faucet, status: "expired" }));
   }
 
-  reserveClaim(faucetId: number, telegramId: bigint, now: number): ReserveClaimResult {
+  reserveClaim(
+    faucetId: number,
+    telegramId: bigint,
+    now: number,
+    claimantDisplayName?: string,
+  ): ReserveClaimResult {
     const reserve = this.db.transaction((): ReserveClaimResult => {
       const faucet = this.getFaucet(faucetId);
       if (!faucet) return { ok: false, reason: "not_found" };
@@ -259,17 +327,19 @@ export class FaucetDatabase extends BaseDatabase {
       if (existing) {
         this.run(
           `UPDATE faucet_claims
-           SET status = 'processing', transaction_signature = NULL, last_error = NULL, updated_at = ?
+           SET status = 'processing', transaction_signature = NULL, last_error = NULL,
+               claimant_display_name = COALESCE(?, claimant_display_name),
+               notification_status = NULL, notification_error = NULL, updated_at = ?
            WHERE faucet_id = ? AND telegram_id = ?`,
-          [now, faucetId, telegramId.toString()],
+          [claimantDisplayName ?? null, now, faucetId, telegramId.toString()],
           "retrying faucet claim",
         );
       } else {
         this.run(
           `INSERT INTO faucet_claims (
-            faucet_id, telegram_id, status, created_at, updated_at
-          ) VALUES (?, ?, 'processing', ?, ?)`,
-          [faucetId, telegramId.toString(), now, now],
+            faucet_id, telegram_id, claimant_display_name, status, created_at, updated_at
+          ) VALUES (?, ?, ?, 'processing', ?, ?)`,
+          [faucetId, telegramId.toString(), claimantDisplayName ?? null, now, now],
           "reserving faucet claim",
         );
       }
@@ -310,7 +380,9 @@ export class FaucetDatabase extends BaseDatabase {
     const complete = this.db.transaction(() => {
       this.run(
         `UPDATE faucet_claims
-         SET status = 'paid', transaction_signature = ?, last_error = NULL, updated_at = ?
+         SET status = 'paid', transaction_signature = ?, last_error = NULL, updated_at = ?,
+             notification_status = 'pending', notification_error = NULL,
+             notification_attempts = 0, notification_next_attempt_at = NULL
          WHERE faucet_id = ? AND telegram_id = ? AND status IN ('processing', 'submitted')`,
         [signature, now, faucetId, telegramId.toString()],
         "completing faucet claim",
@@ -331,6 +403,51 @@ export class FaucetDatabase extends BaseDatabase {
       }
     });
     complete();
+  }
+
+  getPendingNotifications(now: number): FaucetClaimRecord[] {
+    return this.all<FaucetClaimRecord>(
+      `SELECT * FROM faucet_claims
+       WHERE status = 'paid' AND notification_status = 'pending'
+         AND (notification_next_attempt_at IS NULL OR notification_next_attempt_at <= ?)
+       ORDER BY COALESCE(notification_next_attempt_at, updated_at) ASC`,
+      [now],
+      "loading pending faucet notifications",
+    );
+  }
+
+  markNotificationSent(faucetId: number, telegramId: bigint): void {
+    this.run(
+      `UPDATE faucet_claims
+       SET notification_status = 'sent', notification_error = NULL,
+           notification_next_attempt_at = NULL
+       WHERE faucet_id = ? AND telegram_id = ? AND notification_status = 'pending'`,
+      [faucetId, telegramId.toString()],
+      "marking faucet notification sent",
+    );
+  }
+
+  recordNotificationFailure(
+    faucetId: number,
+    telegramId: bigint,
+    error: string,
+    nextAttemptAt: number | null,
+  ): void {
+    this.run(
+      `UPDATE faucet_claims
+       SET notification_status = ?, notification_error = ?,
+           notification_attempts = notification_attempts + 1,
+           notification_next_attempt_at = ?
+       WHERE faucet_id = ? AND telegram_id = ? AND notification_status = 'pending'`,
+      [
+        nextAttemptAt === null ? "failed" : "pending",
+        error.slice(0, 500),
+        nextAttemptAt,
+        faucetId,
+        telegramId.toString(),
+      ],
+      "recording faucet notification failure",
+    );
   }
 
   failClaim(faucetId: number, telegramId: bigint, error: string, now: number): void {

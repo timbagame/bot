@@ -8,6 +8,7 @@ const createFaucet = (overrides: Partial<Parameters<FaucetDatabase["createFaucet
   db.createFaucet({
     creatorId: 10n,
     chatId: -100,
+    creatorDisplayName: "@creator",
     tokenMint: "mint",
     tokenTicker: "TOK",
     decimals: 2,
@@ -112,5 +113,25 @@ describe("FaucetDatabase", () => {
     expect(db.getReservedAmount(10n, "mint", false, 2_003)).toBe(100);
     db.cancelFaucet(faucet.id, 10n);
     expect(db.getReservedAmount(10n, "mint", false, 2_004)).toBe(0);
+  });
+
+  test("stores collector names and queues a notification after payment", () => {
+    const faucet = createFaucet();
+    db.reserveClaim(faucet.id, 1n, 2_000, "@collector");
+    db.completeClaim(faucet.id, 1n, "sig", 2_001);
+
+    expect(db.getProgress(faucet.id)?.collectors).toEqual([
+      { telegramId: "1", displayName: "@collector" },
+    ]);
+    expect(db.getPendingNotifications(2_001)).toEqual([
+      expect.objectContaining({
+        faucet_id: faucet.id,
+        telegram_id: "1",
+        notification_status: "pending",
+      }),
+    ]);
+
+    db.markNotificationSent(faucet.id, 1n);
+    expect(db.getPendingNotifications(2_001)).toEqual([]);
   });
 });
