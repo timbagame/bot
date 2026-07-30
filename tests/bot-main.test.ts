@@ -69,7 +69,7 @@ describe("Bot Main Entry Point Tests", () => {
       expect(typeof botModule.wallet.getTokenBalance).toBe("function");
     });
 
-    test("registers every command with Telegram menu metadata", () => {
+    test("registers public commands with Telegram menu metadata", () => {
       const commands = botModule.__test_getRegisteredBotCommands();
       expect(commands).toEqual(
         expect.arrayContaining([
@@ -84,6 +84,7 @@ describe("Bot Main Entry Point Tests", () => {
         ]),
       );
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);
+      expect(commands.some(({ command }) => command === "finance")).toBe(false);
     });
   });
 
