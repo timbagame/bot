@@ -3,6 +3,11 @@ import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
+import {
+  BotHealthResponseSchema,
+  CompletedGameNotificationResponseSchema,
+  CompletedGameNotificationSchema,
+} from "@timbagame/protocol/bot";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { CommandGroup } from "@grammyjs/commands";
 import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
@@ -6370,36 +6375,30 @@ if (process.env.NODE_ENV !== "test") {
         async fetch(request) {
           const url = new URL(request.url);
           if (url.pathname === "/health" && request.method === "GET") {
-            return new Response(JSON.stringify({ status: "ok" }), {
+            return new Response(JSON.stringify(BotHealthResponseSchema.parse({ status: "ok" })), {
               status: 200,
               headers: { "Content-Type": "application/json" },
             });
           }
           if (url.pathname === "/internal/completed" && request.method === "POST") {
             try {
-              const body = (await request.json()) as Record<string, unknown>;
-              const gameAddress =
-                typeof body["gameAddress"] === "string" ? body["gameAddress"] : "";
-              const winnerAddress =
-                typeof body["winnerAddress"] === "string" ? body["winnerAddress"] : "";
-              const winnerTxSignature =
-                typeof body["winnerTxSignature"] === "string"
-                  ? body["winnerTxSignature"]
-                  : undefined;
-              const totalPot = typeof body["totalPot"] === "number" ? body["totalPot"] : undefined;
-              if (!gameAddress || !winnerAddress) {
-                return new Response(
-                  JSON.stringify({ error: "Missing gameAddress or winnerAddress" }),
-                  { status: 400 },
-                );
+              const body = CompletedGameNotificationSchema.safeParse(await request.json());
+              if (!body.success) {
+                return new Response(JSON.stringify({ error: "Invalid completion notification" }), {
+                  status: 400,
+                });
               }
+              const { gameAddress, winnerAddress, totalPot, winnerTxSignature } = body.data;
               await runProcessGameCompletion(
                 gameAddress,
                 winnerAddress,
                 totalPot,
                 winnerTxSignature,
               );
-              return new Response(JSON.stringify({ success: true }), { status: 200 });
+              return new Response(
+                JSON.stringify(CompletedGameNotificationResponseSchema.parse({ success: true })),
+                { status: 200 },
+              );
             } catch (error) {
               console.error("Error handling /internal/completed:", error);
               return new Response(JSON.stringify({ error: "Internal server error" }), {

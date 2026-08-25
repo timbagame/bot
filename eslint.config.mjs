@@ -27,6 +27,25 @@ export default tseslint.config(
     },
   },
   {
+    files: [
+      "src/utils/jupiter.ts",
+      "src/utils/oracle.ts",
+      "src/utils/prices.ts",
+      "src/utils/verified-token-registry.ts",
+    ],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+      "@typescript-eslint/consistent-type-imports": "error",
+    },
+  },
+  {
     files: ["tests/**"],
     rules: {
       "@typescript-eslint/ban-ts-comment": "off",

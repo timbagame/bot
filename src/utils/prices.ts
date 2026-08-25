@@ -1,5 +1,6 @@
 import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS } from "./constants";
 import { PublicKey } from "@solana/web3.js";
+import { z } from "zod";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";
 
@@ -11,6 +12,27 @@ type PriceCacheEntry = {
 const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(PRICES_CACHE_TTL_MS);
 
 const PRICES_ENV_KEY = "PRICES_ENABLED";
+
+const priceEntrySchema = z
+  .object({
+    price: z.union([z.number(), z.string()]).nullish(),
+    usdPrice: z.union([z.number(), z.string()]).nullish(),
+    usd_price: z.union([z.number(), z.string()]).nullish(),
+  })
+  .passthrough();
+const priceEntriesSchema = z.record(z.string(), priceEntrySchema);
+const wrappedJupiterPriceResponseSchema = z.object({ data: priceEntriesSchema }).passthrough();
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === "AbortError" || candidate.code === "ABORT_ERR";
+}
+
+function getPriceEntries(payload: unknown): Record<string, z.infer<typeof priceEntrySchema>> {
+  const wrapped = wrappedJupiterPriceResponseSchema.safeParse(payload);
+  return wrapped.success ? wrapped.data.data : priceEntriesSchema.parse(payload);
+}
 
 function isPricesEnabled(): boolean {
   if (typeof process !== "undefined" && process?.env) {
@@ -46,7 +68,7 @@ async function withTimeout<T>(
   try {
     return await factory(ac.signal);
   } catch (error) {
-    if ((error as any)?.name === "AbortError" || (error as any)?.code === "ABORT_ERR") {
+    if (isAbortError(error)) {
       throw new Error("timeout", { cause: error });
     }
     throw error;
@@ -85,8 +107,7 @@ async function fetchFromJupiter(
       timeoutMs,
     );
     if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    const entry = data?.data?.[id] ?? data?.[id];
+    const entry = getPriceEntries(await res.json())[id];
     if (!entry) return null;
     return pickValidPrice([entry?.price, entry?.usdPrice, entry?.usd_price]);
   } catch {
@@ -122,8 +143,7 @@ async function fetchBatchFromJupiter(
       return {};
     }
 
-    const data = (await res.json()) as any;
-    const container = data?.data ?? data ?? {};
+    const container = getPriceEntries(await res.json());
     return uniqueIds.reduce<Record<string, number | null>>((acc, requestId) => {
       const entry = container?.[requestId];
       acc[requestId] = entry
@@ -138,7 +158,7 @@ async function fetchBatchFromJupiter(
 
 export async function getPriceUSD(
   mintAddress: string,
-  fetchImpl: FetchLike = globalThis.fetch as any,
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
 ): Promise<number> {
   if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintAddress);
@@ -193,7 +213,7 @@ export async function getPriceUSD(
 
 export async function getPricesUSD(
   ids: string[],
-  fetchImpl: FetchLike = globalThis.fetch as any,
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
 ): Promise<Record<string, number>> {
   if (!isPricesEnabled()) {
     return Object.fromEntries(ids.map((id) => [id, 0]));

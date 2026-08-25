@@ -1,13 +1,34 @@
-import { PublicKey, Transaction } from "@solana/web3.js";
-import type {
-  AuthorizationResult,
-  OracleApiResponse,
-  OracleStats,
-  OracleStatsResponse,
-} from "../types";
+import { Transaction, type PublicKey } from "@solana/web3.js";
+import type { AuthorizationResult, OracleStats } from "../types";
 import { GameDatabase } from "./game-database";
-import { WalletManager } from "./wallet";
+import type { WalletManager } from "./wallet";
 import { loadOracleApiToken } from "./secrets";
+import { ApiErrorSchema } from "@timbagame/protocol/common";
+import {
+  CompleteGameNowResponseSchema,
+  GenerateHashResponseSchema,
+  OracleHealthResponseSchema,
+  OracleStatsResponseSchema,
+  SignGameTransactionResponseSchema,
+} from "@timbagame/protocol/oracle";
+
+async function parseOracleResponse<T>(
+  response: Response,
+  schema: { parse(value: unknown): T },
+): Promise<T> {
+  const raw: unknown = await response.json();
+  if (!response.ok) {
+    const error = ApiErrorSchema.safeParse(raw);
+    throw new Error(
+      error.success ? error.data.error : `Oracle request failed (${response.status})`,
+    );
+  }
+  return schema.parse(raw);
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+}
 
 // ================================
 // ORACLE API CLIENT
@@ -58,15 +79,7 @@ export class OracleClient {
         headers: this.serviceHeaders(true),
       });
 
-      if (!response.ok) {
-        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
-      }
-
-      const data = (await response.json()) as OracleApiResponse;
-
-      if (!data.success || !data.randomHash || !data.oracleOperator) {
-        throw new Error(data.error || "Failed to generate random hash");
-      }
+      const data = await parseOracleResponse(response, GenerateHashResponseSchema);
 
       console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
 
@@ -89,12 +102,7 @@ export class OracleClient {
       headers: this.serviceHeaders(true),
       body: JSON.stringify({ txBase64 }),
     });
-    const data = (await response.json()) as OracleApiResponse & {
-      txBase64?: string;
-    };
-    if (!response.ok || !data.success || !data.txBase64) {
-      throw new Error(data.error || "Oracle rejected the game transaction");
-    }
+    const data = await parseOracleResponse(response, SignGameTransactionResponseSchema);
     return Transaction.from(Buffer.from(data.txBase64, "base64"));
   }
 
@@ -107,17 +115,7 @@ export class OracleClient {
         headers: this.serviceHeaders(),
       });
 
-      if (!response.ok) {
-        console.warn(`Oracle stats request failed: ${response.status}`);
-        return null;
-      }
-
-      const data = (await response.json()) as OracleStatsResponse;
-
-      if (!data.success || !data.stats) {
-        console.warn("Oracle stats not available:", data.error);
-        return null;
-      }
+      const data = await parseOracleResponse(response, OracleStatsResponseSchema);
 
       return data.stats;
     } catch (error) {
@@ -138,13 +136,14 @@ export class OracleClient {
       });
 
       console.log(`🔍 Oracle health response: ${response.status} ${response.statusText}`);
-      return response.ok;
+      await parseOracleResponse(response, OracleHealthResponseSchema);
+      return true;
     } catch (error) {
       console.error("❌ Oracle health check failed:", {
         url: `${this.oracleApiUrl}/health`,
         error: error instanceof Error ? error.message : String(error),
         type: error?.constructor?.name || typeof error,
-        code: (error as any)?.code,
+        code: errorCode(error),
       });
       return false;
     }
@@ -159,13 +158,7 @@ export class OracleClient {
         signal: AbortSignal.timeout(3000),
       });
 
-      if (!response.ok) {
-        console.warn(
-          `Oracle completion wake-up failed for ${gameAddress}: ${response.status} ${response.statusText}`,
-        );
-        return false;
-      }
-
+      await parseOracleResponse(response, CompleteGameNowResponseSchema);
       return true;
     } catch (error) {
       console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
