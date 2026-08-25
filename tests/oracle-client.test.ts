@@ -120,10 +120,9 @@ describe("OracleClient", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe(`${ORACLE_URL}/games/complete-now`);
     expect(requests[0]?.init?.method).toBe("POST");
-    expect(requests[0]?.init?.headers).toEqual({
-      "Content-Type": "application/json",
-      Authorization: "Bearer test-oracle-token",
-    });
+    const headers = new Headers(requests[0]?.init?.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("Authorization")).toBe("Bearer test-oracle-token");
     expect(requests[0]?.init?.body).toBe(JSON.stringify({ gameAddress: TEST_GAME_ADDRESS }));
   });
 

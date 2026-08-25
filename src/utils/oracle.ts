@@ -3,28 +3,8 @@ import type { AuthorizationResult, OracleStats } from "../types";
 import { GameDatabase } from "./game-database";
 import type { WalletManager } from "./wallet";
 import { loadOracleApiToken } from "./secrets";
-import { ApiErrorSchema } from "@timbagame/protocol/common";
-import {
-  CompleteGameNowResponseSchema,
-  GenerateHashResponseSchema,
-  OracleHealthResponseSchema,
-  OracleStatsResponseSchema,
-  SignGameTransactionResponseSchema,
-} from "@timbagame/protocol/oracle";
-
-async function parseOracleResponse<T>(
-  response: Response,
-  schema: { parse(value: unknown): T },
-): Promise<T> {
-  const raw: unknown = await response.json();
-  if (!response.ok) {
-    const error = ApiErrorSchema.safeParse(raw);
-    throw new Error(
-      error.success ? error.data.error : `Oracle request failed (${response.status})`,
-    );
-  }
-  return schema.parse(raw);
-}
+import { createRestClient, expectStatus } from "@timbagame/protocol/common";
+import { oracleContract } from "@timbagame/protocol/oracle";
 
 function errorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
@@ -59,14 +39,18 @@ export class OracleClient {
   // ORACLE API METHODS
   // ================================
 
-  private serviceHeaders(includeJson = false): Record<string, string> {
-    const headers: Record<string, string> = {};
-    if (includeJson) headers["Content-Type"] = "application/json";
-    const apiToken = loadOracleApiToken();
-    if (apiToken) {
-      headers["Authorization"] = `Bearer ${apiToken}`;
-    }
-    return headers;
+  private apiClient() {
+    return createRestClient(oracleContract, {
+      baseUrl: this.oracleApiUrl,
+      getHeaders: (endpoint) => {
+        const apiToken = loadOracleApiToken();
+        const headers: Record<string, string> = {};
+        if (endpoint.authenticated && apiToken) {
+          headers["Authorization"] = `Bearer ${apiToken}`;
+        }
+        return headers;
+      },
+    });
   }
 
   /**
@@ -74,12 +58,7 @@ export class OracleClient {
    */
   public async generateGameSecrets(): Promise<{ randomHash: string; oracleOperator: string }> {
     try {
-      const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
-        method: "POST",
-        headers: this.serviceHeaders(true),
-      });
-
-      const data = await parseOracleResponse(response, GenerateHashResponseSchema);
+      const data = expectStatus(await this.apiClient().generateHash({ body: {} }), 200).data;
 
       console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
 
@@ -97,12 +76,10 @@ export class OracleClient {
     const txBase64 = transaction
       .serialize({ requireAllSignatures: false, verifySignatures: false })
       .toString("base64");
-    const response = await fetch(`${this.oracleApiUrl}/sign-game-transaction`, {
-      method: "POST",
-      headers: this.serviceHeaders(true),
-      body: JSON.stringify({ txBase64 }),
-    });
-    const data = await parseOracleResponse(response, SignGameTransactionResponseSchema);
+    const data = expectStatus(
+      await this.apiClient().signGameTransaction({ body: { txBase64 } }),
+      200,
+    ).data;
     return Transaction.from(Buffer.from(data.txBase64, "base64"));
   }
 
@@ -111,11 +88,7 @@ export class OracleClient {
    */
   public async getStats(): Promise<OracleStats | null> {
     try {
-      const response = await fetch(`${this.oracleApiUrl}/stats`, {
-        headers: this.serviceHeaders(),
-      });
-
-      const data = await parseOracleResponse(response, OracleStatsResponseSchema);
+      const data = expectStatus(await this.apiClient().stats(), 200).data;
 
       return data.stats;
     } catch (error) {
@@ -130,13 +103,14 @@ export class OracleClient {
   public async isHealthy(): Promise<boolean> {
     try {
       console.log(`🔍 Checking Oracle health at: ${this.oracleApiUrl}/health`);
-      const response = await fetch(`${this.oracleApiUrl}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(5000), // 5 second timeout
+      const result = await this.apiClient().health({
+        request: { signal: AbortSignal.timeout(5000) },
       });
 
-      console.log(`🔍 Oracle health response: ${response.status} ${response.statusText}`);
-      await parseOracleResponse(response, OracleHealthResponseSchema);
+      console.log(
+        `🔍 Oracle health response: ${result.response.status} ${result.response.statusText}`,
+      );
+      expectStatus(result, 200);
       return true;
     } catch (error) {
       console.error("❌ Oracle health check failed:", {
@@ -151,14 +125,13 @@ export class OracleClient {
 
   public async requestGameCompletion(gameAddress: string): Promise<boolean> {
     try {
-      const response = await fetch(`${this.oracleApiUrl}/games/complete-now`, {
-        method: "POST",
-        headers: this.serviceHeaders(true),
-        body: JSON.stringify({ gameAddress }),
-        signal: AbortSignal.timeout(3000),
-      });
-
-      await parseOracleResponse(response, CompleteGameNowResponseSchema);
+      expectStatus(
+        await this.apiClient().completeGameNow({
+          body: { gameAddress },
+          request: { signal: AbortSignal.timeout(3000) },
+        }),
+        200,
+      );
       return true;
     } catch (error) {
       console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
