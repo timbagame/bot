@@ -4,6 +4,7 @@
     "service-admin": "bun run scripts/service-admin.ts",
     "start": "bun run src/bot.ts",
     "dev": "bun run --watch src/bot.ts",
+    "audit": "bun -e 'if (Date.now() >= Date.parse(\"2026-11-23T00:00:00Z\")) { console.error(\"Audit exception GHSA-3gc7-fjrx-p6mg expired on 2026-11-23\"); process.exit(1); }' && bun audit --ignore GHSA-3gc7-fjrx-p6mg",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint . --max-warnings 0",
@@ -34,5 +35,8 @@
     "prettier": "^3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.67.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }
