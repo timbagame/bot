@@ -1,6 +1,10 @@
 import { afterEach, test, expect } from "bun:test";
 import { OracleClient } from "../src/utils/oracle";
-import { PublicKey } from "@solana/web3.js";
+import {
+  oracleResponse,
+  TEST_GAME_ADDRESS,
+  TEST_OPERATOR_ADDRESS,
+} from "./helpers/oracle-response";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -12,15 +16,17 @@ test("generateGameSecrets returns randomHash on success", async () => {
   oc.setOracleUrl("http://oracle.test");
   globalThis.fetch = (async () =>
     new Response(
-      JSON.stringify({
-        success: true,
-        randomHash: "abc123",
-        oracleOperator: PublicKey.default.toBase58(),
-      }),
+      JSON.stringify(
+        oracleResponse({
+          randomHash: "ab".repeat(32),
+          gameAddress: TEST_GAME_ADDRESS,
+          oracleOperator: TEST_OPERATOR_ADDRESS,
+        }),
+      ),
       { status: 200 },
     )) as any;
   const { randomHash } = await oc.generateGameSecrets();
-  expect(randomHash).toBe("abc123");
+  expect(randomHash).toBe("ab".repeat(32));
   const buf = oc.hexToBuffer("ff");
   expect(buf[0]).toBe(0xff);
 });

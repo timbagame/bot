@@ -1,4 +1,5 @@
-import { PublicKey } from "@solana/web3.js";
+import { SolanaAddressSchema } from "@timbagame/protocol";
+import { z } from "zod";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { getSupportedTokens } from "./token-registry";
@@ -6,6 +7,11 @@ import { getSupportedTokens } from "./token-registry";
 const JUPITER_VERIFIED_URL = "https://api.jup.ag/tokens/v2/tag?query=verified";
 const REFRESH_INTERVAL_MS = 6 * 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 3_000;
+const verifiedTokenSnapshotSchema = z.object({
+  savedAt: z.number().finite().nonnegative().default(0),
+  mints: z.array(SolanaAddressSchema).default([]),
+});
+const jupiterVerifiedTokensSchema = z.array(z.object({ id: SolanaAddressSchema }).passthrough());
 
 const localMints = () => getSupportedTokens().map((token) => token.mint);
 const snapshotPath = join(
@@ -16,14 +22,11 @@ const snapshotPath = join(
 function loadSnapshot(): { mints: Set<string>; savedAt: number } {
   const mints = new Set(localMints());
   try {
-    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as {
-      savedAt?: unknown;
-      mints?: unknown;
-    };
-    if (Array.isArray(snapshot.mints)) {
-      for (const mint of snapshot.mints) if (isMint(mint)) mints.add(mint);
-    }
-    return { mints, savedAt: Number(snapshot.savedAt) || 0 };
+    const snapshot = verifiedTokenSnapshotSchema.parse(
+      JSON.parse(readFileSync(snapshotPath, "utf8")),
+    );
+    for (const mint of snapshot.mints) mints.add(mint);
+    return { mints, savedAt: snapshot.savedAt };
   } catch {
     return { mints, savedAt: 0 };
   }
@@ -49,15 +52,6 @@ let verifiedMints = initialSnapshot.mints;
 let refreshAfter = 0;
 let refreshPromise: Promise<void> | undefined;
 
-function isMint(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try {
-    return new PublicKey(value).toBase58() === value;
-  } catch {
-    return false;
-  }
-}
-
 async function refreshVerifiedMints(): Promise<void> {
   const apiKey = process.env.JUPITER_API_KEY?.trim();
   if (!apiKey) return;
@@ -71,14 +65,11 @@ async function refreshVerifiedMints(): Promise<void> {
     });
     if (!response.ok) return;
 
-    const payload = (await response.json()) as unknown;
-    if (!Array.isArray(payload)) return;
+    const payload = jupiterVerifiedTokensSchema.safeParse(await response.json());
+    if (!payload.success) return;
 
     const next = new Set(localMints());
-    for (const entry of payload) {
-      const mint = (entry as { id?: unknown })?.id;
-      if (isMint(mint)) next.add(mint);
-    }
+    for (const entry of payload.data) next.add(entry.id);
     verifiedMints = next;
     saveSnapshot(next);
     refreshAfter = Date.now() + REFRESH_INTERVAL_MS;

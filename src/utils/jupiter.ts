@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import { z } from "zod";
 import { escapeHtml, formatRate } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
 import { MIN_JUPITER_SWAP_FEE_BPS } from "./admin-payer-surcharge";
@@ -244,6 +245,131 @@ export interface JupiterExecuteResponse {
   };
 }
 
+const jupiterRoutePlanSchema = z.array(
+  z.object({
+    swapInfo: z.object({
+      ammKey: z.string(),
+      label: z.string(),
+      inputMint: z.string(),
+      outputMint: z.string(),
+      inAmount: z.string(),
+      outAmount: z.string(),
+      feeAmount: z.string(),
+      feeMint: z.string(),
+    }),
+    percent: z.number(),
+    bps: z.number().optional(),
+  }),
+);
+const platformFeeSchema = z.object({ amount: z.string(), feeBps: z.number() }).nullable();
+const jupiterErrorSchema = z
+  .object({
+    error: z.string().optional(),
+    errorCode: z.number().optional(),
+    errorMessage: z.string().optional(),
+  })
+  .refine((value) => Boolean(value.error || value.errorMessage), {
+    message: "A Jupiter error response must include an error message",
+  });
+const jupiterOrderResponseSchema = z
+  .object({
+    mode: z.string().default("order"),
+    inputMint: z.string(),
+    outputMint: z.string(),
+    inAmount: z.string(),
+    outAmount: z.string(),
+    otherAmountThreshold: z.string(),
+    swapMode: z.string(),
+    slippageBps: z.number(),
+    priceImpactPct: z.string().optional(),
+    priceImpact: z.number().optional(),
+    routePlan: jupiterRoutePlanSchema,
+    feeMint: z.string().optional(),
+    feeBps: z.number().optional(),
+    inUsdValue: z.number().optional(),
+    outUsdValue: z.number().optional(),
+    platformFee: platformFeeSchema.optional(),
+    router: z.string().optional(),
+    transaction: z.string().nullable().optional(),
+    gasless: z.boolean().optional(),
+    requestId: z.string().optional(),
+    quoteId: z.string().optional(),
+    maker: z.string().optional(),
+    expireAt: z.string().optional(),
+    totalTime: z.number().optional(),
+    error: z.string().optional(),
+    errorCode: z.number().optional(),
+    errorMessage: z.string().optional(),
+    signatureFeeLamports: z.number().optional(),
+    prioritizationFeeLamports: z.number().optional(),
+    rentFeeLamports: z.number().optional(),
+    referralApplied: z.boolean().optional(),
+    payerApplied: z.boolean().optional(),
+    integratorFallback: z.boolean().optional(),
+    integratorFallbackReason: z.string().optional(),
+  })
+  .passthrough();
+const jupiterInstructionSchema = z.object({
+  programId: z.string(),
+  accounts: z.array(
+    z.object({ pubkey: z.string(), isSigner: z.boolean(), isWritable: z.boolean() }),
+  ),
+  data: z.string(),
+});
+const jupiterBuildResponseSchema = z
+  .object({
+    inputMint: z.string(),
+    outputMint: z.string(),
+    inAmount: z.string(),
+    outAmount: z.string(),
+    otherAmountThreshold: z.string(),
+    swapMode: z.string(),
+    slippageBps: z.number(),
+    routePlan: jupiterRoutePlanSchema,
+    computeBudgetInstructions: z.array(jupiterInstructionSchema),
+    setupInstructions: z.array(jupiterInstructionSchema),
+    swapInstruction: jupiterInstructionSchema,
+    cleanupInstruction: jupiterInstructionSchema.nullable(),
+    otherInstructions: z.array(jupiterInstructionSchema),
+    tipInstruction: jupiterInstructionSchema.nullable(),
+    addressesByLookupTableAddress: z.record(z.string(), z.array(z.string())).nullable(),
+    blockhashWithMetadata: z.object({
+      blockhash: z.array(z.number().int().min(0).max(255)),
+      lastValidBlockHeight: z.number(),
+    }),
+  })
+  .passthrough();
+const jupiterExecuteResponseSchema = z
+  .object({
+    status: z.string().optional(),
+    signature: z.string().optional(),
+    txid: z.string().optional(),
+    error: z.string().optional(),
+    errorMessage: z.string().optional(),
+    code: z.number().optional(),
+    signatureStatus: z
+      .object({
+        slot: z.number().optional(),
+        confirmations: z.number().optional(),
+        confirmationStatus: z.string().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+const jupiterTokenMetadataSchema = z
+  .object({
+    id: z.string(),
+    symbol: z.string(),
+    name: z.string().optional(),
+    icon: z.string().optional(),
+    decimals: z.number().finite(),
+  })
+  .passthrough();
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ================================
 // JUPITER CLIENT
 // ================================
@@ -371,7 +497,16 @@ export class JupiterClient {
         );
       }
 
-      const data = (await response.json()) as JupiterOrderResponse;
+      const payload: unknown = await response.json();
+      const errorResult = jupiterErrorSchema.safeParse(payload);
+      if (errorResult.success) {
+        const data = errorResult.data;
+        const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        throw new Error(
+          `Jupiter order error${codeSuffix}: ${data.errorMessage || data.error || "Unknown Jupiter error"}`,
+        );
+      }
+      const data: JupiterOrderResponse = jupiterOrderResponseSchema.parse(payload);
 
       if (data.error || data.errorMessage) {
         const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
@@ -411,12 +546,12 @@ export class JupiterClient {
       } satisfies JupiterQuoteResponse;
 
       return { raw: data, normalized, referralApplied };
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof JupiterReferralUnavailableError) {
         throw error;
       }
       console.error("Error requesting Jupiter order:", error);
-      throw new Error(`Failed to request Jupiter order: ${error.message}`, { cause: error });
+      throw new Error(`Failed to request Jupiter order: ${errorMessage(error)}`, { cause: error });
     }
   }
 
@@ -528,18 +663,21 @@ export class JupiterClient {
         );
       }
 
-      const data = (await response.json()) as JupiterBuildResponse & JupiterBuildErrorResponse;
-
-      if (data.error || data.errorMessage) {
+      const payload: unknown = await response.json();
+      const errorResult = jupiterErrorSchema.safeParse(payload);
+      if (errorResult.success) {
+        const data: JupiterBuildErrorResponse = errorResult.data;
         const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
-        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
-        throw new Error(`Jupiter build error${codeSuffix}: ${errorMessage}`);
+        throw new Error(
+          `Jupiter build error${codeSuffix}: ${data.errorMessage || data.error || "Unknown Jupiter error"}`,
+        );
       }
+      const data: JupiterBuildResponse = jupiterBuildResponseSchema.parse(payload);
 
       return data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error requesting Jupiter build:", error);
-      throw new Error(`Failed to request Jupiter build: ${error.message}`, { cause: error });
+      throw new Error(`Failed to request Jupiter build: ${errorMessage(error)}`, { cause: error });
     }
   }
 
@@ -558,7 +696,9 @@ export class JupiterClient {
         }),
       });
 
-      const data = (await response.json()) as JupiterExecuteResponse;
+      const data: JupiterExecuteResponse = jupiterExecuteResponseSchema.parse(
+        await response.json(),
+      );
 
       const execLogPayload = JSON.stringify(data, null, 2);
       const logExec = () => console.error("Jupiter execute response", execLogPayload);
@@ -584,9 +724,9 @@ export class JupiterClient {
       }
 
       return data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error executing Jupiter order:", error);
-      throw new Error(`Failed to execute Jupiter order: ${error.message}`, { cause: error });
+      throw new Error(`Failed to execute Jupiter order: ${errorMessage(error)}`, { cause: error });
     }
   }
 
@@ -766,13 +906,13 @@ export async function fetchJupiterTokenMetadata(
       return null;
     }
 
-    const data = (await response.json()) as any;
-    if (!Array.isArray(data) || data.length === 0) {
+    const parsed = z.array(jupiterTokenMetadataSchema).safeParse(await response.json());
+    if (!parsed.success || parsed.data.length === 0) {
       return null;
     }
 
     const normalizedQuery = query.trim().toLowerCase();
-    const entries = data.filter((item) => item && typeof item === "object");
+    const entries = parsed.data;
 
     const exactId = entries.find(
       (item) => typeof item.id === "string" && item.id.trim().toLowerCase() === normalizedQuery,
@@ -784,21 +924,16 @@ export async function fetchJupiterTokenMetadata(
     );
 
     const candidate = exactId ?? exactSymbol ?? entries[0];
-    if (!candidate || typeof candidate.symbol !== "string") {
+    if (!candidate) {
       return null;
     }
 
-    const decimals =
-      typeof candidate.decimals === "number" && Number.isFinite(candidate.decimals)
-        ? candidate.decimals
-        : 6;
-
     return {
-      id: typeof candidate.id === "string" ? candidate.id : query.trim(),
+      id: candidate.id,
       symbol: candidate.symbol,
-      name: typeof candidate.name === "string" ? candidate.name : undefined,
-      icon: typeof candidate.icon === "string" ? candidate.icon : undefined,
-      decimals,
+      name: candidate.name,
+      icon: candidate.icon,
+      decimals: candidate.decimals,
     };
   } catch (error) {
     console.error("Failed to fetch Jupiter token metadata:", error);

@@ -3,6 +3,13 @@ import { OracleClient } from "../src/utils/oracle";
 import { GameDatabase } from "../src/utils/game-database";
 import { PublicKey } from "@solana/web3.js";
 import { resetTestDatabase } from "./helpers/database";
+import {
+  completeOracleStats,
+  oracleResponse,
+  TEST_GAME_ADDRESS,
+  TEST_OPERATOR_ADDRESS,
+  TEST_SIGNATURE,
+} from "./helpers/oracle-response";
 
 describe("OracleClient", () => {
   const originalFetch = globalThis.fetch;
@@ -17,8 +24,10 @@ describe("OracleClient", () => {
   });
 
   test("isHealthy returns true when health endpoint is ok", async () => {
-    // @ts-ignore
-    globalThis.fetch = async () => ({ ok: true, status: 200, statusText: "OK" });
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(oracleResponse({ status: "healthy" })), {
+        status: 200,
+      })) as any;
 
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
@@ -42,17 +51,18 @@ describe("OracleClient", () => {
     globalThis.fetch = async () => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        success: true,
-        randomHash: "a1b2c3",
-        oracleOperator: PublicKey.default.toBase58(),
-      }),
+      json: async () =>
+        oracleResponse({
+          randomHash: "ab".repeat(32),
+          gameAddress: TEST_GAME_ADDRESS,
+          oracleOperator: TEST_OPERATOR_ADDRESS,
+        }),
     });
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
     const res = await oc.generateGameSecrets();
-    expect(res.randomHash).toBe("a1b2c3");
-    expect(res.oracleOperator).toBe(PublicKey.default.toBase58());
+    expect(res.randomHash).toBe("ab".repeat(32));
+    expect(res.oracleOperator).toBe(TEST_OPERATOR_ADDRESS);
   });
 
   test("generateGameSecrets throws on bad response", async () => {
@@ -69,15 +79,12 @@ describe("OracleClient", () => {
     globalThis.fetch = async () => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        success: true,
-        stats: { totalSecrets: 10, usedSecrets: 5, pendingGames: 2, completedGames: 8 },
-      }),
+      json: async () => oracleResponse({ stats: completeOracleStats }),
     });
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
     const stats = await oc.getStats();
-    expect(stats).toEqual({ totalSecrets: 10, usedSecrets: 5, pendingGames: 2, completedGames: 8 });
+    expect(stats).toEqual(completeOracleStats);
 
     // Failure path (ok: false)
     // @ts-ignore
@@ -90,12 +97,24 @@ describe("OracleClient", () => {
     // @ts-ignore
     globalThis.fetch = async (url: string, init?: RequestInit) => {
       requests.push({ url, init });
-      return { ok: true, status: 200, statusText: "OK" };
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () =>
+          oracleResponse({
+            gameAddress: TEST_GAME_ADDRESS,
+            status: "completed",
+            txHash: TEST_SIGNATURE,
+            winnerAddress: TEST_OPERATOR_ADDRESS,
+            totalPot: 1,
+          }),
+      };
     };
 
     const oc = OracleClient.getInstance();
     oc.setOracleUrl(ORACLE_URL);
-    const success = await oc.requestGameCompletion("game123");
+    const success = await oc.requestGameCompletion(TEST_GAME_ADDRESS);
 
     expect(success).toBe(true);
     expect(requests).toHaveLength(1);
@@ -105,7 +124,7 @@ describe("OracleClient", () => {
       "Content-Type": "application/json",
       Authorization: "Bearer test-oracle-token",
     });
-    expect(requests[0]?.init?.body).toBe(JSON.stringify({ gameAddress: "game123" }));
+    expect(requests[0]?.init?.body).toBe(JSON.stringify({ gameAddress: TEST_GAME_ADDRESS }));
   });
 
   test("requestGameCompletion returns false on request failure", async () => {

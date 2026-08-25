@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { OracleClient } from "../src/utils/oracle";
+import { oracleResponse } from "./helpers/oracle-response";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -10,7 +11,10 @@ describe("OracleClient health and stats", () => {
   test("isHealthy returns true on 200", async () => {
     const oc = OracleClient.getInstance();
     oc.setOracleUrl("http://oracle.test");
-    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as any;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(oracleResponse({ status: "healthy" })), {
+        status: 200,
+      })) as any;
     const ok = await oc.isHealthy();
     expect(ok).toBe(true);
   });
