@@ -171,6 +171,13 @@ describe("faucet handler", () => {
     expect(harness.replies.at(-1)?.text).toContain("Not enough TOK");
   });
 
+  test("rejects creation when the creator cannot fund the full faucet", async () => {
+    const harness = createHarness({ balance: 399 });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 4"));
+    expect(db.getFaucet(1)).toBeNull();
+    expect(harness.replies.at(-1)?.text).toContain("Not enough TOK");
+  });
+
   test("rejects unsafe total multiplication", async () => {
     const harness = createHarness({
       parse: () => ({ ...parsed, amount: Number.MAX_SAFE_INTEGER }),
@@ -235,6 +242,43 @@ describe("faucet handler", () => {
       status: "paid",
       transaction_signature: "retry-signature",
     });
+  });
+
+  test("closes an active faucet when the creator no longer has enough balance", async () => {
+    let balance = 100;
+    const harness = createHarness({
+      balance,
+      transfer: async () => {
+        throw new Error("transfer should not be attempted");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    balance = 0;
+    const emptyHarness = createHarness({ balance });
+    await emptyHarness.module.handleClaim(emptyHarness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("empty");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(emptyHarness.replies.at(-1)?.text).toContain("faucet is empty");
+    expect(emptyHarness.edits.at(-1)?.text).toContain("Empty");
+    expect(emptyHarness.edits.at(-1)?.text).toContain("Remaining: <b>0/1 TOK</b>");
+    expect(emptyHarness.edits.at(-1)?.options.reply_markup.inline_keyboard.flat()).toEqual([]);
+  });
+
+  test("closes the faucet when a transfer reports insufficient funds", async () => {
+    const harness = createHarness({
+      transfer: async () => {
+        throw Object.assign(new Error("Transaction simulation failed"), {
+          logs: ["Program log: Error: insufficient funds"],
+        });
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("empty");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("faucet is empty");
   });
 
   test("reconciles an ambiguous direct transfer without paying twice", async () => {

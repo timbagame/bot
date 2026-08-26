@@ -1,6 +1,6 @@
 import { createDatabaseSingleton, BaseDatabase } from "./base-database";
 
-export type FaucetStatus = "active" | "cancelled" | "completed" | "expired";
+export type FaucetStatus = "active" | "cancelled" | "completed" | "expired" | "empty";
 export type FaucetClaimStatus = "processing" | "submitted" | "paid" | "failed";
 
 export interface FaucetRecord {
@@ -457,6 +457,14 @@ export class FaucetDatabase extends BaseDatabase {
        WHERE faucet_id = ? AND telegram_id = ? AND status IN ('processing', 'submitted')`,
       [error.slice(0, 500), now, faucetId, telegramId.toString()],
       "failing faucet claim",
+    );
+  }
+
+  markFaucetEmpty(faucetId: number): void {
+    this.run(
+      "UPDATE faucets SET status = 'empty' WHERE id = ? AND status = 'active'",
+      [faucetId],
+      "marking faucet empty",
     );
   }
 
