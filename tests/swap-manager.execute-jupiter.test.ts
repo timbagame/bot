@@ -119,6 +119,20 @@ describe("SwapManager.executeJupiterSwap", () => {
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
       swapTransaction: base64Tx,
       requestId: "req-123",
+      order: {
+        mode: "ExactIn",
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        inAmount: "1000000",
+        outAmount: "99500",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        routePlan: [],
+        feeMint: "So11111111111111111111111111111111111111112",
+        feeBps: 100,
+        platformFee: { amount: "500", feeBps: 50 },
+      },
     });
 
     const capturedExecuteRequest = { requestId: "", signedTransaction: "" };
@@ -169,6 +183,9 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(sig).toBe("SIG_JUP_123");
     expect(capturedExecuteRequest.requestId).toBe("req-123");
     expect(typeof capturedExecuteRequest.signedTransaction).toBe("string");
+    expect((quote as any).executionFeeAmount).toBe("500");
+    expect((quote as any).executionFeeBps).toBe(50);
+    expect((quote as any).executionOutputAmount).toBe("99500");
   });
 
   test("rejects a fee-free fallback Jupiter transaction", async () => {

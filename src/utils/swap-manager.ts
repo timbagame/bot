@@ -1085,19 +1085,19 @@ export class SwapManager {
       }
       throw error;
     }
+    // Jupiter's top-level fee can include gasless cost recoup. Keep accounting
+    // aligned with the platform/referral amount by preferring its fee rate.
+    const appliedFeeBps = swapResponse.order
+      ? (resolveAppliedFeeBps(swapResponse.order) ?? undefined)
+      : undefined;
     quote.executionFeeMint = swapResponse.order?.feeMint;
     quote.executionFeeAmount = swapResponse.order?.platformFee?.amount;
-    quote.executionFeeBps = swapResponse.order?.feeBps ?? swapResponse.order?.platformFee?.feeBps;
+    quote.executionFeeBps = appliedFeeBps;
     quote.executionOutputAmount = swapResponse.order?.outAmount ?? quote.outputAmount;
 
     const requiredFeeBps = integrator
       ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee)
       : 0;
-    // Jupiter's top-level fee includes gasless cost recoup. Prefer the
-    // platform/referral component so unrelated charges cannot satisfy this check.
-    const appliedFeeBps = swapResponse.order
-      ? (resolveAppliedFeeBps(swapResponse.order) ?? undefined)
-      : undefined;
     const requiredReferralApplied =
       !integrator || (typeof appliedFeeBps === "number" && appliedFeeBps >= requiredFeeBps);
     quote.executionReferralApplied =

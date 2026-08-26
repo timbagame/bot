@@ -602,6 +602,28 @@ describe("SwapService.execute", () => {
     recordSpy.mockRestore();
   });
 
+  test("records the isolated platform fee rate instead of Jupiter's total fee rate", async () => {
+    const history = TransactionHistory.getInstance();
+    const recordSpy = vi.spyOn(history, "recordSwap").mockImplementation(() => {});
+
+    await service.execute(
+      {
+        ...baseQuote,
+        provider: "jupiter",
+        providerQuote: {
+          feeBps: 100,
+          platformFee: { amount: "5", feeBps: 50 },
+        },
+      } as any,
+      user,
+    );
+
+    expect(recordSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ fee_amount: "5", fee_bps: 50 }),
+    );
+    recordSpy.mockRestore();
+  });
+
   test("records actual sponsored network cost and atomic reimbursement", async () => {
     const history = TransactionHistory.getInstance();
     const recordSpy = vi.spyOn(history, "recordSwap").mockImplementation(() => {});
