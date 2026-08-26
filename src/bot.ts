@@ -3431,7 +3431,10 @@ const faucetModule = createFaucetModule({
   getBalance: (telegramId, parsed) =>
     parsed.isSol
       ? wallet.getBalance(telegramId, { forceFresh: true })
-      : wallet.getTokenBalance(telegramId, parsed.tokenMint, { createIfMissing: false }),
+      : wallet.getTokenBalance(telegramId, parsed.tokenMint, {
+          createIfMissing: false,
+          throwOnError: true,
+        }),
   getRecipientPublicKey: (telegramId) => wallet.getPublicKey(telegramId),
   transfer: (creatorId, recipient, parsed, onPrepared) =>
     parsed.isSol

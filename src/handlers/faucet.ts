@@ -86,6 +86,29 @@ const isPermanentDirectMessageError = (error: unknown): boolean => {
   return code === 400 || code === 403;
 };
 
+const isInsufficientFundsError = (error: unknown, seen = new Set<unknown>()): boolean => {
+  if (error == null || seen.has(error)) return false;
+  seen.add(error);
+
+  if (typeof error === "string") {
+    const normalized = error.toLowerCase();
+    return (
+      normalized.includes("insufficient funds") ||
+      normalized.includes("insufficient balance") ||
+      normalized.includes("insufficient lamports") ||
+      normalized.includes("attempt to debit an account but found no record of a prior credit")
+    );
+  }
+  if (error instanceof Error && isInsufficientFundsError(error.message, seen)) return true;
+  if (typeof error !== "object") return false;
+
+  const details = error as { cause?: unknown; logs?: unknown };
+  return (
+    isInsufficientFundsError(details.cause, seen) ||
+    (Array.isArray(details.logs) && details.logs.some((log) => isInsufficientFundsError(log, seen)))
+  );
+};
+
 const buildCollectorsLine = (progress: FaucetProgress): string | null => {
   if (progress.collectors.length === 0) return null;
   const visible = progress.collectors.slice(0, MAX_VISIBLE_COLLECTORS).map((collector) => {
@@ -109,7 +132,8 @@ export const buildFaucetMessage = (progress: FaucetProgress): string => {
   const { faucet, paidClaims } = progress;
   const collectorsLine = buildCollectorsLine(progress);
   const amount = Number(faucet.amount_per_claim);
-  const remainingClaims = Math.max(0, faucet.max_claims - paidClaims);
+  const remainingClaims =
+    faucet.status === "empty" ? 0 : Math.max(0, faucet.max_claims - paidClaims);
   const remainingRaw = amount * remainingClaims;
   const totalRaw = amount * faucet.max_claims;
   const scale = 10 ** faucet.decimals;
@@ -122,7 +146,9 @@ export const buildFaucetMessage = (progress: FaucetProgress): string => {
         ? "🚫 Cancelled"
         : faucet.status === "expired"
           ? "⌛ Expired"
-          : null;
+          : faucet.status === "empty"
+            ? "🚰 Empty"
+            : null;
 
   return [
     `🚰 <b>Collect ${escapeHtml(faucet.display_amount)}</b>`,
@@ -293,7 +319,13 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       await ctx.reply("❌ The total faucet amount is too large.");
       return;
     }
-    const balance = await deps.getBalance(creatorId, parsed);
+    let balance: number;
+    try {
+      balance = await deps.getBalance(creatorId, parsed);
+    } catch {
+      await ctx.reply("❌ Could not verify your balance. Please try again.");
+      return;
+    }
     const alreadyReserved = deps.database.getReservedAmount(
       creatorId,
       parsed.tokenMint,
@@ -373,12 +405,55 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
 
     await answer(ctx, "Processing your claim…");
     const faucet = reserved.faucet;
+    const claimAmount = Number(faucet.amount_per_claim);
+    const parsedClaim = {
+      amount: claimAmount,
+      isSol: faucet.is_sol === 1,
+      formattedAmount: faucet.display_amount,
+      tokenMint: faucet.token_mint,
+      tokenTicker: faucet.token_ticker,
+      decimals: faucet.decimals,
+      tokenWasSpecified: true,
+      requestedNativeSol: faucet.is_sol === 1,
+    };
+    let balance: number;
+    try {
+      balance = await deps.getBalance(BigInt(faucet.creator_id), parsedClaim);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.database.failClaim(faucetId, claimantId, message, now());
+      await ctx.reply("❌ Could not verify the faucet balance. Please try again.", {
+        reply_to_message_id: faucet.message_id ?? undefined,
+      });
+      await render(ctx, faucetId);
+      return;
+    }
+
+    if (balance < claimAmount) {
+      deps.database.failClaim(
+        faucetId,
+        claimantId,
+        "faucet creator balance is insufficient",
+        now(),
+      );
+      deps.database.markFaucetEmpty(faucetId);
+      await ctx.reply(
+        `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: faucet.message_id ?? undefined,
+        },
+      );
+      await render(ctx, faucetId);
+      return;
+    }
+
     try {
       const signature = await deps.transfer(
         BigInt(faucet.creator_id),
         deps.getRecipientPublicKey(claimantId),
         {
-          amount: Number(faucet.amount_per_claim),
+          amount: claimAmount,
           isSol: faucet.is_sol === 1,
           tokenMint: faucet.token_mint,
         },
@@ -392,6 +467,16 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         await ctx.reply(
           "⏳ Payment was submitted but confirmation is delayed. The bot will verify it automatically.",
           { reply_to_message_id: faucet.message_id ?? undefined },
+        );
+      } else if (isInsufficientFundsError(error)) {
+        deps.database.failClaim(faucetId, claimantId, message, now());
+        deps.database.markFaucetEmpty(faucetId);
+        await ctx.reply(
+          `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
+          {
+            parse_mode: "HTML",
+            reply_to_message_id: faucet.message_id ?? undefined,
+          },
         );
       } else {
         deps.database.failClaim(faucetId, claimantId, message, now());

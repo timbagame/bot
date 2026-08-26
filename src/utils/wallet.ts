@@ -748,7 +748,7 @@ export class WalletManager {
   public async getTokenBalance(
     telegramId: bigint,
     tokenMint: string,
-    options: { createIfMissing?: boolean } = {},
+    options: { createIfMissing?: boolean; throwOnError?: boolean } = {},
   ): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
@@ -817,6 +817,7 @@ export class WalletManager {
         }
       } else {
         console.error(`Error getting token balance for ${pubkey.toBase58()}:`, error);
+        if (options.throwOnError) throw error;
       }
       return 0;
     }

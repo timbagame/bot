@@ -23,6 +23,7 @@ const createHarness = (
   options: {
     parse?: (args: string[]) => any;
     balance?: number;
+    getBalance?: () => Promise<number>;
     transfer?: (onPrepared: (signature: string) => void) => Promise<string>;
     outcome?: () => Promise<"confirmed" | "failed" | "unknown">;
     notify?: (chatId: number, text: string) => Promise<void>;
@@ -62,7 +63,8 @@ const createHarness = (
     }),
     inferMaxPlayers,
     getRequiredTelegramId: async () => 10n,
-    getBalance: async () => options.balance ?? 10_000,
+    getBalance: async () =>
+      options.getBalance ? options.getBalance() : (options.balance ?? 10_000),
     getRecipientPublicKey: () => publicKey,
     transfer: async (creatorId, _recipient, _parsed, onPrepared) => {
       transferSenders.push(creatorId);
@@ -171,6 +173,25 @@ describe("faucet handler", () => {
     expect(harness.replies.at(-1)?.text).toContain("Not enough TOK");
   });
 
+  test("rejects creation when the creator cannot fund the full faucet", async () => {
+    const harness = createHarness({ balance: 399 });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 4"));
+    expect(db.getFaucet(1)).toBeNull();
+    expect(harness.replies.at(-1)?.text).toContain("Not enough TOK");
+  });
+
+  test("does not create a faucet when balance verification is unavailable", async () => {
+    const harness = createHarness({
+      getBalance: async () => {
+        throw new Error("RPC unavailable");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 4"));
+
+    expect(db.getFaucet(1)).toBeNull();
+    expect(harness.replies.at(-1)?.text).toContain("Could not verify your balance");
+  });
+
   test("rejects unsafe total multiplication", async () => {
     const harness = createHarness({
       parse: () => ({ ...parsed, amount: Number.MAX_SAFE_INTEGER }),
@@ -235,6 +256,74 @@ describe("faucet handler", () => {
       status: "paid",
       transaction_signature: "retry-signature",
     });
+  });
+
+  test("closes an active faucet when the creator no longer has enough balance", async () => {
+    let balance = 100;
+    const harness = createHarness({
+      balance,
+      transfer: async () => {
+        throw new Error("transfer should not be attempted");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    balance = 0;
+    const emptyHarness = createHarness({ balance });
+    await emptyHarness.module.handleClaim(emptyHarness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("empty");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(emptyHarness.replies.at(-1)?.text).toContain("faucet is empty");
+    expect(emptyHarness.edits.at(-1)?.text).toContain("Empty");
+    expect(emptyHarness.edits.at(-1)?.text).toContain("Remaining: <b>0/1 TOK</b>");
+    expect(emptyHarness.edits.at(-1)?.options.reply_markup.inline_keyboard.flat()).toEqual([]);
+  });
+
+  test("closes the faucet when a transfer reports insufficient funds", async () => {
+    const harness = createHarness({
+      transfer: async () => {
+        throw Object.assign(new Error("Transaction simulation failed"), {
+          logs: ["Program log: Error: insufficient funds"],
+        });
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("empty");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("faucet is empty");
+  });
+
+  test("keeps the faucet active when balance verification is unavailable", async () => {
+    let balanceAvailable = true;
+    const harness = createHarness({
+      getBalance: async () => {
+        if (!balanceAvailable) throw new Error("RPC unavailable");
+        return 100;
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    balanceAvailable = false;
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("active");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("Could not verify the faucet balance");
+  });
+
+  test("does not treat a bare custom program error as insufficient funds", async () => {
+    const harness = createHarness({
+      transfer: async () => {
+        throw new Error("Transaction simulation failed: custom program error: 0x1");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("active");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("Payment failed");
   });
 
   test("reconciles an ambiguous direct transfer without paying twice", async () => {
