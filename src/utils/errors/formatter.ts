@@ -107,16 +107,14 @@ interface ErrorContext {
   lowerMessage: string;
   recommendedMinimum?: string;
   minimumSolForFees?: string;
-  originalMessage?: string;
 }
 
 type ErrorHandler = (ctx: ErrorContext) => string | null;
 
 const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: ErrorHandler }> = [
   {
-    matcher: (ctx) =>
-      ctx.lowerMessage.includes("swaps under") && typeof ctx.originalMessage === "string",
-    handler: (ctx) => ctx.originalMessage ?? null,
+    matcher: (ctx) => ctx.lowerMessage.includes("swaps under"),
+    handler: () => `⚠️ Swap amount is too small.\n` + `Increase the amount and try again.`,
   },
   {
     matcher: (ctx) =>
@@ -303,7 +301,6 @@ export const parseTransactionError = async (
     lowerMessage,
     recommendedMinimum,
     minimumSolForFees,
-    originalMessage: errorMessage,
   };
 
   for (const { matcher, handler } of errorHandlers) {

@@ -59,12 +59,13 @@ beforeEach(() => {
 });
 
 test("swap_to_token reprompt keeps initiatorId ownership", async () => {
+  const opaque = "database credential xyz exploded";
   const originalTokenManager = botModule.__test_getTokenManager();
   const createdTokenManagerStub = originalTokenManager
     ? undefined
     : {
         resolveSwapToken: async () => {
-          throw new Error("Token not found");
+          throw new Error(opaque);
         },
       };
 
@@ -90,7 +91,7 @@ test("swap_to_token reprompt keeps initiatorId ownership", async () => {
   });
 
   tokenManager.resolveSwapToken = async () => {
-    throw new Error("Token not found");
+    throw new Error(opaque);
   };
 
   const replies: Array<{ text: string; options: any }> = [];
@@ -130,6 +131,9 @@ test("swap_to_token reprompt keeps initiatorId ownership", async () => {
 
     const stored = getInputSession(`${chatId}_${promptMessageId}`);
     expect(stored?.initiatorId).toBe(initiatorId);
+    expect(replies.length).toBeGreaterThan(0);
+    expect(replies.map(({ text }) => text).join(" ")).not.toContain(opaque);
+    expect(replies.some(({ text }) => text.includes("Token Not Found"))).toBe(true);
   } finally {
     tokenManager.resolveSwapToken = originalResolveSwapToken;
     if (originalTokenManager) {

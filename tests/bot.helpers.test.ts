@@ -1047,7 +1047,7 @@ describe("createGameViaCommand helper", () => {
     }
   });
 
-  test("relays active game limit failures from GameManager", async () => {
+  test("maps active game limit failures to a fixed message", async () => {
     const ctx: any = makeCtx();
     const limitMessage = `Active game limit reached. You currently have ${MAX_ACTIVE_GAMES_PER_CREATOR} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`;
     const deps = makeDeps({
@@ -1064,13 +1064,30 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
-    expect(response).toContain("Active game limit reached");
-    expect(response).toContain("limit reached");
-    expect(response).toContain(String(MAX_ACTIVE_GAMES_PER_CREATOR));
+    expect(response).toBe("❌ Failed to create game. Please try again.");
+    expect(response).not.toContain(limitMessage);
     expect(ctx.__deleted?.length).toBe(1);
   });
 
-  test("relays creation rate limit failures from GameManager", async () => {
+  test("does not emit opaque game creation diagnostics", async () => {
+    const opaque = "database credential xyz exploded";
+    const ctx: any = makeCtx();
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: false, error: opaque }),
+        createGameMessage: async () => {
+          throw new Error("should not send message when creation fails");
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
+
+    expect(ctx.__calls[1]).toBe("❌ Failed to create game. Please try again.");
+    expect(ctx.__calls.join(" ")).not.toContain(opaque);
+  });
+
+  test("maps creation rate limit failures to a fixed message", async () => {
     const ctx: any = makeCtx();
     const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
     const windowLabel = formatWindowForTests(GAME_CREATION_RATE_LIMIT_WINDOW_MS);
@@ -1089,10 +1106,8 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__calls.length).toBe(2);
     expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
-    expect(response).toContain("Game creation rate limit reached");
-    expect(response.toLowerCase()).toContain("rate limit");
-    expect(response).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
-    expect(response).toContain("Please wait");
+    expect(response).toBe("❌ Too many games are being created. Please try again shortly.");
+    expect(response).not.toContain(rateLimitMessage);
     expect(ctx.__deleted?.length).toBe(1);
   });
 
@@ -1121,7 +1136,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(firstCtx.__calls.length).toBe(2);
-    expect(String(firstCtx.__calls[1])).toContain("rate limit");
+    expect(String(firstCtx.__calls[1])).toContain("Too many games");
 
     const secondCtx: any = makeCtx();
     await botModule.__test_createGameViaCommand(

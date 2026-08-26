@@ -393,7 +393,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
       );
 
       if (!result.success) {
-        const errorMessage = result.error || "Failed to join game";
+        const errorMessage = result.error ?? "";
 
         if (errorMessage.includes("already completed")) {
           await answerJoinCallbackOnce(
@@ -412,9 +412,21 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               updateError,
             );
           }
+          await answerJoinCallbackOnce(
+            ctx,
+            game.game_address,
+            telegramIdStr,
+            "You already joined this game.",
+          );
+          return;
         }
 
-        await answerJoinCallbackOnce(ctx, game.game_address, telegramIdStr, errorMessage);
+        await answerJoinCallbackOnce(
+          ctx,
+          game.game_address,
+          telegramIdStr,
+          "Failed to join game. Please try again.",
+        );
         return;
       }
 
@@ -1456,9 +1468,15 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
                 const rawError = result.error || "❌ Failed to create game";
                 const hasBalanceInfo = containsBalanceInfo(rawError);
+                const isCreationRateLimit = /game creation rate limit/i.test(rawError);
+                const isActiveGameLimit = /active game limit/i.test(rawError);
                 const displayText = hasBalanceInfo
                   ? "❌ Game creation failed (insufficient funds). Please add more funds and try again."
-                  : rawError;
+                  : isCreationRateLimit
+                    ? "❌ Too many games are being created. Please try again shortly."
+                    : isActiveGameLimit
+                      ? "❌ You have too many active games. Finish or cancel one and try again."
+                      : "❌ Failed to create game. Please try again.";
 
                 await respondWithMenu(
                   ctx,
@@ -1540,9 +1558,12 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               }
 
               if (result.autoJoinResult && !result.autoJoinResult.success) {
-                await ctx.reply(result.autoJoinResult.error || "Failed to auto-join game", {
-                  parse_mode: "HTML",
-                });
+                await ctx.reply(
+                  "Failed to auto-join game. Please use the Join button to try again.",
+                  {
+                    parse_mode: "HTML",
+                  },
+                );
               }
             } finally {
               deps.pendingGameCreations.delete(creationKey);

@@ -305,13 +305,39 @@ describe("JupiterClient referral URL params", () => {
 });
 
 describe("resolveAppliedFeeBps", () => {
-  test("prefers top-level feeBps then platformFee.feeBps", () => {
+  test("prefers platform/referral fee over the total feeBps", () => {
     expect(resolveAppliedFeeBps({ feeBps: 100 })).toBe(100);
     expect(resolveAppliedFeeBps({ platformFee: { feeBps: 85, amount: "1" } })).toBe(85);
     expect(resolveAppliedFeeBps({ feeBps: 100, platformFee: { feeBps: 50, amount: "1" } })).toBe(
-      100,
+      50,
     );
     expect(resolveAppliedFeeBps({})).toBe(null);
+  });
+
+  test("does not mistake gasless recoup in total feeBps for the referral fee", async () => {
+    const request = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "1000000",
+    };
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeJupiterOrderResponse(request, {
+          feeBps: 120,
+          platformFee: { feeBps: 10, amount: "1" },
+        }),
+      ),
+    );
+
+    await expect(
+      client.getQuote({
+        ...request,
+        referralAccount: "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U",
+        referralFee: 100,
+        payer: "6HqDqk25HSbzsk1HJ8PMzhzD5ZNY9LqZhpGwbCLyzvC6",
+      }),
+    ).rejects.toThrow(/below the required 100 bps/);
   });
 });
 

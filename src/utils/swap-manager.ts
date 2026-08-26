@@ -13,6 +13,7 @@ import { TOKEN_PROGRAM_ID, unpackAccount } from "@solana/spl-token";
 import {
   JupiterClient,
   JupiterReferralUnavailableError,
+  resolveAppliedFeeBps,
   type JupiterQuoteResponse,
   type JupiterQuoteRequest,
   type JupiterSwapResponse,
@@ -1092,13 +1093,11 @@ export class SwapManager {
     const requiredFeeBps = integrator
       ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, integrator.referralFee)
       : 0;
-    // Jupiter Swap v2 confirms fees via feeBps; referralApplied is not always returned.
-    const appliedFeeBps =
-      typeof swapResponse.order?.feeBps === "number"
-        ? swapResponse.order.feeBps
-        : typeof swapResponse.order?.platformFee?.feeBps === "number"
-          ? swapResponse.order.platformFee.feeBps
-          : undefined;
+    // Jupiter's top-level fee includes gasless cost recoup. Prefer the
+    // platform/referral component so unrelated charges cannot satisfy this check.
+    const appliedFeeBps = swapResponse.order
+      ? (resolveAppliedFeeBps(swapResponse.order) ?? undefined)
+      : undefined;
     const requiredReferralApplied =
       !integrator || (typeof appliedFeeBps === "number" && appliedFeeBps >= requiredFeeBps);
     quote.executionReferralApplied =

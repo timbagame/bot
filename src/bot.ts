@@ -6054,8 +6054,6 @@ const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: stri
       "",
       `<b>Input:</b> ${escapeHtml(trimmedInput)}`,
       "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
       "Please enter a valid token symbol or paste a contract address.",
       "",
       `<b>Examples:</b>`,

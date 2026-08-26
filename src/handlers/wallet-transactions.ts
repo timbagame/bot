@@ -806,6 +806,10 @@ export const createWalletTransactionsModule = (
         }
 
         const amountChoice = payload;
+        if (!amountChoice.trim()) {
+          await safeAnswerCallbackQuery(ctx, "❌ Amount cannot be empty");
+          return;
+        }
         const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
         const availableSolLamports = nativeSolBalance;
 
@@ -840,8 +844,7 @@ export const createWalletTransactionsModule = (
         await safeAnswerCallbackQuery(ctx, `Wrap ${confirmation.displayAmount} SOL`);
       } catch (error) {
         console.error("Error in wrap amount selection:", error);
-        const message = error instanceof Error ? error.message : "Error processing wrap amount";
-        await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
+        await safeAnswerCallbackQuery(ctx, "❌ Error processing wrap amount");
       }
     });
 
@@ -1093,8 +1096,7 @@ export const createWalletTransactionsModule = (
         });
       } catch (error) {
         console.error("Error in send amount selection:", error);
-        const message = error instanceof Error ? error.message : "Error processing amount";
-        await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
+        await safeAnswerCallbackQuery(ctx, "❌ Error processing amount");
       }
     });
 
