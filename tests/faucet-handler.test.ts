@@ -23,6 +23,7 @@ const createHarness = (
   options: {
     parse?: (args: string[]) => any;
     balance?: number;
+    getBalance?: () => Promise<number>;
     transfer?: (onPrepared: (signature: string) => void) => Promise<string>;
     outcome?: () => Promise<"confirmed" | "failed" | "unknown">;
     notify?: (chatId: number, text: string) => Promise<void>;
@@ -62,7 +63,8 @@ const createHarness = (
     }),
     inferMaxPlayers,
     getRequiredTelegramId: async () => 10n,
-    getBalance: async () => options.balance ?? 10_000,
+    getBalance: async () =>
+      options.getBalance ? options.getBalance() : (options.balance ?? 10_000),
     getRecipientPublicKey: () => publicKey,
     transfer: async (creatorId, _recipient, _parsed, onPrepared) => {
       transferSenders.push(creatorId);
@@ -279,6 +281,37 @@ describe("faucet handler", () => {
     expect(db.getFaucet(1)?.status).toBe("empty");
     expect(db.getClaim(1, 20n)?.status).toBe("failed");
     expect(harness.replies.at(-1)?.text).toContain("faucet is empty");
+  });
+
+  test("keeps the faucet active when balance verification is unavailable", async () => {
+    let balanceAvailable = true;
+    const harness = createHarness({
+      getBalance: async () => {
+        if (!balanceAvailable) throw new Error("RPC unavailable");
+        return 100;
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    balanceAvailable = false;
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("active");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("Could not verify the faucet balance");
+  });
+
+  test("does not treat a bare custom program error as insufficient funds", async () => {
+    const harness = createHarness({
+      transfer: async () => {
+        throw new Error("Transaction simulation failed: custom program error: 0x1");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(db.getFaucet(1)?.status).toBe("active");
+    expect(db.getClaim(1, 20n)?.status).toBe("failed");
+    expect(harness.replies.at(-1)?.text).toContain("Payment failed");
   });
 
   test("reconciles an ambiguous direct transfer without paying twice", async () => {

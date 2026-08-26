@@ -160,3 +160,24 @@ test("getTokenBalance without createIfMissing does not attempt ATA creation", as
   expect(balance).toBe(0);
   expect(creationAttempted).toBe(false);
 });
+
+test("getTokenBalance can surface RPC errors instead of returning zero", async () => {
+  const mint = new PublicKey("So11111111111111111111111111111111111111112");
+  const connection = {
+    async getAccountInfo(pubkey: PublicKey) {
+      if (pubkey.equals(mint)) {
+        return { owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(0) };
+      }
+      throw new Error("RPC unavailable");
+    },
+  };
+  const wm = WalletManager.createForTest(MNEMONIC, {
+    connection: connection as any,
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+
+  await expect(wm.getTokenBalance(42n, mint.toBase58(), { throwOnError: true })).rejects.toThrow(
+    "RPC unavailable",
+  );
+});

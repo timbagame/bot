@@ -96,7 +96,6 @@ const isInsufficientFundsError = (error: unknown, seen = new Set<unknown>()): bo
       normalized.includes("insufficient funds") ||
       normalized.includes("insufficient balance") ||
       normalized.includes("insufficient lamports") ||
-      normalized.includes("custom program error: 0x1") ||
       normalized.includes("attempt to debit an account but found no record of a prior credit")
     );
   }
@@ -411,27 +410,39 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       tokenWasSpecified: true,
       requestedNativeSol: faucet.is_sol === 1,
     };
+    let balance: number;
     try {
-      const balance = await deps.getBalance(BigInt(faucet.creator_id), parsedClaim);
-      if (balance < claimAmount) {
-        deps.database.failClaim(
-          faucetId,
-          claimantId,
-          "faucet creator balance is insufficient",
-          now(),
-        );
-        deps.database.markFaucetEmpty(faucetId);
-        await ctx.reply(
-          `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
-          {
-            parse_mode: "HTML",
-            reply_to_message_id: faucet.message_id ?? undefined,
-          },
-        );
-        await render(ctx, faucetId);
-        return;
-      }
+      balance = await deps.getBalance(BigInt(faucet.creator_id), parsedClaim);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.database.failClaim(faucetId, claimantId, message, now());
+      await ctx.reply("❌ Could not verify the faucet balance. Please try again.", {
+        reply_to_message_id: faucet.message_id ?? undefined,
+      });
+      await render(ctx, faucetId);
+      return;
+    }
 
+    if (balance < claimAmount) {
+      deps.database.failClaim(
+        faucetId,
+        claimantId,
+        "faucet creator balance is insufficient",
+        now(),
+      );
+      deps.database.markFaucetEmpty(faucetId);
+      await ctx.reply(
+        `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: faucet.message_id ?? undefined,
+        },
+      );
+      await render(ctx, faucetId);
+      return;
+    }
+
+    try {
       const signature = await deps.transfer(
         BigInt(faucet.creator_id),
         deps.getRecipientPublicKey(claimantId),
