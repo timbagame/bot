@@ -55,5 +55,8 @@ export interface JustInTimeSwapResult {
   provider?: "jupiter" | "unwrap";
   signature?: string;
   lamportsReceived?: number;
+  /** Internal diagnostic detail. Never send this value directly to users. */
   error?: string;
+  /** Safe message for Telegram and other user-facing surfaces. */
+  userMessage?: string;
 }

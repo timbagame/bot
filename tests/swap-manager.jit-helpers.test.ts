@@ -44,6 +44,40 @@ const createSwapManager = (
 ) => new SwapManager(connection as any, wallet, feeBudget as any);
 
 describe("SwapManager JIT helpers", () => {
+  test("performJustInTimeSolSwap keeps provider errors out of user messages", async () => {
+    const user = Keypair.generate();
+    const connection = createConnection(0);
+    const wallet = createWallet(connection, null);
+    const manager = createSwapManager(connection, wallet);
+    const rawError = 'Failed to request Jupiter order: [{"code":"invalid_type"}]';
+
+    (manager as any).buildJitIntegrator = async () => null;
+    (manager as any).attemptJupiterSwap = async () => ({
+      status: "error",
+      error: {
+        type: "PROBE_FAILED",
+        message: rawError,
+        cause: new Error(rawError),
+      },
+    });
+
+    const result = await manager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "mint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: 20_000_000,
+      desiredLamports: 2_000_000,
+      tokenTicker: "TKN",
+      logContext: "test",
+    });
+
+    expect(result.swapped).toBeFalse();
+    expect(result.error).toBe(rawError);
+    expect(result.userMessage).toContain("Jupiter could not prepare");
+    expect(result.userMessage).not.toContain("invalid_type");
+    expect(result.userMessage).not.toContain("Failed to request Jupiter order");
+  });
+
   test("computeTargets fails when no tokens are available", async () => {
     const user = Keypair.generate();
     const connection = createConnection(0);

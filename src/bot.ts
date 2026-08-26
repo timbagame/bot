@@ -150,6 +150,7 @@ import { formatDuration } from "./utils/format-time";
 import { getVerifiedTokenMints } from "./utils/verified-token-registry";
 import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
 import { FaucetDatabase } from "./utils/faucet-database";
+import { outboundErrorGuard } from "./utils/outbound-error-guard";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -158,6 +159,10 @@ export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // Module-level exports for use by utility modules
 export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
+
+// Last-resort boundary protection: never expose exception, validator, HTTP, or
+// RPC diagnostics through any Telegram API method that carries text/captions.
+bot.api.config.use(outboundErrorGuard);
 
 // Configure auto-retry for handling Telegram rate limits (429 errors)
 // This will automatically retry failed requests with exponential backoff

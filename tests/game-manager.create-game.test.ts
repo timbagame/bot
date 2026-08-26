@@ -1142,9 +1142,10 @@ describe("GameManager.createGame", () => {
       },
     };
 
+    let result: Awaited<ReturnType<typeof gm.createGame>>;
     try {
       // Attempt to create game - should fail but trigger JIT swap attempt
-      await gm.createGame(
+      result = await gm.createGame(
         "coinflip",
         { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
         2,
@@ -1160,6 +1161,9 @@ describe("GameManager.createGame", () => {
     expect(jitSwapCalled).toBe(true);
     // The desired lamports should include minSolBuffer + gameRent + nativeRent
     expect(desiredLamportsArg).toBe(minSolBuffer + gameRent + NATIVE_RENT);
+    expect(result!.success).toBe(false);
+    expect(result!.error).toContain("Unable to top up SOL balance automatically");
+    expect(result!.error).not.toContain("Mock swap disabled");
 
     resetGM();
   });

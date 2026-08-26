@@ -162,6 +162,51 @@ describe("JupiterClient HTTP", () => {
     expect(res.outAmount).toBe("20");
   });
 
+  test("getQuote accepts omitted route and platform fee amounts", async () => {
+    const payload = {
+      inputMint: "A",
+      outputMint: "B",
+      inAmount: "10",
+      outAmount: "20",
+      otherAmountThreshold: "9",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0.10",
+      routePlan: [
+        {
+          swapInfo: {
+            ammKey: "amm",
+            label: "route",
+            inputMint: "A",
+            outputMint: "B",
+            inAmount: "10",
+            outAmount: "20",
+          },
+          percent: 100,
+        },
+      ],
+      feeBps: 100,
+      platformFee: { feeMint: "A" },
+    };
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => payload,
+    })) as any;
+
+    const jc = new JupiterClient("https://example.invalid", globalThis.fetch as any);
+    const quote = await jc.getQuote({
+      inputMint: "A",
+      outputMint: "B",
+      amount: "10",
+      referralAccount: "referral",
+      referralFee: 100,
+    });
+
+    expect(quote.routePlan[0]?.swapInfo.feeAmount).toBeUndefined();
+    expect(quote.routePlan[0]?.swapInfo.feeMint).toBeUndefined();
+    expect(quote.platformFee).toEqual({ feeMint: "A" });
+  });
+
   test("getSwapTransaction throws with non-ok response and includes status", async () => {
     globalThis.fetch = (async () => ({
       ok: false,
