@@ -180,6 +180,18 @@ describe("faucet handler", () => {
     expect(harness.replies.at(-1)?.text).toContain("Not enough TOK");
   });
 
+  test("does not create a faucet when balance verification is unavailable", async () => {
+    const harness = createHarness({
+      getBalance: async () => {
+        throw new Error("RPC unavailable");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 4"));
+
+    expect(db.getFaucet(1)).toBeNull();
+    expect(harness.replies.at(-1)?.text).toContain("Could not verify your balance");
+  });
+
   test("rejects unsafe total multiplication", async () => {
     const harness = createHarness({
       parse: () => ({ ...parsed, amount: Number.MAX_SAFE_INTEGER }),

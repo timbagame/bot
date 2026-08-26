@@ -319,7 +319,13 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       await ctx.reply("❌ The total faucet amount is too large.");
       return;
     }
-    const balance = await deps.getBalance(creatorId, parsed);
+    let balance: number;
+    try {
+      balance = await deps.getBalance(creatorId, parsed);
+    } catch {
+      await ctx.reply("❌ Could not verify your balance. Please try again.");
+      return;
+    }
     const alreadyReserved = deps.database.getReservedAmount(
       creatorId,
       parsed.tokenMint,
