@@ -300,13 +300,15 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         const hasBalanceInfo = containsBalanceInfo(finalError);
         const displayText = hasBalanceInfo
           ? "❌ Failed to create game: insufficient funds. Please add more funds and try again."
-          : finalError;
+          : isCreationRateLimit
+            ? "❌ Too many games are being created. Please try again shortly."
+            : "❌ Failed to create game. Please try again.";
         await ctx.reply(displayText, { parse_mode: "HTML" });
         return;
       }
 
       if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
-        await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
+        await ctx.reply("Failed to auto-join game. Please use the Join button to try again.", {
           parse_mode: "HTML",
         });
       }

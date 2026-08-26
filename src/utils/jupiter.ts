@@ -217,18 +217,19 @@ const extractJupiterErrorMessage = (errorText: string): string => {
 };
 
 /**
- * Resolve the fee rate Jupiter actually applied on an order response.
- * Swap v2 confirms integrator fees via feeBps (and platformFee.feeBps);
- * referralApplied is not always present in live responses.
+ * Resolve the referral/platform fee rate Jupiter actually applied.
+ * Swap v2's top-level feeBps is the total rate and can also contain gasless
+ * support cost recoup. platformFee.feeBps isolates the platform/referral
+ * component, so prefer it whenever Jupiter returns both fields.
  */
 export const resolveAppliedFeeBps = (
   data: Pick<JupiterOrderResponse, "feeBps" | "platformFee">,
 ): number | null => {
-  if (typeof data.feeBps === "number" && Number.isFinite(data.feeBps)) {
-    return data.feeBps;
-  }
   if (typeof data.platformFee?.feeBps === "number" && Number.isFinite(data.platformFee.feeBps)) {
     return data.platformFee.feeBps;
+  }
+  if (typeof data.feeBps === "number" && Number.isFinite(data.feeBps)) {
+    return data.feeBps;
   }
   return null;
 };
@@ -527,8 +528,8 @@ export class JupiterClient {
         params.referralAccount && params.referralFee !== undefined
           ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee)
           : 0;
-      // Jupiter Swap v2 documents fee confirmation via top-level feeBps /
-      // platformFee.feeBps. It does not reliably return referralApplied.
+      // Jupiter does not reliably return referralApplied. Confirm the isolated
+      // platform/referral component before falling back to the total fee rate.
       const appliedFeeBps = resolveAppliedFeeBps(data);
       if (requiredReferralFeeBps > 0) {
         if (appliedFeeBps === null) {

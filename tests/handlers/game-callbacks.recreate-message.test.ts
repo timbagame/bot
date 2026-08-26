@@ -173,7 +173,31 @@ describe("Game Join Message Recreation", () => {
 
     expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(ctx, gameAddress, "Active");
     expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", {
-      text: "You have already joined this game!",
+      text: "You already joined this game.",
     });
+  });
+
+  test("does not emit opaque join diagnostics", async () => {
+    const opaque = "database credential xyz exploded";
+    const { module, gameManager } = makeDeps();
+    const ctx = makeCtx("@joiner");
+    const gameAddress = "game-addr-opaque";
+    const gamePda = new PublicKey(Keypair.generate().publicKey);
+
+    (gameManager.joinGame as any).mockResolvedValue({ success: false, error: opaque });
+
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 456n, {
+      game_address: gameAddress,
+      status: "active",
+      chat_id: 1,
+      amount: 50,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
+
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", {
+      text: "Failed to join game. Please try again.",
+    });
+    expect(JSON.stringify((ctx.api.answerCallbackQuery as any).mock.calls)).not.toContain(opaque);
   });
 });

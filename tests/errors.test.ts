@@ -82,6 +82,14 @@ test("parseTransactionError returns default message for unknown errors", async (
   expect(message).toContain("Please try again");
 });
 
+test("parseTransactionError does not echo opaque diagnostics from recognized errors", async () => {
+  const opaque = "database credential xyz exploded";
+  const message = await parseTransactionError(new Error(`swaps under the minimum: ${opaque}`));
+
+  expect(message).toContain("Swap amount is too small");
+  expect(message).not.toContain(opaque);
+});
+
 test("parseTransactionError owns the complete wrap failure message", async () => {
   const message = await parseTransactionError(
     new Error("Failed to wrap SOL automatically: RPC unavailable"),

@@ -160,6 +160,7 @@ test("confirm_game skips fallback edit when confirmation message is missing", as
 }, 15000);
 
 test("confirm_game replies directly when confirmation message is missing and creation fails", async () => {
+  const opaque = "database credential xyz exploded";
   const userId = 7200;
   const chatId = 8300;
   const messageId = 92;
@@ -200,7 +201,7 @@ test("confirm_game replies directly when confirmation message is missing and cre
   };
 
   botModule.__test_setGameManager({
-    createGame: async () => ({ success: false, error: "❌ No liquidity" }),
+    createGame: async () => ({ success: false, error: opaque }),
     createGameMessage: async () => {},
     updateGameMessageFromData: async () => {},
   } as any);
@@ -233,7 +234,8 @@ test("confirm_game replies directly when confirmation message is missing and cre
   expect(editCalls.length).toBe(1);
   expect(deleteCalls.length).toBe(0);
   expect(sendCalls.length).toBe(1);
-  expect(sendCalls[0].text).toBe("❌ No liquidity");
+  expect(sendCalls[0].text).toBe("❌ Failed to create game. Please try again.");
+  expect(JSON.stringify(sendCalls)).not.toContain(opaque);
 }, 15000);
 
 test("confirm_game clears pending state and surfaces limit errors", async () => {
@@ -316,6 +318,9 @@ test("confirm_game clears pending state and surfaces limit errors", async () => 
   expect(sendCalls.length).toBe(0);
 
   const errorEdit = editCalls[editCalls.length - 1];
-  expect(errorEdit[2] || errorEdit.text || "").toContain("limit");
+  expect(errorEdit[2] || errorEdit.text || "").toBe(
+    "❌ Too many games are being created. Please try again shortly.",
+  );
+  expect(JSON.stringify(errorEdit)).not.toContain(limitMessage);
   expect(botModule.__test_getPendingGameCreations().size).toBe(0);
 }, 15000);
