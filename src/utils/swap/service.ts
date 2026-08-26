@@ -10,6 +10,7 @@ import { calculateRouteCosts, type RouteLikeCosts } from "./route-cost";
 import { TransactionHistory } from "../transaction-history";
 import { NetworkDetector } from "../network-detector";
 import { getConfirmedTransactionFeeLamports } from "../transaction-fee";
+import { resolveAppliedFeeBps } from "../jupiter";
 
 export interface SwapBackend {
   getQuote(request: SwapRequest & { integrator?: IntegratorSwapParams | null }): Promise<SwapQuote>;
@@ -220,6 +221,7 @@ export class SwapService {
     const signature = await this.backend.executeJupiterSwap(request, quote);
     try {
       const sponsorAccounting = await this.getSponsorAccounting(quote, signature);
+      const providerFeeBps = quote.providerQuote ? resolveAppliedFeeBps(quote.providerQuote) : null;
       TransactionHistory.getInstance().recordSwap({
         signature,
         wallet: userKeypair.publicKey.toBase58(),
@@ -237,8 +239,7 @@ export class SwapService {
           quote.platformFee?.amount,
         fee_bps:
           quote.executionFeeBps ??
-          quote.providerQuote?.feeBps ??
-          quote.providerQuote?.platformFee?.feeBps ??
+          providerFeeBps ??
           quote.platformFee?.feeBps ??
           quote.integrator?.referralFee,
         ...sponsorAccounting,
