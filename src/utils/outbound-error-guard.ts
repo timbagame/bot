@@ -19,9 +19,7 @@ export const containsRawErrorDetails = (text: string): boolean =>
   RAW_ERROR_PATTERNS.some((pattern) => pattern.test(text));
 
 export const guardOutboundText = (text: unknown): unknown =>
-  typeof text === "string" && containsRawErrorDetails(text)
-    ? GENERIC_USER_ERROR_MESSAGE
-    : text;
+  typeof text === "string" && containsRawErrorDetails(text) ? GENERIC_USER_ERROR_MESSAGE : text;
 
 /**
  * Final defense at the Telegram API boundary. Internal diagnostics still go to
