@@ -44,8 +44,8 @@ export interface JupiterQuoteResponse {
       outputMint: string;
       inAmount: string;
       outAmount: string;
-      feeAmount: string;
-      feeMint: string;
+      feeAmount?: string;
+      feeMint?: string;
     };
     percent: number;
     bps?: number;
@@ -59,7 +59,7 @@ export interface JupiterQuoteResponse {
   inUsdValue?: number;
   outUsdValue?: number;
   platformFee?: {
-    amount: string;
+    amount?: string;
     feeBps: number;
   } | null;
   signatureFeeLamports?: number;
@@ -166,7 +166,7 @@ export interface JupiterOrderResponse {
   inUsdValue?: number;
   outUsdValue?: number;
   platformFee?: {
-    amount: string;
+    amount?: string;
     feeBps: number;
   } | null;
   router?: string;
@@ -254,14 +254,16 @@ const jupiterRoutePlanSchema = z.array(
       outputMint: z.string(),
       inAmount: z.string(),
       outAmount: z.string(),
-      feeAmount: z.string(),
-      feeMint: z.string(),
+      feeAmount: z.string().optional(),
+      feeMint: z.string().optional(),
     }),
     percent: z.number(),
     bps: z.number().optional(),
   }),
 );
-const platformFeeSchema = z.object({ amount: z.string(), feeBps: z.number() }).nullable();
+const platformFeeSchema = z
+  .object({ amount: z.string().optional(), feeBps: z.number() })
+  .nullable();
 const jupiterErrorSchema = z
   .object({
     error: z.string().optional(),
@@ -762,7 +764,7 @@ export class JupiterClient {
       message += `💸 <b>Fee:</b> ${percent}%\n`;
     }
 
-    if (quote.platformFee) {
+    if (quote.platformFee?.amount !== undefined) {
       const feeAmount = parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
       message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(6)} ${safeInputTicker}\n`;
     }

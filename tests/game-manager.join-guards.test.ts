@@ -593,7 +593,10 @@ describe("GameManager.joinGame guards", () => {
     );
     expect(jitSwapCalled).toBe(true);
     expect(res.success).toBe(false);
-    expect(res.error).toBe("Test: swap failed");
+    expect(res.error).toBe(
+      "Unable to top up SOL balance automatically. Add SOL manually and try again.",
+    );
+    expect(res.error).not.toContain("Test: swap failed");
   });
 
   test("giveaway allows all tokens for JIT swap since no stake needed", async () => {

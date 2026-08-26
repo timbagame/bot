@@ -117,6 +117,23 @@ interface JitSwapError {
   cause?: unknown;
 }
 
+const formatJitSwapErrorForUser = (error: JitSwapError): string => {
+  switch (error.type) {
+    case "INSUFFICIENT_TOKENS":
+      return error.message;
+    case "ZERO_LIQUIDITY":
+      return "Jupiter could not find a route for the automatic SOL fee top-up. Add a small amount of SOL manually or try again later.";
+    case "INSUFFICIENT_INPUT":
+    case "SWAP_UNDERSIZED":
+      return "The available tokens cannot provide enough SOL for fees. Add a small amount of SOL manually and try again.";
+    case "UNWRAP_FAILED":
+      return "Unable to unwrap WSOL for fees. Add a small amount of SOL manually and try again.";
+    case "PROBE_FAILED":
+    case "SWAP_EXECUTION_FAILED":
+      return "Jupiter could not prepare the automatic SOL fee top-up. Try again shortly or add a small amount of SOL manually.";
+  }
+};
+
 export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
   jupiterQuoteExpirationMs = value;
 };
@@ -467,12 +484,15 @@ export class SwapManager {
       return {
         swapped: false,
         error: lastError?.message ?? fallbackMessage,
+        userMessage: lastError ? formatJitSwapErrorForUser(lastError) : fallbackMessage,
       };
     } catch (error: any) {
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
         error: error.message || "Failed to perform SOL lending swap",
+        userMessage:
+          "Unable to prepare the automatic SOL fee top-up. Try again shortly or add a small amount of SOL manually.",
       };
     }
   }

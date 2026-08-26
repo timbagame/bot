@@ -1983,7 +1983,9 @@ export class GameManager {
       if (!swapResult.swapped) {
         return {
           success: false,
-          reason: swapResult.error ?? `Unable to swap ${tokenTicker.toUpperCase()} for SOL fees.`,
+          reason:
+            swapResult.userMessage ??
+            `Unable to swap ${tokenTicker.toUpperCase()} for SOL fees. Add SOL manually and try again.`,
         };
       }
 
@@ -3570,13 +3572,11 @@ export class GameManager {
         });
 
         if (!jitResult.swapped) {
-          if (jitResult.error) {
-            return { success: false, error: jitResult.error };
-          }
-
           return {
             success: false,
-            error: "Unable to top up SOL balance automatically. Add SOL manually and try again.",
+            error:
+              jitResult.userMessage ??
+              "Unable to top up SOL balance automatically. Add SOL manually and try again.",
           };
         }
 
@@ -4127,8 +4127,13 @@ export class GameManager {
           logContext: `join ${gameAddress}`,
         });
 
-        if (!jitResult.swapped && jitResult.error) {
-          return { success: false, error: jitResult.error };
+        if (!jitResult.swapped) {
+          return {
+            success: false,
+            error:
+              jitResult.userMessage ??
+              "Unable to top up SOL balance automatically. Add SOL manually and try again.",
+          };
         }
 
         if (jitResult.swapped) {
