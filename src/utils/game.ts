@@ -4398,7 +4398,7 @@ export class GameManager {
       console.error(`Error unjoining game ${gameAddress}:`, error);
       return {
         success: false,
-        error: error.message || "Failed to unjoin game",
+        error: await logAndFormatError(error, `unjoining game ${gameAddress}`, this.wallet),
       };
     }
   }
@@ -4473,7 +4473,10 @@ export class GameManager {
     } catch (error: any) {
       const failureMessage = failurePrefix ?? `❌ Failed to close ${gameType} game`;
       console.error(`${failureMessage} ${address}:`, error?.message ?? error);
-      return { success: false, error: error?.message ?? String(error) };
+      return {
+        success: false,
+        error: await logAndFormatError(error, `closing ${gameType} game ${address}`, this.wallet),
+      };
     }
   }
 
@@ -4503,7 +4506,14 @@ export class GameManager {
       });
     } catch (error: any) {
       console.error(`❌ Error closing ${gameType} game ${gamePda.toBase58()}:`, error);
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: await logAndFormatError(
+          error,
+          `cancelling ${gameType} game ${gamePda.toBase58()}`,
+          this.wallet,
+        ),
+      };
     }
   }
 

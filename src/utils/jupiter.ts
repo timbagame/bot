@@ -60,7 +60,8 @@ export interface JupiterQuoteResponse {
   outUsdValue?: number;
   platformFee?: {
     amount?: string;
-    feeBps: number;
+    feeBps?: number;
+    feeMint?: string;
   } | null;
   signatureFeeLamports?: number;
   prioritizationFeeLamports?: number;
@@ -167,7 +168,8 @@ export interface JupiterOrderResponse {
   outUsdValue?: number;
   platformFee?: {
     amount?: string;
-    feeBps: number;
+    feeBps?: number;
+    feeMint?: string;
   } | null;
   router?: string;
   transaction?: string | null;
@@ -262,7 +264,12 @@ const jupiterRoutePlanSchema = z.array(
   }),
 );
 const platformFeeSchema = z
-  .object({ amount: z.string().optional(), feeBps: z.number() })
+  .object({
+    amount: z.string().optional(),
+    feeBps: z.number().optional(),
+    feeMint: z.string().optional(),
+  })
+  .passthrough()
   .nullable();
 const jupiterErrorSchema = z
   .object({

@@ -166,7 +166,10 @@ export class OracleClient {
       return { authorized: true, operatorKeypair };
     } catch (error) {
       console.error(`Error authorizing player:`, error);
-      return { authorized: false, error: (error as Error).message };
+      return {
+        authorized: false,
+        error: "Unable to authorize this private-game join. Please try again shortly.",
+      };
     }
   }
 

@@ -186,7 +186,7 @@ describe("JupiterClient HTTP", () => {
         },
       ],
       feeBps: 100,
-      platformFee: { feeBps: 100 },
+      platformFee: { feeMint: "A" },
     };
     globalThis.fetch = (async () => ({
       ok: true,
@@ -204,7 +204,7 @@ describe("JupiterClient HTTP", () => {
 
     expect(quote.routePlan[0]?.swapInfo.feeAmount).toBeUndefined();
     expect(quote.routePlan[0]?.swapInfo.feeMint).toBeUndefined();
-    expect(quote.platformFee).toEqual({ feeBps: 100 });
+    expect(quote.platformFee).toEqual({ feeMint: "A" });
   });
 
   test("getSwapTransaction throws with non-ok response and includes status", async () => {
