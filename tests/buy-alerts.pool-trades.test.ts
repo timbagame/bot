@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import {
   createPoolTradePoller,
   parseGeckoPoolTrade,
-  PoolTradeCapacityError,
   rememberSignature,
 } from "../src/services/buy-alerts/pool-trades";
 import { WSOL_MINT } from "../src/utils/constants";
@@ -221,13 +220,12 @@ test("pool trade poller retains newest signatures when snapshots arrive newest-f
   poller.stop();
 });
 
-test("pool trade poller rejects watch sets beyond one-cycle API capacity", async () => {
-  const errors: unknown[] = [];
-  const pooler = createPoolTradePoller({
-    intervalMs: 8_000,
-    minRequestIntervalMs: 2_100,
-    maxPoolsPerCycle: 1,
-    onError: (error) => errors.push(error),
+test("pool trade poller rotates fairly across Pump and non-Pump pools", async () => {
+  const requestedPools: string[] = [];
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    poolsPerCycle: 1,
     fetchPoolStats: async () => [
       {
         priceUsd: 1,
@@ -249,14 +247,31 @@ test("pool trade poller rejects watch sets beyond one-cycle API capacity", async
         pairAddress: "pair-b",
         tokenName: "TOKEN",
       },
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "pump-fun",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-pump",
+        tokenName: "TOKEN",
+      },
     ],
-    fetchTrades: async () => ({ data: [] }),
+    fetchTrades: async (pairAddress) => {
+      requestedPools.push(pairAddress);
+      return { data: [] };
+    },
   });
 
-  pooler.setMints([mint]);
-  await expect(pooler.pollNow()).rejects.toBeInstanceOf(PoolTradeCapacityError);
-  expect(errors.every((error) => error instanceof PoolTradeCapacityError)).toBe(true);
-  pooler.stop();
+  poller.setMints([mint]);
+  await poller.pollNow();
+  await poller.pollNow();
+  expect(requestedPools).toEqual(["pair-a", "pair-b", "pair-pump"]);
+
+  await poller.pollNow();
+  expect(requestedPools.at(-1)).toBe("pair-a");
+  poller.stop();
 });
 
 test("pool trade poller does not prime a pool after failed or malformed responses", async () => {

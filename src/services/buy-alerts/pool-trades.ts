@@ -8,20 +8,8 @@ const GECKO_POOL_TRADES_URL = "https://api.geckoterminal.com/api/v2/networks/sol
 const TRADE_FETCH_TIMEOUT_MS = 5_000;
 // Keep the keyless GeckoTerminal feed below its documented 30 requests/minute limit.
 const GECKO_MIN_REQUEST_INTERVAL_MS = 2_100;
-export const POOL_TRADE_POLL_MS = 8_000;
+export const POOL_TRADE_POLL_MS = GECKO_MIN_REQUEST_INTERVAL_MS;
 export const MAX_SEEN_SIGNATURES_PER_MINT = 400;
-
-export class PoolTradeCapacityError extends Error {
-  constructor(
-    readonly requestedPools: number,
-    readonly supportedPools: number,
-  ) {
-    super(
-      `Buy-alert pool capacity exceeded: ${requestedPools} non-Pump pools discovered, but the configured GeckoTerminal request budget supports ${supportedPools} per polling cycle`,
-    );
-    this.name = "PoolTradeCapacityError";
-  }
-}
 
 export function rememberSignature(
   known: Set<string>,
@@ -137,7 +125,7 @@ export type PoolTradePollerOptions = {
   fetchTrades?: (pairAddress: string) => Promise<unknown>;
   intervalMs?: number;
   minRequestIntervalMs?: number;
-  maxPoolsPerCycle?: number;
+  poolsPerCycle?: number;
   onError?: (error: unknown) => void;
 };
 
@@ -176,10 +164,10 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     0,
     options.minRequestIntervalMs ?? GECKO_MIN_REQUEST_INTERVAL_MS,
   );
-  const maxPoolsPerCycle = Math.max(
+  const poolsPerCycle = Math.max(
     1,
     Math.trunc(
-      options.maxPoolsPerCycle ??
+      options.poolsPerCycle ??
         (minRequestIntervalMs === 0
           ? Number.MAX_SAFE_INTEGER
           : Math.floor(intervalMs / minRequestIntervalMs)),
@@ -194,6 +182,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   const primed = new Map<string, Set<string>>();
   const discoveredPools = new Map<string, Set<string>>();
   const baselinePools = new Map<string, Set<string>>();
+  let poolQueue: Array<{ mint: string; pairAddress: string }> = [];
   let nextTradeFetchAt = 0;
   let consecutiveTradeFailures = 0;
 
@@ -308,6 +297,33 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   let pollChain = Promise.resolve();
   let queuedPolls = 0;
 
+  const targetKey = (mint: string, pairAddress: string): string => `${mint}:${pairAddress}`;
+
+  const refreshPoolQueue = (
+    targets: Array<{ mint: string; pair: PairStats }>,
+  ): Map<string, { mint: string; pair: PairStats }> => {
+    const targetByKey = new Map<string, { mint: string; pair: PairStats }>();
+    for (const target of targets) {
+      const pairAddress = target.pair.pairAddress?.trim();
+      if (!pairAddress) continue;
+      targetByKey.set(targetKey(target.mint, pairAddress), target);
+    }
+
+    poolQueue = poolQueue.filter(({ mint, pairAddress }) =>
+      targetByKey.has(targetKey(mint, pairAddress)),
+    );
+    const queued = new Set(poolQueue.map(({ mint, pairAddress }) => targetKey(mint, pairAddress)));
+    for (const { mint, pair } of targetByKey.values()) {
+      const pairAddress = pair.pairAddress!.trim();
+      const key = targetKey(mint, pairAddress);
+      if (!queued.has(key)) {
+        poolQueue.push({ mint, pairAddress });
+        queued.add(key);
+      }
+    }
+    return targetByKey;
+  };
+
   const pollNow = async () => {
     queuedPolls += 1;
     const run = async () => {
@@ -316,20 +332,21 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
         mints.map(async (mint) => ({ mint, pools: await discoverMintPools(mint) })),
       );
       const targets = poolsByMint.flatMap(({ mint, pools }) =>
-        pools
-          // PumpPortal streams Pump.fun and PumpSwap trades, so do not spend
-          // the limited GeckoTerminal request budget polling the same venues.
-          .filter((pool) => !pool.dexId?.trim().toLowerCase().includes("pump"))
-          .map((pair) => ({ mint, pair })),
+        pools.map((pair) => ({ mint, pair })),
       );
+      const targetByKey = refreshPoolQueue(targets);
+      const cycleSize = Math.min(poolsPerCycle, poolQueue.length);
 
-      if (targets.length > maxPoolsPerCycle) {
-        throw new PoolTradeCapacityError(targets.length, maxPoolsPerCycle);
-      }
+      for (let index = 0; index < cycleSize; index += 1) {
+        const queuedTarget = poolQueue.shift();
+        if (!queuedTarget) break;
+        const key = targetKey(queuedTarget.mint, queuedTarget.pairAddress);
+        const target = targetByKey.get(key);
+        if (!target) continue;
+        poolQueue.push(queuedTarget);
 
-      for (const { mint, pair } of targets) {
-        const pairAddress = pair.pairAddress?.trim();
-        if (!pairAddress) continue;
+        const { mint, pair } = target;
+        const pairAddress = queuedTarget.pairAddress;
         const suppressFirstPass = baselinePools.get(mint)?.has(pairAddress) ?? false;
         const succeeded = await pollPool(mint, pair, suppressFirstPass);
         if (succeeded) {
@@ -383,6 +400,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
         }
       }
       mints = Array.from(nextSet);
+      poolQueue = poolQueue.filter(({ mint }) => nextSet.has(mint));
       if (mints.length === 0) {
         stopTimer();
         return;
@@ -399,6 +417,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       primed.clear();
       discoveredPools.clear();
       baselinePools.clear();
+      poolQueue = [];
       nextTradeFetchAt = 0;
       consecutiveTradeFailures = 0;
     },

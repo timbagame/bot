@@ -6,7 +6,6 @@ declare global {
       TELEGRAM_TOKEN: string;
       SOLANA_NETWORK: string;
       HELIUS_REBATE_ADDRESS?: string;
-      PUMPPORTAL_API_KEY?: string;
       MNEMONIC?: string;
       MNEMONIC_FILE?: string;
       OPERATOR_KEYPAIR_PATH?: string;

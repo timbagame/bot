@@ -1,5 +1,4 @@
 import type { ChatDatabase } from "../../utils/chat-database";
-import { createPumpPortalFeed } from "./feed";
 import { createPoolTradePoller } from "./pool-trades";
 import {
   attachBuyAlertFeed,
@@ -27,9 +26,7 @@ export type CreateBuyAlertServiceDeps = {
 };
 
 export function createBuyAlertService(deps: CreateBuyAlertServiceDeps): BuyAlertService {
-  const feeds: BuyFeed[] = deps.feed
-    ? [deps.feed]
-    : [createPumpPortalFeed(), createPoolTradePoller()];
+  const feeds: BuyFeed[] = [deps.feed ?? createPoolTradePoller()];
   const publisher = createBuyAlertPublisher({
     chatDb: deps.chatDb,
     tokenManager: {
