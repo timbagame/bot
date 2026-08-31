@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { WSOL_MINT } from "../../utils/constants";
-import { fetchDexScreenerPairStats } from "./dexscreener";
+import { fetchDexScreenerPoolStats } from "./dexscreener";
 import { mapDexFromPool } from "./parser";
 import type { BuyEvent, BuyFeed, PairStats } from "./types";
 
 const GECKO_POOL_TRADES_URL = "https://api.geckoterminal.com/api/v2/networks/solana/pools";
 const TRADE_FETCH_TIMEOUT_MS = 5_000;
+const MAX_CONCURRENT_POOL_POLLS = 3;
 export const POOL_TRADE_POLL_MS = 8_000;
 export const MAX_SEEN_SIGNATURES_PER_MINT = 400;
 
@@ -70,6 +71,7 @@ export function parseGeckoPoolTrade(
   mint: string,
   payload: unknown,
   dexId?: string | null,
+  inputSymbol?: string | null,
 ): BuyEvent | null {
   const parsed = geckoTradeSchema.safeParse(payload);
   if (!parsed.success) {
@@ -83,11 +85,6 @@ export function parseGeckoPoolTrade(
     return null;
   }
 
-  const kind = (attrs.kind ?? "").trim().toLowerCase();
-  if (kind && kind !== "buy") {
-    return null;
-  }
-
   const trader = (attrs.tx_from_address ?? "").trim();
   const tokenAmount = parseFiniteNumber(attrs.to_token_amount);
   const fromAmount = parseFiniteNumber(attrs.from_token_amount);
@@ -95,13 +92,15 @@ export function parseGeckoPoolTrade(
     return null;
   }
 
-  const solAmount = isSolMint(fromMint) ? (fromAmount ?? 0) : 0;
+  const solAmount = isSolMint(fromMint) && fromAmount != null && fromAmount > 0 ? fromAmount : null;
 
   return {
     signature: attrs.tx_hash.trim(),
     mint,
     trader,
     solAmount,
+    inputAmount: fromAmount,
+    inputSymbol: inputSymbol?.trim() || (isSolMint(fromMint) ? "SOL" : null),
     tokenAmount,
     dex: mapDexFromPool(dexId),
   };
@@ -119,6 +118,7 @@ async function withTimeout<T>(factory: (signal: AbortSignal) => Promise<T>, time
 
 export type PoolTradePollerOptions = {
   fetchPairStats?: (mint: string) => Promise<PairStats | null>;
+  fetchPoolStats?: (mint: string) => Promise<PairStats[]>;
   fetchTrades?: (pairAddress: string) => Promise<unknown>;
   intervalMs?: number;
 };
@@ -144,7 +144,14 @@ export type PoolTradePoller = BuyFeed & {
 };
 
 export function createPoolTradePoller(options: PoolTradePollerOptions = {}): PoolTradePoller {
-  const fetchPairStats = options.fetchPairStats ?? fetchDexScreenerPairStats;
+  const fetchPoolStats =
+    options.fetchPoolStats ??
+    (options.fetchPairStats
+      ? async (mint: string) => {
+          const pair = await options.fetchPairStats!(mint);
+          return pair ? [pair] : [];
+        }
+      : fetchDexScreenerPoolStats);
   const fetchTrades = options.fetchTrades ?? fetchGeckoTrades;
   const intervalMs = options.intervalMs ?? POOL_TRADE_POLL_MS;
 
@@ -152,8 +159,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   let cursor = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   const handlers = new Set<(event: BuyEvent) => void>();
-  const seen = new Map<string, Set<string>>();
-  const primed = new Set<string>();
+  const seen = new Map<string, Map<string, Set<string>>>();
+  const primed = new Map<string, Set<string>>();
 
   const emit = (event: BuyEvent) => {
     for (const handler of handlers) {
@@ -161,8 +168,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     }
   };
 
-  const pollMint = async (mint: string) => {
-    const pair = await fetchPairStats(mint);
+  const pollPool = async (mint: string, pair: PairStats) => {
     const pairAddress = pair?.pairAddress?.trim();
     if (!pairAddress) {
       return;
@@ -177,11 +183,13 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
 
     const parsed = geckoTradesResponseSchema.safeParse(payload);
     const trades = parsed.success ? (parsed.data.data ?? []) : [];
-    const known = seen.get(mint) ?? new Set<string>();
-    const isFirstPass = !primed.has(mint);
+    const mintSeen = seen.get(mint) ?? new Map<string, Set<string>>();
+    const known = mintSeen.get(pairAddress) ?? new Set<string>();
+    const mintPrimed = primed.get(mint) ?? new Set<string>();
+    const isFirstPass = !mintPrimed.has(pairAddress);
 
     for (const trade of trades) {
-      const event = parseGeckoPoolTrade(mint, trade, pair?.dexId);
+      const event = parseGeckoPoolTrade(mint, trade, pair.dexId, pair.quoteSymbol);
       if (!event) continue;
       if (!rememberSignature(known, event.signature)) continue;
       if (!isFirstPass) {
@@ -189,8 +197,35 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       }
     }
 
-    seen.set(mint, known);
-    primed.add(mint);
+    mintSeen.set(pairAddress, known);
+    seen.set(mint, mintSeen);
+    mintPrimed.add(pairAddress);
+    primed.set(mint, mintPrimed);
+  };
+
+  const pollMint = async (mint: string) => {
+    const pools = await fetchPoolStats(mint);
+    const uniquePools = new Map<string, PairStats>();
+    for (const pool of pools) {
+      const pairAddress = pool.pairAddress?.trim();
+      if (pairAddress && !uniquePools.has(pairAddress)) {
+        uniquePools.set(pairAddress, pool);
+      }
+    }
+    const poolsToPoll = Array.from(uniquePools.values());
+    let nextPool = 0;
+    const pollWorker = async () => {
+      while (nextPool < poolsToPoll.length) {
+        const pool = poolsToPoll[nextPool];
+        nextPool += 1;
+        if (pool) {
+          await pollPool(mint, pool);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(MAX_CONCURRENT_POOL_POLLS, poolsToPoll.length) }, pollWorker),
+    );
   };
 
   let pollChain = Promise.resolve();

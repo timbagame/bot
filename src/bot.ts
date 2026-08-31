@@ -5129,6 +5129,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         inputMint: quote.inputMint,
         outputMint: quote.outputMint,
         inputAmountRaw: quote.inputAmountRaw,
+        inputDecimals: quote.inputDecimals,
+        inputTicker: quote.inputTicker ?? transaction.fromToken,
         outputAmountRaw: quote.executionOutputAmount ?? quote.outputAmount,
         outputDecimals,
       });

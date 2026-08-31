@@ -4,7 +4,9 @@ export type BuyEvent = {
   signature: string;
   mint: string;
   trader: string;
-  solAmount: number;
+  solAmount: number | null;
+  inputAmount?: number | null;
+  inputSymbol?: string | null;
   tokenAmount: number;
   dex: BuyDex;
   newHolder?: boolean | null;

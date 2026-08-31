@@ -78,6 +78,23 @@ test("formatBuyAlertMessage escapes attacker-controlled ticker text", () => {
   expect(text).not.toContain("New Holder");
 });
 
+test("formatBuyAlertMessage shows the actual input token when SOL value is unknown", () => {
+  const text = formatBuyAlertMessage({
+    event: {
+      ...event,
+      solAmount: null,
+      inputAmount: 2.5,
+      inputSymbol: "USDC<script>",
+    },
+    ticker: "TIMBA",
+    pair: null,
+    solPriceUsd: 100,
+  });
+
+  expect(text).toContain("Spent: <code>2.5</code> USDC&lt;script&gt;");
+  expect(text).not.toContain("Spent: <code>0</code> SOL");
+});
+
 test("dexLabel prefers pair metadata then the parsed pool", () => {
   expect(dexLabel("pump", "raydium")).toBe("Raydium AMM");
   expect(dexLabel("unknown", "pumpswap")).toBe("PumpSwap");

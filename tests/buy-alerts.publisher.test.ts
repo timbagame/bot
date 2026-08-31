@@ -185,7 +185,7 @@ test("publisher skips unknown-size buys when a minimum is configured", async () 
     fetchPairStats: async () => null,
   });
 
-  const unknown = await publisher.publish(event({ signature: "unknown-size", solAmount: 0 }));
+  const unknown = await publisher.publish(event({ signature: "unknown-size", solAmount: null }));
   expect(unknown.posted).toBe(1);
   expect(unknown.skipped).toContain("dust:-2");
   expect(sent).toEqual([-1]);

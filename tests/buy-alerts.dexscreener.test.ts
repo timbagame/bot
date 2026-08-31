@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import {
   fetchDexScreenerPairStats,
+  fetchDexScreenerPoolStats,
   selectSolanaPair,
+  selectSolanaPairs,
   __test_clearDexScreenerCache,
 } from "../src/services/buy-alerts/dexscreener";
 
@@ -60,8 +62,8 @@ test("fetchDexScreenerPairStats uses the injected fetch and caches the result", 
             marketCap: 1000,
             liquidity: { usd: 10 },
             priceChange: { h24: -3.5 },
-            quoteToken: { symbol: "SOL" },
-            baseToken: { name: "TIMBA", symbol: "TIMBA" },
+            quoteToken: { address: "sol", symbol: "SOL" },
+            baseToken: { address: "mint", name: "TIMBA", symbol: "TIMBA" },
           },
         ],
       }),
@@ -76,4 +78,50 @@ test("fetchDexScreenerPairStats uses the injected fetch and caches the result", 
   expect(first?.pairAddress).toBe("pair-timba");
   expect(first?.tokenName).toBe("TIMBA");
   expect(second?.priceChangeH24).toBe(-3.5);
+});
+
+test("pair discovery keeps the watched mint's orientation and returns every Solana pool", async () => {
+  const pairs = [
+    {
+      chainId: "solana",
+      dexId: "pumpswap",
+      pairAddress: "quote-side",
+      priceUsd: "4.25",
+      marketCap: 20_000_000,
+      liquidity: { usd: 20_000_000 },
+      baseToken: { address: "pump", name: "Pump", symbol: "PUMP" },
+      quoteToken: { address: "usdc", name: "USD Coin", symbol: "USDC" },
+    },
+    {
+      chainId: "solana",
+      dexId: "raydium",
+      pairAddress: "base-side",
+      priceUsd: "1",
+      marketCap: 1_000_000,
+      liquidity: { usd: 3_000_000 },
+      baseToken: { address: "usdc", name: "USD Coin", symbol: "USDC" },
+      quoteToken: { address: "usdt", name: "Tether", symbol: "USDT" },
+    },
+  ];
+
+  const stats = selectSolanaPairs(pairs, "usdc");
+  expect(stats.map((pair) => pair.pairAddress)).toEqual(["base-side", "quote-side"]);
+  expect(stats[0]?.tokenName).toBe("USD Coin");
+  expect(stats[0]?.quoteSymbol).toBe("USDT");
+  expect(stats[0]?.priceUsd).toBe(1);
+  expect(stats[1]?.tokenName).toBe("USD Coin");
+  expect(stats[1]?.quoteSymbol).toBe("PUMP");
+  expect(stats[1]?.priceUsd).toBeNull();
+
+  __test_clearDexScreenerCache();
+  const fetchImpl = async () =>
+    new Response(JSON.stringify({ pairs }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  const fetched = await fetchDexScreenerPoolStats("usdc", fetchImpl as any);
+  expect(fetched.map((pair) => pair.pairAddress)).toEqual(["base-side", "quote-side"]);
+  expect((await fetchDexScreenerPairStats("usdc", fetchImpl as any))?.pairAddress).toBe(
+    "base-side",
+  );
 });

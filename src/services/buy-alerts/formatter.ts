@@ -95,9 +95,9 @@ export function formatBuyAlertMessage({
   const walletLabel = formatWalletLabel(event.trader);
   const walletUrl = NetworkDetector.buildSolscanAccountUrl(event.trader);
   const txUrl = NetworkDetector.buildSolscanTxUrl(event.signature);
-  const spentSol = formatSolAmount(event.solAmount);
+  const spentSol = formatSolAmount(event.solAmount ?? 0);
   const spentUsd =
-    solPriceUsd && solPriceUsd > 0 && event.solAmount > 0
+    solPriceUsd && solPriceUsd > 0 && event.solAmount != null && event.solAmount > 0
       ? formatUsdValue(event.solAmount * solPriceUsd)
       : null;
   const gotAmount = formatBuyTokenAmount(event.tokenAmount);
@@ -105,13 +105,24 @@ export function formatBuyAlertMessage({
   const venue = escapeHtml(dexLabel(event.dex, pair?.dexId));
   const mark = dexMark(event.dex, pair?.dexId);
 
+  let spentLine = "Spent: Unknown";
+  if (event.solAmount != null && event.solAmount > 0) {
+    spentLine = spentUsd
+      ? `Spent: ${copyableHtml(spentSol)} SOL ($${escapeHtml(spentUsd)})`
+      : `Spent: ${copyableHtml(spentSol)} SOL`;
+  } else if (event.inputAmount != null && event.inputAmount > 0) {
+    const inputAmount = formatBuyTokenAmount(event.inputAmount);
+    const inputSymbol = event.inputSymbol?.trim();
+    spentLine = inputSymbol
+      ? `Spent: ${copyableHtml(inputAmount)} ${escapeHtml(inputSymbol)}`
+      : `Spent: ${copyableHtml(inputAmount)}`;
+  }
+
   const lines = [
     `<b>💰 BUY - ${safeName}</b>`,
     "",
     linkedLabel(walletUrl, walletLabel),
-    spentUsd
-      ? `Spent: ${copyableHtml(spentSol)} SOL ($${escapeHtml(spentUsd)})`
-      : `Spent: ${copyableHtml(spentSol)} SOL`,
+    spentLine,
     `Got: ${copyableHtml(gotAmount)} ${safeTicker}`,
     `DEX: ${mark} ${venue} ${quote}`,
   ];

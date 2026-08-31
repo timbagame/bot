@@ -30,6 +30,8 @@ const pairSchema = z
     pairAddress: z.string().optional(),
     quoteToken: z
       .object({
+        address: z.string().optional(),
+        name: z.string().optional(),
         symbol: z.string().optional(),
       })
       .passthrough()
@@ -51,7 +53,7 @@ const tokenResponseSchema = z
   })
   .passthrough();
 
-const pairCache = createExpiringCache<PairStats | null>(PAIR_CACHE_TTL_MS);
+const pairCache = createExpiringCache<PairStats[]>(PAIR_CACHE_TTL_MS);
 
 function toFiniteNumber(value: number | string | null | undefined): number | null {
   if (value == null) return null;
@@ -63,50 +65,80 @@ function liquidityUsd(pair: z.infer<typeof pairSchema>): number {
   return toFiniteNumber(pair.liquidity?.usd) ?? 0;
 }
 
-export function selectSolanaPair(
-  pairs: Array<z.infer<typeof pairSchema>> | null | undefined,
-): PairStats | null {
-  if (!pairs || pairs.length === 0) {
-    return null;
-  }
-
-  const solanaPairs = pairs.filter((pair) => (pair.chainId ?? "").toLowerCase() === "solana");
-  const ranked = (solanaPairs.length > 0 ? solanaPairs : pairs).slice();
-  ranked.sort((a, b) => liquidityUsd(b) - liquidityUsd(a));
-  const best = ranked[0];
-  if (!best) {
-    return null;
-  }
+function mapPairStats(pair: z.infer<typeof pairSchema>, mint?: string): PairStats {
+  const normalizedMint = mint?.trim() ?? "";
+  const targetIsQuote =
+    normalizedMint.length > 0 && pair.quoteToken?.address?.trim() === normalizedMint;
+  const token = targetIsQuote ? pair.quoteToken : pair.baseToken;
+  const counterToken = targetIsQuote ? pair.baseToken : pair.quoteToken;
 
   return {
-    priceUsd: toFiniteNumber(best.priceUsd),
-    marketCapUsd: toFiniteNumber(best.marketCap) ?? toFiniteNumber(best.fdv),
-    priceChangeH24: toFiniteNumber(best.priceChange?.h24),
-    url: best.url?.trim() || null,
-    dexId: best.dexId?.trim() || null,
-    quoteSymbol: best.quoteToken?.symbol?.trim() || null,
-    pairAddress: best.pairAddress?.trim() || null,
-    tokenName: best.baseToken?.name?.trim() || best.baseToken?.symbol?.trim() || null,
+    // DEX Screener's price, market cap, and change fields describe the base token.
+    // Keep them unknown when the watched token is the quote side instead of
+    // attributing the base token's statistics to it.
+    priceUsd: targetIsQuote ? null : toFiniteNumber(pair.priceUsd),
+    marketCapUsd: targetIsQuote
+      ? null
+      : (toFiniteNumber(pair.marketCap) ?? toFiniteNumber(pair.fdv)),
+    priceChangeH24: targetIsQuote ? null : toFiniteNumber(pair.priceChange?.h24),
+    url: pair.url?.trim() || null,
+    dexId: pair.dexId?.trim() || null,
+    quoteSymbol: counterToken?.symbol?.trim() || null,
+    pairAddress: pair.pairAddress?.trim() || null,
+    tokenName: token?.name?.trim() || token?.symbol?.trim() || null,
   };
 }
 
-async function withTimeout<T>(factory: (signal: AbortSignal) => Promise<T>, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await factory(controller.signal);
-  } finally {
-    clearTimeout(timer);
+export function selectSolanaPairs(
+  pairs: Array<z.infer<typeof pairSchema>> | null | undefined,
+  mint?: string,
+): PairStats[] {
+  if (!pairs || pairs.length === 0) {
+    return [];
   }
+
+  const normalizedMint = mint?.trim() ?? "";
+  const ranked = pairs.filter((pair) => {
+    if ((pair.chainId ?? "").toLowerCase() !== "solana") {
+      return false;
+    }
+    if (!normalizedMint) {
+      return true;
+    }
+    return (
+      pair.baseToken?.address?.trim() === normalizedMint ||
+      pair.quoteToken?.address?.trim() === normalizedMint
+    );
+  });
+
+  ranked.sort((a, b) => {
+    if (normalizedMint) {
+      const aIsBase = a.baseToken?.address?.trim() === normalizedMint;
+      const bIsBase = b.baseToken?.address?.trim() === normalizedMint;
+      if (aIsBase !== bIsBase) {
+        return aIsBase ? -1 : 1;
+      }
+    }
+    return liquidityUsd(b) - liquidityUsd(a);
+  });
+
+  return ranked.map((pair) => mapPairStats(pair, normalizedMint));
 }
 
-export async function fetchDexScreenerPairStats(
+export function selectSolanaPair(
+  pairs: Array<z.infer<typeof pairSchema>> | null | undefined,
+  mint?: string,
+): PairStats | null {
+  return selectSolanaPairs(pairs, mint)[0] ?? null;
+}
+
+export async function fetchDexScreenerPoolStats(
   mint: string,
   fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
-): Promise<PairStats | null> {
+): Promise<PairStats[]> {
   const normalizedMint = mint.trim();
   if (!normalizedMint) {
-    return null;
+    return [];
   }
 
   const cached = pairCache.get(normalizedMint);
@@ -124,18 +156,35 @@ export async function fetchDexScreenerPairStats(
       PAIR_FETCH_TIMEOUT_MS,
     );
     if (!response.ok) {
-      pairCache.setWithTTL(normalizedMint, null);
-      return null;
+      pairCache.setWithTTL(normalizedMint, []);
+      return [];
     }
 
     const payload = tokenResponseSchema.parse(await response.json());
-    const stats = selectSolanaPair(payload.pairs ?? []);
+    const stats = selectSolanaPairs(payload.pairs ?? [], normalizedMint);
     pairCache.setWithTTL(normalizedMint, stats);
     return stats;
   } catch {
     const stale = pairCache.peek(normalizedMint);
-    return stale === undefined ? null : stale;
+    return stale ?? [];
   }
+}
+
+async function withTimeout<T>(factory: (signal: AbortSignal) => Promise<T>, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await factory(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchDexScreenerPairStats(
+  mint: string,
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
+): Promise<PairStats | null> {
+  return (await fetchDexScreenerPoolStats(mint, fetchImpl))[0] ?? null;
 }
 
 export const __test_clearDexScreenerCache = (): void => {

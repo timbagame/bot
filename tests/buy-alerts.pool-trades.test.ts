@@ -27,17 +27,44 @@ test("parseGeckoPoolTrade maps a SOL buy on the watched mint", () => {
     mint,
     trader: "Trader11111111111111111111111111111111111",
     solAmount: 1.8998,
+    inputAmount: 1.8998,
+    inputSymbol: "SOL",
     tokenAmount: 1_270_000,
     dex: "raydium",
   });
 });
 
-test("parseGeckoPoolTrade skips sells and other mints", () => {
+test("parseGeckoPoolTrade skips trades whose output is another mint", () => {
   expect(
     parseGeckoPoolTrade(mint, {
       attributes: { ...geckoBuy.attributes, kind: "sell", to_token_address: WSOL_MINT },
     }),
   ).toBeNull();
+});
+
+test("parseGeckoPoolTrade accepts the watched mint on the quote side", () => {
+  expect(
+    parseGeckoPoolTrade(
+      mint,
+      {
+        attributes: {
+          ...geckoBuy.attributes,
+          kind: "sell",
+          from_token_address: "PumpMint",
+          to_token_address: mint,
+          from_token_amount: "250",
+        },
+      },
+      "pumpswap",
+      "PUMP",
+    ),
+  ).toMatchObject({
+    mint,
+    solAmount: null,
+    inputAmount: 250,
+    inputSymbol: "PUMP",
+    dex: "pump",
+  });
 });
 
 test("pool trade poller seeds existing trades then emits only new buys", async () => {
@@ -88,4 +115,53 @@ test("rememberSignature evicts the oldest hashes once the per-mint cap is hit", 
   expect(known.has("a")).toBe(false);
   expect([...known]).toEqual(["b", "c"]);
   expect(rememberSignature(known, "b", 2)).toBe(false);
+});
+
+test("pool trade poller watches every discovered pool", async () => {
+  const received: string[] = [];
+  const payloads = new Map<string, { data: Array<typeof geckoBuy> }>([
+    ["pair-a", { data: [geckoBuy] }],
+    ["pair-b", { data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "seed-b" } }] }],
+  ]);
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    fetchPoolStats: async () => [
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "raydium",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-a",
+        tokenName: "TOKEN",
+      },
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "meteora",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-b",
+        tokenName: "TOKEN",
+      },
+    ],
+    fetchTrades: async (pairAddress) => payloads.get(pairAddress) ?? { data: [] },
+  });
+
+  poller.onTrade((buy) => received.push(buy.signature));
+  poller.setMints([mint]);
+  await poller.pollNow();
+  expect(received).toEqual([]);
+
+  payloads.set("pair-a", {
+    data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "new-a" } }],
+  });
+  payloads.set("pair-b", {
+    data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "new-b" } }],
+  });
+  await poller.pollNow();
+  expect(received.sort()).toEqual(["new-a", "new-b"]);
+  poller.stop();
 });

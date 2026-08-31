@@ -7,6 +7,8 @@ export type SwapBuyInput = {
   inputMint: string;
   outputMint: string;
   inputAmountRaw: string;
+  inputDecimals?: number;
+  inputTicker?: string;
   outputAmountRaw: string;
   outputDecimals: number;
 };
@@ -30,9 +32,16 @@ export function buyEventFromSwap(input: SwapBuyInput): BuyEvent | null {
   }
 
   const inputMint = input.inputMint.trim();
-  let solAmount = 0;
+  const inputDecimals =
+    typeof input.inputDecimals === "number" && Number.isFinite(input.inputDecimals)
+      ? Math.max(0, Math.trunc(input.inputDecimals))
+      : inputMint === WSOL_MINT
+        ? 9
+        : 0;
+  const rawIn = Number(input.inputAmountRaw);
+  const inputAmount = Number.isFinite(rawIn) && rawIn > 0 ? rawIn / 10 ** inputDecimals : null;
+  let solAmount: number | null = null;
   if (inputMint === WSOL_MINT) {
-    const rawIn = Number(input.inputAmountRaw);
     if (Number.isFinite(rawIn) && rawIn > 0) {
       solAmount = rawIn / LAMPORTS_PER_SOL;
     }
@@ -43,6 +52,8 @@ export function buyEventFromSwap(input: SwapBuyInput): BuyEvent | null {
     mint: outputMint,
     trader,
     solAmount,
+    inputAmount,
+    inputSymbol: input.inputTicker?.trim() || (inputMint === WSOL_MINT ? "SOL" : null),
     tokenAmount,
     dex: "unknown",
   };
