@@ -8,6 +8,7 @@ import {
   DEFAULT_GIVEAWAY_MAX_PLAYERS,
   DEFAULT_TOKEN_TICKER,
   INPUT_TIMEOUT_HINT,
+  LAMPORTS_PER_SOL,
   MAX_GAME_TIMEOUT,
   MIN_COINFLIP_PLAYERS,
   MIN_GAME_TIMEOUT,
@@ -25,6 +26,13 @@ import {
 } from "../utils/chat-settings";
 import { escapeHtml } from "../utils/format-amount";
 import { respondWithMenu } from "../utils/menu-response";
+import {
+  formatMinSolLabel,
+  MAX_BUY_ALERT_SOL,
+  MIN_BUY_ALERT_SOL,
+  parseMinSolInput,
+  resolveBuyAlertToken,
+} from "../services/buy-alerts/resolve";
 import {
   getTelegramId,
   getTelegramIdString,
@@ -52,6 +60,16 @@ const formatMediaSummary = (mediaId: string | null | undefined): string => {
   return "Default media";
 };
 
+const formatBuyAlertMediaSummary = (mediaId: string | null | undefined): string => {
+  if (!mediaId || mediaId === CHAT_MEDIA_DISABLED_SENTINEL) return "None";
+  return "Custom";
+};
+
+export const isChatDefaultsMediaSetting = (
+  setting: string | undefined,
+): setting is "video_coinflip" | "video_giveaway" | "video_buy_alerts" =>
+  setting === "video_coinflip" || setting === "video_giveaway" || setting === "video_buy_alerts";
+
 type SettingsTarget =
   | "token"
   | "coinflip"
@@ -60,7 +78,8 @@ type SettingsTarget =
   | "privacy_coinflip"
   | "privacy_giveaway"
   | "video_coinflip"
-  | "video_giveaway";
+  | "video_giveaway"
+  | "video_buy_alerts";
 
 type ChatDefaultsModuleDeps = {
   bot: Bot;
@@ -72,6 +91,9 @@ type ChatDefaultsModuleDeps = {
   getOracleMaxPlayers: () => number;
   isUserGroupAdmin: (ctx: Context, userId: number) => Promise<boolean>;
   replyToMessage: (ctx: Context, text: string) => Promise<void>;
+  buyAlerts?: {
+    refresh: () => void;
+  };
 };
 
 export type ChatDefaultsModule = {
@@ -92,7 +114,9 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("🎁 Giveaway", "chat_defaults_game_giveaway")
     .row()
     .text("📢 Join notifications", "chat_defaults_join_notifications")
-    .text("🌐 Public game feed", "chat_defaults_public_game_feed");
+    .text("🌐 Public game feed", "chat_defaults_public_game_feed")
+    .row()
+    .text("🚨 Buy alerts", "chat_defaults_buy_alerts");
 };
 
 const buildSettingsSummary = async (
@@ -157,6 +181,16 @@ const buildSettingsSummary = async (
   const publicGameFeedEnabled = Boolean(chatSettings?.global_public_game_feed);
   const publicGameFeedLine = `🌐 Global public game feed: ${publicGameFeedEnabled ? "✅ Enabled" : "❌ Disabled"}`;
 
+  const buyAlerts = deps.chatDb.getChatBuyAlerts(chatId);
+  const buyToken = resolveBuyAlertToken(
+    buyAlerts,
+    tokenManager.getChatDefaultToken(chatId),
+    tokenManager.getDefaultToken(),
+  );
+  const buyAlertsLine = buyAlerts?.enabled
+    ? `🚨 Buy alerts: On · ${escapeHtml(buyToken.ticker)} · min ${formatMinSolLabel(buyAlerts.min_sol_lamports)} · media ${formatBuyAlertMediaSummary(buyAlerts.media_file_id)}`
+    : "🚨 Buy alerts: Off";
+
   return [
     "<b>Chat defaults</b>",
     "",
@@ -168,6 +202,7 @@ const buildSettingsSummary = async (
     "",
     joinNotificationsLine,
     publicGameFeedLine,
+    buyAlertsLine,
   ].join("\n");
 };
 
@@ -231,6 +266,49 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
   };
 };
 
+const buildBuyAlertsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) => {
+  const chatId = ctx.chat!.id;
+  const config = deps.chatDb.getChatBuyAlerts(chatId);
+  const enabled = Boolean(config?.enabled);
+  const token = resolveBuyAlertToken(
+    config,
+    deps.getTokenManager().getChatDefaultToken(chatId),
+    deps.getTokenManager().getDefaultToken(),
+  );
+  const minLabel = formatMinSolLabel(config?.min_sol_lamports ?? null);
+
+  return {
+    text: [
+      "<b>🚨 Buy alerts</b>",
+      "",
+      `Current: ${enabled ? "✅ Enabled" : "❌ Disabled"}`,
+      `Token: ${escapeHtml(token.ticker)} (chat default)`,
+      `Min buy: ${minLabel}`,
+      `Media: ${formatBuyAlertMediaSummary(config?.media_file_id)}`,
+    ].join("\n"),
+    parseMode: "HTML" as const,
+    keyboard: new InlineKeyboard()
+      .text(
+        enabled ? "Disable" : "Enable",
+        enabled ? "chat_defaults_set_buy_alerts_off" : "chat_defaults_set_buy_alerts_on",
+      )
+      .text("Media", "chat_defaults_buy_alerts_media")
+      .row()
+      .text("Off", "chat_defaults_set_buy_alerts_min_off")
+      .text("0.1", "chat_defaults_set_buy_alerts_min_01")
+      .text("0.5", "chat_defaults_set_buy_alerts_min_05")
+      .text("1", "chat_defaults_set_buy_alerts_min_1")
+      .row()
+      .text("✏️ Custom min", "chat_defaults_set_buy_alerts_min_custom")
+      .row()
+      .text("🔙 Back", "chat_defaults_cancel"),
+  };
+};
+
+const notifyBuyAlertsChanged = (deps: ChatDefaultsModuleDeps) => {
+  deps.buyAlerts?.refresh();
+};
+
 const buildGameSettingsMenu = (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
@@ -280,6 +358,7 @@ const handleTokenChange = async (
   // Handle 'clear' command to remove chat default token
   if (/^(clear|remove)$/i.test(tokenInput.trim())) {
     deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
+    notifyBuyAlertsChanged(deps);
     await deps.replyToMessage(
       ctx,
       "✅ Default token cleared for this chat. Using bot default token now.",
@@ -288,7 +367,11 @@ const handleTokenChange = async (
   }
 
   const tokenManager = deps.getTokenManager();
-  const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
+  const knownToken =
+    tokenManager.getKnownTokenByTicker(tokenInput) ??
+    (typeof tokenManager.resolveSwapToken === "function"
+      ? await tokenManager.resolveSwapToken(tokenInput)
+      : null);
   if (!knownToken) {
     const allTokens = tokenManager.getSupportedGameTokens();
     const escapedTokenInput = escapeHtml(tokenInput.toUpperCase());
@@ -316,6 +399,7 @@ const handleTokenChange = async (
     knownToken.token_ticker,
     getTelegramId(ctx).toString(),
   );
+  notifyBuyAlertsChanged(deps);
 
   await deps.replyToMessage(
     ctx,
@@ -331,7 +415,7 @@ const promptForSetting = async (
   const messageLines: string[] = [];
   if (target === "token") {
     messageLines.push(
-      "Send the SPL token ticker you want to set as the chat default.",
+      "Send the SPL token ticker or mint you want to set as the chat default.",
       "",
       INPUT_TIMEOUT_HINT,
     );
@@ -346,6 +430,14 @@ const promptForSetting = async (
     const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
     messageLines.push(
       `Send a video, image, or GIF for the ${gameType} game.`,
+      "",
+      "Send the media directly (video, photo, or GIF).",
+      "",
+      INPUT_TIMEOUT_HINT,
+    );
+  } else if (target === "video_buy_alerts") {
+    messageLines.push(
+      "Send a video, image, or GIF for buy alerts.",
       "",
       "Send the media directly (video, photo, or GIF).",
       "",
@@ -478,15 +570,23 @@ const handleVideoIdUpdate = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
   input: string,
-  target: "video_coinflip" | "video_giveaway",
+  target: "video_coinflip" | "video_giveaway" | "video_buy_alerts",
 ): Promise<void> => {
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
   const telegramId = getTelegramId(ctx);
 
   if (/^(clear|remove)$/i.test(input.trim())) {
-    // Clear means use bot default - set to empty string to indicate "use default"
-    // Only update the target field, don't touch the other one
+    if (target === "video_buy_alerts") {
+      deps.chatDb.upsertChatBuyAlerts(chatId, {
+        media_file_id: "",
+        media_type: null,
+        set_by_telegram_id: telegramId.toString(),
+      });
+      notifyBuyAlertsChanged(deps);
+      await deps.replyToMessage(ctx, "✅ Buy alert media cleared.");
+      return;
+    }
     const updateData: any = {
       set_by_telegram_id: telegramId.toString(),
     };
@@ -508,11 +608,9 @@ const handleVideoIdUpdate = async (
     return;
   }
 
-  // Determine media type from context if available
   const message = (ctx as any).message;
-  let mediaType: "photo" | "video" | "animation" = "video"; // default to video
+  let mediaType: "photo" | "video" | "animation" = "video";
 
-  // Check if media type was stored in context (from media message handler)
   if ((ctx as any).__mediaType) {
     mediaType = (ctx as any).__mediaType;
   } else if (message?.video) {
@@ -523,7 +621,19 @@ const handleVideoIdUpdate = async (
     mediaType = "animation";
   }
 
-  // Only update the target field, don't touch the other one
+  if (target === "video_buy_alerts") {
+    deps.chatDb.upsertChatBuyAlerts(chatId, {
+      media_file_id: videoId,
+      media_type: mediaType,
+      set_by_telegram_id: telegramId.toString(),
+    });
+    notifyBuyAlertsChanged(deps);
+    const mediaTypeLabel =
+      mediaType === "photo" ? "image" : mediaType === "animation" ? "GIF" : "video";
+    await deps.replyToMessage(ctx, `✅ Buy alert ${mediaTypeLabel} set.`);
+    return;
+  }
+
   const updateData: any = {
     set_by_telegram_id: telegramId.toString(),
   };
@@ -582,6 +692,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
     if (tokenInput.toUpperCase() === "CLEAR" || tokenInput.toUpperCase() === "REMOVE") {
       deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
+      notifyBuyAlertsChanged(deps);
       await deps.replyToMessage(
         ctx,
         "✅ Default token cleared for this chat. Using bot default token now.",
@@ -605,11 +716,17 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_clear_(token|coinflip|giveaway|timeout|video_coinflip|video_giveaway)$/,
+    /^chat_defaults_clear_(token|coinflip|giveaway|timeout|video_coinflip|video_giveaway|video_buy_alerts)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const target = ctx.match?.[1] as
-        "token" | "coinflip" | "giveaway" | "timeout" | "video_coinflip" | "video_giveaway";
+        | "token"
+        | "coinflip"
+        | "giveaway"
+        | "timeout"
+        | "video_coinflip"
+        | "video_giveaway"
+        | "video_buy_alerts";
       if (!target) return;
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
@@ -619,6 +736,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
       if (target === "token") {
         deps.getTokenManager().removeChatDefaultToken(chatId);
+        notifyBuyAlertsChanged(deps);
       } else if (target === "timeout") {
         deps.chatDb.upsertChatGameSettings(chatId, {
           timeout_seconds: null,
@@ -635,35 +753,43 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
           set_by_telegram_id: telegramId.toString(),
         });
       } else if (target === "video_coinflip") {
-        // Clear means use bot default - set to empty string to indicate "use default"
         deps.chatDb.upsertChatGameSettings(chatId, {
           coinflip_video_id: "",
           coinflip_media_type: null,
           set_by_telegram_id: telegramId.toString(),
         });
       } else if (target === "video_giveaway") {
-        // Clear means use bot default - set to empty string to indicate "use default"
         deps.chatDb.upsertChatGameSettings(chatId, {
           giveaway_video_id: "",
           giveaway_media_type: null,
           set_by_telegram_id: telegramId.toString(),
         });
+      } else if (target === "video_buy_alerts") {
+        deps.chatDb.upsertChatBuyAlerts(chatId, {
+          media_file_id: "",
+          media_type: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+        notifyBuyAlertsChanged(deps);
       }
 
-      // Clear input session if any
       clearInputSession(`${ctx.chat.id}_${ctx.callbackQuery?.message?.message_id}`);
 
-      await renderMenu(ctx);
+      if (target === "video_buy_alerts") {
+        await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
+      } else {
+        await renderMenu(ctx);
+      }
       await safeAnswerCallbackQuery(ctx, "Setting reset to default");
     }),
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway|join_notifications|public_game_feed)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway|join_notifications|public_game_feed|buy_alerts)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const action = ctx.match?.[1] as
-        SettingsTarget | "join_notifications" | "public_game_feed" | undefined;
+        SettingsTarget | "join_notifications" | "public_game_feed" | "buy_alerts" | undefined;
       if (!action) return;
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
@@ -730,6 +856,8 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
             .row()
             .text("🔙 Back", "chat_defaults_cancel"),
         });
+      } else if (action === "buy_alerts") {
+        await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
       } else {
         await promptForSetting(ctx, deps, action);
       }
@@ -758,10 +886,105 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_set_(video_coinflip|video_giveaway)$/,
+    /^chat_defaults_set_buy_alerts_(on|off)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
-      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway";
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      const enabled = ctx.match![1] === "on";
+      deps.chatDb.upsertChatBuyAlerts(ctx.chat.id, {
+        enabled,
+        set_by_telegram_id: getTelegramId(ctx).toString(),
+      });
+      notifyBuyAlertsChanged(deps);
+      await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
+      await safeAnswerCallbackQuery(ctx, enabled ? "Buy alerts enabled" : "Buy alerts disabled");
+    }),
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_buy_alerts_min_(off|01|05|1)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      const key = ctx.match![1];
+      const minSolLamports =
+        key === "off"
+          ? null
+          : key === "01"
+            ? 100_000_000
+            : key === "05"
+              ? 500_000_000
+              : LAMPORTS_PER_SOL;
+      deps.chatDb.upsertChatBuyAlerts(ctx.chat.id, {
+        min_sol_lamports: minSolLamports,
+        set_by_telegram_id: getTelegramId(ctx).toString(),
+      });
+      notifyBuyAlertsChanged(deps);
+      await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
+      await safeAnswerCallbackQuery(ctx, `Min buy set to ${formatMinSolLabel(minSolLamports)}`);
+    }),
+  );
+
+  deps.bot.callbackQuery(
+    "chat_defaults_set_buy_alerts_min_custom",
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      const { messageId, chatId } = await respondWithMenu(ctx, {
+        text: [
+          "Send the minimum buy in SOL.",
+          "Examples: <code>0.05</code>, <code>0.25</code>, <code>2</code>.",
+          "Send <code>0</code> or <code>off</code> to post every buy.",
+          `Must be between ${MIN_BUY_ALERT_SOL} and ${MAX_BUY_ALERT_SOL} SOL.`,
+          "",
+          INPUT_TIMEOUT_HINT,
+        ].join("\n"),
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard().text("🔙 Back", "chat_defaults_buy_alerts"),
+      });
+
+      if (messageId != null && chatId != null) {
+        setInputSession(`${chatId}_${messageId}`, {
+          type: "chat_defaults",
+          target: "buy_alerts_min_custom",
+          chatId,
+          messageId,
+          initiatorId: getTelegramIdString(ctx),
+        });
+      }
+      await safeAnswerCallbackQuery(ctx);
+    }),
+  );
+
+  deps.bot.callbackQuery(
+    "chat_defaults_buy_alerts_media",
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
+
+      await respondWithMenu(ctx, {
+        text: "Choose an option for buy alert media.",
+        keyboard: new InlineKeyboard()
+          .text("📤 Set custom media", "chat_defaults_set_video_buy_alerts")
+          .row()
+          .text("🚫 Disable (no media)", "chat_defaults_disable_video_buy_alerts")
+          .row()
+          .text("❌ Restore defaults", "chat_defaults_clear_video_buy_alerts")
+          .row()
+          .text("🔙 Back", "chat_defaults_buy_alerts"),
+      });
+      await safeAnswerCallbackQuery(ctx);
+    }),
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_(video_coinflip|video_giveaway|video_buy_alerts)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway" | "video_buy_alerts";
       if (!target) return;
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
@@ -772,10 +995,10 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_disable_(video_coinflip|video_giveaway)$/,
+    /^chat_defaults_disable_(video_coinflip|video_giveaway|video_buy_alerts)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
-      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway";
+      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway" | "video_buy_alerts";
       if (!target) return;
 
       const allowed = await ensureAdmin(ctx, deps);
@@ -786,9 +1009,20 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
       const chatId = ctx.chat.id;
       const telegramId = getTelegramId(ctx);
-      const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
 
-      // Only update the target field, don't touch the other one
+      if (target === "video_buy_alerts") {
+        deps.chatDb.upsertChatBuyAlerts(chatId, {
+          media_file_id: CHAT_MEDIA_DISABLED_SENTINEL,
+          media_type: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+        notifyBuyAlertsChanged(deps);
+        await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
+        await safeAnswerCallbackQuery(ctx, "Buy alert media disabled");
+        return;
+      }
+
+      const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
       const updateData: any = {
         set_by_telegram_id: telegramId.toString(),
       };
@@ -980,6 +1214,36 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
     const setting = session["setting"] as SettingsTarget | undefined;
     const target = session["target"] as string | undefined;
 
+    if (target === "buy_alerts_min_custom") {
+      const chatId = session.chatId;
+      if (typeof chatId !== "number") {
+        await deps.replyToMessage(ctx, "❌ Session expired. Please try again.");
+        return true;
+      }
+
+      const parsed = parseMinSolInput(userMessage);
+      if (!parsed.ok) {
+        await deps.replyToMessage(
+          ctx,
+          `❌ Invalid amount. Enter a number between ${MIN_BUY_ALERT_SOL} and ${MAX_BUY_ALERT_SOL} SOL, or 0 / off.`,
+        );
+        return true;
+      }
+
+      deps.chatDb.upsertChatBuyAlerts(chatId, {
+        min_sol_lamports: parsed.minSolLamports,
+        set_by_telegram_id: telegramId.toString(),
+      });
+      notifyBuyAlertsChanged(deps);
+
+      await deps.replyToMessage(
+        ctx,
+        `✅ Min buy set to ${formatMinSolLabel(parsed.minSolLamports)}`,
+      );
+      await renderMenu(ctx);
+      return true;
+    }
+
     // Handle custom join rate input
     if (target === "join_rate_custom") {
       const chatId = session.chatId;
@@ -1008,8 +1272,11 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
       return true;
     }
 
-    // Check if user sent media for video ID settings
-    if (setting === "video_coinflip" || setting === "video_giveaway") {
+    if (
+      setting === "video_coinflip" ||
+      setting === "video_giveaway" ||
+      setting === "video_buy_alerts"
+    ) {
       const message = (ctx as any).message;
       let fileId: string | undefined;
 

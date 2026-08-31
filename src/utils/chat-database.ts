@@ -1,4 +1,4 @@
-import type { ChatGameSettings, ChatTokenConfig } from "../types";
+import type { ChatBuyAlertConfig, ChatGameSettings, ChatTokenConfig } from "../types";
 import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
 /**
@@ -44,6 +44,17 @@ export class ChatDatabase extends BaseDatabase {
           set_by_telegram_id TEXT,
           updated_at INTEGER NOT NULL
         )`,
+        `CREATE TABLE IF NOT EXISTS chat_buy_alerts (
+          chat_id INTEGER PRIMARY KEY,
+          enabled INTEGER NOT NULL DEFAULT 0,
+          token_mint TEXT,
+          token_ticker TEXT,
+          min_sol_lamports INTEGER,
+          media_file_id TEXT,
+          media_type TEXT,
+          set_by_telegram_id TEXT,
+          updated_at INTEGER NOT NULL
+        )`,
       ],
       "Chat",
     );
@@ -65,6 +76,15 @@ export class ChatDatabase extends BaseDatabase {
     for (const column of columnsToAdd) {
       try {
         this.db.run(`ALTER TABLE chat_game_settings ADD COLUMN ${column}`);
+      } catch {
+        // Column already exists - expected on existing databases
+      }
+    }
+
+    const buyAlertColumnsToAdd = ["media_file_id TEXT", "media_type TEXT"] as const;
+    for (const column of buyAlertColumnsToAdd) {
+      try {
+        this.db.run(`ALTER TABLE chat_buy_alerts ADD COLUMN ${column}`);
       } catch {
         // Column already exists - expected on existing databases
       }
@@ -310,6 +330,129 @@ export class ChatDatabase extends BaseDatabase {
   // ================================
   // MAINTENANCE METHODS
   // ================================
+
+  // ================================
+  // BUY ALERT SETTINGS
+  // ================================
+
+  private mapBuyAlertRow(row: {
+    chat_id: number;
+    enabled: number | boolean | null;
+    token_mint: string | null;
+    token_ticker: string | null;
+    min_sol_lamports: number | null;
+    media_file_id?: string | null;
+    media_type?: string | null;
+    set_by_telegram_id: string | null;
+    updated_at: number;
+  }): ChatBuyAlertConfig {
+    const mediaType =
+      row.media_type === "photo" || row.media_type === "video" || row.media_type === "animation"
+        ? row.media_type
+        : null;
+    return {
+      chat_id: row.chat_id,
+      enabled: row.enabled === 1 || row.enabled === true,
+      token_mint: row.token_mint ?? null,
+      token_ticker: row.token_ticker ?? null,
+      min_sol_lamports: row.min_sol_lamports ?? null,
+      media_file_id: row.media_file_id ?? null,
+      media_type: mediaType,
+      set_by_telegram_id: row.set_by_telegram_id ?? null,
+      updated_at: row.updated_at,
+    };
+  }
+
+  public upsertChatBuyAlerts(
+    chatId: number,
+    patch: Partial<Omit<ChatBuyAlertConfig, "chat_id" | "updated_at">>,
+  ): ChatBuyAlertConfig {
+    const existing = this.getChatBuyAlerts(chatId);
+    const now = Date.now();
+    const next: ChatBuyAlertConfig = {
+      chat_id: chatId,
+      enabled: Object.prototype.hasOwnProperty.call(patch, "enabled")
+        ? Boolean(patch.enabled)
+        : (existing?.enabled ?? false),
+      token_mint: Object.prototype.hasOwnProperty.call(patch, "token_mint")
+        ? (patch.token_mint ?? null)
+        : (existing?.token_mint ?? null),
+      token_ticker: Object.prototype.hasOwnProperty.call(patch, "token_ticker")
+        ? (patch.token_ticker ?? null)
+        : (existing?.token_ticker ?? null),
+      min_sol_lamports: Object.prototype.hasOwnProperty.call(patch, "min_sol_lamports")
+        ? (patch.min_sol_lamports ?? null)
+        : (existing?.min_sol_lamports ?? null),
+      media_file_id: Object.prototype.hasOwnProperty.call(patch, "media_file_id")
+        ? (patch.media_file_id ?? null)
+        : (existing?.media_file_id ?? null),
+      media_type: Object.prototype.hasOwnProperty.call(patch, "media_type")
+        ? (patch.media_type ?? null)
+        : (existing?.media_type ?? null),
+      set_by_telegram_id: Object.prototype.hasOwnProperty.call(patch, "set_by_telegram_id")
+        ? (patch.set_by_telegram_id ?? null)
+        : (existing?.set_by_telegram_id ?? null),
+      updated_at: now,
+    };
+
+    this.run(
+      `INSERT OR REPLACE INTO chat_buy_alerts (
+          chat_id,
+          enabled,
+          token_mint,
+          token_ticker,
+          min_sol_lamports,
+          media_file_id,
+          media_type,
+          set_by_telegram_id,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        next.chat_id,
+        next.enabled ? 1 : 0,
+        next.token_mint,
+        next.token_ticker,
+        next.min_sol_lamports,
+        next.media_file_id,
+        next.media_type,
+        next.set_by_telegram_id,
+        next.updated_at,
+      ],
+      "saving chat buy alerts",
+    );
+
+    return next;
+  }
+
+  public getChatBuyAlerts(chatId: number): ChatBuyAlertConfig | null {
+    const row = this.get<{
+      chat_id: number;
+      enabled: number | boolean | null;
+      token_mint: string | null;
+      token_ticker: string | null;
+      min_sol_lamports: number | null;
+      set_by_telegram_id: string | null;
+      updated_at: number;
+    }>("SELECT * FROM chat_buy_alerts WHERE chat_id = ?", [chatId], "getting chat buy alerts");
+    return row ? this.mapBuyAlertRow(row) : null;
+  }
+
+  public getEnabledChatBuyAlerts(): ChatBuyAlertConfig[] {
+    const rows = this.all<{
+      chat_id: number;
+      enabled: number | boolean | null;
+      token_mint: string | null;
+      token_ticker: string | null;
+      min_sol_lamports: number | null;
+      set_by_telegram_id: string | null;
+      updated_at: number;
+    }>(
+      "SELECT * FROM chat_buy_alerts WHERE enabled = 1 ORDER BY chat_id ASC",
+      [],
+      "getting enabled chat buy alerts",
+    );
+    return rows.map((row) => this.mapBuyAlertRow(row));
+  }
 
   public getChatCount(): number {
     return this.getCount(

@@ -193,6 +193,26 @@ export const setInputSession = (key: string, session: InputSessionState): InputS
 export const getInputSession = (key: string): InputSessionState | undefined =>
   getNamespacedState<InputSessionState>(INPUT_SESSION_NAMESPACE, key);
 
+export const findInputSession = (
+  predicate: (key: string, session: InputSessionState) => boolean,
+): { key: string; session: InputSessionState } | undefined => {
+  pruneExpiredEntries(userStates, Date.now());
+  const prefix = `${INPUT_SESSION_NAMESPACE}:`;
+  let latest: { key: string; session: InputSessionState; timestamp: number } | undefined;
+
+  for (const [namespacedKey, value] of userStates.entries()) {
+    if (!namespacedKey.startsWith(prefix)) {
+      continue;
+    }
+    const session = stripTimestamp<InputSessionState>(value);
+    const key = namespacedKey.slice(prefix.length);
+    if (session && predicate(key, session) && (!latest || value.timestamp >= latest.timestamp)) {
+      latest = { key, session, timestamp: value.timestamp };
+    }
+  }
+  return latest ? { key: latest.key, session: latest.session } : undefined;
+};
+
 export const clearInputSession = (key: string): void => {
   clearNamespacedState(INPUT_SESSION_NAMESPACE, key);
 };
