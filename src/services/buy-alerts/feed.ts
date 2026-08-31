@@ -3,6 +3,19 @@ import type { BuyEvent, BuyFeed } from "./types";
 
 export const PUMPPORTAL_WS_URL = "wss://pumpportal.fun/api/data";
 
+export function buildPumpPortalWsUrl(apiKey: string | undefined): string {
+  const normalizedApiKey = apiKey?.trim();
+  if (!normalizedApiKey) {
+    throw new Error(
+      "PUMPPORTAL_API_KEY is required when buy alerts are enabled. Create and fund a PumpPortal data API key before starting the feed.",
+    );
+  }
+
+  const url = new URL(PUMPPORTAL_WS_URL);
+  url.searchParams.set("api-key", normalizedApiKey);
+  return url.toString();
+}
+
 export type SocketLike = {
   send: (data: string) => void;
   close: () => void;
@@ -11,6 +24,7 @@ export type SocketLike = {
 
 export type PumpPortalFeedOptions = {
   url?: string;
+  apiKey?: string;
   socketFactory?: (url: string) => SocketLike;
   reconnectDelayMs?: number;
 };
@@ -19,7 +33,6 @@ const defaultSocketFactory = (url: string): SocketLike =>
   new WebSocket(url) as unknown as SocketLike;
 
 export function createPumpPortalFeed(options: PumpPortalFeedOptions = {}): BuyFeed {
-  const url = options.url ?? PUMPPORTAL_WS_URL;
   const socketFactory = options.socketFactory ?? defaultSocketFactory;
   const reconnectDelayMs = options.reconnectDelayMs ?? 1_000;
 
@@ -45,6 +58,8 @@ export function createPumpPortalFeed(options: PumpPortalFeedOptions = {}): BuyFe
       return;
     }
 
+    const url =
+      options.url ?? buildPumpPortalWsUrl(options.apiKey ?? process.env.PUMPPORTAL_API_KEY);
     const nextSocket = socketFactory(url);
     socket = nextSocket;
     open = false;

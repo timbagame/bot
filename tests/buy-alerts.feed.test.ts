@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { createPumpPortalFeed, type SocketLike } from "../src/services/buy-alerts/feed";
+import {
+  buildPumpPortalWsUrl,
+  createPumpPortalFeed,
+  type SocketLike,
+} from "../src/services/buy-alerts/feed";
 
 class MockSocket implements SocketLike {
   sent: string[] = [];
@@ -45,8 +49,11 @@ test("PumpPortal feed stays idle until a mint is watched", () => {
 
 test("PumpPortal feed subscribes after open and emits parsed buys only", () => {
   const sockets: MockSocket[] = [];
+  const urls: string[] = [];
   const feed = createPumpPortalFeed({
-    socketFactory: () => {
+    apiKey: "secret key",
+    socketFactory: (url) => {
+      urls.push(url);
       const socket = new MockSocket();
       sockets.push(socket);
       return socket;
@@ -58,6 +65,7 @@ test("PumpPortal feed subscribes after open and emits parsed buys only", () => {
 
   feed.setMints(["mint-a"]);
   expect(sockets).toHaveLength(1);
+  expect(urls).toEqual(["wss://pumpportal.fun/api/data?api-key=secret+key"]);
   sockets[0]!.emit("open");
   expect(sockets[0]!.sent).toEqual([
     JSON.stringify({ method: "subscribeTokenTrade", keys: ["mint-a"] }),
@@ -100,4 +108,14 @@ test("PumpPortal feed subscribes after open and emits parsed buys only", () => {
 
   feed.setMints([]);
   expect(sockets[0]!.closed).toBe(true);
+});
+
+test("PumpPortal feed refuses to connect without an API key", () => {
+  const feed = createPumpPortalFeed({
+    apiKey: "",
+    socketFactory: () => new MockSocket(),
+  });
+
+  expect(() => feed.setMints(["mint-a"])).toThrow("PUMPPORTAL_API_KEY is required");
+  expect(() => buildPumpPortalWsUrl("  ")).toThrow("PUMPPORTAL_API_KEY is required");
 });

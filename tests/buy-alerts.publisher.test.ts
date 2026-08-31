@@ -259,3 +259,27 @@ test("publisher retries only chats whose delivery failed", async () => {
   expect((await publisher.publish(event({ signature: "retry-partial" }))).posted).toBe(1);
   expect(attempts).toEqual([-22, -21, -22]);
 });
+
+test("publisher forgets delivered signatures after the deduplication TTL", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-30, { enabled: true });
+
+  let clock = 1_000;
+  let sent = 0;
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    now: () => clock,
+    sendHtml: async () => {
+      sent += 1;
+    },
+    fetchPairStats: async () => null,
+  });
+
+  expect((await publisher.publish(event({ signature: "ttl-signature" }))).posted).toBe(1);
+  expect((await publisher.publish(event({ signature: "ttl-signature" }))).posted).toBe(0);
+
+  clock += 60 * 60 * 1000 + 1;
+  expect((await publisher.publish(event({ signature: "ttl-signature" }))).posted).toBe(1);
+  expect(sent).toBe(2);
+});

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   createPoolTradePoller,
   parseGeckoPoolTrade,
+  PoolTradeCapacityError,
   rememberSignature,
 } from "../src/services/buy-alerts/pool-trades";
 import { WSOL_MINT } from "../src/utils/constants";
@@ -166,10 +167,96 @@ test("pool trade poller watches every discovered pool", async () => {
     data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "new-b" } }],
   });
   await poller.pollNow();
-  expect(received).toEqual(["new-a"]);
-  await poller.pollNow();
   expect(received.sort()).toEqual(["new-a", "new-b"]);
   poller.stop();
+});
+
+test("pool trade poller retains newest signatures when snapshots arrive newest-first", async () => {
+  const received: string[] = [];
+  const trade = (signature: string) => ({
+    attributes: { ...geckoBuy.attributes, tx_hash: signature },
+  });
+  let payload = {
+    data: Array.from({ length: 300 }, (_, index) => trade(`a${index + 1}`)),
+  };
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    fetchPairStats: async () => ({
+      priceUsd: 1,
+      marketCapUsd: 1,
+      priceChangeH24: 1,
+      url: null,
+      dexId: "raydium",
+      quoteSymbol: "SOL",
+      pairAddress: "pair-bounded",
+      tokenName: "TOKEN",
+    }),
+    fetchTrades: async () => payload,
+  });
+
+  poller.onTrade((buy) => received.push(buy.signature));
+  poller.setMints([mint]);
+  await poller.pollNow();
+
+  payload = {
+    data: [
+      ...Array.from({ length: 100 }, (_, index) => trade(`b${index + 1}`)),
+      ...Array.from({ length: 200 }, (_, index) => trade(`a${index + 1}`)),
+    ],
+  };
+  await poller.pollNow();
+  expect(received).toHaveLength(100);
+  received.length = 0;
+
+  payload = {
+    data: [
+      trade("c1"),
+      ...Array.from({ length: 100 }, (_, index) => trade(`b${index + 1}`)),
+      ...Array.from({ length: 199 }, (_, index) => trade(`a${index + 1}`)),
+    ],
+  };
+  await poller.pollNow();
+  expect(received).toEqual(["c1"]);
+  poller.stop();
+});
+
+test("pool trade poller rejects watch sets beyond one-cycle API capacity", async () => {
+  const errors: unknown[] = [];
+  const pooler = createPoolTradePoller({
+    intervalMs: 8_000,
+    minRequestIntervalMs: 2_100,
+    maxPoolsPerCycle: 1,
+    onError: (error) => errors.push(error),
+    fetchPoolStats: async () => [
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "raydium",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-a",
+        tokenName: "TOKEN",
+      },
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "meteora",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-b",
+        tokenName: "TOKEN",
+      },
+    ],
+    fetchTrades: async () => ({ data: [] }),
+  });
+
+  pooler.setMints([mint]);
+  await expect(pooler.pollNow()).rejects.toBeInstanceOf(PoolTradeCapacityError);
+  expect(errors.every((error) => error instanceof PoolTradeCapacityError)).toBe(true);
+  pooler.stop();
 });
 
 test("pool trade poller does not prime a pool after failed or malformed responses", async () => {

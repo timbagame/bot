@@ -1,5 +1,4 @@
 import { LAMPORTS_PER_SOL, CHAT_MEDIA_DISABLED_SENTINEL } from "../../utils/constants";
-import { createExpiringCache } from "../../utils/expiring-cache";
 import type { ChatBuyAlertConfig } from "../../types";
 import type { ChatDatabase } from "../../utils/chat-database";
 import { fetchDexScreenerPairStats } from "./dexscreener";
@@ -9,6 +8,7 @@ import type { BuyEvent, BuyFeed, PairStats } from "./types";
 
 export const BUY_ALERTS_PER_MINUTE = 10;
 const SIGNATURE_TTL_MS = 60 * 60 * 1000;
+const SIGNATURE_PRUNE_INTERVAL_MS = 60_000;
 
 export type BuyAlertMedia = {
   fileId: string;
@@ -43,9 +43,31 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
   const fetchPairStats = deps.fetchPairStats ?? fetchDexScreenerPairStats;
   const now = deps.now ?? Date.now;
   const maxAlertsPerMinute = deps.maxAlertsPerMinute ?? BUY_ALERTS_PER_MINUTE;
-  const deliveredSignatures = createExpiringCache<Set<number>>(SIGNATURE_TTL_MS);
+  const deliveredSignatures = new Map<string, { chatIds: Set<number>; expiresAt: number }>();
   const inFlightSignatures = new Set<string>();
   const chatWindows = new Map<number, number[]>();
+  let nextSignaturePruneAt = 0;
+
+  const pruneDeliveredSignatures = (current: number): void => {
+    if (current < nextSignaturePruneAt) return;
+    for (const [signature, entry] of deliveredSignatures) {
+      if (entry.expiresAt <= current) {
+        deliveredSignatures.delete(signature);
+      }
+    }
+    nextSignaturePruneAt = current + SIGNATURE_PRUNE_INTERVAL_MS;
+  };
+
+  const getDeliveredChats = (signature: string): Set<number> => {
+    const current = now();
+    pruneDeliveredSignatures(current);
+    const entry = deliveredSignatures.get(signature);
+    if (!entry || entry.expiresAt <= current) {
+      deliveredSignatures.delete(signature);
+      return new Set<number>();
+    }
+    return new Set(entry.chatIds);
+  };
 
   const resolveForChat = (chatId: number) => {
     const config = deps.chatDb.getChatBuyAlerts(chatId);
@@ -145,7 +167,7 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
       if (inFlightSignatures.has(event.signature)) {
         return { posted: 0, skipped: ["duplicate"] };
       }
-      const deliveredChats = deliveredSignatures.get(event.signature) ?? new Set<number>();
+      const deliveredChats = getDeliveredChats(event.signature);
 
       const targets = deps.chatDb
         .getEnabledChatBuyAlerts()
@@ -189,7 +211,10 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
           }
         }
         if (deliveredChats.size > 0) {
-          deliveredSignatures.setWithTTL(event.signature, new Set(deliveredChats));
+          deliveredSignatures.set(event.signature, {
+            chatIds: new Set(deliveredChats),
+            expiresAt: now() + SIGNATURE_TTL_MS,
+          });
         }
         return { posted, skipped };
       } finally {
