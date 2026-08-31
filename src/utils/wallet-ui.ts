@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Context } from "grammy";
-import { copyableHtml, escapeHtml, formatUsdValue } from "./format-amount";
+import { copyableHtml, escapeHtml, formatSignedPercent, formatUsdValue } from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
@@ -22,6 +22,7 @@ export type TokenDisplayLine = {
   amount: string;
   usdValue?: string;
   unit?: string;
+  pnlPercent?: number;
 };
 
 export type WalletTokenBalance = {
@@ -173,6 +174,10 @@ export function buildWalletCaption(
 
     if (line.usdValue !== undefined) {
       parts.push(`($${escapeHtml(truncateTokenDisplay(line.usdValue, 32))})`);
+    }
+
+    if (line.pnlPercent != null && Number.isFinite(line.pnlPercent)) {
+      parts.push(`· ${escapeHtml(formatSignedPercent(line.pnlPercent))}`);
     }
 
     const candidate = parts.join(" ");

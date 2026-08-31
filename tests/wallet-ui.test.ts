@@ -83,9 +83,15 @@ test("buildWalletCaption formats address and token lines", () => {
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: <code>1.234567</code> SOL ($123.46)");
     expect(caption).toContain("TIMBA: <code>123</code> ($6,150)");
+    expect(caption).not.toContain("· +");
     expect(caption).toContain("USDC: <code>10.00</code> ($10)");
     expect(caption).not.toContain("SOL: <code>1.234567</code> SOL ($123.46) (Tap to copy)");
     expect(caption.split("(Tap to copy)")[1]).not.toContain("Tap to copy");
+
+    const withPnl = buildWalletCaption("AbCdEf", [
+      { ticker: "TIMBA", mint: "mint", amount: "123", usdValue: "6,150", pnlPercent: 0.184 },
+    ]);
+    expect(withPnl).toContain("TIMBA: <code>123</code> ($6,150) · +18.4%");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");

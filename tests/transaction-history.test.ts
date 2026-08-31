@@ -90,6 +90,17 @@ describe("TransactionHistory", () => {
       feeMintSelections: 0,
     });
 
+    expect(txDb.getSwapsByWallet("wallet")).toEqual([
+      expect.objectContaining({
+        signature: "swap-1",
+        wallet: "wallet",
+        output_mint: "TOKEN-mint",
+        amount_out: "2000000",
+        referral_applied: true,
+      }),
+    ]);
+    expect(txDb.getSwapsByWallet("other")).toEqual([]);
+
     expect(txDb.getReferralFees(1000, 2000)).toEqual([
       {
         feeMint: "USDC-mint",

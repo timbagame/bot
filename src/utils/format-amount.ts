@@ -231,6 +231,17 @@ export function formatUsdValue(value: number, options: FormatUsdValueOptions = {
   return approximate ? `≈ $${formatted}` : formatted;
 }
 
+export function formatSignedPercent(value: number): string {
+  if (!Number.isFinite(value) || value === 0) {
+    return "0%";
+  }
+
+  const abs = Math.abs(value) * 100;
+  const digits = abs >= 10 ? abs.toFixed(1) : abs.toFixed(2);
+  const trimmed = digits.replace(/0+$/, "").replace(/\.$/, "");
+  return `${value > 0 ? "+" : "-"}${trimmed}%`;
+}
+
 export function formatRate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
     return "0";

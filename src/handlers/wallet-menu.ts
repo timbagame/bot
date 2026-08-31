@@ -12,8 +12,20 @@ import {
   type BuildWalletActionMenuForUserOptions,
   type WalletMenuBalances,
 } from "../utils/wallet-ui";
-import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/keyboards";
+import {
+  createPositionsKeyboard,
+  createWalletKeyboard,
+  createWalletSettingsKeyboard,
+} from "../utils/keyboards";
 import { getPricesUSD } from "../utils/prices";
+import { TransactionHistory } from "../utils/transaction-history";
+import {
+  buildTokenPositions,
+  createDecimalResolver,
+  fillsFromSwaps,
+  pnlByMint,
+} from "../services/positions";
+import { onWalletPositions } from "./wallet-positions";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
 import type { WalletManager, WalletBalancesSnapshot, WalletTokenBalance } from "../utils/wallet";
@@ -308,6 +320,26 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       buildWalletCaption,
       createWalletKeyboard,
       WINNER_VIDEO_ID: getStartVideoId(),
+      resolvePositionPnl: async ({ walletAddress, holdings }) => {
+        const swaps = TransactionHistory.getInstance().getSwapsByWallet(walletAddress);
+        const tokenManager = getTokenManager();
+        const knownTokens = tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
+        const fills = fillsFromSwaps(
+          swaps,
+          createDecimalResolver([
+            ...knownTokens.map((token) => ({
+              mint: token.token_mint,
+              decimals: token.decimals,
+            })),
+            ...holdings,
+          ]),
+        );
+        const pricesUsd = await getPricesUSD([
+          WSOL_MINT,
+          ...holdings.map((holding) => holding.mint),
+        ]);
+        return pnlByMint(buildTokenPositions({ fills, holdings, pricesUsd }));
+      },
     });
   };
 
@@ -337,6 +369,37 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
 
     bot.callbackQuery("wallet_settings", async (ctx) => {
       await onWalletSettings(ctx as any, walletHandlerDeps);
+    });
+
+    const positionDeps = {
+      getWalletAddress: (telegramId: bigint) => wallet.getKeyPair(telegramId).publicKey.toBase58(),
+      getHoldings: async (telegramId: bigint) => {
+        const { tokenBalances } = await getCachedWalletData(telegramId);
+        return tokenBalances
+          .filter((token) => token.mint && token.ticker !== "SOL")
+          .map((token) => ({
+            mint: token.mint,
+            ticker: token.ticker,
+            balance: token.decimalBalance,
+            decimals: token.decimals,
+          }));
+      },
+      getSwapsByWallet: (walletAddress: string) =>
+        TransactionHistory.getInstance().getSwapsByWallet(walletAddress),
+      fetchPricesUSD: getPricesUSD,
+      getKnownTokens: () => {
+        const tokenManager = getTokenManager();
+        return tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
+      },
+      createKeyboard: createPositionsKeyboard,
+    };
+
+    bot.callbackQuery("wallet_positions", async (ctx) => {
+      await onWalletPositions(ctx as any, positionDeps);
+    });
+
+    bot.callbackQuery(/^wallet_pos_\d+$/, async (ctx) => {
+      await onWalletPositions(ctx as any, positionDeps);
     });
   };
 

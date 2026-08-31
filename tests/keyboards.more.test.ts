@@ -3,6 +3,7 @@ import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToSettingsKeyboard,
+  createPositionsKeyboard,
   createConfirmWrapKeyboard,
   createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
@@ -82,10 +83,16 @@ describe("keyboards: main and wallet", () => {
   test("wallet keyboard contains swap/withdraw/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
     expect(callbacks).toContain("cmd_swap");
     expect(callbacks).toContain("cmd_withdraw");
+    expect(callbacks).toContain("wallet_positions");
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
+    expect(kb.inline_keyboard).toHaveLength(3);
+    expect(kb.inline_keyboard[2]).toHaveLength(1);
+    expect(texts).toContain("📊 Positions");
+    expect(texts).toContain("⚙️ Settings");
   });
 
   test("wallet settings keyboard includes wrap, unwrap, private key, and back", () => {
@@ -103,6 +110,22 @@ describe("keyboards: main and wallet", () => {
     expect(texts).toContain("🔐 Private Key");
     expect(texts).toContain("← Back to Wallet");
   });
+});
+
+test("positions keyboard pages tokens and links DexScreener", () => {
+  const kb = createPositionsKeyboard({
+    index: 1,
+    count: 3,
+    dexUrl: "https://dexscreener.com/solana/mint",
+  });
+  const callbacks = extractCallbacks(kb);
+  const texts = extractTexts(kb);
+
+  expect(callbacks).toContain("wallet_pos_0");
+  expect(callbacks).toContain("wallet_pos_2");
+  expect(callbacks).toContain("cmd_swap");
+  expect(callbacks).toContain("main_wallet");
+  expect(texts).toContain("DexScreener");
 });
 
 test("back to settings keyboard returns wallet_settings callback", () => {
