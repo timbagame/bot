@@ -1,7 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { InlineKeyboard } from "grammy";
 import { WSOL_MINT } from "../src/utils/constants";
-import { loadWalletPositions, onWalletPositions, type WalletPositionsDeps } from "../src/handlers/wallet-positions";
+import {
+  loadWalletPositions,
+  onWalletPositions,
+  type WalletPositionsDeps,
+} from "../src/handlers/wallet-positions";
 import { clearPositionSnapshot } from "../src/services/positions";
 import type { SwapStatRecord } from "../src/utils/transaction-history";
 
@@ -50,9 +54,7 @@ const buy = (
   timestamp,
 });
 
-const baseDeps = (
-  overrides: Partial<WalletPositionsDeps> = {},
-): WalletPositionsDeps => ({
+const baseDeps = (overrides: Partial<WalletPositionsDeps> = {}): WalletPositionsDeps => ({
   getWalletAddress: () => "wallet-1",
   getHoldings: async () => [{ mint: TIMBA, ticker: "TIMBA", balance: 10, decimals: 6 }],
   getSwapsByWallet: () => [],

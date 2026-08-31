@@ -67,10 +67,7 @@ export const createPositionsKeyboard = (options: {
     keyboard.row();
   }
 
-  keyboard
-    .text("🔄 Swap", "cmd_swap")
-    .text("🔁 Refresh", `wallet_pos_r_${page}`)
-    .row();
+  keyboard.text("🔄 Swap", "cmd_swap").text("🔁 Refresh", `wallet_pos_r_${page}`).row();
   return appendBackToWalletButton(keyboard);
 };
 

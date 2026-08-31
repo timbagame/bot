@@ -112,9 +112,7 @@ export function pruneHoldMarks(
   }
 
   for (const mint of store.listMints(wallet)) {
-    const confirmedGone = dropUnseen
-      ? !held.has(mint)
-      : scanned.has(mint) && !held.has(mint);
+    const confirmedGone = dropUnseen ? !held.has(mint) : scanned.has(mint) && !held.has(mint);
     if (confirmedGone) {
       store.delete(wallet, mint);
     }

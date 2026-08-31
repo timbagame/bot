@@ -77,7 +77,8 @@ export class HoldMarksDatabase extends BaseDatabase {
 export function createHoldMarksDatabaseStore(): HoldMarkStore {
   return {
     get: (wallet, mint) => HoldMarksDatabase.getInstance().getPrice(wallet, mint),
-    set: (wallet, mint, priceUsd) => HoldMarksDatabase.getInstance().setPrice(wallet, mint, priceUsd),
+    set: (wallet, mint, priceUsd) =>
+      HoldMarksDatabase.getInstance().setPrice(wallet, mint, priceUsd),
     listMints: (wallet) => HoldMarksDatabase.getInstance().listMints(wallet),
     delete: (wallet, mint) => HoldMarksDatabase.getInstance().deleteMark(wallet, mint),
   };

@@ -256,7 +256,10 @@ test("buildWalletTokenLines uses hold marks instead of swap PNL", async () => {
   });
   expect(doubled.find((line) => line.ticker === "TIMBA")?.pnlPercent).toBeCloseTo(1, 8);
   expect(
-    buildWalletCaption("AbCdEf", doubled.filter((line) => line.ticker === "TIMBA")),
+    buildWalletCaption(
+      "AbCdEf",
+      doubled.filter((line) => line.ticker === "TIMBA"),
+    ),
   ).toContain("· +100%");
 });
 

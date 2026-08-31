@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createWalletMenuModule } from "../src/handlers/wallet-menu";
-import {
-  applyHoldMarks,
-  createMemoryHoldMarkStore,
-} from "../src/services/hold-marks";
+import { applyHoldMarks, createMemoryHoldMarkStore } from "../src/services/hold-marks";
 import type { WalletTokenCensus } from "../src/utils/wallet";
 
 const stubBot = { callbackQuery: () => undefined };
@@ -57,8 +54,7 @@ const createStubWallet = (
       return state.balanceValue;
     },
     peekCachedNativeBalance: () => state.staleNative,
-    getAllWalletTokenBalances:
-      options.getAllWalletTokenBalances ?? (async () => []),
+    getAllWalletTokenBalances: options.getAllWalletTokenBalances ?? (async () => []),
     getWalletTokenBalancePage: options.getWalletTokenBalancePage,
     peekCachedWalletTokenBalances: () => state.staleTokens,
     setCachedNativeBalance: () => {},

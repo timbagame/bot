@@ -28,10 +28,8 @@ const UNKNOWN_MINT = "Unk1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const knownDecimals = (extra: Array<{ mint: string; decimals: number }> = []) =>
   createDecimalResolver([{ mint: TIMBA, decimals: 6 }, ...extra]);
 
-const fromSwaps = (
-  swaps: SwapStatRecord[],
-  extra?: Array<{ mint: string; decimals: number }>,
-) => fillsFromSwaps(swaps, knownDecimals(extra));
+const fromSwaps = (swaps: SwapStatRecord[], extra?: Array<{ mint: string; decimals: number }>) =>
+  fillsFromSwaps(swaps, knownDecimals(extra));
 
 const card = (overrides: Partial<TokenPosition> = {}): TokenPosition => ({
   mint: TIMBA,
@@ -139,9 +137,7 @@ test("resolveTokenDecimals uses MAGAIBA's on-chain 8 decimals, not the 6-decimal
 test("resolveTokenDecimals does not invent 6 decimals for an unknown mint", () => {
   expect(resolveTokenDecimals(UNKNOWN_MINT, "NOPE")).toBeNull();
   expect(fromSwaps([swap({ output_mint: UNKNOWN_MINT, output_ticker: "NOPE" })])).toEqual([]);
-  expect(
-    fillsFromSwaps([swap({ output_mint: UNKNOWN_MINT, output_ticker: "NOPE" })]),
-  ).toEqual([]);
+  expect(fillsFromSwaps([swap({ output_mint: UNKNOWN_MINT, output_ticker: "NOPE" })])).toEqual([]);
 });
 
 test("buildTokenPositions does not treat a small bot buy as the cost of a larger bag", () => {
@@ -671,7 +667,12 @@ test("quote holdings and SOL are never positions", () => {
         { mint: TIMBA, ticker: "TIMBA", balance: 123, decimals: 6 },
         { mint: USDC_MINT, ticker: "USDC", balance: 100, decimals: 6 },
         { mint: WSOL_MINT, ticker: "WSOL", balance: 2, decimals: 9 },
-        { mint: "So11111111111111111111111111111111111111112", ticker: "SOL", balance: 1, decimals: 9 },
+        {
+          mint: "So11111111111111111111111111111111111111112",
+          ticker: "SOL",
+          balance: 1,
+          decimals: 9,
+        },
       ],
       pricesUsd: { [WSOL_MINT]: 100, [TIMBA]: 1, [USDC_MINT]: 1 },
     }).map((position) => position.ticker),
@@ -869,7 +870,9 @@ test("loadTokenPositionsForWallet reuses fills and prices across /start and Posi
   const swaps = [
     swap({ signature: "buy", amount_in: "1000000000", amount_out: "100000000", timestamp: 1 }),
   ];
-  const holdings = [{ mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6, rawBalance: "100000000" }];
+  const holdings = [
+    { mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6, rawBalance: "100000000" },
+  ];
   const loader = {
     walletAddress: "wallet-cache-1",
     getHoldings: async () => holdings,
@@ -900,7 +903,9 @@ test("loadTokenPositionsForWallet retries a mint after a failed price fetch", as
   const swaps = [
     swap({ signature: "buy", amount_in: "1000000000", amount_out: "100000000", timestamp: 1 }),
   ];
-  const holdings = [{ mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6, rawBalance: "100000000" }];
+  const holdings = [
+    { mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6, rawBalance: "100000000" },
+  ];
   const fetches: string[][] = [];
   const loader = {
     walletAddress: "wallet-price-retry",

@@ -673,14 +673,22 @@ async function resolvePositionWork(
   const pricedMints = new Set(cacheFresh && cached ? cached.pricedMints : []);
   const missingPrices = neededPrices.filter((mint) => !pricedMints.has(mint));
   if (missingPrices.length > 0) {
-    mergePricedMints(pricesUsd, pricedMints, await args.fetchPricesUSD(missingPrices), missingPrices);
+    mergePricedMints(
+      pricesUsd,
+      pricedMints,
+      await args.fetchPricesUSD(missingPrices),
+      missingPrices,
+    );
   }
 
   const next: PositionWorkCache = {
     expiresAt: now + POSITION_SNAPSHOT_TTL_MS,
     fills,
     swapFingerprint,
-    fillKnownMints: cacheFresh && cached ? new Set([...cached.fillKnownMints, ...fillKnownMints]) : fillKnownMints,
+    fillKnownMints:
+      cacheFresh && cached
+        ? new Set([...cached.fillKnownMints, ...fillKnownMints])
+        : fillKnownMints,
     pricesUsd,
     pricedMints,
   };
