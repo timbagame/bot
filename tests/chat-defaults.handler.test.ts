@@ -1056,7 +1056,6 @@ describe("chat defaults module", () => {
         refresh: () => {
           refreshed += 1;
         },
-        sendTest: async () => {},
       },
     });
 

@@ -93,7 +93,6 @@ type ChatDefaultsModuleDeps = {
   replyToMessage: (ctx: Context, text: string) => Promise<void>;
   buyAlerts?: {
     refresh: () => void;
-    sendTest: (chatId: number) => Promise<void>;
   };
 };
 
@@ -301,8 +300,6 @@ const buildBuyAlertsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) => {
       .text("1", "chat_defaults_set_buy_alerts_min_1")
       .row()
       .text("✏️ Custom min", "chat_defaults_set_buy_alerts_min_custom")
-      .row()
-      .text("Send test", "chat_defaults_buy_alerts_test")
       .row()
       .text("🔙 Back", "chat_defaults_cancel"),
   };
@@ -976,22 +973,6 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
           .text("🔙 Back", "chat_defaults_buy_alerts"),
       });
       await safeAnswerCallbackQuery(ctx);
-    }),
-  );
-
-  deps.bot.callbackQuery(
-    "chat_defaults_buy_alerts_test",
-    deps.wrapCallbackHandler(async (ctx) => {
-      if (!ctx.chat) return;
-      if (!(await checkCallbackAdmin(ctx, deps))) return;
-
-      try {
-        await deps.buyAlerts?.sendTest(ctx.chat.id);
-        await safeAnswerCallbackQuery(ctx, "Test buy alert sent");
-      } catch (error) {
-        console.error("Failed to send buy alert test:", error);
-        await safeAnswerCallbackQuery(ctx, "Could not send test alert");
-      }
     }),
   );
 
