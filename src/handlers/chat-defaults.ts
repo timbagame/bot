@@ -358,6 +358,7 @@ const handleTokenChange = async (
   // Handle 'clear' command to remove chat default token
   if (/^(clear|remove)$/i.test(tokenInput.trim())) {
     deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
+    notifyBuyAlertsChanged(deps);
     await deps.replyToMessage(
       ctx,
       "✅ Default token cleared for this chat. Using bot default token now.",
@@ -398,6 +399,7 @@ const handleTokenChange = async (
     knownToken.token_ticker,
     getTelegramId(ctx).toString(),
   );
+  notifyBuyAlertsChanged(deps);
 
   await deps.replyToMessage(
     ctx,
@@ -690,6 +692,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
     if (tokenInput.toUpperCase() === "CLEAR" || tokenInput.toUpperCase() === "REMOVE") {
       deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
+      notifyBuyAlertsChanged(deps);
       await deps.replyToMessage(
         ctx,
         "✅ Default token cleared for this chat. Using bot default token now.",
@@ -733,6 +736,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
       if (target === "token") {
         deps.getTokenManager().removeChatDefaultToken(chatId);
+        notifyBuyAlertsChanged(deps);
       } else if (target === "timeout") {
         deps.chatDb.upsertChatGameSettings(chatId, {
           timeout_seconds: null,

@@ -170,6 +170,27 @@ test("publisher routes buys to chats by their default token", async () => {
   expect(sent).toEqual([-10, -11]);
 });
 
+test("publisher skips unknown-size buys when a minimum is configured", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-1, { enabled: true, min_sol_lamports: null });
+  chatDb.upsertChatBuyAlerts(-2, { enabled: true, min_sol_lamports: 100_000_000 });
+
+  const sent: number[] = [];
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (chatId) => {
+      sent.push(chatId);
+    },
+    fetchPairStats: async () => null,
+  });
+
+  const unknown = await publisher.publish(event({ signature: "unknown-size", solAmount: 0 }));
+  expect(unknown.posted).toBe(1);
+  expect(unknown.skipped).toContain("dust:-2");
+  expect(sent).toEqual([-1]);
+});
+
 test("publisher includes new-holder when the resolver reports it", async () => {
   const chatDb = ChatDatabase.getInstance();
   chatDb.upsertChatBuyAlerts(-7, { enabled: true });

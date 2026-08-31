@@ -7,6 +7,26 @@ import type { BuyEvent, BuyFeed, PairStats } from "./types";
 const GECKO_POOL_TRADES_URL = "https://api.geckoterminal.com/api/v2/networks/solana/pools";
 const TRADE_FETCH_TIMEOUT_MS = 5_000;
 export const POOL_TRADE_POLL_MS = 8_000;
+export const MAX_SEEN_SIGNATURES_PER_MINT = 400;
+
+export function rememberSignature(
+  known: Set<string>,
+  signature: string,
+  max = MAX_SEEN_SIGNATURES_PER_MINT,
+): boolean {
+  if (known.has(signature)) {
+    return false;
+  }
+  known.add(signature);
+  while (known.size > max) {
+    const oldest = known.values().next().value;
+    if (oldest == null) {
+      break;
+    }
+    known.delete(oldest);
+  }
+  return true;
+}
 
 const numericSchema = z.union([z.number(), z.string()]);
 
@@ -163,8 +183,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     for (const trade of trades) {
       const event = parseGeckoPoolTrade(mint, trade, pair?.dexId);
       if (!event) continue;
-      if (known.has(event.signature)) continue;
-      known.add(event.signature);
+      if (!rememberSignature(known, event.signature)) continue;
       if (!isFirstPass) {
         emit(event);
       }

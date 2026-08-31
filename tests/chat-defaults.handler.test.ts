@@ -1191,4 +1191,46 @@ describe("chat defaults module", () => {
     expect(chatDb.getChatBuyAlerts(99)?.media_type).toBe("animation");
     expect(replies.some((text) => text.includes("Buy alert GIF set"))).toBe(true);
   });
+
+  test("changing or clearing the default token refreshes buy-alert feeds", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.getSupportedGameTokens = () => [];
+    const { ctx } = buildMockContext();
+    let refreshed = 0;
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx, next) =>
+        await handler(callbackCtx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+      buyAlerts: {
+        refresh: () => {
+          refreshed += 1;
+        },
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "UNKNOWN");
+    expect(refreshed).toBe(0);
+
+    await module.handleSettingsInput(ctx as any, session, "AAA");
+    expect(tokenManager.getChatDefaultToken()?.token_ticker).toBe("AAA");
+    expect(refreshed).toBe(1);
+
+    await module.handleDefaultCommand(ctx as any, ["/default", "CLEAR"]);
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(refreshed).toBe(2);
+  });
 });

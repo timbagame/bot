@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { createPoolTradePoller, parseGeckoPoolTrade } from "../src/services/buy-alerts/pool-trades";
+import {
+  createPoolTradePoller,
+  parseGeckoPoolTrade,
+  rememberSignature,
+} from "../src/services/buy-alerts/pool-trades";
 import { WSOL_MINT } from "../src/utils/constants";
 import type { BuyEvent } from "../src/services/buy-alerts/types";
 
@@ -74,4 +78,14 @@ test("pool trade poller seeds existing trades then emits only new buys", async (
   expect(received.map((event) => event.signature)).toEqual(["buy-sig-2"]);
 
   poller.stop();
+});
+
+test("rememberSignature evicts the oldest hashes once the per-mint cap is hit", () => {
+  const known = new Set<string>();
+  expect(rememberSignature(known, "a", 2)).toBe(true);
+  expect(rememberSignature(known, "b", 2)).toBe(true);
+  expect(rememberSignature(known, "c", 2)).toBe(true);
+  expect(known.has("a")).toBe(false);
+  expect([...known]).toEqual(["b", "c"]);
+  expect(rememberSignature(known, "b", 2)).toBe(false);
 });

@@ -78,8 +78,11 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
 
   const belowMinimum = (chatId: number, solAmount: number): boolean => {
     const minLamports = deps.chatDb.getChatBuyAlerts(chatId)?.min_sol_lamports;
-    if (minLamports == null || minLamports <= 0 || solAmount <= 0) {
+    if (minLamports == null || minLamports <= 0) {
       return false;
+    }
+    if (!(solAmount > 0)) {
+      return true;
     }
     return solAmount * LAMPORTS_PER_SOL + 1e-9 < minLamports;
   };
