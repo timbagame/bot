@@ -193,6 +193,17 @@ export const setInputSession = (key: string, session: InputSessionState): InputS
 export const getInputSession = (key: string): InputSessionState | undefined =>
   getNamespacedState<InputSessionState>(INPUT_SESSION_NAMESPACE, key);
 
+export const findInputSession = (
+  predicate: (key: string, session: InputSessionState) => boolean,
+): { key: string; session: InputSessionState } | undefined => {
+  for (const [key, session] of listNamespaceEntries<InputSessionState>(INPUT_SESSION_NAMESPACE)) {
+    if (predicate(key, session)) {
+      return { key, session };
+    }
+  }
+  return undefined;
+};
+
 export const clearInputSession = (key: string): void => {
   clearNamespacedState(INPUT_SESSION_NAMESPACE, key);
 };
