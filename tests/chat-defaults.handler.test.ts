@@ -401,9 +401,7 @@ describe("chat defaults module", () => {
     const tokenManager = baseTokenManager();
     const pumpMint = "NewPumpMint111111111111111111111111111pump";
     (tokenManager as any).resolveSwapToken = async (input: string) =>
-      input === pumpMint
-        ? { token_mint: pumpMint, token_ticker: "NEWP", decimals: 6 }
-        : null;
+      input === pumpMint ? { token_mint: pumpMint, token_ticker: "NEWP", decimals: 6 } : null;
     const { ctx, replies } = buildMockContext();
 
     const module = createChatDefaultsModule({

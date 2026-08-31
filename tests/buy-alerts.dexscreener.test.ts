@@ -35,12 +35,12 @@ test("selectSolanaPair prefers the highest-liquidity Solana pair", () => {
     },
   ]);
 
-    expect(stats?.url).toBe("https://dexscreener.com/solana/high");
-    expect(stats?.dexId).toBe("pumpswap");
-    expect(stats?.priceUsd).toBe(0.000151);
-    expect(stats?.marketCapUsd).toBe(131550);
-    expect(stats?.pairAddress).toBeNull();
-    expect(stats?.tokenName).toBeNull();
+  expect(stats?.url).toBe("https://dexscreener.com/solana/high");
+  expect(stats?.dexId).toBe("pumpswap");
+  expect(stats?.priceUsd).toBe(0.000151);
+  expect(stats?.marketCapUsd).toBe(131550);
+  expect(stats?.pairAddress).toBeNull();
+  expect(stats?.tokenName).toBeNull();
 });
 
 test("fetchDexScreenerPairStats uses the injected fetch and caches the result", async () => {

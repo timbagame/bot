@@ -112,7 +112,9 @@ test("pump venues get a pill on the DEX line", () => {
 
   expect(text).toContain("DEX: 💊 Pump.fun SOL");
   expect(text).toContain("24h: -0.37%");
-  expect(text).toContain("https://dexscreener.com/solana/byxahgga9u8ruerpbfqq7n97q35u9msch3emqvxvt5dd");
+  expect(text).toContain(
+    "https://dexscreener.com/solana/byxahgga9u8ruerpbfqq7n97q35u9msch3emqvxvt5dd",
+  );
 });
 
 test("formatMarketCapUsd uses MAGAIBA-style suffixes", () => {

@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-  createPoolTradePoller,
-  parseGeckoPoolTrade,
-} from "../src/services/buy-alerts/pool-trades";
+import { createPoolTradePoller, parseGeckoPoolTrade } from "../src/services/buy-alerts/pool-trades";
 import { WSOL_MINT } from "../src/utils/constants";
 import type { BuyEvent } from "../src/services/buy-alerts/types";
 
