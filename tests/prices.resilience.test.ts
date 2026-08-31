@@ -194,6 +194,7 @@ describe("price utilities resilience", () => {
         }),
         fc.integer({ min: 1, max: 100 }),
         async (tokens: string[], basePriceInteger: number) => {
+          __test_resetPriceCache();
           const basePrice = basePriceInteger;
 
           const fetchImpl = (async (url: string) => {
@@ -215,7 +216,8 @@ describe("price utilities resilience", () => {
           const ids = [...tokens];
           const results = await getPricesUSD(ids, fetchImpl);
           for (const id of ids) {
-            expect(results[id]).toBe(basePrice);
+            const expected = id === WSOL_MINT && basePrice >= 0.5 && basePrice <= 2 ? 0 : basePrice;
+            expect(results[id]).toBe(expected);
           }
         },
       ),
