@@ -74,3 +74,37 @@ test("ChatDatabase returns only chats subscribed to the global public game feed"
 
   expect(db.getGlobalPublicGameFeedChatIds()).toEqual([-1001]);
 });
+
+test("ChatDatabase stores per-chat buy alert settings off by default", () => {
+  db = ChatDatabase.getInstance();
+
+  expect(db.getChatBuyAlerts(55)).toBeNull();
+  expect(db.getEnabledChatBuyAlerts()).toEqual([]);
+
+  const stored = db.upsertChatBuyAlerts(55, {
+    enabled: true,
+    token_mint: "mint-timba",
+    token_ticker: "TIMBA",
+    min_sol_lamports: 100_000_000,
+    set_by_telegram_id: "admin",
+  });
+
+  expect(stored.enabled).toBe(true);
+  expect(stored.token_mint).toBe("mint-timba");
+  expect(stored.min_sol_lamports).toBe(100_000_000);
+
+  db.upsertChatBuyAlerts(55, { enabled: false });
+  expect(db.getChatBuyAlerts(55)?.enabled).toBe(false);
+  expect(db.getChatBuyAlerts(55)?.token_mint).toBe("mint-timba");
+  expect(db.getEnabledChatBuyAlerts()).toEqual([]);
+
+  db.upsertChatBuyAlerts(56, { enabled: true });
+  expect(db.getEnabledChatBuyAlerts().map((row) => row.chat_id)).toEqual([56]);
+
+  db.upsertChatBuyAlerts(56, {
+    media_file_id: "AgAD-gif",
+    media_type: "animation",
+  });
+  expect(db.getChatBuyAlerts(56)?.media_file_id).toBe("AgAD-gif");
+  expect(db.getChatBuyAlerts(56)?.media_type).toBe("animation");
+});

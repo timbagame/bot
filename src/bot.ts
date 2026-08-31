@@ -63,6 +63,7 @@ import {
   clearGameSetupSession,
   setInputSession,
   getInputSession,
+  findInputSession,
   clearInputSession,
   markInputSessionProcessing,
   clearInputSessionProcessing,
@@ -132,7 +133,11 @@ import { handleCoinflipCommand } from "./handlers/game";
 import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
 import { createGameCallbacksModule } from "./handlers/game-callbacks";
-import { createChatDefaultsModule } from "./handlers/chat-defaults";
+import { createChatDefaultsModule, isChatDefaultsMediaSetting } from "./handlers/chat-defaults";
+import { createBuyAlertService } from "./services/buy-alerts";
+import { buyEventFromSwap } from "./services/buy-alerts/swap-event";
+import { detectNewHolder } from "./services/buy-alerts/holder";
+import { getPricesUSD } from "./utils/prices";
 import {
   createWalletMenuModule,
   type WalletCacheSnapshot as WalletCacheSnapshotData,
@@ -155,6 +160,7 @@ import { getVerifiedTokenMints } from "./utils/verified-token-registry";
 import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
 import { FaucetDatabase } from "./utils/faucet-database";
 import { outboundErrorGuard } from "./utils/outbound-error-guard";
+import { sendMediaWithFallback } from "./utils/media";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -3005,6 +3011,39 @@ const replyToMessage = async (
   });
 };
 
+const buyAlertService = createBuyAlertService({
+  chatDb,
+  getTokenManager: () => tokenManager,
+  sendHtml: async (chatId, text, media) => {
+    await sendMediaWithFallback({
+      videoFileId: media?.fileId ?? null,
+      logLabel: "buy alert",
+      sendText: () =>
+        bot.api.sendMessage(chatId, text, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        }),
+      sendVideo: media
+        ? async () => {
+            const options = { caption: text, parse_mode: "HTML" as const };
+            if (media.mediaType === "photo") {
+              return bot.api.sendPhoto(chatId, media.fileId, options);
+            }
+            if (media.mediaType === "animation") {
+              return bot.api.sendAnimation(chatId, media.fileId, options);
+            }
+            return bot.api.sendVideo(chatId, media.fileId, options);
+          }
+        : undefined,
+    });
+  },
+  fetchSolPriceUsd: async () => {
+    const prices = await getPricesUSD([WSOL_MINT]);
+    return prices[WSOL_MINT] ?? null;
+  },
+  resolveNewHolder: (event) => detectNewHolder(wallet.getConnection(), event),
+});
+
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
   chatDb,
@@ -3015,6 +3054,7 @@ const chatDefaultsModule = createChatDefaultsModule({
   getOracleMaxPlayers,
   isUserGroupAdmin,
   replyToMessage,
+  buyAlerts: buyAlertService,
 });
 
 registerGameCallbackHandlers();
@@ -3958,7 +3998,7 @@ registerCaseInsensitiveCommand(
     "/gb - Shorthand for globalboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default - View chat defaults (token, players, privacy, media, timeout)",
+    "/default - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -3969,7 +4009,7 @@ registerCaseInsensitiveCommand(
     "• Use USD in the token slot to auto-convert: /cf 12 USD",
     "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
     "• Works for tips/withdrawals too: /tip @user $10 WBTC or /withdraw &lt;addr&gt; 10 USD",
-    "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
+    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
@@ -5083,6 +5123,23 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       console.log(`🚀 Swap transaction submitted: ${txSignature}`);
 
+      const swapBuy = buyEventFromSwap({
+        signature: txSignature,
+        trader: keypair.publicKey.toBase58(),
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        inputAmountRaw: quote.inputAmountRaw,
+        inputDecimals: quote.inputDecimals,
+        inputTicker: quote.inputTicker ?? transaction.fromToken,
+        outputAmountRaw: quote.executionOutputAmount ?? quote.outputAmount,
+        outputDecimals,
+      });
+      if (swapBuy) {
+        void buyAlertService.ingest(swapBuy).catch((error) => {
+          console.error("Failed to ingest swap buy alert:", error);
+        });
+      }
+
       const receivedDisplay = formatAmount(quote.outputAmount ?? "0", outputDecimals, {
         maxFractionDigits: outputDecimals,
         trim: true,
@@ -5880,24 +5937,33 @@ const handleMediaForChatDefaults = async (
     return;
   }
 
-  // Check if the message is a reply to a prompting message
   const replyToMessageId = ctx.message?.reply_to_message?.message_id;
-  if (!replyToMessageId) {
+  const chatId = typeof ctx.chat?.id === "number" ? ctx.chat.id : 0;
+  let sessionKey = replyToMessageId ? `${chatId}_${replyToMessageId}` : "";
+  let inputSession = sessionKey ? getInputSession(sessionKey) : undefined;
+
+  if (!inputSession || inputSession.type !== "chat_defaults") {
+    const fallback = findInputSession(
+      (_key, session) =>
+        session.type === "chat_defaults" &&
+        session.chatId === chatId &&
+        session.initiatorId === userId &&
+        isChatDefaultsMediaSetting(session["setting"] as string | undefined),
+    );
+    if (!fallback) {
+      return;
+    }
+    sessionKey = fallback.key;
+    inputSession = fallback.session;
+  }
+
+  if (inputSession.type !== "chat_defaults") {
     return;
   }
 
-  // Construct session key from chat and message ID
-  const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
-
-  // Check for input session
-  const inputSession = getInputSession(sessionKey);
-  if (!inputSession || inputSession.type !== "chat_defaults") {
-    return; // Not waiting for video ID input
-  }
-
   const setting = inputSession["setting"] as string | undefined;
-  if (setting !== "video_coinflip" && setting !== "video_giveaway") {
-    return; // Not a video ID setting
+  if (!isChatDefaultsMediaSetting(setting)) {
+    return;
   }
 
   if (
@@ -6208,6 +6274,8 @@ if (process.env.NODE_ENV !== "test") {
       attachRpcEndpointFailoverHandler();
       financeBackfillWorker.start();
       console.log("Finance history backfill worker scheduled");
+      buyAlertService.start();
+      console.log("Buy alert feed synchronized");
 
       const expireFaucets = async () => {
         try {
@@ -6438,6 +6506,7 @@ if (process.env.NODE_ENV !== "test") {
           rpcEndpointListenerCleanup?.();
           rpcEndpointListenerCleanup = null;
           financeBackfillWorker.stop();
+          buyAlertService.stop();
           await unregisterProgramEventListeners();
           await handle?.stop();
           internalServer?.stop();

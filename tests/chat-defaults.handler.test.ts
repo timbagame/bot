@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { Bot } from "grammy";
 import {
   createChatDefaultsModule,
+  isChatDefaultsMediaSetting,
   __test_buildMenuKeyboard,
   __test_buildSettingsSummary,
 } from "../src/handlers/chat-defaults";
@@ -62,6 +63,20 @@ const baseTokenManager = () => {
     getKnownTokenByTicker: (ticker: string) =>
       ticker.toUpperCase() === "AAA"
         ? { token_mint: "mint", token_ticker: "AAA", decimals: 6 }
+        : ticker.toUpperCase() === "TIMBA"
+          ? {
+              token_mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+              token_ticker: "TIMBA",
+              decimals: 6,
+            }
+          : null,
+    getKnownTokenByMint: (mint: string) =>
+      mint === "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump"
+        ? {
+            token_mint: mint,
+            token_ticker: "TIMBA",
+            decimals: 6,
+          }
         : null,
     getAllKnownTokens: () => [],
   } as any;
@@ -98,15 +113,26 @@ describe("chat defaults module", () => {
     gameDb = GameDatabase.getInstance();
   });
 
-  test("uses a compact three-row main keyboard", () => {
+  test("accepts buy-alert media as a chat-defaults media setting", () => {
+    expect(isChatDefaultsMediaSetting("video_buy_alerts")).toBe(true);
+    expect(isChatDefaultsMediaSetting("video_coinflip")).toBe(true);
+    expect(isChatDefaultsMediaSetting("token")).toBe(false);
+  });
+
+  test("uses a compact main keyboard with buy alerts", () => {
     const keyboard = __test_buildMenuKeyboard();
-    expect(keyboard.inline_keyboard).toHaveLength(3);
-    expect(keyboard.inline_keyboard.every((row) => row.length === 2)).toBe(true);
-    const callbacks = keyboard.inline_keyboard
-      .flat()
-      .map((button) => (button as { callback_data?: string }).callback_data);
+    expect(keyboard.inline_keyboard).toHaveLength(4);
+    expect(keyboard.inline_keyboard.slice(0, 3).every((row) => row.length === 2)).toBe(true);
+    expect(keyboard.inline_keyboard[3]).toHaveLength(1);
+    const buttons = keyboard.inline_keyboard.flat() as Array<{
+      text?: string;
+      callback_data?: string;
+    }>;
+    const callbacks = buttons.map((button) => button.callback_data);
+    expect(buttons.map((button) => button.text)).toContain("🚨 Buy alerts");
     expect(callbacks).toContain("chat_defaults_game_coinflip");
     expect(callbacks).toContain("chat_defaults_game_giveaway");
+    expect(callbacks).toContain("chat_defaults_buy_alerts");
   });
 
   test("builds summary with chat overrides", async () => {
@@ -137,6 +163,32 @@ describe("chat defaults module", () => {
     expect(summary).toContain("Coinflip: 7 players");
     expect(summary).toContain("Giveaway: 20 players");
     expect(summary).toContain("30m");
+    expect(summary).toContain("🚨 Buy alerts: Off");
+  });
+
+  test("buy alerts summary shows the chat token and min buy when enabled", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "1");
+    chatDb.upsertChatBuyAlerts(99, {
+      enabled: true,
+      min_sol_lamports: 50_000_000,
+      media_file_id: "AgAD-gif",
+      set_by_telegram_id: "1",
+    });
+
+    const summary = await __test_buildSettingsSummary(99, {
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+    });
+
+    expect(summary).toContain("🚨 Buy alerts: On · AAA · min 0.05 SOL · media Custom");
   });
 
   test("updates settings via text input handler", async () => {
@@ -343,7 +395,41 @@ describe("chat defaults module", () => {
     expect(errorReply).toBeDefined();
     expect(errorReply).toContain("Supported tokens");
     expect(errorReply).toContain("TIMBA");
-    expect(errorReply).toContain("SOL");
+  });
+
+  test("handleSettingsInput accepts a newly discovered mint as the chat default", async () => {
+    const tokenManager = baseTokenManager();
+    const pumpMint = "NewPumpMint111111111111111111111111111pump";
+    (tokenManager as any).resolveSwapToken = async (input: string) =>
+      input === pumpMint ? { token_mint: pumpMint, token_ticker: "NEWP", decimals: 6 } : null;
+    const { ctx, replies } = buildMockContext();
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) => await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, pumpMint);
+
+    expect(tokenManager.getChatDefaultToken()?.token_mint).toBe(pumpMint);
+    expect(tokenManager.getChatDefaultToken()?.token_ticker).toBe("NEWP");
+    expect(replies.some((text) => text.includes("NEWP"))).toBe(true);
   });
 
   test("handleSettingsInput rejects replies from non-initiators", async () => {
@@ -882,6 +968,10 @@ describe("chat defaults module", () => {
       "chat_defaults_clear_coinflip",
       "chat_defaults_public_game_feed",
       "chat_defaults_set_public_game_feed_on",
+      "chat_defaults_buy_alerts",
+      "chat_defaults_set_buy_alerts_on",
+      "chat_defaults_buy_alerts_media",
+      "chat_defaults_set_buy_alerts_min_custom",
     ];
 
     for (const action of restrictedActions) {
@@ -931,5 +1021,216 @@ describe("chat defaults module", () => {
     await mockBot.dispatch("chat_defaults_set_public_game_feed_on", ctx);
     expect(Boolean(chatDb.getChatGameSettings(99)?.global_public_game_feed)).toBe(true);
     expect(lastText).toContain("Global public game feed: ✅ Enabled");
+  });
+
+  test("buy alerts can be enabled by an admin and stay off by default", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx } = buildMockContext();
+    ctx.callbackQuery = {
+      id: "cb-buy",
+      data: "chat_defaults_buy_alerts",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+
+    let lastText = "";
+    ctx.editMessageText = async (text: string) => {
+      lastText = text;
+      return {};
+    };
+    ctx.answerCallbackQuery = async () => {};
+
+    let refreshed = 0;
+    createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx) =>
+        await handler(callbackCtx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+      buyAlerts: {
+        refresh: () => {
+          refreshed += 1;
+        },
+      },
+    });
+
+    await mockBot.dispatch("chat_defaults_buy_alerts", ctx);
+    expect(lastText).toContain("🚨 Buy alerts");
+    expect(lastText).not.toContain("Post Pump.fun");
+    expect(lastText).toContain("Disabled");
+    expect(lastText).toContain("(chat default)");
+    expect(lastText).toContain("Media: None");
+    expect(lastText).toContain("Min buy: Off");
+    expect(chatDb.getChatBuyAlerts(99)).toBeNull();
+
+    ctx.callbackQuery.data = "chat_defaults_set_buy_alerts_on";
+    await mockBot.dispatch("chat_defaults_set_buy_alerts_on", ctx);
+    expect(chatDb.getChatBuyAlerts(99)?.enabled).toBe(true);
+    expect(lastText).toContain("Enabled");
+    expect(refreshed).toBe(1);
+
+    ctx.callbackQuery.data = "chat_defaults_set_buy_alerts_min_05";
+    await mockBot.dispatch("chat_defaults_set_buy_alerts_min_05", ctx);
+    expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBe(500_000_000);
+    expect(lastText).toContain("0.5 SOL");
+    expect(lastText).toContain("Media: None");
+  });
+
+  test("buy alerts accept a custom min buy amount", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.callbackQuery = {
+      id: "cb-buy-min",
+      data: "chat_defaults_set_buy_alerts_min_custom",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+
+    let lastText = "";
+    ctx.editMessageText = async (text: string) => {
+      lastText = text;
+      return {};
+    };
+    ctx.answerCallbackQuery = async () => {};
+
+    const module = createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx) =>
+        await handler(callbackCtx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    await mockBot.dispatch("chat_defaults_set_buy_alerts_min_custom", ctx);
+    expect(lastText).toContain("minimum buy in SOL");
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      target: "buy_alerts_min_custom",
+      initiatorId: "123",
+    };
+
+    await module.handleSettingsInput(ctx as any, session, "0.05");
+    expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBe(50_000_000);
+    expect(replies.some((text) => text.includes("0.05 SOL"))).toBe(true);
+
+    await module.handleSettingsInput(ctx as any, session, "off");
+    expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBeNull();
+    expect(replies.some((text) => text.includes("Min buy set to Off"))).toBe(true);
+
+    await module.handleSettingsInput(ctx as any, session, "nope");
+    expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBeNull();
+    expect(replies.some((text) => text.includes("Invalid amount"))).toBe(true);
+  });
+
+  test("buy alert media can be set from the defaults menu", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.callbackQuery = {
+      id: "cb-buy-media",
+      data: "chat_defaults_buy_alerts_media",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+
+    let lastText = "";
+    ctx.editMessageText = async (text: string) => {
+      lastText = text;
+      return {};
+    };
+    ctx.answerCallbackQuery = async () => {};
+
+    const module = createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx) =>
+        await handler(callbackCtx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    await mockBot.dispatch("chat_defaults_buy_alerts_media", ctx);
+    expect(lastText).toContain("buy alert media");
+
+    ctx.callbackQuery.data = "chat_defaults_set_video_buy_alerts";
+    await mockBot.dispatch("chat_defaults_set_video_buy_alerts", ctx);
+    expect(lastText).toContain("Send a video, image, or GIF for buy alerts");
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "video_buy_alerts",
+      initiatorId: "123",
+    };
+
+    ctx.message = { animation: { file_id: "GIF_BUY_1" } };
+    await module.handleSettingsInput(ctx as any, session, "");
+
+    expect(chatDb.getChatBuyAlerts(99)?.media_file_id).toBe("GIF_BUY_1");
+    expect(chatDb.getChatBuyAlerts(99)?.media_type).toBe("animation");
+    expect(replies.some((text) => text.includes("Buy alert GIF set"))).toBe(true);
+  });
+
+  test("changing or clearing the default token refreshes buy-alert feeds", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.getSupportedGameTokens = () => [];
+    const { ctx } = buildMockContext();
+    let refreshed = 0;
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (callbackCtx, next) =>
+        await handler(callbackCtx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+      buyAlerts: {
+        refresh: () => {
+          refreshed += 1;
+        },
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "UNKNOWN");
+    expect(refreshed).toBe(0);
+
+    await module.handleSettingsInput(ctx as any, session, "AAA");
+    expect(tokenManager.getChatDefaultToken()?.token_ticker).toBe("AAA");
+    expect(refreshed).toBe(1);
+
+    await module.handleDefaultCommand(ctx as any, ["/default", "CLEAR"]);
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(refreshed).toBe(2);
   });
 });

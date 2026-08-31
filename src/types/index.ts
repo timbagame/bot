@@ -49,6 +49,18 @@ export interface ChatTokenConfig {
   set_at: number;
 }
 
+export interface ChatBuyAlertConfig {
+  chat_id: number;
+  enabled: boolean;
+  token_mint: string | null;
+  token_ticker: string | null;
+  min_sol_lamports: number | null;
+  media_file_id: string | null;
+  media_type: "photo" | "video" | "animation" | null;
+  set_by_telegram_id: string | null;
+  updated_at: number;
+}
+
 export interface ChatGameSettings {
   chat_id: number;
   coinflip_max_players?: number | null;
