@@ -3024,7 +3024,7 @@ const buyAlertService = createBuyAlertService({
           link_preview_options: { is_disabled: true },
         }),
       sendVideo: media
-        ? () => {
+        ? async () => {
             const options = { caption: text, parse_mode: "HTML" as const };
             if (media.mediaType === "photo") {
               return bot.api.sendPhoto(chatId, media.fileId, options);
