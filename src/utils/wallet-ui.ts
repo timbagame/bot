@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Context } from "grammy";
-import { escapeHtml, formatUsdValue } from "./format-amount";
+import { copyableHtml, escapeHtml, formatUsdValue } from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
@@ -167,8 +167,8 @@ export function buildWalletCaption(
     );
 
     const amountLabel = line.unit
-      ? `${escapeHtml(truncateTokenDisplay(line.amount))} ${escapeHtml(line.unit)}`
-      : escapeHtml(truncateTokenDisplay(line.amount));
+      ? `${copyableHtml(truncateTokenDisplay(line.amount))} ${escapeHtml(line.unit)}`
+      : copyableHtml(truncateTokenDisplay(line.amount));
     parts.push(amountLabel);
 
     if (line.usdValue !== undefined) {

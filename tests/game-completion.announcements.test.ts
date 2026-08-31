@@ -69,7 +69,8 @@ describe("Game completion announcements", () => {
     const text = sendCalls[0]?.text ?? "";
     expect(text).toContain("&lt;a href=&quot;https://evil&quot;&gt;winner&lt;/a&gt;");
     expect(text).toContain("won the coinflip");
-    expect(text).toContain("Prize:");
+    expect(text).toContain("Prize: <code>1.000</code> SOL ($150)");
+    expect(text).not.toContain("Tap to copy");
     expect(sendCalls[0]?.options?.parse_mode).toBe("HTML");
   });
 
@@ -136,6 +137,8 @@ describe("Game completion announcements", () => {
     // Should have sent: 1 announcement only
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("won the coinflip");
+    expect(sendCalls[0]?.text).toContain("Prize: <code>500</code> SOL ($75)");
+    expect(sendCalls[0]?.text).not.toContain("Tap to copy");
   });
 
   test("creator does NOT receive winner DM", async () => {

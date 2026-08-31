@@ -81,9 +81,11 @@ test("buildWalletCaption formats address and token lines", () => {
 
     expect(caption).toContain('Solana Address · <a href="https://solscan.io/account/AbCdEf">🅴</a>');
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
-    expect(caption).toContain("SOL: 1.234567 SOL ($123.46)");
-    expect(caption).toContain("TIMBA: 123 ($6,150)");
-    expect(caption).toContain("USDC: 10.00 ($10)");
+    expect(caption).toContain("SOL: <code>1.234567</code> SOL ($123.46)");
+    expect(caption).toContain("TIMBA: <code>123</code> ($6,150)");
+    expect(caption).toContain("USDC: <code>10.00</code> ($10)");
+    expect(caption).not.toContain("SOL: <code>1.234567</code> SOL ($123.46) (Tap to copy)");
+    expect(caption.split("(Tap to copy)")[1]).not.toContain("Tap to copy");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -106,7 +108,7 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
       'Solana Address · <a href="https://solscan.io/account/ADDR%3C%26%22">🅴</a>',
     );
     expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
-    expect(caption).toContain("BAD&lt;&amp;&quot;: 5 &amp; rising ($12.34)");
+    expect(caption).toContain("BAD&lt;&amp;&quot;: <code>5 &amp; rising</code> ($12.34)");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -144,7 +146,7 @@ test("buildWalletCaption sanitizes token symbols before escaping HTML", () => {
     },
   ]);
 
-  expect(caption).toContain("&lt;PUMPAPI.…: 20 ($0)");
+  expect(caption).toContain("&lt;PUMPAPI.…: <code>20</code> ($0)");
   expect(caption).not.toContain("CREATE BOTS");
   expect(caption).not.toContain("\nNOW");
 });
@@ -159,11 +161,11 @@ test("buildWalletCaption paginates token lines", () => {
   const firstPage = buildWalletCaption("AbCdEf", tokenLines, { page: 0, pageSize: 4 });
   const lastPage = buildWalletCaption("AbCdEf", tokenLines, { page: 2, pageSize: 4 });
 
-  expect(firstPage).toContain("T0: 0");
-  expect(firstPage).toContain("T3: 3");
-  expect(firstPage).not.toContain("T4: 4");
-  expect(lastPage).toContain("T8: 8");
-  expect(lastPage).toContain("T9: 9");
+  expect(firstPage).toContain("T0: <code>0</code>");
+  expect(firstPage).toContain("T3: <code>3</code>");
+  expect(firstPage).not.toContain("T4: <code>4</code>");
+  expect(lastPage).toContain("T8: <code>8</code>");
+  expect(lastPage).toContain("T9: <code>9</code>");
 });
 
 test("buildWalletCaption disambiguates duplicate symbols by mint", () => {
@@ -172,8 +174,8 @@ test("buildWalletCaption disambiguates duplicate symbols by mint", () => {
     { ticker: "SAME", mint: "222222222222", amount: "2" },
   ]);
 
-  expect(caption).toContain("SAME · 1111…1111: 1");
-  expect(caption).toContain("SAME · 2222…2222: 2");
+  expect(caption).toContain("SAME · 1111…1111: <code>1</code>");
+  expect(caption).toContain("SAME · 2222…2222: <code>2</code>");
 });
 
 test("buildWalletCaption stays within Telegram's media caption limit", () => {
