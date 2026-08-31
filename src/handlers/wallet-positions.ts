@@ -1,7 +1,6 @@
 import { InlineKeyboard } from "grammy";
-import { getTelegramId } from "../utils/context-helpers";
+import { getTelegramId, safeAnswerCallbackQuery } from "../utils/context-helpers";
 import { respondWithMenu } from "../utils/menu-response";
-import { safeAnswerCallbackQuery } from "../utils/context-helpers";
 import {
   formatPositionsPage,
   loadTokenPositionsForWallet,

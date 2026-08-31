@@ -911,7 +911,7 @@ test("loadTokenPositionsForWallet retries a mint after a failed price fetch", as
     walletAddress: "wallet-price-retry",
     getHoldings: async () => holdings,
     getSwaps: () => swaps,
-    fetchPricesUSD: async (mints: string[]) => {
+    fetchPricesUSD: async (mints: string[]): Promise<Record<string, number>> => {
       fetches.push([...mints]);
       if (fetches.length === 1) {
         return { [WSOL_MINT]: 100 };

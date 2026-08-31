@@ -428,7 +428,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
         return tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
       },
       createKeyboard: createPositionsKeyboard,
-      refreshCaches: (telegramId) => {
+      refreshCaches: (telegramId: bigint) => {
         clearWalletCache(telegramId);
       },
     };
