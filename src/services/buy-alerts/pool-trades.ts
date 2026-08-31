@@ -43,6 +43,7 @@ const geckoTradeSchema = z
         kind: z.string().optional(),
         from_token_address: z.string().optional(),
         to_token_address: z.string().optional(),
+        block_timestamp: z.string().optional(),
       })
       .passthrough(),
   })
@@ -127,6 +128,7 @@ export type PoolTradePollerOptions = {
   minRequestIntervalMs?: number;
   poolsPerCycle?: number;
   onError?: (error: unknown) => void;
+  now?: () => number;
 };
 
 async function fetchGeckoTrades(pairAddress: string): Promise<unknown> {
@@ -174,6 +176,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     ),
   );
   const onError = options.onError ?? ((error: unknown) => console.error(error));
+  const now = options.now ?? Date.now;
 
   let mints: string[] = [];
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -182,6 +185,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   const primed = new Map<string, Set<string>>();
   const discoveredPools = new Map<string, Set<string>>();
   const baselinePools = new Map<string, Set<string>>();
+  const watchedAtByMint = new Map<string, number>();
   let poolQueue: Array<{ mint: string; pairAddress: string }> = [];
   let nextTradeFetchAt = 0;
   let consecutiveTradeFailures = 0;
@@ -189,6 +193,14 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   const emit = (event: BuyEvent) => {
     for (const handler of handlers) {
       handler(event);
+    }
+  };
+
+  const reportError = (error: unknown) => {
+    try {
+      onError(error);
+    } catch (reportingError) {
+      console.error("Buy-alert error handler failed:", reportingError);
     }
   };
 
@@ -212,7 +224,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   const pollPool = async (
     mint: string,
     pair: PairStats,
-    suppressFirstPass: boolean,
+    firstPassCutoffMs: number | null,
   ): Promise<boolean> => {
     const pairAddress = pair?.pairAddress?.trim();
     if (!pairAddress) {
@@ -226,14 +238,16 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
         return false;
       }
       payload = await fetchTrades(pairAddress);
-    } catch {
+    } catch (error) {
       deferAfterTradeFailure();
+      reportError(error);
       return false;
     }
 
     const parsed = geckoTradesResponseSchema.safeParse(payload);
     if (!parsed.success) {
       deferAfterTradeFailure();
+      reportError(new Error("GeckoTerminal trades response was malformed"));
       return false;
     }
     consecutiveTradeFailures = 0;
@@ -250,7 +264,12 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       const event = parseGeckoPoolTrade(mint, trade, pair.dexId, pair.quoteSymbol);
       if (!event) continue;
       if (!rememberSignature(known, event.signature)) continue;
-      if (!isFirstPass || !suppressFirstPass) {
+      const tradeTimestamp = Date.parse(trade.attributes.block_timestamp ?? "");
+      const occurredAfterWatchStarted =
+        firstPassCutoffMs != null &&
+        Number.isFinite(tradeTimestamp) &&
+        tradeTimestamp >= firstPassCutoffMs;
+      if (!isFirstPass || firstPassCutoffMs == null || occurredAfterWatchStarted) {
         emit(event);
       }
     }
@@ -266,7 +285,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     let pools: PairStats[];
     try {
       pools = await fetchPoolStats(mint);
-    } catch {
+    } catch (error) {
+      reportError(error);
       return [];
     }
     const uniquePools = new Map<string, PairStats>();
@@ -288,7 +308,10 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       baselinePools.set(mint, new Set(knownPools));
     } else {
       for (const pairAddress of uniquePools.keys()) {
-        knownPools.add(pairAddress);
+        if (!knownPools.has(pairAddress)) {
+          knownPools.add(pairAddress);
+          baselinePools.get(mint)?.add(pairAddress);
+        }
       }
     }
     return poolsToPoll;
@@ -347,8 +370,11 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
 
         const { mint, pair } = target;
         const pairAddress = queuedTarget.pairAddress;
-        const suppressFirstPass = baselinePools.get(mint)?.has(pairAddress) ?? false;
-        const succeeded = await pollPool(mint, pair, suppressFirstPass);
+        const isBaselinePool = baselinePools.get(mint)?.has(pairAddress) ?? false;
+        const firstPassCutoffMs = isBaselinePool
+          ? (watchedAtByMint.get(mint) ?? Number.POSITIVE_INFINITY)
+          : null;
+        const succeeded = await pollPool(mint, pair, firstPassCutoffMs);
         if (succeeded) {
           baselinePools.get(mint)?.delete(pairAddress);
         }
@@ -370,14 +396,14 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     if (timer || mints.length === 0) return;
     timer = setInterval(() => {
       if (queuedPolls === 0) {
-        void pollNow().catch(onError);
+        void pollNow().catch(reportError);
       }
     }, intervalMs);
     if (typeof (timer as NodeJS.Timeout).unref === "function") {
       (timer as NodeJS.Timeout).unref();
     }
     if (queuedPolls === 0) {
-      void pollNow().catch(onError);
+      void pollNow().catch(reportError);
     }
   };
 
@@ -391,12 +417,19 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     setMints: (nextMints) => {
       const normalized = nextMints.map((mint) => mint.trim()).filter((mint) => mint.length > 0);
       const nextSet = new Set(normalized);
+      const previousSet = new Set(mints);
       for (const mint of mints) {
         if (!nextSet.has(mint)) {
           seen.delete(mint);
           primed.delete(mint);
           discoveredPools.delete(mint);
           baselinePools.delete(mint);
+          watchedAtByMint.delete(mint);
+        }
+      }
+      for (const mint of nextSet) {
+        if (!previousSet.has(mint)) {
+          watchedAtByMint.set(mint, now());
         }
       }
       mints = Array.from(nextSet);
@@ -417,6 +450,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       primed.clear();
       discoveredPools.clear();
       baselinePools.clear();
+      watchedAtByMint.clear();
       poolQueue = [];
       nextTradeFetchAt = 0;
       consecutiveTradeFailures = 0;

@@ -276,6 +276,7 @@ test("pool trade poller rotates fairly across Pump and non-Pump pools", async ()
 
 test("pool trade poller does not prime a pool after failed or malformed responses", async () => {
   const received: string[] = [];
+  const errors: unknown[] = [];
   let calls = 0;
   let payload = { data: [geckoBuy] };
   const poller = createPoolTradePoller({
@@ -301,6 +302,7 @@ test("pool trade poller does not prime a pool after failed or malformed response
       }
       return payload;
     },
+    onError: (error) => errors.push(error),
   });
 
   poller.onTrade((buy) => received.push(buy.signature));
@@ -308,6 +310,7 @@ test("pool trade poller does not prime a pool after failed or malformed response
   await poller.pollNow();
   await poller.pollNow();
   expect(received).toEqual([]);
+  expect(errors).toHaveLength(2);
 
   payload = {
     data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "after-recovery" } }],
@@ -317,9 +320,30 @@ test("pool trade poller does not prime a pool after failed or malformed response
   poller.stop();
 });
 
+test("pool trade poller reports pool discovery failures", async () => {
+  const errors: unknown[] = [];
+  const discoveryError = new Error("discovery unavailable");
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    fetchPoolStats: async () => {
+      throw discoveryError;
+    },
+    fetchTrades: async () => ({ data: [] }),
+    onError: (error) => errors.push(error),
+  });
+
+  poller.setMints([mint]);
+  await poller.pollNow();
+
+  expect(errors).toContain(discoveryError);
+  poller.stop();
+});
+
 test("pool trade poller emits the first snapshot from a newly discovered pool", async () => {
   const received: string[] = [];
   let includeNewPool = false;
+  const watchedAt = Date.parse("2026-08-31T20:00:00.000Z");
   const poller = createPoolTradePoller({
     intervalMs: 60_000,
     minRequestIntervalMs: 0,
@@ -355,10 +379,13 @@ test("pool trade poller emits the first snapshot from a newly discovered pool", 
           attributes: {
             ...geckoBuy.attributes,
             tx_hash: pairAddress === "pair-new" ? "new-pool-buy" : "initial-buy",
+            block_timestamp:
+              pairAddress === "pair-new" ? "2026-08-31T20:00:01.000Z" : "2026-08-31T19:59:59.000Z",
           },
         },
       ],
     }),
+    now: () => watchedAt,
   });
 
   poller.onTrade((buy) => received.push(buy.signature));
@@ -369,5 +396,61 @@ test("pool trade poller emits the first snapshot from a newly discovered pool", 
   includeNewPool = true;
   await poller.pollNow();
   expect(received).toEqual(["new-pool-buy"]);
+  poller.stop();
+});
+
+test("pool trade poller preserves buys after enabling while baseline pools wait", async () => {
+  const received: string[] = [];
+  const watchedAt = Date.parse("2026-08-31T20:00:00.000Z");
+  const trade = (signature: string, blockTimestamp: string) => ({
+    attributes: {
+      ...geckoBuy.attributes,
+      tx_hash: signature,
+      block_timestamp: blockTimestamp,
+    },
+  });
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    poolsPerCycle: 1,
+    fetchPoolStats: async () => [
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "raydium",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-a",
+        tokenName: "TOKEN",
+      },
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "pump-fun",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-b",
+        tokenName: "TOKEN",
+      },
+    ],
+    fetchTrades: async (pairAddress) => ({
+      data:
+        pairAddress === "pair-a"
+          ? [trade("old-a", "2026-08-31T19:59:59.000Z")]
+          : [
+              trade("after-enable", "2026-08-31T20:00:01.000Z"),
+              trade("old-b", "2026-08-31T19:59:59.000Z"),
+            ],
+    }),
+    now: () => watchedAt,
+  });
+
+  poller.onTrade((buy) => received.push(buy.signature));
+  poller.setMints([mint]);
+  await poller.pollNow();
+
+  expect(received).toEqual(["after-enable"]);
   poller.stop();
 });
