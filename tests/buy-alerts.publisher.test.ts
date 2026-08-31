@@ -209,3 +209,53 @@ test("publisher includes new-holder when the resolver reports it", async () => {
   await publisher.publish(event({ signature: "holder-sig" }));
   expect(sent[0]).toContain("New Holder!");
 });
+
+test("publisher retries a signature when every delivery fails", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-20, { enabled: true });
+
+  let attempts = 0;
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("temporary Telegram failure");
+      }
+    },
+    fetchPairStats: async () => null,
+  });
+
+  expect((await publisher.publish(event({ signature: "retry-all" }))).posted).toBe(0);
+  expect((await publisher.publish(event({ signature: "retry-all" }))).posted).toBe(1);
+  expect((await publisher.publish(event({ signature: "retry-all" }))).skipped).toEqual([
+    "duplicate",
+  ]);
+  expect(attempts).toBe(2);
+});
+
+test("publisher retries only chats whose delivery failed", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-21, { enabled: true });
+  chatDb.upsertChatBuyAlerts(-22, { enabled: true });
+
+  const attempts: number[] = [];
+  let failedOnce = false;
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (chatId) => {
+      attempts.push(chatId);
+      if (chatId === -22 && !failedOnce) {
+        failedOnce = true;
+        throw new Error("temporary Telegram failure");
+      }
+    },
+    fetchPairStats: async () => null,
+  });
+
+  expect((await publisher.publish(event({ signature: "retry-partial" }))).posted).toBe(1);
+  expect((await publisher.publish(event({ signature: "retry-partial" }))).posted).toBe(1);
+  expect(attempts).toEqual([-22, -21, -22]);
+});

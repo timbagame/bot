@@ -56,5 +56,7 @@ export function buyEventFromSwap(input: SwapBuyInput): BuyEvent | null {
     inputSymbol: input.inputTicker?.trim() || (inputMint === WSOL_MINT ? "SOL" : null),
     tokenAmount,
     dex: "unknown",
+    dexId: "jupiter",
+    quoteSymbol: input.inputTicker?.trim() || (inputMint === WSOL_MINT ? "SOL" : null),
   };
 }

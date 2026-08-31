@@ -67,5 +67,7 @@ export function parsePumpPortalTrade(payload: unknown): BuyEvent | null {
     solAmount,
     tokenAmount,
     dex: mapDexFromPool(parsed.data.pool),
+    dexId: parsed.data.pool?.trim() || null,
+    quoteSymbol: "SOL",
   };
 }

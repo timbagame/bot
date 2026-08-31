@@ -9,6 +9,8 @@ export type BuyEvent = {
   inputSymbol?: string | null;
   tokenAmount: number;
   dex: BuyDex;
+  dexId?: string | null;
+  quoteSymbol?: string | null;
   newHolder?: boolean | null;
 };
 

@@ -95,10 +95,36 @@ test("formatBuyAlertMessage shows the actual input token when SOL value is unkno
   expect(text).not.toContain("Spent: <code>0</code> SOL");
 });
 
-test("dexLabel prefers pair metadata then the parsed pool", () => {
+test("dexLabel maps explicit venue metadata and preserves unknown venues", () => {
   expect(dexLabel("pump", "raydium")).toBe("Raydium AMM");
   expect(dexLabel("unknown", "pumpswap")).toBe("PumpSwap");
   expect(dexLabel("pump", null)).toBe("Pump.fun");
+  expect(dexLabel("unknown", null)).toBe("Unknown");
+});
+
+test("formatBuyAlertMessage prefers the event venue over the market-data pair", () => {
+  const text = formatBuyAlertMessage({
+    event: {
+      ...event,
+      dex: "pump",
+      dexId: "pumpfun",
+      quoteSymbol: "USDC",
+    },
+    ticker: "TIMBA",
+    pair: {
+      priceUsd: 1,
+      marketCapUsd: 1,
+      priceChangeH24: 0,
+      url: null,
+      dexId: "raydium",
+      quoteSymbol: "SOL",
+      pairAddress: "unrelated-top-pair",
+      tokenName: "TIMBA",
+    },
+  });
+
+  expect(text).toContain("DEX: 💊 Pump.fun USDC");
+  expect(text).not.toContain("Raydium AMM");
 });
 
 test("dexMark uses a venue mark for each major Solana DEX", () => {

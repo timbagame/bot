@@ -21,6 +21,8 @@ test("parsePumpPortalTrade maps a buy payload", () => {
     solAmount: 0.4212,
     tokenAmount: 282970,
     dex: "pump",
+    dexId: "pump",
+    quoteSymbol: "SOL",
   });
 });
 

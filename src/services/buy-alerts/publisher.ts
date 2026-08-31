@@ -43,7 +43,8 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
   const fetchPairStats = deps.fetchPairStats ?? fetchDexScreenerPairStats;
   const now = deps.now ?? Date.now;
   const maxAlertsPerMinute = deps.maxAlertsPerMinute ?? BUY_ALERTS_PER_MINUTE;
-  const postedSignatures = createExpiringCache<true>(SIGNATURE_TTL_MS);
+  const deliveredSignatures = createExpiringCache<Set<number>>(SIGNATURE_TTL_MS);
+  const inFlightSignatures = new Set<string>();
   const chatWindows = new Map<number, number[]>();
 
   const resolveForChat = (chatId: number) => {
@@ -141,13 +142,15 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
 
     publish: async (event: BuyEvent): Promise<PublishResult> => {
       const skipped: string[] = [];
-      if (postedSignatures.get(event.signature)) {
+      if (inFlightSignatures.has(event.signature)) {
         return { posted: 0, skipped: ["duplicate"] };
       }
+      const deliveredChats = deliveredSignatures.get(event.signature) ?? new Set<number>();
 
       const targets = deps.chatDb
         .getEnabledChatBuyAlerts()
         .filter((config) => matchesMint(config.chat_id, event.mint))
+        .filter((config) => !deliveredChats.has(config.chat_id))
         .filter((config) => {
           if (belowMinimum(config.chat_id, event.solAmount)) {
             skipped.push(`dust:${config.chat_id}`);
@@ -164,23 +167,34 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
         });
 
       if (targets.length === 0) {
-        return { posted: 0, skipped };
+        return {
+          posted: 0,
+          skipped: deliveredChats.size > 0 ? ["duplicate"] : skipped,
+        };
       }
 
-      postedSignatures.setWithTTL(event.signature, true);
-      const [pair, solPriceUsd, enriched] = await Promise.all([
-        fetchPairStats(event.mint),
-        deps.fetchSolPriceUsd ? deps.fetchSolPriceUsd() : Promise.resolve(null),
-        enrichEvent(event),
-      ]);
+      inFlightSignatures.add(event.signature);
+      try {
+        const [pair, solPriceUsd, enriched] = await Promise.all([
+          fetchPairStats(event.mint),
+          deps.fetchSolPriceUsd ? deps.fetchSolPriceUsd() : Promise.resolve(null),
+          enrichEvent(event),
+        ]);
 
-      let posted = 0;
-      for (const config of targets) {
-        if (await publishToChat(config.chat_id, enriched, pair, solPriceUsd ?? null)) {
-          posted += 1;
+        let posted = 0;
+        for (const config of targets) {
+          if (await publishToChat(config.chat_id, enriched, pair, solPriceUsd ?? null)) {
+            deliveredChats.add(config.chat_id);
+            posted += 1;
+          }
         }
+        if (deliveredChats.size > 0) {
+          deliveredSignatures.setWithTTL(event.signature, new Set(deliveredChats));
+        }
+        return { posted, skipped };
+      } finally {
+        inFlightSignatures.delete(event.signature);
       }
-      return { posted, skipped };
     },
 
     sendTest: async (chatId: number): Promise<void> => {
@@ -219,6 +233,8 @@ export function attachBuyAlertFeed(
   publish: (event: BuyEvent) => Promise<unknown>,
 ): void {
   feed.onTrade((event) => {
-    void publish(event);
+    void publish(event).catch((error) => {
+      console.error(`Failed to publish buy alert for ${event.signature}:`, error);
+    });
   });
 }

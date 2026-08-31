@@ -24,6 +24,8 @@ test("buyEventFromSwap maps a SOL to token Jupiter swap", () => {
     inputSymbol: "SOL",
     tokenAmount: 1270,
     dex: "unknown",
+    dexId: "jupiter",
+    quoteSymbol: "SOL",
   });
 });
 

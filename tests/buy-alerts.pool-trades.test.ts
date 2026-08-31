@@ -31,6 +31,8 @@ test("parseGeckoPoolTrade maps a SOL buy on the watched mint", () => {
     inputSymbol: "SOL",
     tokenAmount: 1_270_000,
     dex: "raydium",
+    dexId: "raydium",
+    quoteSymbol: "SOL",
   });
 });
 
@@ -72,6 +74,7 @@ test("pool trade poller seeds existing trades then emits only new buys", async (
   let payload = { data: [geckoBuy] };
   const poller = createPoolTradePoller({
     intervalMs: 60_000,
+    minRequestIntervalMs: 0,
     fetchPairStats: async () => ({
       priceUsd: 0.000152,
       marketCapUsd: 132_750,
@@ -125,6 +128,7 @@ test("pool trade poller watches every discovered pool", async () => {
   ]);
   const poller = createPoolTradePoller({
     intervalMs: 60_000,
+    minRequestIntervalMs: 0,
     fetchPoolStats: async () => [
       {
         priceUsd: 1,
@@ -162,6 +166,106 @@ test("pool trade poller watches every discovered pool", async () => {
     data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "new-b" } }],
   });
   await poller.pollNow();
+  expect(received).toEqual(["new-a"]);
+  await poller.pollNow();
   expect(received.sort()).toEqual(["new-a", "new-b"]);
+  poller.stop();
+});
+
+test("pool trade poller does not prime a pool after failed or malformed responses", async () => {
+  const received: string[] = [];
+  let calls = 0;
+  let payload = { data: [geckoBuy] };
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    fetchPairStats: async () => ({
+      priceUsd: 1,
+      marketCapUsd: 1,
+      priceChangeH24: 1,
+      url: null,
+      dexId: "raydium",
+      quoteSymbol: "SOL",
+      pairAddress: "pair-failure",
+      tokenName: "TOKEN",
+    }),
+    fetchTrades: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("429");
+      }
+      if (calls === 2) {
+        return { malformed: true };
+      }
+      return payload;
+    },
+  });
+
+  poller.onTrade((buy) => received.push(buy.signature));
+  poller.setMints([mint]);
+  await poller.pollNow();
+  await poller.pollNow();
+  expect(received).toEqual([]);
+
+  payload = {
+    data: [{ attributes: { ...geckoBuy.attributes, tx_hash: "after-recovery" } }],
+  };
+  await poller.pollNow();
+  expect(received).toEqual(["after-recovery"]);
+  poller.stop();
+});
+
+test("pool trade poller emits the first snapshot from a newly discovered pool", async () => {
+  const received: string[] = [];
+  let includeNewPool = false;
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 0,
+    fetchPoolStats: async () => [
+      {
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "raydium",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-initial",
+        tokenName: "TOKEN",
+      },
+      ...(includeNewPool
+        ? [
+            {
+              priceUsd: 1,
+              marketCapUsd: 1,
+              priceChangeH24: 1,
+              url: null,
+              dexId: "meteora",
+              quoteSymbol: "SOL",
+              pairAddress: "pair-new",
+              tokenName: "TOKEN",
+            },
+          ]
+        : []),
+    ],
+    fetchTrades: async (pairAddress) => ({
+      data: [
+        {
+          attributes: {
+            ...geckoBuy.attributes,
+            tx_hash: pairAddress === "pair-new" ? "new-pool-buy" : "initial-buy",
+          },
+        },
+      ],
+    }),
+  });
+
+  poller.onTrade((buy) => received.push(buy.signature));
+  poller.setMints([mint]);
+  await poller.pollNow();
+  expect(received).toEqual([]);
+
+  includeNewPool = true;
+  await poller.pollNow();
+  expect(received).toEqual(["new-pool-buy"]);
   poller.stop();
 });

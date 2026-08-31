@@ -70,7 +70,7 @@ export function dexLabel(dex: BuyDex, dexId?: string | null): string {
   if (dex === "raydium") return "Raydium AMM";
   if (dex === "pump") return "Pump.fun";
   if (fromPair) return dexId!.trim();
-  return "Pump.fun";
+  return "Unknown";
 }
 
 function linkedLabel(url: string | null, label: string): string {
@@ -101,9 +101,12 @@ export function formatBuyAlertMessage({
       ? formatUsdValue(event.solAmount * solPriceUsd)
       : null;
   const gotAmount = formatBuyTokenAmount(event.tokenAmount);
-  const quote = escapeHtml(pair?.quoteSymbol || "SOL");
-  const venue = escapeHtml(dexLabel(event.dex, pair?.dexId));
-  const mark = dexMark(event.dex, pair?.dexId);
+  const quote = escapeHtml(
+    event.quoteSymbol?.trim() || event.inputSymbol?.trim() || pair?.quoteSymbol || "Unknown",
+  );
+  const sourceDexId = event.dexId?.trim() || (event.dex === "unknown" ? pair?.dexId?.trim() : null);
+  const venue = escapeHtml(dexLabel(event.dex, sourceDexId));
+  const mark = dexMark(event.dex, sourceDexId);
 
   let spentLine = "Spent: Unknown";
   if (event.solAmount != null && event.solAmount > 0) {
