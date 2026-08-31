@@ -50,27 +50,27 @@ export const createWalletKeyboard = (pagination?: WalletPagination): InlineKeybo
 };
 
 export const createPositionsKeyboard = (options: {
-  index: number;
-  count: number;
-  dexUrl?: string | null;
+  page?: number;
+  pageCount?: number;
 }): InlineKeyboard => {
+  const page = options.page ?? 0;
+  const pageCount = options.pageCount ?? 1;
   const keyboard = new InlineKeyboard();
 
-  if (options.count > 1) {
-    if (options.index > 0) {
-      keyboard.text("←", `wallet_pos_${options.index - 1}`);
+  if (pageCount > 1) {
+    if (page > 0) {
+      keyboard.text("←", `wallet_pos_${page - 1}`);
     }
-    if (options.index + 1 < options.count) {
-      keyboard.text("→", `wallet_pos_${options.index + 1}`);
+    if (page + 1 < pageCount) {
+      keyboard.text("→", `wallet_pos_${page + 1}`);
     }
     keyboard.row();
   }
 
-  keyboard.text("🔄 Swap", "cmd_swap");
-  if (options.dexUrl) {
-    keyboard.url("DexScreener", options.dexUrl);
-  }
-  keyboard.row();
+  keyboard
+    .text("🔄 Swap", "cmd_swap")
+    .text("🔁 Refresh", `wallet_pos_r_${page}`)
+    .row();
   return appendBackToWalletButton(keyboard);
 };
 

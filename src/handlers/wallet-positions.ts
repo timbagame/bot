@@ -1,14 +1,11 @@
 import { InlineKeyboard } from "grammy";
-import { WSOL_MINT } from "../utils/constants";
 import { getTelegramId } from "../utils/context-helpers";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery } from "../utils/context-helpers";
 import {
-  buildDexScreenerTokenUrl,
-  buildTokenPositions,
-  createDecimalResolver,
-  fillsFromSwaps,
-  formatPositionMessage,
+  formatPositionsPage,
+  loadTokenPositionsForWallet,
+  POSITIONS_PAGE_SIZE,
   type TokenHolding,
   type TokenPosition,
 } from "../services/positions";
@@ -20,11 +17,8 @@ export type WalletPositionsDeps = {
   getSwapsByWallet: (wallet: string) => SwapStatRecord[];
   fetchPricesUSD: (mints: string[]) => Promise<Record<string, number>>;
   getKnownTokens?: () => Array<{ mint?: string; token_mint?: string; decimals: number }>;
-  createKeyboard: (args: {
-    index: number;
-    count: number;
-    dexUrl?: string | null;
-  }) => InlineKeyboard;
+  createKeyboard: (args: { page: number; pageCount: number }) => InlineKeyboard;
+  refreshCaches?: (telegramId: bigint) => void | Promise<void>;
 };
 
 const EMPTY_TEXT = [
@@ -34,12 +28,19 @@ const EMPTY_TEXT = [
   "Buy a token with Swap to start seeing PNL from your average entry.",
 ].join("\n");
 
-const parsePositionIndex = (callbackData: string | undefined): number => {
-  const match = String(callbackData ?? "").match(/^wallet_pos_(\d+)$/);
-  if (!match) {
-    return 0;
+const parsePositionsView = (
+  callbackData: string | undefined,
+): { page: number; refresh: boolean } => {
+  const raw = String(callbackData ?? "");
+  const refreshMatch = raw.match(/^wallet_pos_r_(\d+)$/);
+  if (refreshMatch) {
+    return { page: Number(refreshMatch[1]), refresh: true };
   }
-  return Number(match[1]);
+  const pageMatch = raw.match(/^wallet_pos_(\d+)$/);
+  if (pageMatch) {
+    return { page: Number(pageMatch[1]), refresh: false };
+  }
+  return { page: 0, refresh: false };
 };
 
 export async function loadWalletPositions(
@@ -47,18 +48,13 @@ export async function loadWalletPositions(
   deps: WalletPositionsDeps,
 ): Promise<TokenPosition[]> {
   const walletAddress = deps.getWalletAddress(telegramId);
-  const holdings = await deps.getHoldings(telegramId);
-  const swaps = deps.getSwapsByWallet(walletAddress);
-  const fills = fillsFromSwaps(
-    swaps,
-    createDecimalResolver([...(deps.getKnownTokens?.() ?? []), ...holdings]),
-  );
-  const priceMints = new Set<string>([WSOL_MINT]);
-  for (const holding of holdings) {
-    priceMints.add(holding.mint);
-  }
-  const pricesUsd = await deps.fetchPricesUSD([...priceMints]);
-  return buildTokenPositions({ fills, holdings, pricesUsd });
+  return loadTokenPositionsForWallet({
+    walletAddress,
+    getHoldings: () => deps.getHoldings(telegramId),
+    getSwaps: () => deps.getSwapsByWallet(walletAddress),
+    fetchPricesUSD: deps.fetchPricesUSD,
+    knownTokens: deps.getKnownTokens?.(),
+  });
 }
 
 export async function onWalletPositions(ctx: any, deps: WalletPositionsDeps): Promise<void> {
@@ -69,33 +65,36 @@ export async function onWalletPositions(ctx: any, deps: WalletPositionsDeps): Pr
       return;
     }
 
+    const view = parsePositionsView(ctx.callbackQuery?.data);
+    if (view.refresh) {
+      await deps.refreshCaches?.(telegramId);
+    }
+
     const positions = await loadWalletPositions(telegramId, deps);
     if (positions.length === 0) {
       await respondWithMenu(ctx, {
         text: EMPTY_TEXT,
-        keyboard: new InlineKeyboard().text("← Back to Wallet", "main_wallet"),
+        keyboard: new InlineKeyboard()
+          .text("🔁 Refresh", "wallet_pos_r_0")
+          .row()
+          .text("← Back to Wallet", "main_wallet"),
       });
       await safeAnswerCallbackQuery(ctx);
       return;
     }
 
-    const index = Math.min(
-      Math.max(0, parsePositionIndex(ctx.callbackQuery?.data)),
-      positions.length - 1,
-    );
-    const position = positions[index]!;
-    const text = formatPositionMessage(position, {
-      index,
-      count: positions.length,
-    });
+    const pageCount = Math.max(1, Math.ceil(positions.length / POSITIONS_PAGE_SIZE));
+    const page = Math.min(Math.max(0, view.page), pageCount - 1);
+    const start = page * POSITIONS_PAGE_SIZE;
+    const pagePositions = positions.slice(start, start + POSITIONS_PAGE_SIZE);
+    const text = formatPositionsPage(pagePositions, { page, pageCount });
 
     await respondWithMenu(ctx, {
       text,
       parseMode: "HTML",
       keyboard: deps.createKeyboard({
-        index,
-        count: positions.length,
-        dexUrl: buildDexScreenerTokenUrl(position.mint),
+        page,
+        pageCount,
       }),
     });
     await safeAnswerCallbackQuery(ctx);

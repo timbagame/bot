@@ -6,7 +6,7 @@ import {
   type WalletCaptionOptions,
 } from "../utils/wallet-ui";
 import type { WalletPagination } from "../utils/keyboards";
-import type { TokenHolding } from "../services/positions";
+import type { HoldMarkStore } from "../services/hold-marks";
 import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -31,6 +31,7 @@ export type ShowWalletUIDeps = {
       balance: number;
       decimals: number;
       decimalBalance?: number;
+      rawBalance?: string;
     }>;
   }>;
   getWalletPageData?: (
@@ -45,6 +46,7 @@ export type ShowWalletUIDeps = {
       balance: number;
       decimals: number;
       decimalBalance?: number;
+      rawBalance?: string;
     }>;
     page: number;
     pageCount: number;
@@ -57,10 +59,7 @@ export type ShowWalletUIDeps = {
   ) => string;
   createWalletKeyboard: (pagination?: WalletPagination) => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
-  resolvePositionPnl?: (args: {
-    walletAddress: string;
-    holdings: TokenHolding[];
-  }) => Promise<Map<string, number>>;
+  holdMarks?: HoldMarkStore;
 };
 
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
@@ -72,7 +71,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     buildWalletCaption,
     createWalletKeyboard,
     WINNER_VIDEO_ID,
-    resolvePositionPnl,
+    holdMarks,
   } = deps;
 
   const telegramId = await getRequiredTelegramIdForContext(ctx, "wallet display", {
@@ -204,34 +203,9 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
         ? (amount, decimals) => (wallet as any).formatTokenBalance(amount, decimals)
         : undefined,
       fetchPricesUSD,
+      walletAddress: holdMarks ? walletAddress : undefined,
+      holdMarks,
     });
-    if (resolvePositionPnl) {
-      const holdings = tokenBalances
-        .filter((token) => token.mint && token.ticker !== "SOL")
-        .map((token) => {
-          const decimals = token.decimals;
-          const decimalBalance =
-            typeof token.decimalBalance === "number"
-              ? token.decimalBalance
-              : decimals >= 0
-                ? token.balance / 10 ** decimals
-                : token.balance;
-          return {
-            mint: token.mint,
-            ticker: token.ticker,
-            balance: decimalBalance,
-            decimals,
-          };
-        });
-      if (holdings.length > 0) {
-        const pnl = await resolvePositionPnl({ walletAddress, holdings });
-        for (const line of tokenLines) {
-          if (line.mint && pnl.has(line.mint)) {
-            line.pnlPercent = pnl.get(line.mint);
-          }
-        }
-      }
-    }
 
     const pageCount = pageData.pageCount;
     const page = pageData.page;

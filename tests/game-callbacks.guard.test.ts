@@ -55,6 +55,7 @@ describe("Game callback guard", () => {
     expect(botModule.__test_shouldSkipGenericGameCallback("unwrap_confirm")).toBe(true);
     expect(botModule.__test_shouldSkipGenericGameCallback("wallet_positions")).toBe(true);
     expect(botModule.__test_shouldSkipGenericGameCallback("wallet_pos_1")).toBe(true);
+    expect(botModule.__test_shouldSkipGenericGameCallback("wallet_pos_r_1")).toBe(true);
   });
 
   test("continues handling for game callbacks", () => {

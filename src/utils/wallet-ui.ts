@@ -1,5 +1,11 @@
 import { InlineKeyboard, type Context } from "grammy";
-import { copyableHtml, escapeHtml, formatSignedPercent, formatUsdValue } from "./format-amount";
+import {
+  copyableHtml,
+  escapeHtml,
+  formatAmount,
+  formatSignedPercent,
+  formatUsdValue,
+} from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
@@ -13,6 +19,7 @@ import {
   truncateTokenDisplay,
 } from "./token-display";
 import { sortTokensByRecognition } from "./verified-token-registry";
+import { applyHoldMarks, type HoldMarkStore } from "../services/hold-marks";
 
 export { sanitizeTokenSymbol } from "./token-display";
 
@@ -20,6 +27,7 @@ export type TokenDisplayLine = {
   ticker: string;
   mint?: string;
   amount: string;
+  copyAmount?: string;
   usdValue?: string;
   unit?: string;
   pnlPercent?: number;
@@ -30,7 +38,22 @@ export type WalletTokenBalance = {
   ticker: string;
   balance: number;
   decimals: number;
+  rawBalance?: string;
 };
+
+function exactTokenAmount(token: WalletTokenBalance): string {
+  const raw = token.rawBalance?.trim();
+  if (raw && /^-?\d+$/.test(raw)) {
+    return formatAmount(raw, token.decimals, { trim: true });
+  }
+  return formatAmount(token.balance, token.decimals, { trim: true });
+}
+
+function sanitizeCopyableAmount(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "")
+    .trim();
+}
 
 export type BuildWalletTokenLinesParams = {
   solBalanceLamports: number;
@@ -38,6 +61,8 @@ export type BuildWalletTokenLinesParams = {
   formatSolBalance: (lamports: number) => string;
   formatTokenBalance?: (balance: number, decimals: number) => string;
   fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
+  walletAddress?: string;
+  holdMarks?: HoldMarkStore;
 };
 
 export async function buildWalletTokenLines({
@@ -46,6 +71,8 @@ export async function buildWalletTokenLines({
   formatSolBalance,
   formatTokenBalance,
   fetchPricesUSD,
+  walletAddress,
+  holdMarks,
 }: BuildWalletTokenLinesParams): Promise<TokenDisplayLine[]> {
   const filteredBalances = sortTokensByRecognition(
     tokenBalances.filter((token) => {
@@ -69,6 +96,7 @@ export async function buildWalletTokenLines({
   const getPriceFor = (reference: string) => priceRecord?.[reference] ?? 0;
 
   const solFormatted = formatSolBalance(solBalanceLamports);
+  const solExact = formatAmount(solBalanceLamports, 9, { trim: true });
   const solPriceUSD = getPriceFor(WSOL_MINT);
   const solDecimalBalance = solBalanceLamports / LAMPORTS_PER_SOL;
 
@@ -76,6 +104,7 @@ export async function buildWalletTokenLines({
     {
       ticker: "SOL",
       amount: solFormatted,
+      copyAmount: solExact,
       usdValue: solPriceUSD > 0 ? formatUsdValue(solDecimalBalance * solPriceUSD) : undefined,
       unit: "SOL",
     },
@@ -89,6 +118,7 @@ export async function buildWalletTokenLines({
     const formattedAmount = formatTokenBalance
       ? formatTokenBalance(token.balance, token.decimals)
       : String(token.balance / Math.pow(10, token.decimals));
+    const exactAmount = exactTokenAmount(token);
 
     const tokenPriceUSD = getPriceFor(token.mint);
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
@@ -97,6 +127,7 @@ export async function buildWalletTokenLines({
       ticker: token.ticker,
       mint: token.mint,
       amount: formattedAmount,
+      copyAmount: exactAmount,
       usdValue: tokenPriceUSD > 0 ? formatUsdValue(tokenDecimalBalance * tokenPriceUSD) : undefined,
     };
 
@@ -123,6 +154,25 @@ export async function buildWalletTokenLines({
 
   for (const line of otherTokenLines) {
     lines.push(line);
+  }
+
+  if (walletAddress && holdMarks) {
+    const marks = lines
+      .filter((line) => line.mint)
+      .map((line) => ({
+        mint: line.mint!,
+        priceUsd: getPriceFor(line.mint!),
+      }));
+    const percents = applyHoldMarks({
+      walletAddress,
+      marks,
+      store: holdMarks,
+    });
+    for (const line of lines) {
+      if (line.mint && percents.has(line.mint)) {
+        line.pnlPercent = percents.get(line.mint);
+      }
+    }
   }
 
   return lines;
@@ -161,23 +211,18 @@ export function buildWalletCaption(
   const displaySymbols = resolveTokenDisplaySymbols(tokenLines);
 
   for (const [pageIndex, line] of pageLines.entries()) {
-    const parts: string[] = [];
     const absoluteIndex = page * pageSize + pageIndex;
-    parts.push(
-      `${escapeHtml(displaySymbols[absoluteIndex] ?? sanitizeTokenSymbol(line.ticker, line.mint))}:`,
-    );
-
-    const amountLabel = line.unit
-      ? `${copyableHtml(truncateTokenDisplay(line.amount))} ${escapeHtml(line.unit)}`
-      : copyableHtml(truncateTokenDisplay(line.amount));
-    parts.push(amountLabel);
-
-    if (line.usdValue !== undefined) {
-      parts.push(`($${escapeHtml(truncateTokenDisplay(line.usdValue, 32))})`);
+    const symbol = displaySymbols[absoluteIndex] ?? sanitizeTokenSymbol(line.ticker, line.mint);
+    const exact = sanitizeCopyableAmount(line.copyAmount || line.amount);
+    const parts = [`${escapeHtml(symbol)}:`, copyableHtml(exact)];
+    if (line.unit) {
+      parts.push(escapeHtml(line.unit));
     }
-
+    if (line.usdValue !== undefined) {
+      parts.push(escapeHtml(`($${truncateTokenDisplay(line.usdValue, 32)})`));
+    }
     if (line.pnlPercent != null && Number.isFinite(line.pnlPercent)) {
-      parts.push(`· ${escapeHtml(formatSignedPercent(line.pnlPercent))}`);
+      parts.push(escapeHtml(`· ${formatSignedPercent(line.pnlPercent)}`));
     }
 
     const candidate = parts.join(" ");

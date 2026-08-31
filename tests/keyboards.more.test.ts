@@ -112,20 +112,25 @@ describe("keyboards: main and wallet", () => {
   });
 });
 
-test("positions keyboard pages tokens and links DexScreener", () => {
+test("positions keyboard pages tokens without a DexScreener button", () => {
+  const onePage = createPositionsKeyboard({ page: 0, pageCount: 1 });
+  expect(extractCallbacks(onePage)).not.toContain("wallet_pos_1");
+  expect(extractCallbacks(onePage)).toContain("wallet_pos_r_0");
+  expect(extractTexts(onePage)).toContain("🔁 Refresh");
+
   const kb = createPositionsKeyboard({
-    index: 1,
-    count: 3,
-    dexUrl: "https://dexscreener.com/solana/mint",
+    page: 0,
+    pageCount: 2,
   });
   const callbacks = extractCallbacks(kb);
   const texts = extractTexts(kb);
 
-  expect(callbacks).toContain("wallet_pos_0");
-  expect(callbacks).toContain("wallet_pos_2");
+  expect(callbacks).toContain("wallet_pos_1");
+  expect(callbacks).not.toContain("wallet_pos_0");
+  expect(callbacks).toContain("wallet_pos_r_0");
   expect(callbacks).toContain("cmd_swap");
   expect(callbacks).toContain("main_wallet");
-  expect(texts).toContain("DexScreener");
+  expect(texts).not.toContain("DexScreener");
 });
 
 test("back to settings keyboard returns wallet_settings callback", () => {

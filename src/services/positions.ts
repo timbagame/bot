@@ -1,10 +1,11 @@
 import {
+  copyableHtml,
+  formatAmount,
   formatRate,
   formatSignedPercent,
-  formatTokenDisplay,
   formatUsdValue,
 } from "../utils/format-amount";
-import { WSOL_MINT } from "../utils/constants";
+import { WALLET_RPC_CACHE_TTL_MS, WSOL_MINT } from "../utils/constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -15,6 +16,7 @@ export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
 const QUOTE_MINTS = new Set([WSOL_MINT, USDC_MINT, USDT_MINT]);
+const POSITION_SNAPSHOT_TTL_MS = WALLET_RPC_CACHE_TTL_MS;
 
 export type PositionFill = {
   mint: string;
@@ -24,6 +26,21 @@ export type PositionFill = {
   quoteMint: string;
   quoteAmount: number;
   timestamp: number;
+  source?: "cash" | "rotate";
+  groupId?: string;
+};
+
+type LotCost = {
+  costSol: number;
+  costUsdc: number;
+  costUsdt: number;
+};
+
+type TokenLot = LotCost & {
+  ticker: string;
+  qty: number;
+  buyCount: number;
+  sellCount: number;
 };
 
 export type TokenHolding = {
@@ -31,6 +48,7 @@ export type TokenHolding = {
   ticker: string;
   balance: number;
   decimals: number;
+  rawBalance?: string;
 };
 
 export type TokenPosition = {
@@ -38,6 +56,8 @@ export type TokenPosition = {
   ticker: string;
   balance: number;
   trackedBalance: number;
+  decimals: number;
+  rawBalance?: string;
   avgEntrySol: number | null;
   avgEntryUsd: number | null;
   priceUsd: number | null;
@@ -46,9 +66,31 @@ export type TokenPosition = {
   buyCount: number;
   sellCount: number;
   solSpent: number;
+  usdcSpent: number;
+  usdtSpent: number;
 };
 
-export type DecimalResolver = (mint: string, ticker: string) => number;
+export type DecimalResolver = (mint: string, ticker: string) => number | null;
+
+export type PositionSnapshotLoader = {
+  walletAddress: string;
+  getHoldings: () => Promise<TokenHolding[]>;
+  getSwaps: () => SwapStatRecord[];
+  fetchPricesUSD: (mints: string[]) => Promise<Record<string, number>>;
+  knownTokens?: Array<{ mint?: string; token_mint?: string; decimals: number }>;
+};
+
+type PositionWorkCache = {
+  expiresAt: number;
+  fills: PositionFill[];
+  swapFingerprint: string;
+  fillKnownMints: Set<string>;
+  pricesUsd: Record<string, number>;
+  pricedMints: Set<string>;
+};
+
+const positionWorkCache = new Map<string, PositionWorkCache>();
+const pendingPositionWork = new Map<string, Promise<PositionWorkCache>>();
 
 export function isQuoteMint(mint: string): boolean {
   return QUOTE_MINTS.has(mint);
@@ -58,12 +100,15 @@ export function resolveTokenDecimals(
   mint: string,
   ticker: string,
   knownByMint?: ReadonlyMap<string, number>,
-): number {
+): number | null {
+  const known = knownByMint?.get(mint);
+  if (known != null) {
+    return known;
+  }
   return (
-    knownByMint?.get(mint) ??
     getBuiltinTokenMetadataByMint(mint)?.decimals ??
     getBuiltinTokenMetadataByTicker(ticker)?.decimals ??
-    6
+    null
   );
 }
 
@@ -100,21 +145,11 @@ export function rawAmountToNumber(raw: string | undefined, decimals: number): nu
   }
 }
 
-export function quoteAmountToSol(
-  quoteMint: string,
-  quoteAmount: number,
-  solPriceUsd: number,
-): number {
-  if (quoteAmount <= 0) {
+export function quoteAmountToSol(quoteMint: string, quoteAmount: number): number {
+  if (quoteAmount <= 0 || quoteMint !== WSOL_MINT) {
     return 0;
   }
-  if (quoteMint === WSOL_MINT) {
-    return quoteAmount;
-  }
-  if ((quoteMint === USDC_MINT || quoteMint === USDT_MINT) && solPriceUsd > 0) {
-    return quoteAmount / solPriceUsd;
-  }
-  return 0;
+  return quoteAmount;
 }
 
 export function quoteAmountToUsd(
@@ -152,6 +187,9 @@ export function fillsFromSwaps(
 
     const inputDecimals = resolveDecimals(inputMint, swap.input_ticker);
     const outputDecimals = resolveDecimals(outputMint, swap.output_ticker);
+    if (inputDecimals == null || outputDecimals == null) {
+      continue;
+    }
     const amountIn = rawAmountToNumber(swap.amount_in, inputDecimals);
     const amountOut = rawAmountToNumber(swap.amount_out, outputDecimals);
     if (amountIn <= 0 || amountOut <= 0) {
@@ -167,6 +205,7 @@ export function fillsFromSwaps(
         quoteMint: inputMint,
         quoteAmount: amountIn,
         timestamp: swap.timestamp,
+        source: "cash",
       });
       continue;
     }
@@ -180,11 +219,151 @@ export function fillsFromSwaps(
         quoteMint: outputMint,
         quoteAmount: amountOut,
         timestamp: swap.timestamp,
+        source: "cash",
       });
+      continue;
     }
+
+    const groupId = swap.signature || `${swap.timestamp}:${inputMint}:${outputMint}`;
+    fills.push({
+      mint: inputMint,
+      ticker: swap.input_ticker,
+      side: "sell",
+      tokenAmount: amountIn,
+      quoteMint: "",
+      quoteAmount: 0,
+      timestamp: swap.timestamp,
+      source: "rotate",
+      groupId,
+    });
+    fills.push({
+      mint: outputMint,
+      ticker: swap.output_ticker,
+      side: "buy",
+      tokenAmount: amountOut,
+      quoteMint: "",
+      quoteAmount: 0,
+      timestamp: swap.timestamp,
+      source: "rotate",
+      groupId,
+    });
   }
 
   return fills;
+}
+
+function compareFills(left: PositionFill, right: PositionFill): number {
+  if (left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp;
+  }
+  if (left.groupId && left.groupId === right.groupId) {
+    if (left.side !== right.side) {
+      return left.side === "sell" ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+function getOrCreateLot(lots: Map<string, TokenLot>, mint: string, ticker: string): TokenLot {
+  const existing = lots.get(mint);
+  if (existing) {
+    if (ticker) {
+      existing.ticker = ticker;
+    }
+    return existing;
+  }
+  const created: TokenLot = {
+    ticker,
+    qty: 0,
+    costSol: 0,
+    costUsdc: 0,
+    costUsdt: 0,
+    buyCount: 0,
+    sellCount: 0,
+  };
+  lots.set(mint, created);
+  return created;
+}
+
+function lotHasCost(lot: LotCost): boolean {
+  return lot.costSol > 0 || lot.costUsdc > 0 || lot.costUsdt > 0;
+}
+
+function reduceLot(lot: TokenLot, tokenAmount: number): LotCost {
+  const sold = Math.min(tokenAmount, lot.qty);
+  if (lot.qty <= 0 || sold <= 0) {
+    return { costSol: 0, costUsdc: 0, costUsdt: 0 };
+  }
+  const fraction = sold / lot.qty;
+  const costSol = lot.costSol * fraction;
+  const costUsdc = lot.costUsdc * fraction;
+  const costUsdt = lot.costUsdt * fraction;
+  lot.costSol -= costSol;
+  lot.costUsdc -= costUsdc;
+  lot.costUsdt -= costUsdt;
+  lot.qty -= sold;
+  return { costSol, costUsdc, costUsdt };
+}
+
+function addCashCost(lot: TokenLot, quoteMint: string, quoteAmount: number): void {
+  if (quoteAmount <= 0) {
+    return;
+  }
+  if (quoteMint === WSOL_MINT) {
+    lot.costSol += quoteAmount;
+    return;
+  }
+  if (quoteMint === USDC_MINT) {
+    lot.costUsdc += quoteAmount;
+    return;
+  }
+  if (quoteMint === USDT_MINT) {
+    lot.costUsdt += quoteAmount;
+  }
+}
+
+export function applyFillsToLots(fills: PositionFill[]): Map<string, TokenLot> {
+  const lots = new Map<string, TokenLot>();
+  const rotatedCost = new Map<string, LotCost>();
+
+  for (const fill of [...fills].sort(compareFills)) {
+    const lot = getOrCreateLot(lots, fill.mint, fill.ticker);
+    const source = fill.source ?? "cash";
+
+    if (source === "rotate" && fill.side === "sell") {
+      const moved = reduceLot(lot, fill.tokenAmount);
+      if (fill.groupId) {
+        rotatedCost.set(fill.groupId, moved);
+      }
+      lot.sellCount += 1;
+      continue;
+    }
+
+    if (source === "rotate" && fill.side === "buy") {
+      const moved = (fill.groupId ? rotatedCost.get(fill.groupId) : undefined) ?? {
+        costSol: 0,
+        costUsdc: 0,
+        costUsdt: 0,
+      };
+      lot.qty += fill.tokenAmount;
+      lot.costSol += moved.costSol;
+      lot.costUsdc += moved.costUsdc;
+      lot.costUsdt += moved.costUsdt;
+      continue;
+    }
+
+    if (fill.side === "buy") {
+      lot.qty += fill.tokenAmount;
+      addCashCost(lot, fill.quoteMint, fill.quoteAmount);
+      lot.buyCount += 1;
+      continue;
+    }
+
+    reduceLot(lot, fill.tokenAmount);
+    lot.sellCount += 1;
+  }
+
+  return lots;
 }
 
 export function buildTokenPositions(args: {
@@ -193,14 +372,7 @@ export function buildTokenPositions(args: {
   pricesUsd: Record<string, number>;
 }): TokenPosition[] {
   const solPriceUsd = args.pricesUsd[WSOL_MINT] ?? 0;
-  const fillsByMint = new Map<string, PositionFill[]>();
-
-  for (const fill of args.fills) {
-    const list = fillsByMint.get(fill.mint) ?? [];
-    list.push(fill);
-    fillsByMint.set(fill.mint, list);
-  }
-
+  const lots = applyFillsToLots(args.fills);
   const positions: TokenPosition[] = [];
 
   for (const holding of args.holdings) {
@@ -208,48 +380,17 @@ export function buildTokenPositions(args: {
       continue;
     }
 
-    const fills = fillsByMint.get(holding.mint) ?? [];
-    let qty = 0;
-    let costSol = 0;
-    let costUsd = 0;
-    let solSpent = 0;
-    let buyCount = 0;
-    let sellCount = 0;
-
-    for (const fill of fills) {
-      const quoteSol = quoteAmountToSol(fill.quoteMint, fill.quoteAmount, solPriceUsd);
-      const quoteUsd = quoteAmountToUsd(fill.quoteMint, fill.quoteAmount, solPriceUsd);
-      if (fill.side === "buy") {
-        qty += fill.tokenAmount;
-        costSol += quoteSol;
-        costUsd += quoteUsd;
-        solSpent += quoteSol;
-        buyCount += 1;
-        continue;
-      }
-
-      const sold = Math.min(fill.tokenAmount, qty);
-      if (qty > 0 && sold > 0) {
-        const remaining = (qty - sold) / qty;
-        costSol *= remaining;
-        costUsd *= remaining;
-        qty -= sold;
-      }
-      sellCount += 1;
-    }
-
-    if (buyCount === 0 || qty <= 0 || (costSol <= 0 && costUsd <= 0)) {
+    const lot = lots.get(holding.mint);
+    if (!lot || lot.qty <= 0 || !lotHasCost(lot)) {
       continue;
     }
 
+    const { qty, costSol, costUsdc, costUsdt, buyCount, sellCount } = lot;
+    const costUsd = costUsdc + costUsdt;
+    const markedUsd = costUsd + (solPriceUsd > 0 ? costSol * solPriceUsd : 0);
     const avgEntrySol = costSol > 0 ? costSol / qty : null;
     const priceUsd = args.pricesUsd[holding.mint] ?? 0;
-    const avgEntryUsd =
-      costUsd > 0
-        ? costUsd / qty
-        : avgEntrySol != null && solPriceUsd > 0
-          ? avgEntrySol * solPriceUsd
-          : null;
+    const avgEntryUsd = markedUsd > 0 ? markedUsd / qty : null;
     const pnlPercent =
       avgEntryUsd != null && avgEntryUsd > 0 && priceUsd > 0
         ? (priceUsd - avgEntryUsd) / avgEntryUsd
@@ -260,9 +401,11 @@ export function buildTokenPositions(args: {
 
     positions.push({
       mint: holding.mint,
-      ticker: holding.ticker,
+      ticker: holding.ticker || lot.ticker,
       balance: holding.balance,
       trackedBalance: qty,
+      decimals: holding.decimals,
+      rawBalance: holding.rawBalance,
       avgEntrySol,
       avgEntryUsd,
       priceUsd: priceUsd > 0 ? priceUsd : null,
@@ -270,11 +413,34 @@ export function buildTokenPositions(args: {
       unrealizedUsd,
       buyCount,
       sellCount,
-      solSpent,
+      solSpent: costSol,
+      usdcSpent: costUsdc,
+      usdtSpent: costUsdt,
     });
   }
 
-  return positions;
+  return sortTokenPositions(positions);
+}
+
+export function positionUsdValue(position: TokenPosition): number {
+  if (position.priceUsd == null || position.priceUsd <= 0 || position.balance <= 0) {
+    return 0;
+  }
+  return position.balance * position.priceUsd;
+}
+
+export function sortTokenPositions(positions: TokenPosition[]): TokenPosition[] {
+  return [...positions].sort((left, right) => {
+    const valueDiff = positionUsdValue(right) - positionUsdValue(left);
+    if (valueDiff !== 0) {
+      return valueDiff;
+    }
+    const pnlDiff = Math.abs(right.pnlPercent ?? 0) - Math.abs(left.pnlPercent ?? 0);
+    if (pnlDiff !== 0) {
+      return pnlDiff;
+    }
+    return left.ticker.localeCompare(right.ticker);
+  });
 }
 
 export { formatSignedPercent };
@@ -283,23 +449,62 @@ export function buildDexScreenerTokenUrl(mint: string): string {
   return `https://dexscreener.com/solana/${encodeURIComponent(mint)}`;
 }
 
-export function formatSolSpent(sol: number): string {
-  if (!Number.isFinite(sol) || sol <= 0) {
-    return "0 SOL";
+function formatQuoteSpent(amount: number, ticker: string): string | null {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
   }
-  const text = sol.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-  return `${text} SOL`;
+  const text = amount.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return `${text} ${ticker}`;
 }
 
-export function formatPositionMessage(
-  position: TokenPosition,
-  options: { index: number; count: number },
-): string {
-  const title =
-    options.count > 1
-      ? `📊 ${position.ticker} · ${options.index + 1}/${options.count}`
-      : `📊 ${position.ticker}`;
-  const price = position.priceUsd != null ? `$${formatRate(position.priceUsd)}` : "—";
+export function formatSolSpent(sol: number): string {
+  return formatQuoteSpent(sol, "SOL") ?? "0 SOL";
+}
+
+export function formatPositionSpent(position: {
+  solSpent?: number;
+  usdcSpent?: number;
+  usdtSpent?: number;
+}): string {
+  const parts = [
+    formatQuoteSpent(position.solSpent ?? 0, "SOL"),
+    formatQuoteSpent(position.usdcSpent ?? 0, "USDC"),
+    formatQuoteSpent(position.usdtSpent ?? 0, "USDT"),
+  ].filter((part): part is string => part != null);
+  return parts.length > 0 ? parts.join(" + ") : "—";
+}
+
+function formatExactTokenAmount(value: number, decimals: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  const places = Math.min(Math.max(0, Math.trunc(decimals)), 18);
+  return value.toFixed(places).replace(/0+$/, "").replace(/\.$/, "") || "0";
+}
+
+function formatPositionBag(position: TokenPosition): string {
+  const raw = position.rawBalance?.trim();
+  const decimals = position.decimals;
+  if (raw && /^-?\d+$/.test(raw) && Number.isInteger(decimals) && decimals >= 0) {
+    return formatAmount(raw, decimals, { trim: true });
+  }
+  if (Number.isInteger(decimals) && decimals >= 0) {
+    return formatExactTokenAmount(position.balance, decimals);
+  }
+  return formatExactTokenAmount(position.balance, 18);
+}
+
+function formatPositionTracked(position: TokenPosition): string {
+  const decimals = Number.isInteger(position.decimals) ? position.decimals : 18;
+  return formatExactTokenAmount(position.trackedBalance, decimals);
+}
+
+export const POSITIONS_PAGE_SIZE = 3;
+
+export function formatPositionMessage(position: TokenPosition): string {
+  const dexLink = `<a href="${buildDexScreenerTokenUrl(position.mint)}">📈</a>`;
+  const title = `📊 ${position.ticker} ${dexLink}`;
+  const mark = position.priceUsd != null ? `$${formatRate(position.priceUsd)}` : "—";
   const avgEntry = position.avgEntryUsd != null ? `$${formatRate(position.avgEntryUsd)}` : "—";
   const valueUsd =
     position.priceUsd != null && position.balance > 0
@@ -313,26 +518,62 @@ export function formatPositionMessage(
             ? ` (${position.unrealizedUsd >= 0 ? "+" : "-"}$${formatUsdValue(Math.abs(position.unrealizedUsd))})`
             : ""
         }${position.pnlPercent > 0 ? " 🟢" : position.pnlPercent < 0 ? " 🟥" : ""}`;
-  const buys = `${formatSolSpent(position.solSpent)} · ${position.buyCount} buy${
-    position.buyCount === 1 ? "" : "s"
-  }`;
+  const spent =
+    position.buyCount > 0
+      ? `${formatPositionSpent(position)} · ${position.buyCount} buy${
+          position.buyCount === 1 ? "" : "s"
+        }`
+      : formatPositionSpent(position);
 
   const lines = [
     title,
     "",
     `<code>${position.mint}</code> (Tap to copy)`,
     "",
-    `Price: ${price}`,
+    `Mark: ${mark}`,
     `Avg entry: ${avgEntry}`,
-    `Balance: ${formatTokenDisplay(position.balance)}${valueUsd}`,
+    `Balance: ${copyableHtml(formatPositionBag(position))}${valueUsd}`,
   ];
 
-  if (position.trackedBalance > 0 && position.trackedBalance < position.balance * 0.99) {
-    lines.push(`Bot lot: ${formatTokenDisplay(position.trackedBalance)}`);
+  const pnlScope = formatUnrealizedScopeLine(position);
+  if (pnlScope) {
+    lines.push(pnlScope);
   }
 
-  lines.push("", `Unrealized: ${pnl}`, `Spent: ${buys}`);
+  lines.push("", `Unrealized: ${pnl}`, `Spent: ${spent}`);
   return lines.join("\n");
+}
+
+export function formatUnrealizedScopeLine(position: TokenPosition): string | null {
+  const tracked = position.trackedBalance;
+  const balance = position.balance;
+  if (!(tracked > 0 && Number.isFinite(tracked))) {
+    return null;
+  }
+
+  const swapQty = formatPositionTracked(position);
+  if (!(tracked < balance * 0.99)) {
+    return null;
+  }
+
+  const swapUsd =
+    position.priceUsd != null && position.priceUsd > 0
+      ? ` ($${formatUsdValue(tracked * position.priceUsd)})`
+      : "";
+  return `on ${swapQty}${swapUsd}`;
+}
+
+export function formatPositionsPage(
+  positions: TokenPosition[],
+  options: { page?: number; pageCount?: number } = {},
+): string {
+  const cards = positions.map((position) => formatPositionMessage(position));
+  const pageCount = options.pageCount ?? 1;
+  const page = options.page ?? 0;
+  if (pageCount > 1) {
+    return [`📊 Positions · ${page + 1}/${pageCount}`, "", cards.join("\n\n")].join("\n");
+  }
+  return cards.join("\n\n");
 }
 
 export function pnlByMint(positions: TokenPosition[]): Map<string, number> {
@@ -343,4 +584,148 @@ export function pnlByMint(positions: TokenPosition[]): Map<string, number> {
     }
   }
   return map;
+}
+
+function mergePricedMints(
+  pricesUsd: Record<string, number>,
+  pricedMints: Set<string>,
+  fetched: Record<string, number>,
+  missingPrices: string[],
+): void {
+  for (const mint of missingPrices) {
+    const price = fetched[mint];
+    if (price && Number.isFinite(price) && price > 0) {
+      pricesUsd[mint] = price;
+      pricedMints.add(mint);
+    }
+  }
+}
+
+function fingerprintSwaps(swaps: SwapStatRecord[]): string {
+  if (swaps.length === 0) {
+    return "0";
+  }
+  const first = swaps[0];
+  const last = swaps[swaps.length - 1];
+  return `${swaps.length}:${first?.signature ?? ""}:${last?.signature ?? ""}:${last?.timestamp ?? 0}`;
+}
+
+function collectKnownMints(
+  knownTokens: Array<{ mint?: string; token_mint?: string; decimals: number }> | undefined,
+  holdings: TokenHolding[],
+): Set<string> {
+  const mints = new Set<string>();
+  for (const token of knownTokens ?? []) {
+    const mint = token.mint ?? token.token_mint;
+    if (mint) {
+      mints.add(mint);
+    }
+  }
+  for (const holding of holdings) {
+    if (holding.mint) {
+      mints.add(holding.mint);
+    }
+  }
+  return mints;
+}
+
+function knownMintsGrew(previous: Set<string>, next: Set<string>): boolean {
+  for (const mint of next) {
+    if (!previous.has(mint)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildFillsForHoldings(
+  swaps: SwapStatRecord[],
+  knownTokens: Array<{ mint?: string; token_mint?: string; decimals: number }> | undefined,
+  holdings: TokenHolding[],
+): PositionFill[] {
+  return fillsFromSwaps(swaps, createDecimalResolver([...(knownTokens ?? []), ...holdings]));
+}
+
+async function resolvePositionWork(
+  args: PositionSnapshotLoader,
+  holdings: TokenHolding[],
+  swaps: SwapStatRecord[],
+): Promise<PositionWorkCache> {
+  const swapFingerprint = fingerprintSwaps(swaps);
+  const fillKnownMints = collectKnownMints(args.knownTokens, holdings);
+  const neededPrices = [...new Set([WSOL_MINT, ...holdings.map((holding) => holding.mint)])];
+  const cached = positionWorkCache.get(args.walletAddress);
+  const now = Date.now();
+  const cacheFresh = Boolean(cached && cached.expiresAt > now);
+
+  let fills = cached?.fills;
+  if (
+    !cacheFresh ||
+    !cached ||
+    cached.swapFingerprint !== swapFingerprint ||
+    !fills ||
+    knownMintsGrew(cached.fillKnownMints, fillKnownMints)
+  ) {
+    fills = buildFillsForHoldings(swaps, args.knownTokens, holdings);
+  }
+
+  const pricesUsd = { ...(cacheFresh && cached ? cached.pricesUsd : {}) };
+  const pricedMints = new Set(cacheFresh && cached ? cached.pricedMints : []);
+  const missingPrices = neededPrices.filter((mint) => !pricedMints.has(mint));
+  if (missingPrices.length > 0) {
+    mergePricedMints(pricesUsd, pricedMints, await args.fetchPricesUSD(missingPrices), missingPrices);
+  }
+
+  const next: PositionWorkCache = {
+    expiresAt: now + POSITION_SNAPSHOT_TTL_MS,
+    fills,
+    swapFingerprint,
+    fillKnownMints: cacheFresh && cached ? new Set([...cached.fillKnownMints, ...fillKnownMints]) : fillKnownMints,
+    pricesUsd,
+    pricedMints,
+  };
+  positionWorkCache.set(args.walletAddress, next);
+  return next;
+}
+
+export function clearPositionSnapshot(walletAddress?: string): void {
+  if (walletAddress) {
+    positionWorkCache.delete(walletAddress);
+    pendingPositionWork.delete(walletAddress);
+    return;
+  }
+  positionWorkCache.clear();
+  pendingPositionWork.clear();
+}
+
+export async function loadTokenPositionsForWallet(
+  args: PositionSnapshotLoader,
+): Promise<TokenPosition[]> {
+  const holdings = await args.getHoldings();
+  const swaps = args.getSwaps();
+  const cacheKey = args.walletAddress;
+  const pending = pendingPositionWork.get(cacheKey);
+  if (pending) {
+    const work = await pending;
+    const neededPrices = [...new Set([WSOL_MINT, ...holdings.map((holding) => holding.mint)])];
+    const missingPrices = neededPrices.filter((mint) => !work.pricedMints.has(mint));
+    if (missingPrices.length > 0) {
+      mergePricedMints(
+        work.pricesUsd,
+        work.pricedMints,
+        await args.fetchPricesUSD(missingPrices),
+        missingPrices,
+      );
+    }
+    return buildTokenPositions({ fills: work.fills, holdings, pricesUsd: work.pricesUsd });
+  }
+
+  const workPromise = resolvePositionWork(args, holdings, swaps);
+  pendingPositionWork.set(cacheKey, workPromise);
+  try {
+    const work = await workPromise;
+    return buildTokenPositions({ fills: work.fills, holdings, pricesUsd: work.pricesUsd });
+  } finally {
+    pendingPositionWork.delete(cacheKey);
+  }
 }
