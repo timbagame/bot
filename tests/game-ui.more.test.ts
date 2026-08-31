@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { buildGameHeader, buildPrizeLine, buildParticipantsList } from "../src/utils/game-ui";
+import {
+  buildGameHeader,
+  buildPrizeLine,
+  buildParticipantsList,
+  buildWinnerPrizeDetails,
+} from "../src/utils/game-ui";
 
 test("buildGameHeader formats header line", () => {
   const header = buildGameHeader("🪙 Coinflip", "10.000000", "TIMBA", "@user", 1, 2);
@@ -38,6 +43,22 @@ test("buildPrizeLine shows only when flag true", () => {
 test("buildPrizeLine appends USD approximation when provided", () => {
   const shown = buildPrizeLine(true, "20.000000", "TIMBA", "$5.0");
   expect(shown).toContain("Current Prize: 20 TIMBA ($5.0)");
+});
+
+test("buildWinnerPrizeDetails wraps the prize amount for tap-to-copy", () => {
+  expect(buildWinnerPrizeDetails("50068", "TIMBA", "$0.28")).toBe(
+    " Prize: <code>50068</code> TIMBA ($0.28)",
+  );
+});
+
+test("buildWinnerPrizeDetails omits ticker and USD when they are missing", () => {
+  expect(buildWinnerPrizeDetails("1.000")).toBe(" Prize: <code>1.000</code>");
+});
+
+test("buildWinnerPrizeDetails escapes ticker and USD without a tap-to-copy hint", () => {
+  const details = buildWinnerPrizeDetails("1.000", "SOL<script>", '$150"');
+  expect(details).toBe(" Prize: <code>1.000</code> SOL&lt;script&gt; ($150&quot;)");
+  expect(details).not.toContain("Tap to copy");
 });
 
 test("buildGameHeader escapes ticker markup", () => {

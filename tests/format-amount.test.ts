@@ -1,11 +1,18 @@
 import { test, expect } from "bun:test";
 import {
+  copyableHtml,
   formatAmount,
   formatCompactTokenDisplay,
   formatRate,
   formatTokenDisplay,
   formatUsdValue,
 } from "../src/utils/format-amount";
+
+test("copyableHtml wraps escaped text in a Telegram tap-to-copy code tag", () => {
+  expect(copyableHtml("4.006348202")).toBe("<code>4.006348202</code>");
+  expect(copyableHtml('5 & <x> "y"')).toBe("<code>5 &amp; &lt;x&gt; &quot;y&quot;</code>");
+  expect(copyableHtml(undefined)).toBe("<code></code>");
+});
 
 test("formatAmount formats basic integer", () => {
   expect(formatAmount(123456, 5)).toBe("1.23456");

@@ -29,6 +29,10 @@ export function escapeHtml(value: unknown): string {
   return str.replace(/[&<>"]/g, (char) => HTML_ESCAPE_LOOKUP[char] ?? char);
 }
 
+export function copyableHtml(value: unknown): string {
+  return `<code>${escapeHtml(value)}</code>`;
+}
+
 function toBigIntString(value: number | string | bigint): { sign: string; digits: string } {
   if (typeof value === "bigint") {
     const sign = value < 0n ? "-" : "";

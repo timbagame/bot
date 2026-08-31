@@ -20,7 +20,7 @@ describe("wallet UI security", () => {
     expect(caption).not.toContain(maliciousTicker);
     expect(caption).not.toContain(maliciousAmount);
     expect(caption).toContain("&lt;script&gt;a…:");
-    expect(caption).toContain("&lt;b&gt;999&lt;/b&gt;");
+    expect(caption).toContain("<code>&lt;b&gt;999&lt;/b&gt;</code>");
     expect(caption).toContain("&lt;/img&gt;");
     expect(caption).toContain("&lt;/span&gt;");
     expect(caption).toContain("FakeAddressWith&lt;tags&gt;");

@@ -85,7 +85,11 @@ import {
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
 import { formatAmount, escapeHtml, formatRate, formatUsdValue } from "./utils/format-amount";
-import { buildPlayerProfileLink, formatPlayerAddress } from "./utils/game-ui";
+import {
+  buildPlayerProfileLink,
+  buildWinnerPrizeDetails,
+  formatPlayerAddress,
+} from "./utils/game-ui";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
@@ -2151,12 +2155,11 @@ const processGameCompletion = async (
             gameData?.token_mint ?? undefined,
           );
           if (prizeInfo) {
-            const tickerSegment = prizeInfo.tokenTicker ? ` ${prizeInfo.tokenTicker}` : "";
-            const usdSegment = prizeInfo.usdApproximation ? ` (${prizeInfo.usdApproximation})` : "";
-            prizeDetails =
-              ` Prize: ${escapeHtml(prizeInfo.formattedAmount)}` +
-              `${escapeHtml(tickerSegment)}` +
-              `${escapeHtml(usdSegment)}`;
+            prizeDetails = buildWinnerPrizeDetails(
+              prizeInfo.formattedAmount,
+              prizeInfo.tokenTicker,
+              prizeInfo.usdApproximation,
+            );
           }
         }
         const safeWinnerDisplay =

@@ -1,4 +1,4 @@
-import { escapeHtml, formatCompactTokenDisplay } from "./format-amount";
+import { copyableHtml, escapeHtml, formatCompactTokenDisplay } from "./format-amount";
 import { formatDuration } from "./format-time";
 
 export function formatPlayerAddress(address: string): string {
@@ -72,6 +72,20 @@ export function buildPrizeLine(
   const prizeDisplay = escapeHtml(formatCompactTokenDisplay(totalFormatted));
   const safeTicker = escapeHtml(tokenTicker);
   return `\nCurrent Prize: ${prizeDisplay} ${safeTicker}${usdSegment}\n`;
+}
+
+/**
+ * Winner announcement prize suffix. The amount is wrapped for Telegram tap-to-copy
+ * without adding a visible hint.
+ */
+export function buildWinnerPrizeDetails(
+  formattedAmount: string,
+  tokenTicker?: string | null,
+  usdApproximation?: string | null,
+): string {
+  const tickerSegment = tokenTicker ? ` ${tokenTicker}` : "";
+  const usdSegment = usdApproximation ? ` (${usdApproximation})` : "";
+  return ` Prize: ${copyableHtml(formattedAmount)}${escapeHtml(tickerSegment)}${escapeHtml(usdSegment)}`;
 }
 
 /**
