@@ -108,6 +108,57 @@ test("publisher watches only enabled-chat mints and can send a test", async () =
   expect(sent[0]?.text).toContain("New Holder!");
 });
 
+test("publisher attaches a Buy deep link for the mint", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-1, { enabled: true });
+
+  const sent: Array<{ url?: string; button?: string }> = [];
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (_chatId, _text, _media, keyboard) => {
+      const button = keyboard?.inline_keyboard?.[0]?.[0];
+      sent.push({
+        url: button && "url" in button ? button.url : undefined,
+        button: button?.text,
+      });
+    },
+    fetchPairStats: async () => null,
+    getBotUsername: () => "playtimbabot",
+  });
+
+  await publisher.publish(event({ signature: "buy-button" }));
+  expect(sent).toEqual([
+    {
+      url: `https://t.me/playtimbabot?start=ba_${TIMBA_MINT}`,
+      button: "BUY TIMBA",
+    },
+  ]);
+});
+
+test("publisher falls back to a callback Buy button without a bot username", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-1, { enabled: true });
+
+  const sent: Array<{ data?: string; url?: string; button?: string }> = [];
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (_chatId, _text, _media, keyboard) => {
+      const button = keyboard?.inline_keyboard?.[0]?.[0];
+      sent.push({
+        data: button && "callback_data" in button ? button.callback_data : undefined,
+        url: button && "url" in button ? button.url : undefined,
+        button: button?.text,
+      });
+    },
+    fetchPairStats: async () => null,
+  });
+
+  await publisher.publish(event({ signature: "buy-callback-fallback" }));
+  expect(sent).toEqual([{ data: `buy_alert_${TIMBA_MINT}`, url: undefined, button: "BUY TIMBA" }]);
+});
+
 test("publisher attaches configured chat media", async () => {
   const chatDb = ChatDatabase.getInstance();
   chatDb.upsertChatBuyAlerts(-5, {

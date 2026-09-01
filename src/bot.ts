@@ -137,6 +137,8 @@ import { createChatDefaultsModule, isChatDefaultsMediaSetting } from "./handlers
 import { createBuyAlertService } from "./services/buy-alerts";
 import { buyEventFromSwap } from "./services/buy-alerts/swap-event";
 import { detectNewHolder } from "./services/buy-alerts/holder";
+import { BUY_ALERT_CALLBACK_PREFIX, parseBuyAlertStartText } from "./services/buy-alerts/keyboard";
+import { handleBuyAlertBuy, handleBuyAlertDeepLink } from "./handlers/buy-alert-buy";
 import { getPricesUSD } from "./utils/prices";
 import {
   createWalletMenuModule,
@@ -3011,10 +3013,14 @@ const replyToMessage = async (
   });
 };
 
+export const __test_getBuyAlertBotUsername = (
+  targetBot: Pick<Bot, "isInited" | "botInfo"> = bot,
+): string | undefined => (targetBot.isInited() ? targetBot.botInfo.username : undefined);
+
 const buyAlertService = createBuyAlertService({
   chatDb,
   getTokenManager: () => tokenManager,
-  sendHtml: async (chatId, text, media) => {
+  sendHtml: async (chatId, text, media, keyboard) => {
     await sendMediaWithFallback({
       videoFileId: media?.fileId ?? null,
       logLabel: "buy alert",
@@ -3022,10 +3028,15 @@ const buyAlertService = createBuyAlertService({
         bot.api.sendMessage(chatId, text, {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
+          reply_markup: keyboard,
         }),
       sendVideo: media
         ? async () => {
-            const options = { caption: text, parse_mode: "HTML" as const };
+            const options = {
+              caption: text,
+              parse_mode: "HTML" as const,
+              reply_markup: keyboard,
+            };
             if (media.mediaType === "photo") {
               return bot.api.sendPhoto(chatId, media.fileId, options);
             }
@@ -3042,6 +3053,7 @@ const buyAlertService = createBuyAlertService({
     return prices[WSOL_MINT] ?? null;
   },
   resolveNewHolder: (event) => detectNewHolder(wallet.getConnection(), event),
+  getBotUsername: __test_getBuyAlertBotUsername,
 });
 
 const chatDefaultsModule = createChatDefaultsModule({
@@ -3440,6 +3452,20 @@ registerCaseInsensitiveCommand(
 )(async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
+  }
+
+  const buyMint = parseBuyAlertStartText(ctx.message?.text);
+  if (buyMint && ctx.chat?.type === "private") {
+    await handleBuyAlertDeepLink(buyMint, {
+      resolveSwapToken: (mint) => tokenManager.resolveSwapToken(mint),
+      openSwap: async (args) => {
+        await openBuyAlertSwapUi(ctx, args);
+      },
+      replyError: async (text) => {
+        await ctx.reply(text);
+      },
+    });
+    return;
   }
 
   await onBalance(ctx as any, createBalanceDeps());
@@ -5708,6 +5734,58 @@ const showSwapAmountSelection = async (
     keyboard,
   });
 };
+
+const openBuyAlertSwapUi = async (
+  ctx: any,
+  args: { mint: string; ticker: string; decimals: number },
+) => {
+  const tokenSymbol = args.ticker.toUpperCase();
+  const tokenCacheId = createTokenLookupId();
+  transactionCache.setWithTTL(tokenCacheId, {
+    targetToken: tokenSymbol,
+    targetTokenAddress: args.mint,
+    paymentToken: "SOL",
+    tokenMetadata: {
+      symbol: tokenSymbol,
+      decimals: args.decimals,
+      verified: true,
+    },
+  });
+
+  await showSwapAmountSelection(ctx, "SOL", escapeHtml(tokenSymbol), {
+    toTokenIdentifier: tokenCacheId,
+  });
+};
+
+bot.callbackQuery(
+  new RegExp(`^${BUY_ALERT_CALLBACK_PREFIX}`),
+  wrapCallbackHandler(
+    async (ctx: Context) => {
+      await handleBuyAlertBuy(ctx, {
+        resolveSwapToken: (mint) => tokenManager.resolveSwapToken(mint),
+        openPrivateSwap: async ({ userId, ...args }) => {
+          const dmCtx = {
+            from: { id: userId },
+            chat: { id: userId, type: "private" as const },
+            api: bot.api,
+            reply: (text: string, extra?: Record<string, unknown>) =>
+              bot.api.sendMessage(userId, text, extra as never),
+          };
+
+          await openBuyAlertSwapUi(dmCtx, args);
+        },
+        ack: async (callbackCtx, text, showAlert) => {
+          if (!text) {
+            await callbackCtx.answerCallbackQuery();
+            return;
+          }
+          await callbackCtx.answerCallbackQuery({ text, show_alert: showAlert === true });
+        },
+      });
+    },
+    { action: "buy alert swap", errorAck: "Couldn't open Swap" },
+  ),
+);
 
 /**
  * Show swap quote and confirmation

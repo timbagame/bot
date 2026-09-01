@@ -1,8 +1,10 @@
+import type { InlineKeyboard } from "grammy";
 import { LAMPORTS_PER_SOL, CHAT_MEDIA_DISABLED_SENTINEL } from "../../utils/constants";
 import type { ChatBuyAlertConfig } from "../../types";
 import type { ChatDatabase } from "../../utils/chat-database";
 import { fetchDexScreenerPairStats } from "./dexscreener";
 import { formatBuyAlertMessage } from "./formatter";
+import { createBuyAlertKeyboard } from "./keyboard";
 import { resolveBuyAlertToken } from "./resolve";
 import type { BuyEvent, BuyFeed, PairStats } from "./types";
 
@@ -26,12 +28,18 @@ export type BuyAlertTokenSource = {
 export type BuyAlertPublisherDeps = {
   chatDb: ChatDatabase;
   tokenManager: BuyAlertTokenSource;
-  sendHtml: (chatId: number, text: string, media?: BuyAlertMedia | null) => Promise<void>;
+  sendHtml: (
+    chatId: number,
+    text: string,
+    media?: BuyAlertMedia | null,
+    keyboard?: InlineKeyboard,
+  ) => Promise<void>;
   fetchPairStats?: (mint: string) => Promise<PairStats | null>;
   fetchSolPriceUsd?: () => Promise<number | null>;
   resolveNewHolder?: (event: BuyEvent) => Promise<boolean | null>;
   now?: () => number;
   maxAlertsPerMinute?: number;
+  getBotUsername?: () => string | undefined;
 };
 
 export type PublishResult = {
@@ -139,7 +147,12 @@ export function createBuyAlertPublisher(deps: BuyAlertPublisherDeps) {
       solPriceUsd,
     });
     try {
-      await deps.sendHtml(chatId, text, resolveMedia(chatId));
+      await deps.sendHtml(
+        chatId,
+        text,
+        resolveMedia(chatId),
+        createBuyAlertKeyboard(event.mint, token.ticker, deps.getBotUsername?.()),
+      );
       return true;
     } catch (error) {
       console.error(`Failed to send buy alert to chat ${chatId}:`, error);

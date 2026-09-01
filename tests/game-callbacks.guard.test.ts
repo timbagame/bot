@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { Bot } from "grammy";
 
 let botModule: typeof import("../src/bot");
 const originalEnv = {
@@ -67,5 +68,20 @@ describe("Game callback guard", () => {
   test("skips pagination callbacks", () => {
     expect(botModule.__test_shouldSkipGenericGameCallback("active_page:1")).toBe(true);
     expect(botModule.__test_shouldSkipGenericGameCallback("public_page:2")).toBe(true);
+  });
+
+  test("skips buy-alert swap callbacks", () => {
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback(
+        "buy_alert_F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      ),
+    ).toBe(true);
+  });
+
+  test("reads the buy-alert bot username safely before bot initialization", () => {
+    const uninitializedBot = new Bot("test-token");
+
+    expect(uninitializedBot.isInited()).toBe(false);
+    expect(botModule.__test_getBuyAlertBotUsername(uninitializedBot)).toBeUndefined();
   });
 });
