@@ -882,9 +882,6 @@ export class WalletManager {
         knownTokens,
         knownTokensMap,
       );
-      for (const plan of ataLookup.values()) {
-        scannedMints.add(plan.mint);
-      }
       const ataResult = await this.loadKnownTokenAccounts(ataLookup, seenAccounts);
       ataResult.metadataPrefetchMints.forEach((mint) => metadataPrefetchMints.add(mint));
       parsedAccounts.push(...ataResult.accounts);

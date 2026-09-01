@@ -7,7 +7,7 @@ import {
   AccountState,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { WalletManager } from "../src/utils/wallet";
+import { WalletManager, type WalletTokenCensus } from "../src/utils/wallet";
 import type { TokenDatabase } from "../src/utils/token-database";
 import { TOKEN_DISCOVERY_COOLDOWN_MS } from "../src/utils/constants";
 
@@ -370,6 +370,63 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
 
     expect(persisted).toEqual([[splMint.toBase58(), TOKEN_PROGRAM_ID.toBase58()]]);
     expect(known[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
+  });
+
+  test("an ATA-only refresh does not claim that a mint was fully scanned", async () => {
+    const connection = new ConnParsed();
+    const now = 1_000;
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      {
+        connection: connection as any,
+        fetch: globalThis.fetch as any,
+        timeNow: () => now,
+      },
+    );
+    const owner = wm.getPublicKey(1n);
+    connection.setOwner(owner);
+
+    const heldAtaMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const auxiliaryOnlyMint = new PublicKey("4Nd1mFatW4Kfo7oyi7T5C5x64K8jKe3SWP7WRHnS8svB");
+    await connection.seedTokenAccount({
+      mint: heldAtaMint,
+      programId: TOKEN_PROGRAM_ID,
+      amount: 1_000n,
+      decimals: 6,
+    });
+    (wm as any).lastTokenDiscoveryByUser.set("1", now);
+    (wm as any).getFullTokenMetadata = async () => ({ decimals: 6, symbol: "TOKEN" });
+
+    let census: WalletTokenCensus | undefined;
+    await wm.getAllWalletTokenBalances(
+      1n,
+      [
+        {
+          token_mint: heldAtaMint.toBase58(),
+          token_ticker: "HELD",
+          decimals: 6,
+          token_program_id: TOKEN_PROGRAM_ID.toBase58(),
+        },
+        {
+          token_mint: auxiliaryOnlyMint.toBase58(),
+          token_ticker: "AUX",
+          decimals: 6,
+          token_program_id: TOKEN_PROGRAM_ID.toBase58(),
+        },
+      ],
+      {
+        forceFresh: true,
+        onCensus: (value) => {
+          census = value;
+        },
+      },
+    );
+
+    expect(census).toEqual({
+      complete: false,
+      heldMints: [heldAtaMint.toBase58()],
+      scannedMints: [],
+    });
   });
 
   test("token discovery respects cooldown when accounts already known", async () => {

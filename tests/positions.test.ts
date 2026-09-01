@@ -216,6 +216,45 @@ test("buildTokenPositions skips tokens without bot buys", () => {
   ).toEqual([]);
 });
 
+test("buildTokenPositions aggregates multiple accounts for the same mint", () => {
+  const fills = fromSwaps([
+    swap({ signature: "buy", amount_in: "1000000000", amount_out: "100000000", timestamp: 1 }),
+  ]);
+
+  const positions = buildTokenPositions({
+    fills,
+    holdings: [
+      { mint: TIMBA, ticker: "TIMBA", balance: 60, decimals: 6, rawBalance: "60000000" },
+      { mint: TIMBA, ticker: "TIMBA", balance: 40, decimals: 6, rawBalance: "40000000" },
+    ],
+    pricesUsd: { [WSOL_MINT]: 100, [TIMBA]: 1.2 },
+  });
+
+  expect(positions).toHaveLength(1);
+  expect(positions[0]).toMatchObject({
+    balance: 100,
+    rawBalance: "100000000",
+    trackedBalance: 100,
+    solSpent: 1,
+  });
+  expect(positions[0]?.unrealizedUsd).toBeCloseTo(20, 8);
+});
+
+test("buildTokenPositions does not confuse an SPL token symbol with native SOL", () => {
+  const fills = fromSwaps([
+    swap({ signature: "buy", output_ticker: "SOL", amount_out: "100000000", timestamp: 1 }),
+  ]);
+
+  const positions = buildTokenPositions({
+    fills,
+    holdings: [{ mint: TIMBA, ticker: "SOL", balance: 100, decimals: 6 }],
+    pricesUsd: { [WSOL_MINT]: 100, [TIMBA]: 1.2 },
+  });
+
+  expect(positions).toHaveLength(1);
+  expect(positions[0]?.mint).toBe(TIMBA);
+});
+
 test("a full sell closes the position", () => {
   const fills = fromSwaps([
     swap({ signature: "buy", amount_in: "1000000000", amount_out: "100000000", timestamp: 1 }),
@@ -761,6 +800,13 @@ test("formatPositionMessage includes avg entry and unrealized PNL", () => {
   expect(text).toContain("Avg entry: $0.00000441");
   expect(text).toContain("Unrealized: +18.4% (+$0.95) 🟢");
   expect(text).toContain("Spent: 0.42 SOL · 1 buy");
+});
+
+test("formatPositionMessage escapes an on-chain token symbol", () => {
+  const text = formatPositionMessage(card({ ticker: "<b>T&I" }));
+
+  expect(text).toContain("📊 &lt;b&gt;T&amp;I");
+  expect(text).not.toContain("📊 <b>T&I");
 });
 
 test("formatPositionMessage scopes Unrealized when the bag is larger than the swap fill", () => {

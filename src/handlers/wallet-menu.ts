@@ -326,15 +326,13 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   const holdingsFromTokenBalances = (
     tokenBalances: WalletBalancesSnapshot["tokenBalances"],
   ): TokenHolding[] =>
-    tokenBalances
-      .filter((token) => token.mint && token.ticker !== "SOL")
-      .map((token) => ({
-        mint: token.mint,
-        ticker: token.ticker,
-        balance: token.decimalBalance,
-        decimals: token.decimals,
-        rawBalance: token.rawBalance,
-      }));
+    tokenBalances.map((token) => ({
+      mint: token.mint,
+      ticker: token.ticker,
+      balance: token.decimalBalance,
+      decimals: token.decimals,
+      rawBalance: token.rawBalance,
+    }));
 
   const clearWalletCache = (telegramId: bigint) => {
     try {

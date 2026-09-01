@@ -1,5 +1,6 @@
 import {
   copyableHtml,
+  escapeHtml,
   formatAmount,
   formatRate,
   formatSignedPercent,
@@ -289,6 +290,39 @@ function lotHasCost(lot: LotCost): boolean {
   return lot.costSol > 0 || lot.costUsdc > 0 || lot.costUsdt > 0;
 }
 
+function aggregateTokenHoldings(holdings: TokenHolding[]): TokenHolding[] {
+  const byMint = new Map<string, TokenHolding>();
+
+  for (const holding of holdings) {
+    const existing = byMint.get(holding.mint);
+    if (!existing) {
+      byMint.set(holding.mint, { ...holding });
+      continue;
+    }
+
+    existing.balance += holding.balance;
+    if (!existing.ticker && holding.ticker) {
+      existing.ticker = holding.ticker;
+    }
+
+    const existingRaw = existing.rawBalance?.trim();
+    const holdingRaw = holding.rawBalance?.trim();
+    if (
+      existing.decimals === holding.decimals &&
+      existingRaw &&
+      holdingRaw &&
+      /^\d+$/.test(existingRaw) &&
+      /^\d+$/.test(holdingRaw)
+    ) {
+      existing.rawBalance = (BigInt(existingRaw) + BigInt(holdingRaw)).toString();
+    } else {
+      existing.rawBalance = undefined;
+    }
+  }
+
+  return [...byMint.values()];
+}
+
 function reduceLot(lot: TokenLot, tokenAmount: number): LotCost {
   const sold = Math.min(tokenAmount, lot.qty);
   if (lot.qty <= 0 || sold <= 0) {
@@ -375,8 +409,8 @@ export function buildTokenPositions(args: {
   const lots = applyFillsToLots(args.fills);
   const positions: TokenPosition[] = [];
 
-  for (const holding of args.holdings) {
-    if (holding.balance <= 0 || isQuoteMint(holding.mint) || holding.ticker === "SOL") {
+  for (const holding of aggregateTokenHoldings(args.holdings)) {
+    if (holding.balance <= 0 || isQuoteMint(holding.mint)) {
       continue;
     }
 
@@ -503,7 +537,7 @@ export const POSITIONS_PAGE_SIZE = 3;
 
 export function formatPositionMessage(position: TokenPosition): string {
   const dexLink = `<a href="${buildDexScreenerTokenUrl(position.mint)}">📈</a>`;
-  const title = `📊 ${position.ticker} ${dexLink}`;
+  const title = `📊 ${escapeHtml(position.ticker)} ${dexLink}`;
   const mark = position.priceUsd != null ? `$${formatRate(position.priceUsd)}` : "—";
   const avgEntry = position.avgEntryUsd != null ? `$${formatRate(position.avgEntryUsd)}` : "—";
   const valueUsd =
