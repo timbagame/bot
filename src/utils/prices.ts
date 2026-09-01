@@ -10,6 +10,7 @@ type PriceCacheEntry = {
 };
 
 const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(PRICES_CACHE_TTL_MS);
+const JUPITER_PRICE_BATCH_SIZE = 50;
 
 const PRICES_ENV_KEY = "PRICES_ENABLED";
 
@@ -256,19 +257,22 @@ export async function getPricesUSD(
 
   if (batchTargets.size > 0) {
     const requests = Array.from(batchTargets.values());
-    const fetched = await fetchBatchFromJupiter(
-      requests.map((item) => item.requestId),
-      fetchImpl,
-      PRICES_TIMEOUT_MS,
-    );
+    for (let offset = 0; offset < requests.length; offset += JUPITER_PRICE_BATCH_SIZE) {
+      const batch = requests.slice(offset, offset + JUPITER_PRICE_BATCH_SIZE);
+      const fetched = await fetchBatchFromJupiter(
+        batch.map((item) => item.requestId),
+        fetchImpl,
+        PRICES_TIMEOUT_MS,
+      );
 
-    for (const target of requests) {
-      const price = fetched[target.requestId];
-      if (!price || !Number.isFinite(price) || price <= 0) {
-        continue;
-      }
-      for (const normalizedKey of target.normalizedKeys) {
-        priceCache.setWithTTL(normalizedKey, { value: price });
+      for (const target of batch) {
+        const price = fetched[target.requestId];
+        if (!price || !Number.isFinite(price) || price <= 0) {
+          continue;
+        }
+        for (const normalizedKey of target.normalizedKeys) {
+          priceCache.setWithTTL(normalizedKey, { value: price });
+        }
       }
     }
   }

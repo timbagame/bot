@@ -400,6 +400,26 @@ export function applyFillsToLots(fills: PositionFill[]): Map<string, TokenLot> {
   return lots;
 }
 
+function collectPositionPriceMints(fills: PositionFill[], holdings: TokenHolding[]): string[] {
+  const lots = applyFillsToLots(fills);
+  const tokenMints = new Set<string>();
+  let needsSolPrice = false;
+
+  for (const holding of aggregateTokenHoldings(holdings)) {
+    if (holding.balance <= 0 || isQuoteMint(holding.mint)) {
+      continue;
+    }
+    const lot = lots.get(holding.mint);
+    if (!lot || lot.qty <= 0 || !lotHasCost(lot)) {
+      continue;
+    }
+    tokenMints.add(holding.mint);
+    needsSolPrice ||= lot.costSol > 0;
+  }
+
+  return [...(needsSolPrice ? [WSOL_MINT] : []), ...tokenMints];
+}
+
 export function buildTokenPositions(args: {
   fills: PositionFill[];
   holdings: TokenHolding[];
@@ -687,7 +707,6 @@ async function resolvePositionWork(
 ): Promise<PositionWorkCache> {
   const swapFingerprint = fingerprintSwaps(swaps);
   const fillKnownMints = collectKnownMints(args.knownTokens, holdings);
-  const neededPrices = [...new Set([WSOL_MINT, ...holdings.map((holding) => holding.mint)])];
   const cached = positionWorkCache.get(args.walletAddress);
   const now = Date.now();
   const cacheFresh = Boolean(cached && cached.expiresAt > now);
@@ -702,6 +721,8 @@ async function resolvePositionWork(
   ) {
     fills = buildFillsForHoldings(swaps, args.knownTokens, holdings);
   }
+
+  const neededPrices = collectPositionPriceMints(fills, holdings);
 
   const pricesUsd = { ...(cacheFresh && cached ? cached.pricesUsd : {}) };
   const pricedMints = new Set(cacheFresh && cached ? cached.pricedMints : []);
@@ -749,7 +770,7 @@ export async function loadTokenPositionsForWallet(
   const pending = pendingPositionWork.get(cacheKey);
   if (pending) {
     const work = await pending;
-    const neededPrices = [...new Set([WSOL_MINT, ...holdings.map((holding) => holding.mint)])];
+    const neededPrices = collectPositionPriceMints(work.fills, holdings);
     const missingPrices = neededPrices.filter((mint) => !work.pricedMints.has(mint));
     if (missingPrices.length > 0) {
       mergePricedMints(

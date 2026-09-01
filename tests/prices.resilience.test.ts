@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
+import { Keypair } from "@solana/web3.js";
 import {
   getPriceUSD,
   getPricesUSD,
@@ -223,6 +224,27 @@ describe("price utilities resilience", () => {
       ),
       { seed: 12345, numRuns: 25 },
     );
+  });
+
+  test("getPricesUSD chunks requests at Jupiter's 50-token limit", async () => {
+    const mints = Array.from({ length: 55 }, () => Keypair.generate().publicKey.toBase58());
+    const requestSizes: number[] = [];
+    const fetchImpl = (async (url: string) => {
+      const ids = (new URL(url).searchParams.get("ids") ?? "").split(",").filter(Boolean);
+      requestSizes.push(ids.length);
+      return {
+        ok: true,
+        async json() {
+          return Object.fromEntries(ids.map((id) => [id, { usdPrice: 1 }]));
+        },
+      } as any;
+    }) as any;
+
+    const prices = await getPricesUSD(mints, fetchImpl);
+
+    expect(requestSizes).toEqual([50, 5]);
+    expect(Object.keys(prices)).toHaveLength(55);
+    expect(Object.values(prices).every((price) => price === 1)).toBe(true);
   });
 
   test("invalid PRICES_TIMEOUT_MS falls back to default timeout", async () => {

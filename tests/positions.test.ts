@@ -944,6 +944,57 @@ test("loadTokenPositionsForWallet reuses fills and prices across /start and Posi
   clearPositionSnapshot();
 });
 
+test("loadTokenPositionsForWallet skips price requests when no swaps are tracked", async () => {
+  clearPositionSnapshot();
+  let priceCalls = 0;
+  const positions = await loadTokenPositionsForWallet({
+    walletAddress: "wallet-no-tracked-lots",
+    getHoldings: async () =>
+      Array.from({ length: 60 }, (_, index) => ({
+        mint: `dust-${index}`,
+        ticker: `D${index}`,
+        balance: 1,
+        decimals: 6,
+      })),
+    getSwaps: () => [],
+    fetchPricesUSD: async () => {
+      priceCalls += 1;
+      return {};
+    },
+  });
+
+  expect(positions).toEqual([]);
+  expect(priceCalls).toBe(0);
+  clearPositionSnapshot();
+});
+
+test("loadTokenPositionsForWallet prices only tracked lots in a dust-heavy wallet", async () => {
+  clearPositionSnapshot();
+  const requested: string[][] = [];
+  const positions = await loadTokenPositionsForWallet({
+    walletAddress: "wallet-tracked-lot-with-dust",
+    getHoldings: async () => [
+      { mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6 },
+      ...Array.from({ length: 60 }, (_, index) => ({
+        mint: `dust-${index}`,
+        ticker: `D${index}`,
+        balance: 1,
+        decimals: 6,
+      })),
+    ],
+    getSwaps: () => [swap({ signature: "buy", amount_in: "1000000000", amount_out: "100000000" })],
+    fetchPricesUSD: async (mints) => {
+      requested.push(mints);
+      return { [WSOL_MINT]: 100, [TIMBA]: 1.2 };
+    },
+    knownTokens: [{ mint: TIMBA, decimals: 6 }],
+  });
+
+  expect(requested).toEqual([[WSOL_MINT, TIMBA]]);
+  expect(positions.map((position) => position.mint)).toEqual([TIMBA]);
+  clearPositionSnapshot();
+});
+
 test("loadTokenPositionsForWallet retries a mint after a failed price fetch", async () => {
   clearPositionSnapshot();
   const swaps = [
