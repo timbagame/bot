@@ -148,6 +148,7 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "chat_defaults_",
   "games_tab:",
   "games_refresh:",
+  "buy_alert_",
 ] as const;
 
 const shouldSkipGenericGameCallback = (callbackData: string): boolean => {

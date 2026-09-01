@@ -1,3 +1,4 @@
+import type { InlineKeyboard } from "grammy";
 import type { ChatDatabase } from "../../utils/chat-database";
 import { createPoolTradePoller } from "./pool-trades";
 import {
@@ -19,10 +20,16 @@ export type BuyAlertService = {
 export type CreateBuyAlertServiceDeps = {
   chatDb: ChatDatabase;
   getTokenManager: () => BuyAlertTokenSource;
-  sendHtml: (chatId: number, text: string, media?: BuyAlertMedia | null) => Promise<void>;
+  sendHtml: (
+    chatId: number,
+    text: string,
+    media?: BuyAlertMedia | null,
+    keyboard?: InlineKeyboard,
+  ) => Promise<void>;
   fetchSolPriceUsd?: () => Promise<number | null>;
   resolveNewHolder?: (event: BuyEvent) => Promise<boolean | null>;
   feed?: BuyFeed;
+  getBotUsername?: () => string | undefined;
 };
 
 export function createBuyAlertService(deps: CreateBuyAlertServiceDeps): BuyAlertService {
@@ -36,6 +43,7 @@ export function createBuyAlertService(deps: CreateBuyAlertServiceDeps): BuyAlert
     sendHtml: deps.sendHtml,
     fetchSolPriceUsd: deps.fetchSolPriceUsd,
     resolveNewHolder: deps.resolveNewHolder,
+    getBotUsername: deps.getBotUsername,
   });
 
   for (const feed of feeds) {

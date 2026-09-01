@@ -68,4 +68,12 @@ describe("Game callback guard", () => {
     expect(botModule.__test_shouldSkipGenericGameCallback("active_page:1")).toBe(true);
     expect(botModule.__test_shouldSkipGenericGameCallback("public_page:2")).toBe(true);
   });
+
+  test("skips buy-alert swap callbacks", () => {
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback(
+        "buy_alert_F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      ),
+    ).toBe(true);
+  });
 });
