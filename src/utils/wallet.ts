@@ -190,10 +190,20 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
+export type WalletTokenCensus = {
+  /** True only after getParsedTokenAccountsByOwner ran for this fetch. */
+  complete: boolean;
+  /** On-chain mints with amount > 0 seen in this fetch, including unregistered. */
+  heldMints: string[];
+  /** Mints this fetch actually looked up (ATA plans and/or discovery). */
+  scannedMints: string[];
+};
+
 export type WalletFetchOptions = {
   forceFresh?: boolean;
   allowStaleOnError?: boolean;
   cacheTtlMs?: number;
+  onCensus?: (census: WalletTokenCensus) => void;
 };
 
 export type KnownTokenDefinition = {
@@ -227,6 +237,10 @@ export type WalletTokenBalancePage = {
   tokenBalances: WalletTokenBalance[];
   page: number;
   pageCount: number;
+  /** Every mint with amount > 0 from this owner scan, not just the page slice. */
+  heldMints: string[];
+  /** True when both token-program owner scans succeeded. */
+  complete: boolean;
 };
 
 type ParsedTokenAccount = {
@@ -843,7 +857,12 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
+    const reportCensus = (census: WalletTokenCensus) => {
+      options.onCensus?.(census);
+    };
+
     if (knownTokens.length === 0) {
+      reportCensus({ complete: false, heldMints: [], scannedMints: [] });
       return [];
     }
 
@@ -856,6 +875,7 @@ export class WalletManager {
       const seenAccounts = new Set<string>();
       const metadataPrefetchMints = new Set<string>();
       const parsedAccounts: ParsedTokenAccount[] = [];
+      const scannedMints = new Set<string>();
 
       const ataLookup = await this.buildAtaLookupForKnownTokens(
         pubkey,
@@ -874,9 +894,29 @@ export class WalletManager {
       );
       discoveryResult.metadataPrefetchMints.forEach((mint) => metadataPrefetchMints.add(mint));
       parsedAccounts.push(...discoveryResult.accounts);
+      if (discoveryResult.ran) {
+        for (const account of discoveryResult.accounts) {
+          scannedMints.add(account.mint);
+        }
+      }
+
+      const heldMints: string[] = [];
+      for (const account of parsedAccounts) {
+        const lamports = this.parseLamports(account.tokenAmount.amount, account.mint);
+        if (lamports != null && lamports > 0n) {
+          heldMints.push(account.mint);
+        }
+      }
+
+      const census: WalletTokenCensus = {
+        complete: discoveryResult.ran,
+        heldMints,
+        scannedMints: [...scannedMints],
+      };
 
       if (parsedAccounts.length === 0) {
         console.log(`❌ No token accounts found for user ${telegramId}`);
+        reportCensus(census);
         return [];
       }
 
@@ -903,6 +943,7 @@ export class WalletManager {
         this.cloneWalletTokenBalances(results),
         cacheTtlMs,
       );
+      reportCensus(census);
       return results;
     } catch (error: any) {
       if (
@@ -910,6 +951,7 @@ export class WalletManager {
         error?.message?.includes("Invalid param")
       ) {
         console.log(`No token accounts found for user ${pubkey.toBase58()}`);
+        reportCensus({ complete: false, heldMints: [], scannedMints: [] });
         return [];
       }
 
@@ -921,11 +963,17 @@ export class WalletManager {
             error,
           );
           this.applyProgramHintsToKnownTokens(knownTokens);
+          reportCensus({
+            complete: false,
+            heldMints: stale.filter((token) => token.decimalBalance > 0).map((token) => token.mint),
+            scannedMints: stale.map((token) => token.mint),
+          });
           return this.cloneWalletTokenBalances(stale);
         }
       }
 
       console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
+      reportCensus({ complete: false, heldMints: [], scannedMints: [] });
       return [];
     }
   }
@@ -1015,7 +1063,13 @@ export class WalletManager {
       }
     }
 
-    return { tokenBalances, page, pageCount };
+    return {
+      tokenBalances,
+      page,
+      pageCount,
+      heldMints: rawBalances.map((entry) => entry.mint),
+      complete: true,
+    };
   }
 
   private async buildAtaLookupForKnownTokens(
@@ -1168,6 +1222,7 @@ export class WalletManager {
   ): Promise<{
     accounts: ParsedTokenAccount[];
     metadataPrefetchMints: Set<string>;
+    ran: boolean;
   }> {
     const now = this.timeNow?.() ?? Date.now();
     const discoveryKey = telegramId.toString();
@@ -1177,7 +1232,7 @@ export class WalletManager {
 
     if (!shouldDiscover) {
       console.log(`⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`);
-      return { accounts: [], metadataPrefetchMints: new Set<string>() };
+      return { accounts: [], metadataPrefetchMints: new Set<string>(), ran: false };
     }
 
     const [splTokenAccounts, token2022Accounts] = await Promise.all([
@@ -1248,7 +1303,7 @@ export class WalletManager {
       }
     }
 
-    return { accounts, metadataPrefetchMints };
+    return { accounts, metadataPrefetchMints, ran: true };
   }
 
   private createMetadataLoader(): MetadataLoader {

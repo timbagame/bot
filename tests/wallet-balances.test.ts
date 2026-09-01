@@ -7,7 +7,7 @@ import {
   AccountState,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { WalletManager } from "../src/utils/wallet";
+import { WalletManager, type WalletTokenCensus } from "../src/utils/wallet";
 import type { TokenDatabase } from "../src/utils/token-database";
 import { TOKEN_DISCOVERY_COOLDOWN_MS } from "../src/utils/constants";
 
@@ -176,13 +176,38 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       },
     ];
 
-    const res = await wm.getAllWalletTokenBalances(1n, known);
+    let census: { complete: boolean; heldMints: string[]; scannedMints: string[] } | undefined;
+    const res = await wm.getAllWalletTokenBalances(1n, known, {
+      onCensus: (next) => {
+        census = next;
+      },
+    });
     expect(res.length).toBe(2);
+    expect(census?.complete).toBe(true);
+    expect(census?.heldMints.includes("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe(true);
+    expect(census?.heldMints.includes("So11111111111111111111111111111111111111112")).toBe(true);
     const usdc = res.find((r) => r.ticker === "USDC")!;
     const wsol = res.find((r) => r.ticker === "WSOL")!;
     expect(usdc.balance).toBe(1000);
     expect(wsol.balance).toBe(500000000);
     expect(connection.parsedCalls.length).toBeGreaterThan(0);
+  });
+
+  test("empty known-token list is an incomplete census", async () => {
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      { fetch: globalThis.fetch as any, timeNow: () => Date.now() },
+    );
+
+    let census: { complete: boolean; heldMints: string[]; scannedMints: string[] } | undefined;
+    const res = await wm.getAllWalletTokenBalances(1n, [], {
+      onCensus: (next) => {
+        census = next;
+      },
+    });
+
+    expect(res).toEqual([]);
+    expect(census).toEqual({ complete: false, heldMints: [], scannedMints: [] });
   });
 
   test("getTokenBalance resolves Token-2022 associated account", async () => {
@@ -347,6 +372,63 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
     expect(known[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
   });
 
+  test("an ATA-only refresh does not claim that a mint was fully scanned", async () => {
+    const connection = new ConnParsed();
+    const now = 1_000;
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      {
+        connection: connection as any,
+        fetch: globalThis.fetch as any,
+        timeNow: () => now,
+      },
+    );
+    const owner = wm.getPublicKey(1n);
+    connection.setOwner(owner);
+
+    const heldAtaMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const auxiliaryOnlyMint = new PublicKey("4Nd1mFatW4Kfo7oyi7T5C5x64K8jKe3SWP7WRHnS8svB");
+    await connection.seedTokenAccount({
+      mint: heldAtaMint,
+      programId: TOKEN_PROGRAM_ID,
+      amount: 1_000n,
+      decimals: 6,
+    });
+    (wm as any).lastTokenDiscoveryByUser.set("1", now);
+    (wm as any).getFullTokenMetadata = async () => ({ decimals: 6, symbol: "TOKEN" });
+
+    let census: WalletTokenCensus | undefined;
+    await wm.getAllWalletTokenBalances(
+      1n,
+      [
+        {
+          token_mint: heldAtaMint.toBase58(),
+          token_ticker: "HELD",
+          decimals: 6,
+          token_program_id: TOKEN_PROGRAM_ID.toBase58(),
+        },
+        {
+          token_mint: auxiliaryOnlyMint.toBase58(),
+          token_ticker: "AUX",
+          decimals: 6,
+          token_program_id: TOKEN_PROGRAM_ID.toBase58(),
+        },
+      ],
+      {
+        forceFresh: true,
+        onCensus: (value) => {
+          census = value;
+        },
+      },
+    );
+
+    expect(census).toEqual({
+      complete: false,
+      heldMints: [heldAtaMint.toBase58()],
+      scannedMints: [],
+    });
+  });
+
   test("token discovery respects cooldown when accounts already known", async () => {
     const discoveryCalls: string[] = [];
     let now = 1_000;
@@ -375,12 +457,14 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
     const discoveryMap = (wm as any).lastTokenDiscoveryByUser as Map<string, number>;
     const key = "1";
 
-    await discoveryFn(owner, 1n, 0, seenAccounts);
+    const firstDiscovery = await discoveryFn(owner, 1n, 0, seenAccounts);
+    expect(firstDiscovery.ran).toBe(true);
     expect(discoveryCalls).toHaveLength(2);
     expect(discoveryMap.get(key)).toBe(now);
 
     discoveryCalls.length = 0;
-    await discoveryFn(owner, 1n, 1, seenAccounts);
+    const skippedDiscovery = await discoveryFn(owner, 1n, 1, seenAccounts);
+    expect(skippedDiscovery.ran).toBe(false);
     expect(discoveryCalls).toHaveLength(0);
     expect(discoveryMap.get(key)).toBe(now);
 

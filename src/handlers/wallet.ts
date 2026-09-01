@@ -6,6 +6,7 @@ import {
   type WalletCaptionOptions,
 } from "../utils/wallet-ui";
 import type { WalletPagination } from "../utils/keyboards";
+import type { HoldMarkStore } from "../services/hold-marks";
 import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -24,7 +25,14 @@ export type ShowWalletUIDeps = {
   };
   getCachedWalletData: (telegramId: bigint) => Promise<{
     solBalance: number;
-    tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
+    tokenBalances: Array<{
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      decimalBalance?: number;
+      rawBalance?: string;
+    }>;
   }>;
   getWalletPageData?: (
     telegramId: bigint,
@@ -32,7 +40,14 @@ export type ShowWalletUIDeps = {
     pageSize: number,
   ) => Promise<{
     solBalance: number;
-    tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }>;
+    tokenBalances: Array<{
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      decimalBalance?: number;
+      rawBalance?: string;
+    }>;
     page: number;
     pageCount: number;
   }>;
@@ -44,6 +59,7 @@ export type ShowWalletUIDeps = {
   ) => string;
   createWalletKeyboard: (pagination?: WalletPagination) => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
+  holdMarks?: HoldMarkStore;
 };
 
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
@@ -55,6 +71,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     buildWalletCaption,
     createWalletKeyboard,
     WINNER_VIDEO_ID,
+    holdMarks,
   } = deps;
 
   const telegramId = await getRequiredTelegramIdForContext(ctx, "wallet display", {
@@ -186,6 +203,8 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
         ? (amount, decimals) => (wallet as any).formatTokenBalance(amount, decimals)
         : undefined,
       fetchPricesUSD,
+      walletAddress: holdMarks ? walletAddress : undefined,
+      holdMarks,
     });
 
     const pageCount = pageData.pageCount;

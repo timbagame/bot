@@ -162,6 +162,7 @@ export class TransactionHistory extends BaseDatabase {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE INDEX IF NOT EXISTS idx_swap_stats_timestamp ON swap_stats(timestamp DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_swap_stats_wallet ON swap_stats(wallet)`,
         `CREATE INDEX IF NOT EXISTS idx_swap_stats_fee_mint ON swap_stats(fee_mint)`,
         `CREATE TABLE IF NOT EXISTS finance_events (
           event_id TEXT PRIMARY KEY,
@@ -233,6 +234,44 @@ export class TransactionHistory extends BaseDatabase {
         "adding swap sponsor cost accuracy",
       );
     }
+    this.run(
+      "CREATE INDEX IF NOT EXISTS idx_swap_stats_wallet ON swap_stats(wallet)",
+      [],
+      "indexing swap stats by wallet",
+    );
+  }
+
+  getSwapsByWallet(wallet: string): SwapStatRecord[] {
+    return this.all<SwapStatRecord>(
+      `SELECT
+         signature,
+         wallet,
+         input_mint,
+         output_mint,
+         fee_mint,
+         input_ticker,
+         output_ticker,
+         amount_in,
+         amount_out,
+         referral_applied,
+         fee_amount,
+         fee_bps,
+         sponsor_cost_lamports,
+         sponsor_reimbursement_lamports,
+         sponsor_cost_estimated,
+         timestamp,
+         network
+       FROM swap_stats
+       WHERE wallet = ?
+       ORDER BY timestamp ASC`,
+      [wallet],
+      "getting wallet swap history",
+    ).map((row) => ({
+      ...row,
+      referral_applied: Boolean(row.referral_applied),
+      sponsor_cost_estimated:
+        row.sponsor_cost_estimated == null ? undefined : Boolean(row.sponsor_cost_estimated),
+    }));
   }
 
   recordSwap(record: SwapStatRecord): void {

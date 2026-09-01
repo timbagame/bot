@@ -83,9 +83,15 @@ test("buildWalletCaption formats address and token lines", () => {
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: <code>1.234567</code> SOL ($123.46)");
     expect(caption).toContain("TIMBA: <code>123</code> ($6,150)");
+    expect(caption).not.toContain("· +");
     expect(caption).toContain("USDC: <code>10.00</code> ($10)");
     expect(caption).not.toContain("SOL: <code>1.234567</code> SOL ($123.46) (Tap to copy)");
     expect(caption.split("(Tap to copy)")[1]).not.toContain("Tap to copy");
+
+    const withPnl = buildWalletCaption("AbCdEf", [
+      { ticker: "TIMBA", mint: "mint", amount: "123", usdValue: "6,150", pnlPercent: 0.184 },
+    ]);
+    expect(withPnl).toContain("TIMBA: <code>123</code> ($6,150) · +18.4%");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -151,6 +157,33 @@ test("buildWalletCaption sanitizes token symbols before escaping HTML", () => {
   expect(caption).not.toContain("\nNOW");
 });
 
+test("buildWalletCaption shows the on-chain amount once and copies it exactly", () => {
+  const originalNetwork = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+
+  try {
+    const caption = buildWalletCaption("AbCdEf", [
+      {
+        ticker: "MAGAIBA",
+        mint: "mint",
+        amount: "3703.33795",
+        copyAmount: "3703.33795378",
+        usdValue: "0.57",
+        pnlPercent: -0.0174,
+      },
+    ]);
+    const tokenLine = caption.split("\n").find((line) => line.includes("MAGAIBA"));
+
+    expect(tokenLine).toBe("MAGAIBA: <code>3703.33795378</code> ($0.57) · -1.74%");
+  } finally {
+    if (originalNetwork === undefined) {
+      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+    } else {
+      process.env.SOLANA_NETWORK = originalNetwork;
+    }
+  }
+});
+
 test("buildWalletCaption paginates token lines", () => {
   const tokenLines = Array.from({ length: 10 }, (_, index) => ({
     ticker: `T${index}`,
@@ -190,6 +223,44 @@ test("buildWalletCaption stays within Telegram's media caption limit", () => {
   );
 
   expect(caption.length).toBeLessThanOrEqual(1_024);
+});
+
+test("buildWalletTokenLines uses hold marks instead of swap PNL", async () => {
+  const { createMemoryHoldMarkStore } = await import("../src/services/hold-marks");
+  const store = createMemoryHoldMarkStore();
+  const timba = "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump";
+  const token = {
+    mint: timba,
+    ticker: "TIMBA",
+    balance: 16_350_307,
+    decimals: 0,
+  };
+
+  const first = await buildWalletTokenLines({
+    solBalanceLamports: LAMPORTS_PER_SOL,
+    tokenBalances: [token],
+    formatSolBalance: () => "1",
+    walletAddress: "wallet-hold",
+    holdMarks: store,
+    fetchPricesUSD: async () => ({ [WSOL_MINT]: 100, [timba]: 0.00000551 }),
+  });
+  expect(first.find((line) => line.ticker === "TIMBA")?.pnlPercent).toBeUndefined();
+
+  const doubled = await buildWalletTokenLines({
+    solBalanceLamports: LAMPORTS_PER_SOL,
+    tokenBalances: [token],
+    formatSolBalance: () => "1",
+    walletAddress: "wallet-hold",
+    holdMarks: store,
+    fetchPricesUSD: async () => ({ [WSOL_MINT]: 100, [timba]: 0.00001102 }),
+  });
+  expect(doubled.find((line) => line.ticker === "TIMBA")?.pnlPercent).toBeCloseTo(1, 8);
+  expect(
+    buildWalletCaption(
+      "AbCdEf",
+      doubled.filter((line) => line.ticker === "TIMBA"),
+    ),
+  ).toContain("· +100%");
 });
 
 test("buildWalletTokenLines omits unavailable USD prices", async () => {
@@ -247,6 +318,7 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
   expect(lines[0]).toEqual({
     ticker: "SOL",
     amount: "2 SOL",
+    copyAmount: "2",
     usdValue: "50",
     unit: "SOL",
   });

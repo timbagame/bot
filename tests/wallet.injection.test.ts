@@ -265,6 +265,10 @@ describe("WalletManager dependency injection", () => {
     expect(page.page).toBe(1);
     expect(page.pageCount).toBe(3);
     expect(page.tokenBalances).toHaveLength(4);
+    expect(page.complete).toBe(true);
+    expect(page.heldMints).toHaveLength(12);
+    expect(new Set(page.heldMints).size).toBe(12);
+    expect(mints.every((mint) => page.heldMints.includes(mint))).toBe(true);
     expect(metadataCalls).toBeLessThanOrEqual(4);
   });
 });

@@ -1,4 +1,4 @@
-import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS } from "./constants";
+import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS, WSOL_MINT } from "./constants";
 import { PublicKey } from "@solana/web3.js";
 import { z } from "zod";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
@@ -10,6 +10,7 @@ type PriceCacheEntry = {
 };
 
 const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(PRICES_CACHE_TTL_MS);
+const JUPITER_PRICE_BATCH_SIZE = 50;
 
 const PRICES_ENV_KEY = "PRICES_ENABLED";
 
@@ -87,6 +88,24 @@ function pickValidPrice(candidates: Array<number | string | null | undefined>): 
   return null;
 }
 
+function looksLikeNativeSolPrice(mint: string | undefined, price: number): boolean {
+  return mint === WSOL_MINT && price >= 0.5 && price <= 2;
+}
+
+function pickUsdPrice(entry: z.infer<typeof priceEntrySchema>, mint?: string): number | null {
+  const usd = pickValidPrice([entry.usdPrice, entry.usd_price]);
+  if (usd && !looksLikeNativeSolPrice(mint, usd)) {
+    return usd;
+  }
+
+  const price = pickValidPrice([entry.price]);
+  if (!price || looksLikeNativeSolPrice(mint, price)) {
+    return null;
+  }
+
+  return price;
+}
+
 async function fetchFromJupiter(
   id: string,
   fetchImpl: FetchLike,
@@ -109,7 +128,7 @@ async function fetchFromJupiter(
     if (!res.ok) return null;
     const entry = getPriceEntries(await res.json())[id];
     if (!entry) return null;
-    return pickValidPrice([entry?.price, entry?.usdPrice, entry?.usd_price]);
+    return pickUsdPrice(entry, id);
   } catch {
     return null;
   }
@@ -146,9 +165,7 @@ async function fetchBatchFromJupiter(
     const container = getPriceEntries(await res.json());
     return uniqueIds.reduce<Record<string, number | null>>((acc, requestId) => {
       const entry = container?.[requestId];
-      acc[requestId] = entry
-        ? pickValidPrice([entry?.price, entry?.usdPrice, entry?.usd_price])
-        : null;
+      acc[requestId] = entry ? pickUsdPrice(entry, requestId) : null;
       return acc;
     }, {});
   } catch {
@@ -240,19 +257,22 @@ export async function getPricesUSD(
 
   if (batchTargets.size > 0) {
     const requests = Array.from(batchTargets.values());
-    const fetched = await fetchBatchFromJupiter(
-      requests.map((item) => item.requestId),
-      fetchImpl,
-      PRICES_TIMEOUT_MS,
-    );
+    for (let offset = 0; offset < requests.length; offset += JUPITER_PRICE_BATCH_SIZE) {
+      const batch = requests.slice(offset, offset + JUPITER_PRICE_BATCH_SIZE);
+      const fetched = await fetchBatchFromJupiter(
+        batch.map((item) => item.requestId),
+        fetchImpl,
+        PRICES_TIMEOUT_MS,
+      );
 
-    for (const target of requests) {
-      const price = fetched[target.requestId];
-      if (!price || !Number.isFinite(price) || price <= 0) {
-        continue;
-      }
-      for (const normalizedKey of target.normalizedKeys) {
-        priceCache.setWithTTL(normalizedKey, { value: price });
+      for (const target of batch) {
+        const price = fetched[target.requestId];
+        if (!price || !Number.isFinite(price) || price <= 0) {
+          continue;
+        }
+        for (const normalizedKey of target.normalizedKeys) {
+          priceCache.setWithTTL(normalizedKey, { value: price });
+        }
       }
     }
   }

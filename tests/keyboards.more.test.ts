@@ -3,6 +3,7 @@ import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToSettingsKeyboard,
+  createPositionsKeyboard,
   createConfirmWrapKeyboard,
   createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
@@ -82,10 +83,16 @@ describe("keyboards: main and wallet", () => {
   test("wallet keyboard contains swap/withdraw/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
     expect(callbacks).toContain("cmd_swap");
     expect(callbacks).toContain("cmd_withdraw");
+    expect(callbacks).toContain("wallet_positions");
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
+    expect(kb.inline_keyboard).toHaveLength(3);
+    expect(kb.inline_keyboard[2]).toHaveLength(1);
+    expect(texts).toContain("📊 Positions");
+    expect(texts).toContain("⚙️ Settings");
   });
 
   test("wallet settings keyboard includes wrap, unwrap, private key, and back", () => {
@@ -103,6 +110,27 @@ describe("keyboards: main and wallet", () => {
     expect(texts).toContain("🔐 Private Key");
     expect(texts).toContain("← Back to Wallet");
   });
+});
+
+test("positions keyboard pages tokens without a DexScreener button", () => {
+  const onePage = createPositionsKeyboard({ page: 0, pageCount: 1 });
+  expect(extractCallbacks(onePage)).not.toContain("wallet_pos_1");
+  expect(extractCallbacks(onePage)).toContain("wallet_pos_r_0");
+  expect(extractTexts(onePage)).toContain("🔁 Refresh");
+
+  const kb = createPositionsKeyboard({
+    page: 0,
+    pageCount: 2,
+  });
+  const callbacks = extractCallbacks(kb);
+  const texts = extractTexts(kb);
+
+  expect(callbacks).toContain("wallet_pos_1");
+  expect(callbacks).not.toContain("wallet_pos_0");
+  expect(callbacks).toContain("wallet_pos_r_0");
+  expect(callbacks).toContain("cmd_swap");
+  expect(callbacks).toContain("main_wallet");
+  expect(texts).not.toContain("DexScreener");
 });
 
 test("back to settings keyboard returns wallet_settings callback", () => {

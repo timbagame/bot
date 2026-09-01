@@ -41,6 +41,11 @@ const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
     ticker: "ETH",
     decimals: 8,
   },
+  {
+    mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
+    ticker: "MAGAIBA",
+    decimals: 8,
+  },
 ];
 
 const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<string, BuiltinTokenMetadata>();

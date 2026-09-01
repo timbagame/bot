@@ -4,9 +4,16 @@ import {
   formatAmount,
   formatCompactTokenDisplay,
   formatRate,
+  formatSignedPercent,
   formatTokenDisplay,
   formatUsdValue,
 } from "../src/utils/format-amount";
+
+test("formatSignedPercent keeps a compact signed label", () => {
+  expect(formatSignedPercent(0.184)).toBe("+18.4%");
+  expect(formatSignedPercent(-0.0646)).toBe("-6.46%");
+  expect(formatSignedPercent(0)).toBe("0%");
+});
 
 test("copyableHtml wraps escaped text in a Telegram tap-to-copy code tag", () => {
   expect(copyableHtml("4.006348202")).toBe("<code>4.006348202</code>");

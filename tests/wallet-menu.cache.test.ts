@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createWalletMenuModule } from "../src/handlers/wallet-menu";
+import { applyHoldMarks, createMemoryHoldMarkStore } from "../src/services/hold-marks";
+import type { WalletTokenCensus } from "../src/utils/wallet";
 
 const stubBot = { callbackQuery: () => undefined };
 const stubLimiter = { consume: () => ({ allowed: true, resetInMs: 0 }) };
@@ -14,10 +16,14 @@ type WalletState = {
   staleTokens?: Array<any>;
 };
 
+const TIMBA = "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump";
+
 const createStubWallet = (
   options: Partial<WalletState> & {
     endpoint?: string;
     beforeBalance?: () => void;
+    getAllWalletTokenBalances?: (...args: any[]) => Promise<any>;
+    getWalletTokenBalancePage?: (...args: any[]) => Promise<any>;
   } = {},
 ) => {
   const state: WalletState = {
@@ -48,7 +54,8 @@ const createStubWallet = (
       return state.balanceValue;
     },
     peekCachedNativeBalance: () => state.staleNative,
-    getAllWalletTokenBalances: async () => [],
+    getAllWalletTokenBalances: options.getAllWalletTokenBalances ?? (async () => []),
+    getWalletTokenBalancePage: options.getWalletTokenBalancePage,
     peekCachedWalletTokenBalances: () => state.staleTokens,
     setCachedNativeBalance: () => {},
     setCachedWalletTokenBalances: () => {},
@@ -74,13 +81,14 @@ const createStubWallet = (
   return { wallet, state };
 };
 
-const createModule = (wallet: any) =>
+const createModule = (wallet: any, extras: { holdMarks?: any } = {}) =>
   createWalletMenuModule({
     bot: stubBot as any,
     wallet,
     getTokenManager: () => stubTokenManager as any,
     wrapCallbackHandler: (fn: any) => fn,
     rpcRateLimiter: { limiter: stubLimiter as any },
+    ...extras,
   });
 
 const ensureBalanceCalled = (state: WalletState, expected: number) =>
@@ -192,5 +200,111 @@ describe("wallet menu cache guards", () => {
 
     ensureBalanceCalled(state, 2);
     module.__test_resetWalletRpcCacheTtlMs();
+  });
+});
+
+describe("wallet menu hold-mark prune", () => {
+  const seedTimbaMark = (store: ReturnType<typeof createMemoryHoldMarkStore>) => {
+    applyHoldMarks({
+      walletAddress: "W",
+      marks: [{ mint: TIMBA, priceUsd: 0.00000551069 }],
+      store,
+    });
+  };
+
+  test("a successful empty token list does not re-anchor a hold mark", async () => {
+    const store = createMemoryHoldMarkStore();
+    seedTimbaMark(store);
+    const { wallet } = createStubWallet();
+    const module = createModule(wallet, { holdMarks: store });
+
+    await module.getCachedWalletData(1n);
+
+    expect(store.get("W", TIMBA)).toBeCloseTo(0.00000551069, 12);
+  });
+
+  test("an ATA-only list missing a token does not drop that mark", async () => {
+    const store = createMemoryHoldMarkStore();
+    seedTimbaMark(store);
+    const { wallet } = createStubWallet({
+      getAllWalletTokenBalances: async (_id, _known, options) => {
+        const census: WalletTokenCensus = {
+          complete: false,
+          heldMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
+          scannedMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
+        };
+        options?.onCensus?.(census);
+        return [];
+      },
+    });
+    const module = createModule(wallet, { holdMarks: store });
+
+    await module.getCachedWalletData(1n);
+
+    expect(store.get("W", TIMBA)).toBeCloseTo(0.00000551069, 12);
+  });
+
+  test("a complete empty census drops the mark so the next hold starts fresh", async () => {
+    const store = createMemoryHoldMarkStore();
+    seedTimbaMark(store);
+    const { wallet } = createStubWallet({
+      getAllWalletTokenBalances: async (_id, _known, options) => {
+        options?.onCensus?.({
+          complete: true,
+          heldMints: [],
+          scannedMints: [TIMBA],
+        });
+        return [];
+      },
+    });
+    const module = createModule(wallet, { holdMarks: store });
+
+    await module.getCachedWalletData(1n);
+
+    expect(store.get("W", TIMBA)).toBeUndefined();
+  });
+
+  test("/start page scan prunes sold marks using the full owner list, not the page slice", async () => {
+    const store = createMemoryHoldMarkStore();
+    seedTimbaMark(store);
+    applyHoldMarks({
+      walletAddress: "W",
+      marks: [{ mint: "other-mint", priceUsd: 1 }],
+      store,
+    });
+    const { wallet } = createStubWallet({
+      getWalletTokenBalancePage: async () => ({
+        tokenBalances: [],
+        page: 0,
+        pageCount: 2,
+        heldMints: ["other-mint"],
+        complete: true,
+      }),
+    });
+    const module = createModule(wallet, { holdMarks: store });
+
+    await module.getWalletPageData(1n, 0, 8);
+
+    expect(store.get("W", TIMBA)).toBeUndefined();
+    expect(store.get("W", "other-mint")).toBe(1);
+  });
+
+  test("/start does not prune when the page scan is incomplete", async () => {
+    const store = createMemoryHoldMarkStore();
+    seedTimbaMark(store);
+    const { wallet } = createStubWallet({
+      getWalletTokenBalancePage: async () => ({
+        tokenBalances: [],
+        page: 0,
+        pageCount: 1,
+        heldMints: [],
+        complete: false,
+      }),
+    });
+    const module = createModule(wallet, { holdMarks: store });
+
+    await module.getWalletPageData(1n, 0, 8);
+
+    expect(store.get("W", TIMBA)).toBeCloseTo(0.00000551069, 12);
   });
 });
