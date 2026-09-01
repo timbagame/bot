@@ -3013,6 +3013,9 @@ const replyToMessage = async (
   });
 };
 
+export const __test_getBuyAlertBotUsername = (): string | undefined =>
+  bot.isInited() ? bot.botInfo.username : undefined;
+
 const buyAlertService = createBuyAlertService({
   chatDb,
   getTokenManager: () => tokenManager,
@@ -3049,7 +3052,7 @@ const buyAlertService = createBuyAlertService({
     return prices[WSOL_MINT] ?? null;
   },
   resolveNewHolder: (event) => detectNewHolder(wallet.getConnection(), event),
-  getBotUsername: () => bot.botInfo?.username,
+  getBotUsername: __test_getBuyAlertBotUsername,
 });
 
 const chatDefaultsModule = createChatDefaultsModule({

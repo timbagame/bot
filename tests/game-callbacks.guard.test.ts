@@ -76,4 +76,9 @@ describe("Game callback guard", () => {
       ),
     ).toBe(true);
   });
+
+  test("reads the buy-alert bot username safely before bot initialization", () => {
+    expect(botModule.bot.isInited()).toBe(false);
+    expect(botModule.__test_getBuyAlertBotUsername()).toBeUndefined();
+  });
 });
