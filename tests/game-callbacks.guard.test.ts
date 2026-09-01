@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { Bot } from "grammy";
 
 let botModule: typeof import("../src/bot");
 const originalEnv = {
@@ -78,7 +79,9 @@ describe("Game callback guard", () => {
   });
 
   test("reads the buy-alert bot username safely before bot initialization", () => {
-    expect(botModule.bot.isInited()).toBe(false);
-    expect(botModule.__test_getBuyAlertBotUsername()).toBeUndefined();
+    const uninitializedBot = new Bot("test-token");
+
+    expect(uninitializedBot.isInited()).toBe(false);
+    expect(botModule.__test_getBuyAlertBotUsername(uninitializedBot)).toBeUndefined();
   });
 });

@@ -3013,8 +3013,9 @@ const replyToMessage = async (
   });
 };
 
-export const __test_getBuyAlertBotUsername = (): string | undefined =>
-  bot.isInited() ? bot.botInfo.username : undefined;
+export const __test_getBuyAlertBotUsername = (
+  targetBot: Pick<Bot, "isInited" | "botInfo"> = bot,
+): string | undefined => (targetBot.isInited() ? targetBot.botInfo.username : undefined);
 
 const buyAlertService = createBuyAlertService({
   chatDb,
