@@ -1,12 +1,5 @@
-import * as anchor from "@anchor-lang/core";
-import {
-  getAssociatedTokenAddressSync,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
 import { PublicKey, Keypair, sendAndConfirmRawTransaction, type Connection } from "@solana/web3.js";
 import { ReferralProvider } from "@jup-ag/referral-sdk";
-import type { Timba } from "../../idl/idlType";
 import { WalletManager } from "../utils/wallet";
 import { loadWalletMnemonic } from "../utils/secrets";
 import {
@@ -23,12 +16,7 @@ import {
   FEE_SWEEP_SOL_PRICE_MAX_AGE_MS,
   FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO,
 } from "../utils/constants";
-import {
-  bundleFromKeypair,
-  resolveOracleOperatorBundle,
-  uniqueSigners,
-  type KeypairBundle,
-} from "../utils/keypairs";
+import { bundleFromKeypair, type KeypairBundle } from "../utils/keypairs";
 import { createAnchorContext } from "../utils/anchor-context";
 import { SwapManager } from "../utils/swap-manager";
 import type { SwapRequest } from "../utils/swap/types";
@@ -48,14 +36,12 @@ export interface FeeSweepOptions {
   ) => SwapManager | Pick<SwapManager, "getQuote" | "executeJupiterSwap">;
   priceResolver?: PriceResolver;
   balanceFetcher?: TokenBalanceFetcher;
-  tokenFeeProcessor?: typeof processTokenFee;
   referralSweeper?: typeof runReferralSweep;
   tokenToSolSweeper?: typeof sweepTokensToSol;
   contextFactory?: typeof createAnchorContext;
 }
 
 export interface FeeSweepResult {
-  tokenWithdrawals: number;
   referralClaims: number;
 }
 
@@ -193,30 +179,6 @@ const shouldSkipTokenToSolSweeps = async (options: {
   return false;
 };
 
-const shouldWithdrawToken = async (
-  wallet: WalletManager,
-  config: TokenConfig,
-  pendingFees: bigint,
-  decimals: number,
-  priceResolver: PriceResolver = getUsdPrice,
-) => {
-  const formattedPending = wallet.formatTokenBalance(Number(pendingFees), decimals);
-  const tokenAmount = Number(pendingFees) / 10 ** decimals;
-  const priceData = await priceResolver({
-    tokenMint: config.mint,
-  });
-  const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
-  if (tokenUsdValue < MIN_USD_THRESHOLD) {
-    console.log(
-      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${tokenUsdValue.toFixed(
-        2,
-      )} (< $${MIN_USD_THRESHOLD}).`,
-    );
-    return { shouldWithdraw: false, formattedPending, tokenUsdValue };
-  }
-  return { shouldWithdraw: true, formattedPending, tokenUsdValue };
-};
-
 const getTotalTokenBalanceLamports: TokenBalanceFetcher = async (connection, owner, mint) => {
   let total = 0n;
   const parsed = await connection.getParsedTokenAccountsByOwner(owner, {
@@ -301,131 +263,6 @@ const unwrapWsolBalance = async (
     `   ✅ Unwrapped WSOL. Remaining WSOL: ${remainingDecimal.toFixed(6)}. Signature: ${signature}`,
   );
 };
-
-async function processTokenFee(
-  program: anchor.Program<Timba>,
-  connection: Connection,
-  wallet: WalletManager,
-  payerBundle: KeypairBundle,
-  operatorBundle: KeypairBundle,
-  config: TokenConfig,
-  priceResolver: PriceResolver,
-): Promise<boolean> {
-  const mint = new PublicKey(config.mint);
-  const [oraclePda] = PublicKey.findProgramAddressSync([Buffer.from("oracle")], program.programId);
-  const [gameTokenPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId,
-  );
-  const [gameVaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_vault"), mint.toBuffer()],
-    program.programId,
-  );
-
-  const gameTokenInfo = await connection.getAccountInfo(gameTokenPda);
-  if (!gameTokenInfo) {
-    console.warn(`⚠️  No game token configuration found for ${config.ticker}; skipping.`);
-    return false;
-  }
-
-  const gameToken = await program.account.gameToken.fetch(gameTokenPda);
-  const pendingFees = BigInt(gameToken.feeAmount.toString());
-  if (pendingFees === 0n) {
-    console.log(`ℹ️  No pending fees for ${config.ticker}; skipping.`);
-    return false;
-  }
-
-  const metadata = await wallet.getTokenMetadata(config.mint);
-  const { shouldWithdraw, formattedPending } = await shouldWithdrawToken(
-    wallet,
-    config,
-    pendingFees,
-    metadata.decimals,
-    priceResolver,
-  );
-  if (!shouldWithdraw) return false;
-
-  const {
-    address: operatorAta,
-    instructions: operatorAtaInstructions,
-    programId: tokenProgramId,
-    created: operatorAtaCreated,
-  } = await wallet.ensureAssociatedTokenAccount(
-    operatorBundle.anchor.publicKey,
-    mint,
-    payerBundle.root,
-  );
-  if (!tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
-    throw new Error(`Timba only supports legacy SPL Token mints`);
-  }
-  const gameVaultAta = getAssociatedTokenAddressSync(
-    mint,
-    gameVaultPda,
-    true,
-    TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
-  );
-
-  console.log(
-    `➡️  Withdrawing ${formattedPending} ${
-      config.ticker
-    } to ${operatorBundle.anchor.publicKey.toBase58()}`,
-  );
-
-  const instruction = await program.methods
-    .withdrawTokenFee()
-    .accounts({
-      oracle: oraclePda,
-      oracleOperator: operatorBundle.anchor.publicKey,
-      oracleOperatorTokenAccount: operatorAta,
-      gameTokenCtx: {
-        tokenMint: mint,
-        gameToken: gameTokenPda,
-        gameVault: gameVaultPda,
-        gameTokenAccount: gameVaultAta,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      },
-    } as any)
-    .instruction();
-  const instructions = [...operatorAtaInstructions, instruction];
-
-  if (operatorAtaCreated) {
-    console.log(`🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${config.ticker}`);
-  }
-
-  const tx = await wallet.sendAndConfirmWithResubmits(
-    instructions,
-    uniqueSigners(payerBundle.root, operatorBundle.root),
-    { operationLabel: `Withdraw ${config.ticker} fees` },
-  );
-
-  console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
-  let confirmedWithdrawal = null;
-  try {
-    confirmedWithdrawal = await connection.getTransaction(tx, {
-      commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
-    });
-  } catch (error) {
-    console.warn(`Unable to load withdrawal transaction ${tx} for finance accounting:`, error);
-  }
-  if (confirmedWithdrawal) {
-    TransactionHistory.getInstance().recordFinanceEvent({
-      eventId: `program:${tx}:claim:${mint.toBase58()}`,
-      source: "sweeper",
-      category: "game_fee",
-      kind: "claimed",
-      signature: tx,
-      mint: mint.toBase58(),
-      amountRaw: pendingFees.toString(),
-      networkFeeLamports: String(confirmedWithdrawal.meta?.fee ?? 0),
-      timestamp: (confirmedWithdrawal.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
-      slot: confirmedWithdrawal.slot,
-    });
-  }
-  return true;
-}
 
 async function runReferralSweep(
   connection: Connection,
@@ -629,12 +466,11 @@ async function sweepTokensToSol(
 }
 
 export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweepResult> => {
-  console.log("💸 Collecting oracle fees for configured tokens...\n");
+  console.log("💸 Collecting referral fees and sweeping operator balances...\n");
 
   const wallet = options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
   const payerRoot = wallet.getOperatorKeypair();
   const payerBundle = bundleFromKeypair(payerRoot);
-  const operatorBundle = resolveOracleOperatorBundle(payerRoot);
 
   const tokens = options.tokenConfigs ?? getSupportedTokens();
   const referralAccount = options.referralAccount ?? getReferralConfig().referralAccount;
@@ -646,7 +482,6 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       new SwapManager(connection as any, walletManager));
   const balanceFetcher = options.balanceFetcher ?? getTotalTokenBalanceLamports;
   const enableSwapToSol = options.enableSwapToSol ?? true;
-  const tokenFeeProcessor = options.tokenFeeProcessor ?? processTokenFee;
   const referralSweeper = options.referralSweeper ?? runReferralSweep;
   const tokenToSolSweeper = options.tokenToSolSweeper ?? sweepTokensToSol;
   const contextFactory = options.contextFactory ?? createAnchorContext;
@@ -657,35 +492,12 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       ? options.solUsdThreshold
       : FEE_SWEEP_SOL_USD_THRESHOLD;
 
-  const { provider, program } = contextFactory(payerBundle.root, {
+  const { provider } = contextFactory(payerBundle.root, {
     rpcUrl,
   });
   const connection = provider.connection as unknown as Connection;
 
-  console.log(`Program ID: ${program.programId.toBase58()}`);
-  console.log(
-    `Operator payer: ${payerBundle.anchor.publicKey.toBase58()}, Oracle operator: ${operatorBundle.anchor.publicKey.toBase58()}`,
-  );
-
-  let tokenWithdrawals = 0;
-  for (const token of tokens) {
-    try {
-      const withdrawn = await tokenFeeProcessor(
-        program,
-        connection,
-        wallet,
-        payerBundle,
-        operatorBundle,
-        token,
-        priceResolver,
-      );
-      if (withdrawn) {
-        tokenWithdrawals += 1;
-      }
-    } catch (error) {
-      console.error(`❌ Failed withdrawing ${token.ticker}:`, error);
-    }
-  }
+  console.log(`Operator payer: ${payerBundle.anchor.publicKey.toBase58()}`);
 
   let referralClaims = 0;
   try {
@@ -729,12 +541,11 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
     console.log("ℹ️  Token-to-SOL sweep disabled; skipping swaps.");
   }
 
-  console.log("\n🏁 Fee withdrawal run completed.");
+  console.log("\n🏁 Fee sweep run completed.");
 
-  return { tokenWithdrawals, referralClaims };
+  return { referralClaims };
 };
 
-export const __test_shouldWithdrawToken = shouldWithdrawToken;
 export const __test_shouldSwapTokenBalance = shouldSwapTokenBalance;
 export const __test_sweepTokensToSol = sweepTokensToSol;
 export const __test_unwrapWsolBalance = unwrapWsolBalance;

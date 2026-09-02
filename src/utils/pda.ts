@@ -7,7 +7,6 @@ import { PublicKey } from "@solana/web3.js";
 export class PDAManager {
   private static readonly SEEDS = {
     GAME: "game",
-    GAME_TOKEN: "game_token",
     PLAYER_PARTICIPATION: "player_participation",
     ORACLE: "oracle",
   } as const;
@@ -45,13 +44,6 @@ export class PDAManager {
    */
 
   // PlayerGames PDA not used in current participation tracking model
-
-  /**
-   * Get Game Token PDA - Used for game token configuration
-   */
-  static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
-  }
 
   /**
    * Get Player Participation PDA - Used to track player participation in specific games

@@ -24,7 +24,7 @@ function createConnectionStub(owner: PublicKey) {
 }
 
 describe("GameManager token program resolution", () => {
-  test("resolveGameTokenAccounts rejects Token-2022 mints", async () => {
+  test("resolveGameVaultAccounts rejects Token-2022 mints", async () => {
     resetGM();
     const mint = Keypair.generate().publicKey;
     const programId = Keypair.generate().publicKey;
@@ -47,7 +47,7 @@ describe("GameManager token program resolution", () => {
       getGameParticipants: () => [],
     } as any);
 
-    await expect((gm as any).resolveGameTokenAccounts(mint)).rejects.toThrow(
+    await expect((gm as any).resolveGameVaultAccounts(mint)).rejects.toThrow(
       "Timba only supports legacy SPL Token mints",
     );
     expect(connection.__getCallCount()).toBe(1);

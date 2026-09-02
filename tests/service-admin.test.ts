@@ -6,7 +6,6 @@ describe("service-admin command routing", () => {
     "close-orphaned-games",
     "initialize-referral-token-accounts",
     "show-swap-stats",
-    "withdraw-token-fees",
     "sweep-to-sol",
   ])("accepts %s", (command) => {
     expect(isServiceAdminCommand(command)).toBe(true);
@@ -15,5 +14,6 @@ describe("service-admin command routing", () => {
 
   test("rejects chain administration", () => {
     expect(isServiceAdminCommand("disable-game-tokens")).toBe(false);
+    expect(isServiceAdminCommand("withdraw-token-fees")).toBe(false);
   });
 });

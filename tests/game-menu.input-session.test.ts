@@ -458,7 +458,7 @@ describe("game setup typed input handling", () => {
   test("startInteractiveGameSetup respects token override context", async () => {
     const ctx = createMockCtx("/cf");
     const balanceSpy = spyOn(wallet, "getTokenBalance").mockResolvedValue(2_500_000);
-    const minSpy = spyOn(botModule, "getContractMinimumAmount").mockResolvedValue({
+    const minSpy = spyOn(botModule, "getTokenPolicyMinimumAmount").mockResolvedValue({
       formatted: 0.2,
       raw: 200_000,
       decimals: 6,

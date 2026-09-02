@@ -6,14 +6,8 @@ import { PDAManager } from "../utils/pda";
 const UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const PROGRAM_ACCOUNT_TAG = 2;
 
-type GameTokenAccount = {
-  publicKey: PublicKey;
-  account: { tokenMint: PublicKey };
-};
-
-type ProgramWithGameTokens = {
+type TimbaProgram = {
   programId: PublicKey;
-  account: { gameToken: { all: () => Promise<GameTokenAccount[]> } };
 };
 
 const getProgramDataAddress = (data: Buffer): PublicKey => {
@@ -25,7 +19,8 @@ const getProgramDataAddress = (data: Buffer): PublicKey => {
 
 export async function getContractCapitalLamports(
   connection: Connection,
-  program: ProgramWithGameTokens,
+  program: TimbaProgram,
+  policyMints: readonly string[],
 ): Promise<bigint> {
   const programInfo = await connection.getAccountInfo(program.programId, "confirmed");
   if (!programInfo || !programInfo.owner.equals(UPGRADEABLE_LOADER)) {
@@ -40,13 +35,12 @@ export async function getContractCapitalLamports(
   add(getProgramDataAddress(programInfo.data), UPGRADEABLE_LOADER);
   add(PDAManager.getOraclePDA(program.programId), program.programId);
 
-  for (const gameToken of await program.account.gameToken.all()) {
-    const mint = gameToken.account.tokenMint;
+  for (const mintAddress of new Set(policyMints)) {
+    const mint = new PublicKey(mintAddress);
     const [vault] = PublicKey.findProgramAddressSync(
       [Buffer.from("game_vault"), mint.toBuffer()],
       program.programId,
     );
-    add(gameToken.publicKey, program.programId);
     add(getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID), TOKEN_PROGRAM_ID);
   }
 

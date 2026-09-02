@@ -20,17 +20,6 @@ test("getGamePDA derives expected address", () => {
   expect(pda.toBase58()).toBe(expected.toBase58());
 });
 
-test("getGameTokenPDA derives expected address", () => {
-  const programId = Keypair.generate().publicKey;
-  const tokenMint = Keypair.generate().publicKey;
-  const expected = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_token"), tokenMint.toBuffer()],
-    programId,
-  )[0];
-  const pda = PDAManager.getGameTokenPDA(tokenMint, programId);
-  expect(pda.toBase58()).toBe(expected.toBase58());
-});
-
 test("getPlayerParticipationPDA derives expected address", () => {
   const programId = Keypair.generate().publicKey;
   const gameAddress = Keypair.generate().publicKey;

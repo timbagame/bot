@@ -403,17 +403,10 @@ export class FinanceLedgerService {
     coverage: FinanceLedgerSnapshot["coverage"],
     backfill: FinanceBackfillProgress,
   ): Promise<FinanceLedgerSnapshot> {
-    const [gameAccounts, referralAccounts] = await Promise.all([
-      this.program.account.gameToken.all(),
-      this.referralAccounts(),
-    ]);
+    const referralAccounts = await this.referralAccounts();
     return {
-      gameClaimable: gameAccounts
-        .map(({ account }) => ({
-          mint: account.tokenMint.toBase58(),
-          amountRaw: asBigInt(account.feeAmount),
-        }))
-        .filter(({ amountRaw }) => amountRaw > 0n),
+      // v0.3 transfers completion fees directly to the current Oracle operator ATA.
+      gameClaimable: [],
       swapClaimable: referralAccounts
         .map(({ account }) => ({ mint: account.mint.toBase58(), amountRaw: account.amount }))
         .filter(({ amountRaw }) => amountRaw > 0n),

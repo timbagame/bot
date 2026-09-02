@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   __test_shouldSwapTokenBalance,
-  __test_shouldWithdrawToken,
   __test_sweepTokensToSol,
   __test_unwrapWsolBalance,
   __test_runReferralSweep,
@@ -45,42 +44,6 @@ const buildConnection = () =>
     getAccountInfo: async () => null,
     getProgramAccounts: async () => [],
   }) as any;
-
-describe("fee sweeper helpers", () => {
-  const wallet = {
-    formatTokenBalance: (raw: number, decimals: number) => (raw / 10 ** decimals).toFixed(decimals),
-  } as any;
-  const tokenConfig = { mint: "mint", ticker: "TEST" };
-
-  test("skips withdrawals when below $5 threshold", async () => {
-    const priceResolver = buildPriceResolver(1);
-    const result = await __test_shouldWithdrawToken(
-      wallet,
-      tokenConfig,
-      2_000_000_000n,
-      9,
-      priceResolver as any,
-    );
-
-    expect(result.shouldWithdraw).toBe(false);
-    expect(result.formattedPending).toBe("2.000000000");
-    expect(result.tokenUsdValue).toBeCloseTo(2);
-  });
-
-  test("allows withdrawals at or above the $5 threshold", async () => {
-    const priceResolver = buildPriceResolver(5);
-    const result = await __test_shouldWithdrawToken(
-      wallet,
-      tokenConfig,
-      1_000_000_000n,
-      9,
-      priceResolver as any,
-    );
-
-    expect(result.shouldWithdraw).toBe(true);
-    expect(result.tokenUsdValue).toBeCloseTo(5);
-  });
-});
 
 describe("token to SOL sweep helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
@@ -357,12 +320,12 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
+      enableSwapToSol: false,
       contextFactory: () =>
         ({
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      tokenFeeProcessor: async () => false,
       referralSweeper: async () => {
         // Simulate the threshold check - total value $2 (below $5)
         return 0;
@@ -381,12 +344,12 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
+      enableSwapToSol: false,
       contextFactory: () =>
         ({
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      tokenFeeProcessor: async () => false,
       referralSweeper: async () => {
         // Simulate the threshold check - total value $10 (above $5)
         claimAttempted = true;
@@ -408,6 +371,7 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
+      enableSwapToSol: false,
       priceResolver: async ({ tokenMint }) => {
         // Return different prices for different tokens
         const now = Date.now();
@@ -420,7 +384,6 @@ describe("Jupiter referral sweep threshold", () => {
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      tokenFeeProcessor: async () => false,
       referralSweeper: async (_connection, _adminBundle, _entries, priceResolver) => {
         receivedPriceResolver = priceResolver as TestPriceResolver;
         return 0;
@@ -446,12 +409,12 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
+      enableSwapToSol: false,
       contextFactory: () =>
         ({
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      tokenFeeProcessor: async () => false,
       referralSweeper: async () => {
         // Simulate: tokenA has 0 balance, tokenB has $3 value
         // Only tokenB should count, so total is $3 (below threshold)
@@ -471,13 +434,13 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getOperatorKeypair: () => operatorKeypair } as any,
       tokenConfigs: [],
       referralAccount: "someAccount",
+      enableSwapToSol: false,
       priceResolver: async (_params: { tokenMint?: string }) => null, // No price data
       contextFactory: () =>
         ({
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      tokenFeeProcessor: async () => false,
       referralSweeper: async (_conn, _admin, _entries, priceResolver) => {
         // Tokens without price data should be skipped in USD calculation
         const priceData = priceResolver ? await priceResolver({ tokenMint: "unknown" }) : null;
@@ -525,8 +488,7 @@ describe("sweepFees integration hooks", () => {
     program: { programId: { toBase58: () => "test-program" } },
   });
 
-  test("defaults enable swaps after withdrawals and referrals", async () => {
-    const withdrawn: string[] = [];
+  test("runs referral claims before the default token-to-SOL sweep", async () => {
     let referralClaims = 0;
     let swapRuns = 0;
 
@@ -540,17 +502,6 @@ describe("sweepFees integration hooks", () => {
         resolvedAt: Date.now(),
       }),
       contextFactory: fakeContext as any,
-      tokenFeeProcessor: async (
-        _program,
-        _connection,
-        _wallet,
-        _adminBundle,
-        _operatorBundle,
-        config,
-      ) => {
-        withdrawn.push(config.ticker);
-        return config.ticker === "AAA";
-      },
       referralSweeper: async () => {
         referralClaims += 2;
         return 2;
@@ -558,12 +509,11 @@ describe("sweepFees integration hooks", () => {
       tokenToSolSweeper: async () => {
         swapRuns += 1;
       },
+      balanceFetcher: async () => 0n,
     });
 
-    expect(result.tokenWithdrawals).toBe(1);
     expect(result.referralClaims).toBe(2);
     expect(referralClaims).toBe(2);
-    expect(withdrawn).toEqual(["AAA", "BBB"]);
     expect(swapRuns).toBe(1);
   });
 
@@ -584,7 +534,6 @@ describe("sweepFees integration hooks", () => {
         provider: { connection: { getBalance: async () => 1_000_000_000 } },
         program: { programId: { toBase58: () => "test-program" } },
       })) as any,
-      tokenFeeProcessor: async () => true,
       referralSweeper: async () => 0,
       tokenToSolSweeper: async () => {
         swapRuns += 1;
@@ -603,7 +552,6 @@ describe("sweepFees integration hooks", () => {
       referralAccount: "referral",
       enableSwapToSol: false,
       contextFactory: fakeContext as any,
-      tokenFeeProcessor: async () => true,
       referralSweeper: async () => 0,
       tokenToSolSweeper: async () => {
         swapRuns += 1;

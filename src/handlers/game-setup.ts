@@ -92,7 +92,7 @@ type GameSetupModuleDeps = {
   wallet: WalletManager;
   getTokenManager: () => TokenManager | undefined;
   getDefaultTokenMetadata: GetDefaultTokenMetadata;
-  getContractMinimumAmount: GetContractMinimumAmount;
+  getTokenPolicyMinimumAmount: GetContractMinimumAmount;
   fetchTokenPriceUSD: FetchTokenPriceUSD;
   createAmountSelectionKeyboard: CreateAmountSelectionKeyboard;
   getSuggestedStakeAmounts: GetSuggestedStakeAmounts;
@@ -221,7 +221,7 @@ export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModul
       console.error("Error getting token balance:", error);
     }
 
-    const { formatted: contractMin } = await deps.getContractMinimumAmount(
+    const { formatted: contractMin } = await deps.getTokenPolicyMinimumAmount(
       tokenInfo.tokenMint,
       tokenInfo.decimals,
     );

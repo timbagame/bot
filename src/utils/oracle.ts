@@ -3,11 +3,71 @@ import type { AuthorizationResult, OracleStats } from "../types";
 import { GameDatabase } from "./game-database";
 import type { WalletManager } from "./wallet";
 import { loadOracleApiToken } from "./secrets";
-import { createRestClient, expectStatus } from "@timbagame/protocol/common";
-import { oracleContract } from "@timbagame/protocol/oracle";
+import { createRestClient, expectStatus, ProtocolHttpError } from "@timbagame/protocol/common";
+import {
+  oracleContract,
+  type CreationPolicyRejection,
+  type CreationPolicyRejectionCode,
+  type TokenPolicy,
+} from "@timbagame/protocol/oracle";
 
 function errorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+}
+
+const POLICY_REJECTION_CODES = new Set<CreationPolicyRejectionCode>([
+  "unsupported_mint",
+  "token_disabled",
+  "amount_below_minimum",
+  "policy_unavailable",
+]);
+
+function isCreationPolicyRejection(value: unknown): value is CreationPolicyRejection {
+  if (typeof value !== "object" || value === null || !("code" in value)) return false;
+  return POLICY_REJECTION_CODES.has((value as { code: CreationPolicyRejectionCode }).code);
+}
+
+export class OraclePolicyError extends Error {
+  constructor(
+    readonly code: CreationPolicyRejectionCode,
+    message: string,
+    readonly details: {
+      mint?: string;
+      minimumAmountRaw?: string;
+      revision?: number;
+    } = {},
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "OraclePolicyError";
+  }
+}
+
+function policyErrorFromHttpError(error: unknown): OraclePolicyError | null {
+  if (!(error instanceof ProtocolHttpError) || !isCreationPolicyRejection(error.data)) {
+    return null;
+  }
+  const { code, error: message, mint, minimumAmountRaw, revision } = error.data;
+  return new OraclePolicyError(
+    code,
+    message,
+    { mint, minimumAmountRaw, revision },
+    { cause: error },
+  );
+}
+
+export function formatOraclePolicyError(error: unknown): string | null {
+  if (!(error instanceof OraclePolicyError)) return null;
+  switch (error.code) {
+    case "unsupported_mint":
+      return "❌ This token is not supported for new games.";
+    case "token_disabled":
+      return "❌ This token is temporarily disabled for new games.";
+    case "amount_below_minimum":
+      return "❌ The game amount is below the current minimum for this token.";
+    case "policy_unavailable":
+      return "❌ Token policy is unavailable. Please try again later.";
+  }
 }
 
 // ================================
@@ -76,11 +136,52 @@ export class OracleClient {
     const txBase64 = transaction
       .serialize({ requireAllSignatures: false, verifySignatures: false })
       .toString("base64");
-    const data = expectStatus(
-      await this.apiClient().signGameTransaction({ body: { txBase64 } }),
-      200,
-    ).data;
-    return Transaction.from(Buffer.from(data.txBase64, "base64"));
+    try {
+      const data = expectStatus(
+        await this.apiClient().signGameTransaction({ body: { txBase64 } }),
+        200,
+      ).data;
+      return Transaction.from(Buffer.from(data.txBase64, "base64"));
+    } catch (error) {
+      throw policyErrorFromHttpError(error) ?? error;
+    }
+  }
+
+  public async getTokenPolicies(): Promise<TokenPolicy[]> {
+    try {
+      return expectStatus(await this.apiClient().tokenPolicies(), 200).data.policies;
+    } catch (error) {
+      throw (
+        policyErrorFromHttpError(error) ??
+        new OraclePolicyError(
+          "policy_unavailable",
+          "Unable to load the Oracle token policy",
+          {},
+          { cause: error },
+        )
+      );
+    }
+  }
+
+  public async requireTokenPolicy(mint: string, amountRaw?: bigint): Promise<TokenPolicy> {
+    const policy = (await this.getTokenPolicies()).find((candidate) => candidate.mint === mint);
+    if (!policy) {
+      throw new OraclePolicyError("unsupported_mint", "Token is not supported", { mint });
+    }
+    if (!policy.enabled) {
+      throw new OraclePolicyError("token_disabled", "Token is disabled", {
+        mint: policy.mint,
+        revision: policy.revision,
+      });
+    }
+    if (amountRaw !== undefined && amountRaw < BigInt(policy.minimumAmountRaw)) {
+      throw new OraclePolicyError("amount_below_minimum", "Amount is below the token minimum", {
+        mint: policy.mint,
+        minimumAmountRaw: policy.minimumAmountRaw,
+        revision: policy.revision,
+      });
+    }
+    return policy;
   }
 
   /**

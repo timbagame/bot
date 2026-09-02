@@ -3,6 +3,7 @@ import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
+import { OraclePolicyError } from "../src/utils/oracle";
 import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   MAX_ACTIVE_GAMES_PER_CREATOR,
@@ -13,6 +14,18 @@ import {
 function resetGM() {
   // @ts-ignore
   GameManager["instance"] = undefined;
+}
+
+function getGameManager(...args: Parameters<typeof GameManager.getInstance>): GameManager {
+  const manager = GameManager.getInstance(...args);
+  (manager as any).oracleClient.requireTokenPolicy = async (mint: string) => ({
+    mint,
+    enabled: true,
+    minimumAmountRaw: "1",
+    revision: 1,
+    effectiveAt: "2026-09-02T00:00:00.000Z",
+  });
+  return manager;
 }
 
 function createConnectionStub(owner: PublicKey = TOKEN_PROGRAM_ID) {
@@ -109,7 +122,7 @@ describe("GameManager.createGame", () => {
       },
       formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
     });
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
@@ -139,7 +152,7 @@ describe("GameManager.createGame", () => {
       getTokenBalance: async () => 500_000,
       getBalance: async () => 5_000_000,
     });
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
@@ -165,7 +178,7 @@ describe("GameManager.createGame", () => {
       getTokenBalance: async () => 100_000,
       getBalance: async () => 1_000_000,
     });
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
@@ -201,9 +214,12 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
     // Patch oracle client on the instance
-    (gm as any).oracleClient = { isHealthy: async () => false };
+    (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
+      isHealthy: async () => false,
+    };
     const res = await gm.createGame(
       "coinflip",
       { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
@@ -214,6 +230,38 @@ describe("GameManager.createGame", () => {
     );
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Oracle service is unavailable");
+  });
+
+  test("fails closed with a safe message when Oracle disables the token", async () => {
+    resetGM();
+    const wallet = makeWallet({});
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any);
+    (gm as any).oracleClient.requireTokenPolicy = async () => {
+      throw new OraclePolicyError("token_disabled", "sensitive operator detail");
+    };
+
+    const result = await gm.createGame(
+      "coinflip",
+      {
+        amount: 1,
+        tokenMint: PublicKey.default.toBase58(),
+        tokenTicker: "TEST",
+        isSol: false,
+      },
+      2,
+      2,
+      60,
+      1n,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "❌ This token is temporarily disabled for new games.",
+    });
+    expect(result.error).not.toContain("sensitive operator detail");
   });
 
   test("fails fast when creator hits active game limit", async () => {
@@ -234,7 +282,7 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => MAX_ACTIVE_GAMES_PER_CREATOR,
       countRecentGamesByCreator: () => 0,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
     const res = await gm.createGame(
       "coinflip",
       { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
@@ -268,7 +316,7 @@ describe("GameManager.createGame", () => {
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => recentCount,
     } as any;
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
     const res = await gm.createGame(
       "coinflip",
       { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
@@ -305,7 +353,7 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
 
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
 
     const sharedTimestamp = 1_700_000_000_000;
     const baseArgs: Parameters<GameManager["createGame"]> = [
@@ -329,6 +377,7 @@ describe("GameManager.createGame", () => {
       gm.createGame(...baseArgs),
     );
 
+    await Promise.resolve();
     expect(metadataDeferrals.length).toBe(MAX_GAMES_PER_CREATOR_WINDOW);
 
     const blockedResult = await gm.createGame(...baseArgs);
@@ -368,7 +417,7 @@ describe("GameManager.createGame", () => {
         },
       } as any;
 
-      const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+      const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
 
       const staleTimestamp = fixedNow - 5 * GAME_CREATION_RATE_LIMIT_WINDOW_MS;
       const result = await gm.createGame(
@@ -422,7 +471,7 @@ describe("GameManager.createGame", () => {
         },
       } as any;
 
-      const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+      const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
 
       for (const ts of [Number.POSITIVE_INFINITY, Number.NaN]) {
         const res = await gm.createGame(
@@ -471,7 +520,7 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
 
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
 
     const creationArgs: Parameters<GameManager["createGame"]> = [
       "coinflip",
@@ -522,7 +571,7 @@ describe("GameManager.createGame", () => {
         },
       } as any;
 
-      const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+      const gm = getGameManager(makeProgram(wallet.connection), wallet, db);
 
       const futureTimestamp = fixedNow + 60_000;
       const result = await gm.createGame(
@@ -585,8 +634,9 @@ describe("GameManager.createGame", () => {
     } as any;
 
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "0".repeat(64),
@@ -654,8 +704,9 @@ describe("GameManager.createGame", () => {
     } as any;
 
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "1".repeat(64),
@@ -708,8 +759,9 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "deadbeef",
@@ -721,15 +773,13 @@ describe("GameManager.createGame", () => {
       },
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const creatorTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => creatorTokenAccount;
     // Derivation and confirmation patched
@@ -768,21 +818,39 @@ describe("GameManager.createGame", () => {
       isWritable: false,
     });
     expect(accounts).toBeDefined();
-    expect(accounts.gameTokenCtx).toBeDefined();
-    const ctx = accounts.gameTokenCtx;
+    expect(accounts.gameVaultCtx).toBeDefined();
+    expect(Object.keys(accounts).sort()).toEqual(
+      [
+        "creator",
+        "creatorTokenAccount",
+        "game",
+        "gameVaultCtx",
+        "oracle",
+        "oracleOperator",
+        "systemProgram",
+      ].sort(),
+    );
+    const ctx = accounts.gameVaultCtx;
+    expect(Object.keys(ctx).sort()).toEqual(
+      [
+        "associatedTokenProgram",
+        "gameVault",
+        "gameVaultTokenAccount",
+        "tokenMint",
+        "tokenProgram",
+      ].sort(),
+    );
     expect(ctx.tokenMint.toBase58()).toBe("11111111111111111111111111111111");
-    expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
+    expect(ctx.gameVaultTokenAccount.toBase58()).toBe(gameVaultTokenAccount.toBase58());
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(accounts.creatorTokenAccount.toBase58()).toBe(creatorTokenAccount.toBase58());
     expect(accounts.tokenMint).toBeUndefined();
     expect(accounts.tokenProgram).toBeUndefined();
     expect(accounts.associatedTokenProgram).toBeUndefined();
-    expect(accounts.gameToken).toBeUndefined();
     expect(accounts.gameVault).toBeUndefined();
-    expect(accounts.gameTokenAccount).toBeUndefined();
+    expect(accounts.gameVaultTokenAccount).toBeUndefined();
 
     // restore
     (PDAManager as any).getGamePDA = original;
@@ -825,7 +893,7 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).feeBudget = {
       getGameSafetyBufferLamports: async () => 800_000,
     };
@@ -838,6 +906,7 @@ describe("GameManager.createGame", () => {
       },
     };
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "cafebabe",
@@ -846,15 +915,13 @@ describe("GameManager.createGame", () => {
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const creatorTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => creatorTokenAccount;
     const originalGetGamePda = (PDAManager as any).getGamePDA;
@@ -916,8 +983,9 @@ describe("GameManager.createGame", () => {
     } as any;
 
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "a".repeat(64),
@@ -926,11 +994,10 @@ describe("GameManager.createGame", () => {
       signGameTransaction: async (transaction: any) => transaction,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken: Keypair.generate().publicKey,
       gameVault: Keypair.generate().publicKey,
-      gameTokenAccount: Keypair.generate().publicKey,
+      gameVaultTokenAccount: Keypair.generate().publicKey,
     });
     (gm as any).deriveAta = async () => Keypair.generate().publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
@@ -971,7 +1038,7 @@ describe("GameManager.createGame", () => {
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
     });
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
       countRecentGamesByCreator: () => 0,
@@ -1014,8 +1081,9 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
     const program = makeProgram(connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
     (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "a".repeat(64),
@@ -1027,11 +1095,10 @@ describe("GameManager.createGame", () => {
       },
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken: Keypair.generate().publicKey,
       gameVault: Keypair.generate().publicKey,
-      gameTokenAccount: Keypair.generate().publicKey,
+      gameVaultTokenAccount: Keypair.generate().publicKey,
     });
     (gm as any).deriveAta = async () => Keypair.generate().publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
@@ -1067,9 +1134,9 @@ describe("GameManager.createGame", () => {
       capturedRentCalls.length = 0;
       resetGM();
 
-      const gm2 = GameManager.getInstance(program, wallet, db);
+      const gm2 = getGameManager(program, wallet, db);
       (gm2 as any).oracleClient = (gm as any).oracleClient;
-      (gm2 as any).resolveGameTokenAccounts = (gm as any).resolveGameTokenAccounts;
+      (gm2 as any).resolveGameVaultAccounts = (gm as any).resolveGameVaultAccounts;
       (gm2 as any).deriveAta = (gm as any).deriveAta;
       (gm2 as any).confirmTransactionWithRecovery = (gm as any).confirmTransactionWithRecovery;
 
@@ -1123,7 +1190,7 @@ describe("GameManager.createGame", () => {
       countRecentGamesByCreator: () => 0,
     } as any;
     const program = makeProgram(wallet.connection);
-    const gm = GameManager.getInstance(program, wallet, db);
+    const gm = getGameManager(program, wallet, db);
 
     // Mock feeBudget
     (gm as any).feeBudget = {
@@ -1188,7 +1255,7 @@ describe("GameManager.createGame", () => {
         countRecentGamesByCreator: () => 0,
       } as any;
       const program = makeProgram(wallet.connection);
-      const gm = GameManager.getInstance(program, wallet, db);
+      const gm = getGameManager(program, wallet, db);
 
       (gm as any).feeBudget = {
         getGameSafetyBufferLamports: async () => minSolBuffer,
@@ -1262,7 +1329,7 @@ describe("GameManager.createGame", () => {
   test("explains game funding with a concise shortfall and action", () => {
     resetGM();
     const wallet = makeWallet({});
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {} as any);
+    const gm = getGameManager(makeProgram(wallet.connection), wallet, {} as any);
     const plan = (gm as any).buildGameFundingPlan({
       currentSolLamports: 3_351_920,
       gameDepositLamports: 2_241_120,

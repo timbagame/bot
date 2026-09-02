@@ -42,6 +42,7 @@ Do not use `sudo` for rootless Podman. If the checkout path changes, update the 
 
 - Verify `/balance` and `/oracle` return mainnet data.
 - Confirm the Bot can reach `http://oracle:3001` on the private Podman network.
+- Confirm the authenticated Oracle `/token-policies` endpoint returns the expected enabled mints and minimum amounts.
 - Keep its Solana wallets funded.
 
 For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.

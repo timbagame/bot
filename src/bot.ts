@@ -118,7 +118,7 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getUsdPrice } from "./utils/price-service";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import type { IntegratorSwapParams } from "./utils/integrator-fees";
-import { getReferralConfig, type ReferralConfig } from "./utils/token-registry";
+import { getReferralConfig, getSupportedTokens, type ReferralConfig } from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
@@ -159,6 +159,7 @@ import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
 import { getVerifiedTokenMints } from "./utils/verified-token-registry";
+import { OracleClient } from "./utils/oracle";
 import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
 import { FaucetDatabase } from "./utils/faucet-database";
 import { outboundErrorGuard } from "./utils/outbound-error-guard";
@@ -2908,8 +2909,8 @@ const gameSetupModule = createGameSetupModule({
   wallet,
   getTokenManager: () => tokenManager,
   getDefaultTokenMetadata,
-  getContractMinimumAmount: (tokenMint, decimalsHint) =>
-    getContractMinimumAmount(tokenMint, decimalsHint),
+  getTokenPolicyMinimumAmount: (tokenMint, decimalsHint) =>
+    getTokenPolicyMinimumAmount(tokenMint, decimalsHint),
   fetchTokenPriceUSD: (params) => fetchTokenPriceUSD(params),
   createAmountSelectionKeyboard,
   getSuggestedStakeAmounts,
@@ -2942,8 +2943,8 @@ const gameCommandsModule = createGameCommandsModule({
     getBalance: (telegramId) => wallet.getBalance(telegramId),
     formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
   },
-  getContractMinimumAmount: (tokenMint, decimalsHint) =>
-    getContractMinimumAmount(tokenMint, decimalsHint),
+  getTokenPolicyMinimumAmount: (tokenMint, decimalsHint) =>
+    getTokenPolicyMinimumAmount(tokenMint, decimalsHint),
   gameManager: {
     createGame: (...args) => gameManager.createGame(...args),
     createGameMessage: (...args) => gameManager.createGameMessage(...args),
@@ -2975,8 +2976,8 @@ const gameCallbacksModule = createGameCallbacksModule({
   pendingGameCreations,
   getOracleMaxPlayers,
   getDefaultTokenMetadata: () => getDefaultTokenMetadata(),
-  getContractMinimumAmount: (tokenMint, decimalsHint) =>
-    getContractMinimumAmount(tokenMint, decimalsHint),
+  getTokenPolicyMinimumAmount: (tokenMint, decimalsHint) =>
+    getTokenPolicyMinimumAmount(tokenMint, decimalsHint),
   fetchTokenPriceUSD: (params) => fetchTokenPriceUSD(params),
   getProgram: () => program,
   validateGameTokenData: (gameData) => validateGameTokenData(gameData),
@@ -3266,7 +3267,7 @@ const setupAnchor = async () => {
     gameManager.setGameMessageReadyListener(notifyGameMessageReady);
 
     await checkOracleStatus();
-    await checkGameTokenStatus();
+    await checkTokenPolicyStatus();
   } catch (error) {
     console.error("Error initializing Anchor program:", error);
     console.error(
@@ -3335,9 +3336,9 @@ const checkOracleStatus = async () => {
 };
 
 /**
- * Get the actual minimum amount from the smart contract for a specific token.
+ * Get the current minimum amount from the Oracle-owned token policy.
  */
-export const getContractMinimumAmount = async (
+export const getTokenPolicyMinimumAmount = async (
   tokenMint: string = DEFAULT_TOKEN_MINT,
   decimalsHint?: number,
 ): Promise<{ formatted: number; raw: number; decimals: number }> => {
@@ -3359,52 +3360,37 @@ export const getContractMinimumAmount = async (
     }
   }
 
-  try {
-    const gameTokenPda = PDAManager.getGameTokenPDA(new PublicKey(resolvedMint), program.programId);
-    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-
-    const minAmountRaw = Number(gameTokenAccount.minAmount);
-    const minAmountFormatted = minAmountRaw / Math.pow(10, decimals!);
-
-    console.log(`✅ Contract minimum for ${resolvedMint}: ${minAmountFormatted}`);
-    return {
-      formatted: minAmountFormatted,
-      raw: minAmountRaw,
-      decimals: decimals!,
-    };
-  } catch (error) {
-    console.warn(
-      `⚠️ Could not fetch minimum from contract for ${resolvedMint}, using fallback`,
-      error,
-    );
-    const fallbackRaw = Math.round(20 * Math.pow(10, decimals!));
-    return {
-      formatted: 20,
-      raw: fallbackRaw,
-      decimals: decimals!,
-    };
+  const policy = await OracleClient.getInstance(wallet).requireTokenPolicy(resolvedMint);
+  const minAmountRaw = Number(policy.minimumAmountRaw);
+  if (!Number.isSafeInteger(minAmountRaw)) {
+    throw new Error(`Token policy minimum exceeds the supported numeric range`);
   }
+  const minAmountFormatted = minAmountRaw / Math.pow(10, decimals!);
+
+  console.log(
+    `✅ Oracle token-policy minimum for ${resolvedMint}: ${minAmountFormatted} (revision ${policy.revision})`,
+  );
+  return {
+    formatted: minAmountFormatted,
+    raw: minAmountRaw,
+    decimals: decimals!,
+  };
 };
 
-const checkGameTokenStatus = async () => {
+const checkTokenPolicyStatus = async () => {
   try {
-    const gameTokenPda = PDAManager.getGameTokenPDA(
-      new PublicKey(DEFAULT_TOKEN_MINT),
-      program.programId,
-    );
-    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-
+    const policy = await OracleClient.getInstance(wallet).requireTokenPolicy(DEFAULT_TOKEN_MINT);
     const metadata = await getDefaultTokenMetadata();
     const formattedMinAmount = wallet.formatTokenBalance(
-      Number(gameTokenAccount.minAmount),
+      Number(policy.minimumAmountRaw),
       metadata.decimals,
     );
 
     console.log(
-      `Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`,
+      `Token policy found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${policy.minimumAmountRaw} raw units, revision ${policy.revision})`,
     );
   } catch (error) {
-    console.log("Game token not found, it might need to be initialized");
+    console.warn("Default token policy is unavailable or disabled", error);
   }
 };
 
@@ -4746,7 +4732,11 @@ const financeHandlers = createFinanceHandlers({
   resolveContractCapital: async () => {
     const finance = getFinanceReadContext();
     return {
-      lamports: await getContractCapitalLamports(finance.connection, finance.program),
+      lamports: await getContractCapitalLamports(
+        finance.connection,
+        finance.program,
+        getSupportedTokens().map(({ mint }) => mint),
+      ),
     };
   },
 });
