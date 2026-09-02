@@ -34,6 +34,7 @@ export class OraclePolicyError extends Error {
     readonly details: {
       mint?: string;
       minimumAmountRaw?: string;
+      acceptedMinimumAmountRaw?: string;
       revision?: number;
     } = {},
     options?: ErrorOptions,
@@ -47,11 +48,18 @@ function policyErrorFromHttpError(error: unknown): OraclePolicyError | null {
   if (!(error instanceof ProtocolHttpError) || !isCreationPolicyRejection(error.data)) {
     return null;
   }
-  const { code, error: message, mint, minimumAmountRaw, revision } = error.data;
+  const {
+    code,
+    error: message,
+    mint,
+    minimumAmountRaw,
+    acceptedMinimumAmountRaw,
+    revision,
+  } = error.data;
   return new OraclePolicyError(
     code,
     message,
-    { mint, minimumAmountRaw, revision },
+    { mint, minimumAmountRaw, acceptedMinimumAmountRaw, revision },
     { cause: error },
   );
 }
@@ -174,10 +182,11 @@ export class OracleClient {
         revision: policy.revision,
       });
     }
-    if (amountRaw !== undefined && amountRaw < BigInt(policy.minimumAmountRaw)) {
+    if (amountRaw !== undefined && amountRaw < BigInt(policy.acceptedMinimumAmountRaw)) {
       throw new OraclePolicyError("amount_below_minimum", "Amount is below the token minimum", {
         mint: policy.mint,
         minimumAmountRaw: policy.minimumAmountRaw,
+        acceptedMinimumAmountRaw: policy.acceptedMinimumAmountRaw,
         revision: policy.revision,
       });
     }

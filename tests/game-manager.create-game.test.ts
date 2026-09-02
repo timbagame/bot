@@ -22,6 +22,7 @@ function getGameManager(...args: Parameters<typeof GameManager.getInstance>): Ga
     mint,
     enabled: true,
     minimumAmountRaw: "1",
+    acceptedMinimumAmountRaw: "1",
     revision: 1,
     effectiveAt: "2026-09-02T00:00:00.000Z",
   });

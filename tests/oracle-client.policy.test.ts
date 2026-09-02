@@ -22,13 +22,14 @@ const tokenPolicy = (overrides: Record<string, unknown> = {}) => ({
   mint: TEST_GAME_ADDRESS,
   enabled: true,
   minimumAmountRaw: "100",
+  acceptedMinimumAmountRaw: "95",
   revision: 3,
   effectiveAt: "2026-09-02T00:00:00.000Z",
   ...overrides,
 });
 
 describe("Oracle token policy", () => {
-  test("loads authenticated policies and enforces the current minimum", async () => {
+  test("loads authenticated policies and applies the five-percent grace band", async () => {
     let request: { url: string; init?: RequestInit } | undefined;
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       request = { url, init };
@@ -40,16 +41,20 @@ describe("Oracle token policy", () => {
     const client = newOracleClient();
     client.setOracleUrl("http://oracle.test");
 
-    expect((await client.requireTokenPolicy(TEST_GAME_ADDRESS, 100n)).revision).toBe(3);
+    expect((await client.requireTokenPolicy(TEST_GAME_ADDRESS, 95n)).revision).toBe(3);
     expect(request?.url).toBe("http://oracle.test/token-policies");
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe(
       "Bearer test-oracle-token",
     );
 
-    await expect(client.requireTokenPolicy(TEST_GAME_ADDRESS, 99n)).rejects.toMatchObject({
+    await expect(client.requireTokenPolicy(TEST_GAME_ADDRESS, 94n)).rejects.toMatchObject({
       name: "OraclePolicyError",
       code: "amount_below_minimum",
-      details: { minimumAmountRaw: "100", revision: 3 },
+      details: {
+        minimumAmountRaw: "100",
+        acceptedMinimumAmountRaw: "95",
+        revision: 3,
+      },
     });
   });
 
