@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import {
   createPoolTradePoller,
+  GeckoRateLimitError,
   parseGeckoPoolTrade,
+  parseRetryAfterMs,
   rememberSignature,
 } from "../src/services/buy-alerts/pool-trades";
 import { WSOL_MINT } from "../src/utils/constants";
@@ -42,6 +44,50 @@ test("parseGeckoPoolTrade skips trades whose output is another mint", () => {
       attributes: { ...geckoBuy.attributes, kind: "sell", to_token_address: WSOL_MINT },
     }),
   ).toBeNull();
+});
+
+test("parseRetryAfterMs accepts seconds and HTTP dates", () => {
+  const now = Date.parse("2026-09-03T20:00:00.000Z");
+  expect(parseRetryAfterMs("30", now)).toBe(30_000);
+  expect(parseRetryAfterMs("Thu, 03 Sep 2026 20:00:45 GMT", now)).toBe(45_000);
+  expect(parseRetryAfterMs("invalid", now)).toBeNull();
+});
+
+test("pool trade poller honors rate-limit cooldowns and suppresses repeated logs", async () => {
+  const errors: unknown[] = [];
+  const delays: number[] = [];
+  let now = 0;
+  const poller = createPoolTradePoller({
+    intervalMs: 60_000,
+    minRequestIntervalMs: 1_000,
+    fetchPairStats: async () => ({
+      priceUsd: 1,
+      marketCapUsd: 1,
+      priceChangeH24: 1,
+      url: null,
+      dexId: "raydium",
+      quoteSymbol: "SOL",
+      pairAddress: "pair-rate-limited",
+      tokenName: "TOKEN",
+    }),
+    fetchTrades: async () => {
+      throw new GeckoRateLimitError(30_000);
+    },
+    onError: (error) => errors.push(error),
+    now: () => now,
+    wait: async (delayMs) => {
+      delays.push(delayMs);
+      now += delayMs;
+    },
+  });
+
+  poller.setMints([mint]);
+  await poller.pollNow();
+
+  expect(delays).toEqual([30_000]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(GeckoRateLimitError);
+  poller.stop();
 });
 
 test("parseGeckoPoolTrade accepts the watched mint on the quote side", () => {

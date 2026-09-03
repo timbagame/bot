@@ -6,10 +6,45 @@ import type { BuyEvent, BuyFeed, PairStats } from "./types";
 
 const GECKO_POOL_TRADES_URL = "https://api.geckoterminal.com/api/v2/networks/solana/pools";
 const TRADE_FETCH_TIMEOUT_MS = 5_000;
-// Keep the keyless GeckoTerminal feed below its documented 30 requests/minute limit.
-const GECKO_MIN_REQUEST_INTERVAL_MS = 2_100;
+// The keyless limit is dynamic and shared by source IP. Leave headroom and
+// honor server-directed cooldowns when the public pool is saturated.
+const GECKO_MIN_REQUEST_INTERVAL_MS = 5_000;
+const GECKO_DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+const GECKO_MAX_RATE_LIMIT_COOLDOWN_MS = 15 * 60_000;
+const GECKO_RATE_LIMIT_LOG_INTERVAL_MS = 60_000;
 export const POOL_TRADE_POLL_MS = GECKO_MIN_REQUEST_INTERVAL_MS;
 export const MAX_SEEN_SIGNATURES_PER_MINT = 400;
+
+export class GeckoRateLimitError extends Error {
+  readonly retryAfterMs: number | null;
+
+  constructor(retryAfterMs: number | null) {
+    super("GeckoTerminal trades request failed with status 429");
+    this.name = "GeckoRateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+
+  const seconds = Number(normalized);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1_000);
+  }
+
+  const retryAt = Date.parse(normalized);
+  if (!Number.isFinite(retryAt)) return null;
+  return Math.max(0, retryAt - nowMs);
+}
+
+function rateLimitCooldownMs(error: GeckoRateLimitError): number {
+  return Math.min(
+    error.retryAfterMs ?? GECKO_DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+    GECKO_MAX_RATE_LIMIT_COOLDOWN_MS,
+  );
+}
 
 export function rememberSignature(
   known: Set<string>,
@@ -129,6 +164,7 @@ export type PoolTradePollerOptions = {
   poolsPerCycle?: number;
   onError?: (error: unknown) => void;
   now?: () => number;
+  wait?: (delayMs: number) => Promise<void>;
 };
 
 async function fetchGeckoTrades(pairAddress: string): Promise<unknown> {
@@ -141,6 +177,9 @@ async function fetchGeckoTrades(pairAddress: string): Promise<unknown> {
       }),
     TRADE_FETCH_TIMEOUT_MS,
   );
+  if (response.status === 429) {
+    throw new GeckoRateLimitError(parseRetryAfterMs(response.headers.get("retry-after")));
+  }
   if (!response.ok) {
     throw new Error(`GeckoTerminal trades request failed with status ${response.status}`);
   }
@@ -177,6 +216,9 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   );
   const onError = options.onError ?? ((error: unknown) => console.error(error));
   const now = options.now ?? Date.now;
+  const wait =
+    options.wait ??
+    ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
 
   let mints: string[] = [];
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -189,6 +231,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   let poolQueue: Array<{ mint: string; pairAddress: string }> = [];
   let nextTradeFetchAt = 0;
   let consecutiveTradeFailures = 0;
+  let nextRateLimitReportAt = 0;
 
   const emit = (event: BuyEvent) => {
     for (const handler of handlers) {
@@ -197,6 +240,14 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   };
 
   const reportError = (error: unknown) => {
+    if (error instanceof GeckoRateLimitError) {
+      const current = now();
+      if (current < nextRateLimitReportAt) {
+        return;
+      }
+      nextRateLimitReportAt =
+        current + Math.max(GECKO_RATE_LIMIT_LOG_INTERVAL_MS, rateLimitCooldownMs(error));
+    }
     try {
       onError(error);
     } catch (reportingError) {
@@ -206,19 +257,24 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
 
   const waitForTradeSlot = async () => {
     if (minRequestIntervalMs <= 0) return;
-    const current = Date.now();
+    const current = now();
     const scheduled = Math.max(current, nextTradeFetchAt);
     nextTradeFetchAt = scheduled + minRequestIntervalMs;
     if (scheduled > current) {
-      await new Promise<void>((resolve) => setTimeout(resolve, scheduled - current));
+      await wait(scheduled - current);
     }
   };
 
-  const deferAfterTradeFailure = () => {
+  const deferAfterTradeFailure = (error: unknown) => {
     consecutiveTradeFailures += 1;
     if (minRequestIntervalMs <= 0) return;
     const multiplier = 2 ** Math.min(consecutiveTradeFailures - 1, 4);
-    nextTradeFetchAt = Math.max(nextTradeFetchAt, Date.now() + minRequestIntervalMs * multiplier);
+    const exponentialDelayMs = minRequestIntervalMs * multiplier;
+    const serverDelayMs = error instanceof GeckoRateLimitError ? rateLimitCooldownMs(error) : 0;
+    nextTradeFetchAt = Math.max(
+      nextTradeFetchAt,
+      now() + Math.max(exponentialDelayMs, serverDelayMs),
+    );
   };
 
   const pollPool = async (
@@ -239,15 +295,16 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       }
       payload = await fetchTrades(pairAddress);
     } catch (error) {
-      deferAfterTradeFailure();
+      deferAfterTradeFailure(error);
       reportError(error);
       return false;
     }
 
     const parsed = geckoTradesResponseSchema.safeParse(payload);
     if (!parsed.success) {
-      deferAfterTradeFailure();
-      reportError(new Error("GeckoTerminal trades response was malformed"));
+      const error = new Error("GeckoTerminal trades response was malformed");
+      deferAfterTradeFailure(error);
+      reportError(error);
       return false;
     }
     consecutiveTradeFailures = 0;
@@ -454,6 +511,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       poolQueue = [];
       nextTradeFetchAt = 0;
       consecutiveTradeFailures = 0;
+      nextRateLimitReportAt = 0;
     },
     pollNow,
   };
