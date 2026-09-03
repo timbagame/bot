@@ -13,7 +13,6 @@ RUN --mount=type=secret,id=npm_token \
 COPY tsconfig.json ./tsconfig.json
 COPY src ./src
 COPY scripts ./scripts
-COPY idl ./idl
 
 # Expose the bot HTTP port
 EXPOSE 3000
