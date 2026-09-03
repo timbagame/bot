@@ -3,6 +3,7 @@ import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {
   // reset singleton
@@ -68,13 +69,23 @@ test("cancelGameWithCreator returns true on successful close", async () => {
 
   const accounts = (program as any).__captures.closeGameAccounts;
   expect(accounts).toBeDefined();
+  const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
   expect(Object.keys(accounts).sort()).toEqual(
-    ["creator", "creatorTokenAccount", "game", "gameVaultCtx", "oracle"].sort(),
+    [
+      "creator",
+      "creatorTokenAccount",
+      "game",
+      fundsContextKey,
+      "oracle",
+      ...(contractCapabilities.gameTokenAccount ? ["systemProgram"] : []),
+    ].sort(),
   );
-  const ctx = accounts.gameVaultCtx;
+  const ctx = accounts[fundsContextKey];
   expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
   expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-  expect(ctx.gameVaultTokenAccount.toBase58()).toBe(gameVaultTokenAccount.toBase58());
+  expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+    gameVaultTokenAccount.toBase58(),
+  );
   expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
   expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
   expect(accounts.creatorTokenAccount.toBase58()).toBe(creatorTokenAccount.toBase58());

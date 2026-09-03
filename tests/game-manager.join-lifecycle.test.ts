@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { GameManager } from "../src/utils/game";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {
   // @ts-ignore
@@ -101,14 +102,17 @@ describe("GameManager join lifecycle", () => {
     expect(removed.length).toBe(0);
 
     expect(capturedJoinAccounts).toBeDefined();
+    const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
     expect(Object.keys(capturedJoinAccounts).sort()).toEqual(
-      ["game", "gameVaultCtx", "oracle", "oracleOperator", "player", "playerTokenAccount"].sort(),
+      ["game", fundsContextKey, "oracle", "oracleOperator", "player", "playerTokenAccount"].sort(),
     );
-    const ctx = capturedJoinAccounts.gameVaultCtx;
+    const ctx = capturedJoinAccounts[fundsContextKey];
     expect(ctx).toBeDefined();
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameVaultTokenAccount.toBase58()).toBe(gameVaultTokenAccount.toBase58());
+    expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+      gameVaultTokenAccount.toBase58(),
+    );
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
@@ -204,10 +208,13 @@ describe("GameManager join lifecycle", () => {
     expect(participantCalls[0][3]?.joinSignature).toBe("SIG321");
 
     expect(capturedJoinAccounts).toBeDefined();
-    const ctx = capturedJoinAccounts.gameVaultCtx;
+    const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
+    const ctx = capturedJoinAccounts[fundsContextKey];
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameVaultTokenAccount.toBase58()).toBe(gameVaultTokenAccount.toBase58());
+    expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+      gameVaultTokenAccount.toBase58(),
+    );
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());

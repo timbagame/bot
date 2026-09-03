@@ -35,6 +35,9 @@ import { SwapManager } from "../utils/swap-manager";
 import type { SwapRequest } from "../utils/swap/types";
 import { TransactionHistory } from "../utils/transaction-history";
 import { referralDeltaFromTransaction } from "./finance-ledger";
+import { OracleClient } from "../utils/oracle";
+import { sanitizeTokenSymbol } from "../utils/token-display";
+import type { TokenPolicy } from "@timbagame/protocol/oracle";
 
 export interface FeeSweepOptions {
   rpcUrl?: string;
@@ -53,6 +56,7 @@ export interface FeeSweepOptions {
   referralSweeper?: typeof runReferralSweep;
   tokenToSolSweeper?: typeof sweepTokensToSol;
   contextFactory?: typeof createAnchorContext;
+  tokenPolicyLoader?: () => Promise<TokenPolicy[]>;
 }
 
 export interface FeeSweepResult {
@@ -75,6 +79,46 @@ type SolPriceData = {
   resolvedAt?: number;
   timestamp?: number;
 };
+
+function dedupeTokenConfigs(tokens: TokenConfig[]): TokenConfig[] {
+  return [...new Map(tokens.map((token) => [token.mint, token])).values()];
+}
+
+async function resolveFeeSweepTokens(
+  wallet: WalletManager,
+  configuredTokens?: TokenConfig[],
+  tokenPolicyLoader?: () => Promise<TokenPolicy[]>,
+): Promise<TokenConfig[]> {
+  if (configuredTokens) return dedupeTokenConfigs(configuredTokens);
+  const staticTokens = getSupportedTokens();
+  if (!contractCapabilities.oracleTokenPolicy) return staticTokens;
+
+  try {
+    const policies = await (
+      tokenPolicyLoader ?? (() => OracleClient.getInstance(wallet).getTokenPolicies())
+    )();
+    const dynamicTokens = (
+      await Promise.all(
+        policies.map(async (policy): Promise<TokenConfig | null> => {
+          try {
+            const metadata = await wallet.getTokenMetadata(policy.mint);
+            return {
+              mint: policy.mint,
+              ticker: sanitizeTokenSymbol(metadata.symbol, policy.mint),
+            };
+          } catch (error) {
+            console.error(`❌ Failed to resolve fee token ${policy.mint}:`, error);
+            return null;
+          }
+        }),
+      )
+    ).filter((token): token is TokenConfig => token !== null);
+    return dedupeTokenConfigs([...staticTokens, ...dynamicTokens]);
+  } catch (error) {
+    console.error("❌ Failed to load dynamic token policies for fee sweeping:", error);
+    return staticTokens;
+  }
+}
 
 const MIN_USD_THRESHOLD = 5;
 const SOL_DECIMALS = 9;
@@ -619,7 +663,11 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   const payerBundle = bundleFromKeypair(payerRoot);
   const operatorBundle = resolveOracleOperatorBundle(payerRoot);
 
-  const tokens = options.tokenConfigs ?? getSupportedTokens();
+  const tokens = await resolveFeeSweepTokens(
+    wallet,
+    options.tokenConfigs,
+    options.tokenPolicyLoader,
+  );
   const referralAccount = options.referralAccount ?? getReferralConfig().referralAccount;
   const rpcUrl = resolvePrimaryRpcEndpoint(options.rpcUrl ?? process.env.SOLANA_NETWORK);
   const priceResolver = options.priceResolver ?? getUsdPrice;
@@ -722,4 +770,5 @@ export const __test_shouldSwapTokenBalance = shouldSwapTokenBalance;
 export const __test_sweepTokensToSol = sweepTokensToSol;
 export const __test_unwrapWsolBalance = unwrapWsolBalance;
 export const __test_runReferralSweep = runReferralSweep;
+export const __test_resolveFeeSweepTokens = resolveFeeSweepTokens;
 export { unwrapWsolBalance };

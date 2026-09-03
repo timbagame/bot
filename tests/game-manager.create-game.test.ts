@@ -10,6 +10,7 @@ import {
   MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
 } from "../src/utils/constants";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {
   // @ts-ignore
@@ -234,6 +235,7 @@ describe("GameManager.createGame", () => {
   });
 
   test("fails closed with a safe message when Oracle disables the token", async () => {
+    if (!contractCapabilities.oracleTokenPolicy) return;
     resetGM();
     const wallet = makeWallet({});
     const gm = getGameManager(makeProgram(wallet.connection), wallet, {
@@ -819,31 +821,44 @@ describe("GameManager.createGame", () => {
       isWritable: false,
     });
     expect(accounts).toBeDefined();
-    expect(accounts.gameVaultCtx).toBeDefined();
+    const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
+    expect(accounts[fundsContextKey]).toBeDefined();
     expect(Object.keys(accounts).sort()).toEqual(
       [
         "creator",
         "creatorTokenAccount",
         "game",
-        "gameVaultCtx",
+        fundsContextKey,
         "oracle",
         "oracleOperator",
         "systemProgram",
       ].sort(),
     );
-    const ctx = accounts.gameVaultCtx;
+    const ctx = accounts[fundsContextKey];
     expect(Object.keys(ctx).sort()).toEqual(
-      [
-        "associatedTokenProgram",
-        "gameVault",
-        "gameVaultTokenAccount",
-        "tokenMint",
-        "tokenProgram",
-      ].sort(),
+      (contractCapabilities.gameTokenAccount
+        ? [
+            "associatedTokenProgram",
+            "gameToken",
+            "gameTokenAccount",
+            "gameVault",
+            "tokenMint",
+            "tokenProgram",
+          ]
+        : [
+            "associatedTokenProgram",
+            "gameVault",
+            "gameVaultTokenAccount",
+            "tokenMint",
+            "tokenProgram",
+          ]
+      ).sort(),
     );
     expect(ctx.tokenMint.toBase58()).toBe("11111111111111111111111111111111");
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameVaultTokenAccount.toBase58()).toBe(gameVaultTokenAccount.toBase58());
+    expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+      gameVaultTokenAccount.toBase58(),
+    );
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(accounts.creatorTokenAccount.toBase58()).toBe(creatorTokenAccount.toBase58());

@@ -44,7 +44,13 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun x tsc -p tsconfig.json --noEmit
-      - name: Tests
+      - name: Tests (contract v0.3.0)
+        env:
+          CONTRACT_VERSION: 0.3.0
+        run: bun test --no-summarize
+      - name: Tests (contract v0.2.0)
+        env:
+          CONTRACT_VERSION: 0.2.0
         run: bun test --no-summarize
       - name: Install Podman
         run: |

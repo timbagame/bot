@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
+import { BorshCoder } from "@anchor-lang/core";
+import { timbaIdlV020 } from "@timbagame/protocol/contracts/v0.2.0";
+import { timbaIdlV030 } from "@timbagame/protocol/contracts/v0.3.0";
 import {
   PLAYER_UNJOINED_DISCRIMINATOR,
   decodeLegacyPlayerUnjoined,
@@ -124,6 +127,33 @@ describe("decodeProgramEventLog", () => {
 });
 
 describe("parseProgramEventLogs", () => {
+  it("decodes historical v0.2 fee events with the fallback coder", () => {
+    const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
+    const operator = new PublicKey("11111111111111111111111111111112");
+    const mint = new PublicKey("So11111111111111111111111111111111111111112");
+    const payload = Buffer.alloc(8 + 32 + 32 + 8);
+    Buffer.from([92, 98, 195, 90, 108, 129, 244, 119]).copy(payload, 0);
+    operator.toBuffer().copy(payload, 8);
+    mint.toBuffer().copy(payload, 40);
+    payload.writeBigUInt64LE(123n, 72);
+
+    const events = parseProgramEventLogs(
+      programId,
+      new BorshCoder(timbaIdlV030 as any),
+      [
+        `Program ${programId.toBase58()} invoke [1]`,
+        `Program data: ${payload.toString("base64")}`,
+        `Program ${programId.toBase58()} success`,
+      ],
+      [new BorshCoder(timbaIdlV020 as any)],
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.name).toBe("TokenFeeWithdrawn");
+    expect((events[0]?.data["tokenMint"] as PublicKey).equals(mint)).toBe(true);
+    expect(events[0]?.data["amount"]?.toString()).toBe("123");
+  });
+
   it("recovers a legacy unjoin without aborting the log stream", () => {
     const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
     const legacyLog = encodeLegacyPlayerUnjoined({

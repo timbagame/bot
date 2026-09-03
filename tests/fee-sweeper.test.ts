@@ -5,10 +5,13 @@ import {
   __test_sweepTokensToSol,
   __test_unwrapWsolBalance,
   __test_runReferralSweep,
+  __test_resolveFeeSweepTokens,
   sweepFees,
 } from "../src/services/fee-sweeper";
 import type { SwapRequest } from "../src/utils/swap/types";
 import { WSOL_MINT, parseEnableFeeSweeperFlag } from "../src/utils/constants";
+import { TokenPolicySchema } from "@timbagame/protocol/oracle";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 type TestPriceResolver = (input: { tokenMint: string; tokenTicker?: string }) => Promise<{
   price?: number;
@@ -72,6 +75,42 @@ describe("token to SOL sweep helpers", () => {
 
     expect(result.shouldSwap).toBe(true);
     expect(result.usdValue).toBeCloseTo(5);
+  });
+});
+
+describe("dynamic fee sweep tokens", () => {
+  test("includes Oracle policies and uses resolved display metadata", async () => {
+    const mint = Keypair.generate().publicKey.toBase58();
+    const invalidMint = Keypair.generate().publicKey.toBase58();
+    const tokens = await __test_resolveFeeSweepTokens(
+      {
+        getTokenMetadata: async (candidate: string) => {
+          if (candidate === invalidMint) throw new Error("metadata unavailable");
+          return { decimals: 8, symbol: "NEW" };
+        },
+      } as any,
+      undefined,
+      async () =>
+        [
+          { mint, enabled: false },
+          { mint: invalidMint, enabled: true },
+        ].map((policy) =>
+          TokenPolicySchema.parse({
+            ...policy,
+            minimumAmountRaw: "1",
+            acceptedMinimumAmountRaw: "1",
+            revision: 1,
+            effectiveAt: "2026-09-03T00:00:00.000Z",
+          }),
+        ),
+    );
+
+    if (contractCapabilities.oracleTokenPolicy) {
+      expect(tokens).toContainEqual({ mint, ticker: "NEW" });
+      expect(tokens.some((token) => token.mint === invalidMint)).toBe(false);
+    } else {
+      expect(tokens).not.toContainEqual({ mint, ticker: "NEW" });
+    }
   });
 });
 
