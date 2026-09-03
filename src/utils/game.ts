@@ -3651,7 +3651,22 @@ export class GameManager {
         } as any)
         .instruction();
 
-      let creationInstructions: TransactionInstruction[] = [gameInstruction];
+      const vaultSetupInstructions = contractCapabilities.gameTokenAccount
+        ? []
+        : [
+            createAssociatedTokenAccountIdempotentInstruction(
+              playerKp.publicKey,
+              tokenAccounts.gameVaultTokenAccount,
+              tokenAccounts.gameVault,
+              tokenMintPubkey,
+              tokenAccounts.tokenProgram,
+              ASSOCIATED_TOKEN_PROGRAM_ID,
+            ),
+          ];
+      let creationInstructions: TransactionInstruction[] = [
+        ...vaultSetupInstructions,
+        gameInstruction,
+      ];
       if (usesAtomicCreatorJoin) {
         const { accounts: joinAccounts, setupInstructions } = await this.buildJoinAccounts(
           gamePda,
@@ -3672,7 +3687,12 @@ export class GameManager {
             isWritable: false,
           };
         }
-        creationInstructions = [gameInstruction, ...setupInstructions, joinInstruction];
+        creationInstructions = [
+          ...vaultSetupInstructions,
+          gameInstruction,
+          ...setupInstructions,
+          joinInstruction,
+        ];
       }
 
       const sendCreationTransaction = async () => {

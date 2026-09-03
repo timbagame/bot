@@ -22,6 +22,8 @@ const POLICY_REJECTION_CODES = new Set<CreationPolicyRejectionCode>([
   "policy_unavailable",
 ]);
 
+const TOKEN_POLICY_CACHE_TTL_MS = 5_000;
+
 function isCreationPolicyRejection(value: unknown): value is CreationPolicyRejection {
   if (typeof value !== "object" || value === null || !("code" in value)) return false;
   return POLICY_REJECTION_CODES.has((value as { code: CreationPolicyRejectionCode }).code);
@@ -87,6 +89,15 @@ export class OracleClient {
   private gameDb: GameDatabase;
   private oracleApiUrl: string;
   private wallet?: WalletManager;
+  private tokenPolicyCache?: {
+    oracleApiUrl: string;
+    policies: TokenPolicy[];
+    expiresAt: number;
+  };
+  private tokenPolicyRequest?: {
+    oracleApiUrl: string;
+    promise: Promise<TokenPolicy[]>;
+  };
 
   private constructor() {
     this.gameDb = GameDatabase.getInstance();
@@ -156,18 +167,50 @@ export class OracleClient {
   }
 
   public async getTokenPolicies(): Promise<TokenPolicy[]> {
+    const oracleApiUrl = this.oracleApiUrl;
+    const now = Date.now();
+    if (
+      this.tokenPolicyCache?.oracleApiUrl === oracleApiUrl &&
+      this.tokenPolicyCache.expiresAt > now
+    ) {
+      return this.tokenPolicyCache.policies;
+    }
+
+    if (this.tokenPolicyRequest?.oracleApiUrl === oracleApiUrl) {
+      return this.tokenPolicyRequest.promise;
+    }
+
+    const promise = (async () => {
+      try {
+        const policies = expectStatus(await this.apiClient().tokenPolicies(), 200).data.policies;
+        if (this.oracleApiUrl === oracleApiUrl) {
+          this.tokenPolicyCache = {
+            oracleApiUrl,
+            policies,
+            expiresAt: Date.now() + TOKEN_POLICY_CACHE_TTL_MS,
+          };
+        }
+        return policies;
+      } catch (error) {
+        throw (
+          policyErrorFromHttpError(error) ??
+          new OraclePolicyError(
+            "policy_unavailable",
+            "Unable to load the Oracle token policy",
+            {},
+            { cause: error },
+          )
+        );
+      }
+    })();
+
+    this.tokenPolicyRequest = { oracleApiUrl, promise };
     try {
-      return expectStatus(await this.apiClient().tokenPolicies(), 200).data.policies;
-    } catch (error) {
-      throw (
-        policyErrorFromHttpError(error) ??
-        new OraclePolicyError(
-          "policy_unavailable",
-          "Unable to load the Oracle token policy",
-          {},
-          { cause: error },
-        )
-      );
+      return await promise;
+    } finally {
+      if (this.tokenPolicyRequest?.promise === promise) {
+        this.tokenPolicyRequest = undefined;
+      }
     }
   }
 
@@ -306,5 +349,6 @@ export class OracleClient {
    */
   public setOracleUrl(url: string): void {
     this.oracleApiUrl = url;
+    this.tokenPolicyCache = undefined;
   }
 }

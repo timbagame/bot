@@ -34,9 +34,12 @@ export async function getContractCapitalLamports(
     throw new Error("Unable to verify the Timba program account");
   }
 
-  const expectedOwners = new Map<string, { address: PublicKey; owner: PublicKey }>();
-  const add = (address: PublicKey, owner: PublicKey) =>
-    expectedOwners.set(address.toBase58(), { address, owner });
+  const expectedOwners = new Map<
+    string,
+    { address: PublicKey; owner: PublicKey; required: boolean }
+  >();
+  const add = (address: PublicKey, owner: PublicKey, required = true) =>
+    expectedOwners.set(address.toBase58(), { address, owner, required });
 
   add(program.programId, UPGRADEABLE_LOADER);
   add(getProgramDataAddress(programInfo.data), UPGRADEABLE_LOADER);
@@ -61,7 +64,11 @@ export async function getContractCapitalLamports(
       [Buffer.from("game_vault"), mint.toBuffer()],
       program.programId,
     );
-    add(getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID), TOKEN_PROGRAM_ID);
+    add(
+      getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID),
+      TOKEN_PROGRAM_ID,
+      includeGameTokenAccounts,
+    );
   }
 
   const targets = [...expectedOwners.values()];
@@ -72,7 +79,13 @@ export async function getContractCapitalLamports(
 
   return accounts.reduce((total, account, index) => {
     const expected = targets[index];
-    if (!account || !expected || !account.owner.equals(expected.owner)) {
+    if (!expected) {
+      throw new Error(`Unable to verify contract account ${index}`);
+    }
+    if (!account && !expected.required) {
+      return total;
+    }
+    if (!account || !account.owner.equals(expected.owner)) {
       throw new Error(`Unable to verify contract account ${expected?.address.toBase58() ?? index}`);
     }
     return total + BigInt(account.lamports);

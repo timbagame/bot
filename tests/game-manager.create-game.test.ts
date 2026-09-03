@@ -742,13 +742,13 @@ describe("GameManager.createGame", () => {
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
     let signingCalls = 0;
-    let sentInstructionCount = 0;
+    let sentInstructions: TransactionInstruction[] = [];
     const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      sendTransaction: async (instructions: unknown[]) => {
-        sentInstructionCount = instructions.length;
+      sendTransaction: async (instructions: TransactionInstruction[]) => {
+        sentInstructions = instructions;
         return "SIG";
       },
     });
@@ -808,7 +808,14 @@ describe("GameManager.createGame", () => {
     );
     expect(res.success).toBe(true);
     expect(signingCalls).toBe(1);
-    expect(sentInstructionCount).toBe(2);
+    expect(sentInstructions).toHaveLength(contractCapabilities.gameTokenAccount ? 2 : 3);
+    expect(sentInstructions[0]?.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(
+      !contractCapabilities.gameTokenAccount,
+    );
+    if (!contractCapabilities.gameTokenAccount) {
+      expect(sentInstructions[0]?.keys[1]?.pubkey.equals(gameVaultTokenAccount)).toBe(true);
+      expect(sentInstructions[0]?.keys[2]?.pubkey.equals(gameVault)).toBe(true);
+    }
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
 

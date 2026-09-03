@@ -59,7 +59,7 @@ describe("Oracle token policy", () => {
   });
 
   test("fails closed for unsupported, disabled, and unavailable policies", async () => {
-    const client = newOracleClient();
+    let client = newOracleClient();
     client.setOracleUrl("http://oracle.test");
 
     globalThis.fetch = (async () =>
@@ -68,6 +68,8 @@ describe("Oracle token policy", () => {
       code: "unsupported_mint",
     });
 
+    client = newOracleClient();
+    client.setOracleUrl("http://oracle.test");
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify(oracleResponse({ policies: [tokenPolicy({ enabled: false })] })),
@@ -77,6 +79,8 @@ describe("Oracle token policy", () => {
       code: "token_disabled",
     });
 
+    client = newOracleClient();
+    client.setOracleUrl("http://oracle.test");
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify({
@@ -89,6 +93,30 @@ describe("Oracle token policy", () => {
     await expect(client.requireTokenPolicy(TEST_GAME_ADDRESS)).rejects.toMatchObject({
       code: "policy_unavailable",
     });
+  });
+
+  test("caches successful policy reads and coalesces concurrent requests", async () => {
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      await Promise.resolve();
+      return new Response(JSON.stringify(oracleResponse({ policies: [tokenPolicy()] })), {
+        status: 200,
+      });
+    }) as any;
+
+    const client = newOracleClient();
+    client.setOracleUrl("http://oracle.test");
+
+    const [first, second] = await Promise.all([
+      client.getTokenPolicies(),
+      client.getTokenPolicies(),
+    ]);
+    const cached = await client.getTokenPolicies();
+
+    expect(requests).toBe(1);
+    expect(first).toEqual(second);
+    expect(cached).toEqual(first);
   });
 
   test("preserves a typed signing rejection without exposing server text", async () => {

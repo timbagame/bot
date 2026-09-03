@@ -118,7 +118,7 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getUsdPrice } from "./utils/price-service";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import type { IntegratorSwapParams } from "./utils/integrator-fees";
-import { getReferralConfig, getSupportedTokens, type ReferralConfig } from "./utils/token-registry";
+import { getReferralConfig, type ReferralConfig } from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
@@ -4737,11 +4737,14 @@ const financeHandlers = createFinanceHandlers({
   resolveTokenPriceUsd: async (mint) => (await getUsdPrice({ tokenMint: mint }))?.price ?? null,
   resolveContractCapital: async () => {
     const finance = getFinanceReadContext();
+    const policyMints = contractCapabilities.oracleTokenPolicy
+      ? (await OracleClient.getInstance(wallet).getTokenPolicies()).map(({ mint }) => mint)
+      : [];
     return {
       lamports: await getContractCapitalLamports(
         finance.connection,
         finance.program,
-        getSupportedTokens().map(({ mint }) => mint),
+        policyMints,
         contractCapabilities.gameTokenAccount,
       ),
     };
