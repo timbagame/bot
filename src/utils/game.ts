@@ -66,7 +66,7 @@ import type {
   GameType,
   ParsedAmount,
 } from "../types";
-import type { Timba } from "../../idl/idlType";
+import type { Timba } from "../types/contract";
 import {
   buildPlayerProfileLink,
   formatPlayerAddress,
@@ -88,6 +88,8 @@ import { confirmTransactionWithRecovery, type TransactionProbe } from "./transac
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
 import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
+import { contractCapabilities, contractVersion } from "./contract-idl";
+import { buildGameFundsContext, type ResolvedContractTokenAccounts } from "./contract-adapter";
 
 const resolveGameMedia = (
   gameType: string,
@@ -206,14 +208,6 @@ const formatRateLimitWindow = (windowMs: number): string => {
   }
 
   return formatDuration(windowMs / 1000);
-};
-
-type GameVaultContextAccounts = {
-  tokenMint: PublicKey;
-  gameVault: PublicKey;
-  gameVaultTokenAccount: PublicKey;
-  tokenProgram: PublicKey;
-  associatedTokenProgram: PublicKey;
 };
 
 // ================================
@@ -903,36 +897,19 @@ export class GameManager {
     return getAssociatedTokenAddress(tokenMint, owner, allowOwnerOffCurve, tokenProgram);
   }
 
-  private async resolveGameVaultAccounts(tokenMint: PublicKey): Promise<{
-    tokenProgram: PublicKey;
-    gameVault: PublicKey;
-    gameVaultTokenAccount: PublicKey;
-  }> {
+  private async resolveGameVaultAccounts(
+    tokenMint: PublicKey,
+  ): Promise<ResolvedContractTokenAccounts> {
     const tokenProgram = await this.resolveTokenProgramId(tokenMint);
+    const gameToken = PDAManager.getGameTokenPDA(tokenMint, this.program.programId);
     const gameVault = this.getGameVaultPda(tokenMint);
     const gameVaultTokenAccount = await this.deriveAta(tokenMint, gameVault, tokenProgram, true);
 
     return {
       tokenProgram,
+      gameToken,
       gameVault,
       gameVaultTokenAccount,
-    };
-  }
-
-  private buildGameVaultContext(
-    tokenMint: PublicKey,
-    accounts: {
-      tokenProgram: PublicKey;
-      gameVault: PublicKey;
-      gameVaultTokenAccount: PublicKey;
-    },
-  ): GameVaultContextAccounts {
-    return {
-      tokenMint,
-      gameVault: accounts.gameVault,
-      gameVaultTokenAccount: accounts.gameVaultTokenAccount,
-      tokenProgram: accounts.tokenProgram,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     };
   }
 
@@ -947,7 +924,7 @@ export class GameManager {
   }> {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
     const tokenAccounts = await this.resolveGameVaultAccounts(tokenMint);
-    const gameVaultCtx = this.buildGameVaultContext(tokenMint, tokenAccounts);
+    const gameFundsContext = buildGameFundsContext(contractVersion, tokenMint, tokenAccounts);
     const playerTokenAccount = await this.deriveAta(tokenMint, player, tokenAccounts.tokenProgram);
 
     const setupInstructions: TransactionInstruction[] = [];
@@ -982,7 +959,7 @@ export class GameManager {
     const accounts: Record<string, unknown> = {
       game: gamePda,
       player,
-      gameVaultCtx,
+      ...gameFundsContext,
       playerTokenAccount,
       oracle: this.getOraclePda(),
     };
@@ -1011,7 +988,7 @@ export class GameManager {
   ): Promise<Record<string, unknown>> {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
     const tokenAccounts = await this.resolveGameVaultAccounts(tokenMint);
-    const gameVaultCtx = this.buildGameVaultContext(tokenMint, tokenAccounts);
+    const gameFundsContext = buildGameFundsContext(contractVersion, tokenMint, tokenAccounts);
     const creatorPubkey = new PublicKey(gameAccount.creator);
     const creatorTokenAccount = await this.deriveAta(
       tokenMint,
@@ -1023,8 +1000,9 @@ export class GameManager {
       game: gamePda,
       creator: creatorPubkey,
       oracle: this.getOraclePda(),
-      gameVaultCtx,
+      ...gameFundsContext,
       creatorTokenAccount,
+      ...(contractCapabilities.gameTokenAccount ? { systemProgram: SystemProgram.programId } : {}),
     };
   }
 
@@ -3461,7 +3439,9 @@ export class GameManager {
 
     try {
       const { tokenMint, tokenTicker, amount } = parsedAmount;
-      await this.oracleClient.requireTokenPolicy(tokenMint, BigInt(amount));
+      if (contractCapabilities.oracleTokenPolicy) {
+        await this.oracleClient.requireTokenPolicy(tokenMint, BigInt(amount));
+      }
       const requestedSol = parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
@@ -3646,7 +3626,11 @@ export class GameManager {
       const tokenMintPubkey = new PublicKey(tokenMint);
       const gamePda = PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
       const tokenAccounts = await this.resolveGameVaultAccounts(tokenMintPubkey);
-      const gameVaultCtx = this.buildGameVaultContext(tokenMintPubkey, tokenAccounts);
+      const gameFundsContext = buildGameFundsContext(
+        contractVersion,
+        tokenMintPubkey,
+        tokenAccounts,
+      );
       const creatorTokenAccount = await this.deriveAta(
         tokenMintPubkey,
         playerKp.publicKey,
@@ -3661,7 +3645,7 @@ export class GameManager {
           creator: playerKp.publicKey,
           oracle: oraclePda,
           oracleOperator: usesAtomicCreatorJoin ? oracleOperator : Keypair.generate().publicKey,
-          gameVaultCtx,
+          ...gameFundsContext,
           creatorTokenAccount,
           systemProgram: SystemProgram.programId,
         } as any)

@@ -16,8 +16,8 @@ import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@anchor-lang/core";
 import { EventParser } from "@anchor-lang/core";
 import { Connection, PublicKey } from "@solana/web3.js";
-import type { Timba } from "../idl/idlType";
-import { contractIdl } from "./utils/contract-idl";
+import type { Timba } from "./types/contract";
+import { contractCapabilities, contractIdl, contractVersion } from "./utils/contract-idl";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
 import { GameManager, type GamesTab } from "./utils/game";
@@ -3246,7 +3246,7 @@ const initializeAnchorProvider = async () => {
   );
 
   anchor.setProvider(provider);
-  console.log("Using Timba contract ABI 0.2.0");
+  console.log(`Using Timba contract ABI ${contractVersion}`);
   return new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>;
 };
 
@@ -3335,9 +3335,7 @@ const checkOracleStatus = async () => {
   }
 };
 
-/**
- * Get the current minimum amount from the Oracle-owned token policy.
- */
+/** Get the active contract version's minimum amount for a token. */
 export const getTokenPolicyMinimumAmount = async (
   tokenMint: string = DEFAULT_TOKEN_MINT,
   decimalsHint?: number,
@@ -3360,12 +3358,23 @@ export const getTokenPolicyMinimumAmount = async (
     }
   }
 
+  if (contractCapabilities.gameTokenAccount) {
+    const gameTokenPda = PDAManager.getGameTokenPDA(new PublicKey(resolvedMint), program.programId);
+    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+    const minAmountRaw = Number(gameTokenAccount.minAmount);
+    return {
+      formatted: minAmountRaw / Math.pow(10, decimals),
+      raw: minAmountRaw,
+      decimals,
+    };
+  }
+
   const policy = await OracleClient.getInstance(wallet).requireTokenPolicy(resolvedMint);
   const minAmountRaw = Number(policy.minimumAmountRaw);
   if (!Number.isSafeInteger(minAmountRaw)) {
-    throw new Error(`Token policy minimum exceeds the supported numeric range`);
+    throw new Error("Token policy minimum exceeds the supported numeric range");
   }
-  const minAmountFormatted = minAmountRaw / Math.pow(10, decimals!);
+  const minAmountFormatted = minAmountRaw / Math.pow(10, decimals);
 
   console.log(
     `✅ Oracle token-policy minimum for ${resolvedMint}: ${minAmountFormatted} (revision ${policy.revision})`,
@@ -3373,24 +3382,21 @@ export const getTokenPolicyMinimumAmount = async (
   return {
     formatted: minAmountFormatted,
     raw: minAmountRaw,
-    decimals: decimals!,
+    decimals,
   };
 };
 
 const checkTokenPolicyStatus = async () => {
   try {
-    const policy = await OracleClient.getInstance(wallet).requireTokenPolicy(DEFAULT_TOKEN_MINT);
     const metadata = await getDefaultTokenMetadata();
-    const formattedMinAmount = wallet.formatTokenBalance(
-      Number(policy.minimumAmountRaw),
-      metadata.decimals,
-    );
+    const minimum = await getTokenPolicyMinimumAmount(DEFAULT_TOKEN_MINT, metadata.decimals);
 
-    console.log(
-      `Token policy found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${policy.minimumAmountRaw} raw units, revision ${policy.revision})`,
-    );
+    console.log(`${contractVersion} token minimum: ${minimum.formatted} ${DEFAULT_TOKEN_TICKER}`);
   } catch (error) {
-    console.warn("Default token policy is unavailable or disabled", error);
+    console.warn(
+      `Default token configuration is unavailable for contract ${contractVersion}`,
+      error,
+    );
   }
 };
 
@@ -4736,6 +4742,7 @@ const financeHandlers = createFinanceHandlers({
         finance.connection,
         finance.program,
         getSupportedTokens().map(({ mint }) => mint),
+        contractCapabilities.gameTokenAccount,
       ),
     };
   },

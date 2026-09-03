@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { contractIdl } from "../src/utils/contract-idl";
+import { getContractIdl, parseContractVersion } from "../src/utils/contract-idl";
 
 describe("contract ABI", () => {
   it("uses the v0.3 game-vault account lists", () => {
+    const v030 = getContractIdl("0.3.0");
     const accounts = (instructionName: string) => {
-      const instruction = contractIdl.instructions.find(
+      const instruction = v030.instructions.find(
         ({ name }: { name: string }) => name === instructionName,
       );
       if (!instruction) throw new Error(`Missing ${instructionName}`);
@@ -45,17 +46,41 @@ describe("contract ABI", () => {
     ]);
   });
 
-  it("does not expose v0.2 GameToken administration", () => {
-    const instructionNames = contractIdl.instructions.map(({ name }: { name: string }) => name);
-    expect(instructionNames).not.toContain("withdraw_token_fee");
-    expect(instructionNames).not.toContain("initialize_game_token");
-    expect(contractIdl.accounts.map(({ name }: { name: string }) => name)).not.toContain(
-      "GameToken",
+  it("keeps the v0.2 GameToken account lists", () => {
+    const v020 = getContractIdl("0.2.0");
+    const accounts = (instructionName: string) => {
+      const instruction = v020.instructions.find(
+        ({ name }: { name: string }) => name === instructionName,
+      );
+      if (!instruction) throw new Error(`Missing ${instructionName}`);
+      return instruction.accounts.map(({ name }: { name: string }) => name);
+    };
+
+    expect(accounts("initialize_game")).toContain("game_token_ctx");
+    expect(accounts("join_game")).toContain("game_token_ctx");
+    expect(accounts("unjoin_game")).toContain("game_token_ctx");
+    expect(accounts("close_game")).toContain("game_token_ctx");
+    expect(v020.accounts.map(({ name }: { name: string }) => name)).toContain("GameToken");
+  });
+
+  it("defaults deployment selection to v0.2.0", () => {
+    expect(parseContractVersion(undefined)).toBe("0.2.0");
+    expect(parseContractVersion("0.3.0")).toBe("0.3.0");
+    expect(() => parseContractVersion("0.4.0")).toThrow(
+      "CONTRACT_VERSION must be one of 0.2.0, 0.3.0",
     );
   });
 
+  it("does not expose v0.2 GameToken administration", () => {
+    const v030 = getContractIdl("0.3.0");
+    const instructionNames = v030.instructions.map(({ name }: { name: string }) => name);
+    expect(instructionNames).not.toContain("withdraw_token_fee");
+    expect(instructionNames).not.toContain("initialize_game_token");
+    expect(v030.accounts.map(({ name }: { name: string }) => name)).not.toContain("GameToken");
+  });
+
   it("loads the canonical participant layout", () => {
-    const game = contractIdl.types.find((value: any) => value.name === "Game") as any;
+    const game = getContractIdl("0.3.0").types.find((value: any) => value.name === "Game") as any;
     expect(game.type.fields.at(-1)).toMatchObject({
       name: "participants",
       type: { vec: "pubkey" },

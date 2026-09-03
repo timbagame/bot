@@ -61,7 +61,7 @@ import type { GameManager } from "../utils/game";
 import type { GameDatabase } from "../utils/game-database";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
 import type { CreatorCallbackContext, GameSetupCopy, GameSetupModule } from "./game-setup";
-import type { Timba } from "../../idl/idlType";
+import type { Timba } from "../types/contract";
 import { createNextGuard, getGameOperationQueue } from "../utils/telegram-rate-limiter";
 
 export type GameCallbacksModuleDeps = {

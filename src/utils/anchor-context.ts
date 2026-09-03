@@ -1,8 +1,8 @@
 import * as anchor from "@anchor-lang/core";
 import type { Commitment, Connection, ConnectionConfig, Keypair } from "@solana/web3.js";
 import { clusterApiUrl } from "@solana/web3.js";
-import type { Timba } from "../../idl/idlType";
-import idl from "../../idl/idl.json";
+import type { Timba } from "../types/contract";
+import { contractIdl } from "./contract-idl";
 import { WalletManager } from "./wallet";
 import { loadWalletMnemonic } from "./secrets";
 import { resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
@@ -129,7 +129,7 @@ export const createAnchorContext = (
   const provider = new anchor.AnchorProvider(connection, wallet, providerOptions);
   anchor.setProvider(provider);
 
-  const program = new anchor.Program(idl as Timba, provider) as anchor.Program<Timba>;
+  const program = new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>;
 
   return { provider, program };
 };

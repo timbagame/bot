@@ -6,7 +6,8 @@ import {
   type TokenBalance,
   type VersionedTransactionResponse,
 } from "@solana/web3.js";
-import type { Timba } from "../../idl/idlType";
+import type { Timba } from "../types/contract";
+import { contractCapabilities } from "../utils/contract-idl";
 import { parseProgramEventsFromTransaction } from "../utils/program-event-parser";
 import type {
   FinanceBackfillProgress,
@@ -403,10 +404,19 @@ export class FinanceLedgerService {
     coverage: FinanceLedgerSnapshot["coverage"],
     backfill: FinanceBackfillProgress,
   ): Promise<FinanceLedgerSnapshot> {
-    const referralAccounts = await this.referralAccounts();
+    const [gameAccounts, referralAccounts] = await Promise.all([
+      contractCapabilities.gameTokenAccount
+        ? (this.program.account as any).gameToken.all()
+        : Promise.resolve([]),
+      this.referralAccounts(),
+    ]);
     return {
-      // v0.3 transfers completion fees directly to the current Oracle operator ATA.
-      gameClaimable: [],
+      gameClaimable: gameAccounts
+        .map(({ account }: { account: { tokenMint: PublicKey; feeAmount: unknown } }) => ({
+          mint: account.tokenMint.toBase58(),
+          amountRaw: asBigInt(account.feeAmount),
+        }))
+        .filter(({ amountRaw }: { amountRaw: bigint }) => amountRaw > 0n),
       swapClaimable: referralAccounts
         .map(({ account }) => ({ mint: account.mint.toBase58(), amountRaw: account.amount }))
         .filter(({ amountRaw }) => amountRaw > 0n),

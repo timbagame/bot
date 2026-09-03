@@ -3,7 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 
 /**
  * PlayerUnjoined discriminator (unchanged when moved_participant was added).
- * From idl.json — keep in sync if the event is renamed/regenerated.
+ * From the versioned Anchor IDL — keep in sync if the event is renamed.
  */
 export const PLAYER_UNJOINED_DISCRIMINATOR = Buffer.from([191, 34, 140, 22, 253, 20, 237, 73]);
 

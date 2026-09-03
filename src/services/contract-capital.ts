@@ -6,8 +6,14 @@ import { PDAManager } from "../utils/pda";
 const UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const PROGRAM_ACCOUNT_TAG = 2;
 
+type GameTokenAccount = {
+  publicKey: PublicKey;
+  account: { tokenMint: PublicKey };
+};
+
 type TimbaProgram = {
   programId: PublicKey;
+  account?: { gameToken?: { all: () => Promise<GameTokenAccount[]> } };
 };
 
 const getProgramDataAddress = (data: Buffer): PublicKey => {
@@ -21,6 +27,7 @@ export async function getContractCapitalLamports(
   connection: Connection,
   program: TimbaProgram,
   policyMints: readonly string[],
+  includeGameTokenAccounts = false,
 ): Promise<bigint> {
   const programInfo = await connection.getAccountInfo(program.programId, "confirmed");
   if (!programInfo || !programInfo.owner.equals(UPGRADEABLE_LOADER)) {
@@ -35,8 +42,21 @@ export async function getContractCapitalLamports(
   add(getProgramDataAddress(programInfo.data), UPGRADEABLE_LOADER);
   add(PDAManager.getOraclePDA(program.programId), program.programId);
 
-  for (const mintAddress of new Set(policyMints)) {
-    const mint = new PublicKey(mintAddress);
+  const configuredMints = new Map<string, PublicKey>();
+  if (includeGameTokenAccounts) {
+    const loader = program.account?.gameToken;
+    if (!loader) throw new Error("The v0.2.0 program client cannot load GameToken accounts");
+    for (const gameToken of await loader.all()) {
+      configuredMints.set(gameToken.account.tokenMint.toBase58(), gameToken.account.tokenMint);
+      add(gameToken.publicKey, program.programId);
+    }
+  } else {
+    for (const mintAddress of policyMints) {
+      configuredMints.set(mintAddress, new PublicKey(mintAddress));
+    }
+  }
+
+  for (const mint of configuredMints.values()) {
     const [vault] = PublicKey.findProgramAddressSync(
       [Buffer.from("game_vault"), mint.toBuffer()],
       program.programId,
