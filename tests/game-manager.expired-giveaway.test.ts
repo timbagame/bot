@@ -47,7 +47,7 @@ describe("GameManager expired giveaway handler", () => {
     });
   });
 
-  test("does not close when expired and minimum tickets reached (waits for oracle)", async () => {
+  test("waits for the oracle buffer when minimum tickets were reached", async () => {
     resetGameManager();
     const gm = GameManager.getInstance(stubProgram(), {} as any, {} as any);
 
@@ -60,6 +60,34 @@ describe("GameManager expired giveaway handler", () => {
       return { success: true, tx: "TX_CLOSE" };
     };
 
+    const now = Math.floor(Date.now() / 1000);
+    const result = await gm.handleExpiredGame(gamePda, {
+      gameType: { giveaway: {} },
+      ticketsCount: 99,
+      minTickets: 99,
+      maxTickets: 100,
+      createdAt: now - 60,
+      timeout: 30,
+      ticketAmount: 123,
+      creator,
+    });
+
+    expect(cancelCalled).toBe(false);
+    expect(result).toBe(false);
+  });
+
+  test("closes an unresolved giveaway after the oracle buffer", async () => {
+    resetGameManager();
+    const gm = GameManager.getInstance(stubProgram(), {} as any, {} as any);
+    const gamePda = new PublicKey("BPFLoader5111111111111111111111111111111111");
+    const creator = new PublicKey("BPFLoader6111111111111111111111111111111111");
+
+    (gm as any).isGameExpiredWithBuffer = () => true;
+    (gm as any).cancelGameWithPlayerKeys = async () => ({
+      success: true,
+      tx: "TX_BUFFER_CLOSE",
+    });
+
     const result = await gm.handleExpiredGame(gamePda, {
       gameType: { giveaway: {} },
       ticketsCount: 99,
@@ -71,7 +99,11 @@ describe("GameManager expired giveaway handler", () => {
       creator,
     });
 
-    expect(cancelCalled).toBe(false);
-    expect(result).toBe(false);
+    expect(result).toEqual({
+      cancelled: true,
+      amount: 123,
+      creator: creator.toBase58(),
+      tx: "TX_BUFFER_CLOSE",
+    });
   });
 });
