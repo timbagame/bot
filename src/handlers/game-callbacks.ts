@@ -61,7 +61,7 @@ import type { GameManager } from "../utils/game";
 import type { GameDatabase } from "../utils/game-database";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
 import type { CreatorCallbackContext, GameSetupCopy, GameSetupModule } from "./game-setup";
-import type { Timba } from "../../idl/idlType";
+import type { Timba } from "../types/contract";
 import { createNextGuard, getGameOperationQueue } from "../utils/telegram-rate-limiter";
 
 export type GameCallbacksModuleDeps = {
@@ -75,7 +75,7 @@ export type GameCallbacksModuleDeps = {
   pendingGameCreations: Set<string>;
   getOracleMaxPlayers: () => number;
   getDefaultTokenMetadata: () => Promise<{ decimals: number }>;
-  getContractMinimumAmount: (
+  getTokenPolicyMinimumAmount: (
     tokenMint?: string,
     decimalsHint?: number,
   ) => Promise<{ formatted: number; raw: number; decimals: number }>;
@@ -554,7 +554,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
       const minAllowed =
         userSession.contractMinimum ??
         (
-          await deps.getContractMinimumAmount(
+          await deps.getTokenPolicyMinimumAmount(
             userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
             tokenDecimals,
           )
@@ -748,7 +748,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
       }
 
       if (resolvedAmount < minAllowed) {
-        const errorMessage = `❌ Amount below contract minimum of ${minAllowed} ${tokenTicker}.`;
+        const errorMessage = `❌ Amount below current minimum of ${minAllowed} ${tokenTicker}.`;
         try {
           await ctx.api.editMessageText(userSession.chatId!, userSession.messageId!, errorMessage, {
             parse_mode: "HTML",
@@ -1635,7 +1635,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             const { formatted: contractMin } =
               tokenContext.contractMinimum !== undefined
                 ? { formatted: tokenContext.contractMinimum }
-                : await deps.getContractMinimumAmount(
+                : await deps.getTokenPolicyMinimumAmount(
                     tokenContext.tokenMint,
                     tokenContext.tokenDecimals,
                   );
@@ -1861,7 +1861,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             const { formatted: contractMin } =
               tokenContext.contractMinimum !== undefined
                 ? { formatted: tokenContext.contractMinimum }
-                : await deps.getContractMinimumAmount(
+                : await deps.getTokenPolicyMinimumAmount(
                     tokenContext.tokenMint,
                     tokenContext.tokenDecimals,
                   );
@@ -1967,7 +1967,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             const { formatted: contractMin } =
               tokenContext.contractMinimum !== undefined
                 ? { formatted: tokenContext.contractMinimum }
-                : await deps.getContractMinimumAmount(
+                : await deps.getTokenPolicyMinimumAmount(
                     tokenContext.tokenMint,
                     tokenContext.tokenDecimals,
                   );

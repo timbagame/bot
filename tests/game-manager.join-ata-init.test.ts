@@ -85,15 +85,13 @@ describe("GameManager join initializes missing ATAs", () => {
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => true;
 
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 
@@ -228,15 +226,13 @@ describe("GameManager join initializes missing ATAs", () => {
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => true;
 
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = expectedAtaInstruction.keys[1]?.pubkey as PublicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 

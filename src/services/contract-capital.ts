@@ -11,9 +11,9 @@ type GameTokenAccount = {
   account: { tokenMint: PublicKey };
 };
 
-type ProgramWithGameTokens = {
+type TimbaProgram = {
   programId: PublicKey;
-  account: { gameToken: { all: () => Promise<GameTokenAccount[]> } };
+  account?: { gameToken?: { all: () => Promise<GameTokenAccount[]> } };
 };
 
 const getProgramDataAddress = (data: Buffer): PublicKey => {
@@ -25,29 +25,50 @@ const getProgramDataAddress = (data: Buffer): PublicKey => {
 
 export async function getContractCapitalLamports(
   connection: Connection,
-  program: ProgramWithGameTokens,
+  program: TimbaProgram,
+  policyMints: readonly string[],
+  includeGameTokenAccounts = false,
 ): Promise<bigint> {
   const programInfo = await connection.getAccountInfo(program.programId, "confirmed");
   if (!programInfo || !programInfo.owner.equals(UPGRADEABLE_LOADER)) {
     throw new Error("Unable to verify the Timba program account");
   }
 
-  const expectedOwners = new Map<string, { address: PublicKey; owner: PublicKey }>();
-  const add = (address: PublicKey, owner: PublicKey) =>
-    expectedOwners.set(address.toBase58(), { address, owner });
+  const expectedOwners = new Map<
+    string,
+    { address: PublicKey; owner: PublicKey; required: boolean }
+  >();
+  const add = (address: PublicKey, owner: PublicKey, required = true) =>
+    expectedOwners.set(address.toBase58(), { address, owner, required });
 
   add(program.programId, UPGRADEABLE_LOADER);
   add(getProgramDataAddress(programInfo.data), UPGRADEABLE_LOADER);
   add(PDAManager.getOraclePDA(program.programId), program.programId);
 
-  for (const gameToken of await program.account.gameToken.all()) {
-    const mint = gameToken.account.tokenMint;
+  const configuredMints = new Map<string, PublicKey>();
+  if (includeGameTokenAccounts) {
+    const loader = program.account?.gameToken;
+    if (!loader) throw new Error("The v0.2.0 program client cannot load GameToken accounts");
+    for (const gameToken of await loader.all()) {
+      configuredMints.set(gameToken.account.tokenMint.toBase58(), gameToken.account.tokenMint);
+      add(gameToken.publicKey, program.programId);
+    }
+  } else {
+    for (const mintAddress of policyMints) {
+      configuredMints.set(mintAddress, new PublicKey(mintAddress));
+    }
+  }
+
+  for (const mint of configuredMints.values()) {
     const [vault] = PublicKey.findProgramAddressSync(
       [Buffer.from("game_vault"), mint.toBuffer()],
       program.programId,
     );
-    add(gameToken.publicKey, program.programId);
-    add(getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID), TOKEN_PROGRAM_ID);
+    add(
+      getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID),
+      TOKEN_PROGRAM_ID,
+      includeGameTokenAccounts,
+    );
   }
 
   const targets = [...expectedOwners.values()];
@@ -58,7 +79,13 @@ export async function getContractCapitalLamports(
 
   return accounts.reduce((total, account, index) => {
     const expected = targets[index];
-    if (!account || !expected || !account.owner.equals(expected.owner)) {
+    if (!expected) {
+      throw new Error(`Unable to verify contract account ${index}`);
+    }
+    if (!account && !expected.required) {
+      return total;
+    }
+    if (!account || !account.owner.equals(expected.owner)) {
       throw new Error(`Unable to verify contract account ${expected?.address.toBase58() ?? index}`);
     }
     return total + BigInt(account.lamports);

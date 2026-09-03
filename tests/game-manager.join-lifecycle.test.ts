@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { GameManager } from "../src/utils/game";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {
   // @ts-ignore
@@ -75,15 +76,13 @@ describe("GameManager join lifecycle", () => {
       probeCount += 1;
       return probeCount > 1;
     };
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 
@@ -103,12 +102,17 @@ describe("GameManager join lifecycle", () => {
     expect(removed.length).toBe(0);
 
     expect(capturedJoinAccounts).toBeDefined();
-    const ctx = capturedJoinAccounts.gameTokenCtx;
+    const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
+    expect(Object.keys(capturedJoinAccounts).sort()).toEqual(
+      ["game", fundsContextKey, "oracle", "oracleOperator", "player", "playerTokenAccount"].sort(),
+    );
+    const ctx = capturedJoinAccounts[fundsContextKey];
     expect(ctx).toBeDefined();
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
-    expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
+    expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+      gameVaultTokenAccount.toBase58(),
+    );
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
@@ -116,9 +120,8 @@ describe("GameManager join lifecycle", () => {
     expect(capturedJoinAccounts.oracleOperator?.toBase58()).toBe(playerKp.publicKey.toBase58());
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
-    expect(capturedJoinAccounts.gameToken).toBeUndefined();
     expect(capturedJoinAccounts.gameVault).toBeUndefined();
-    expect(capturedJoinAccounts.gameTokenAccount).toBeUndefined();
+    expect(capturedJoinAccounts.gameVaultTokenAccount).toBeUndefined();
   });
 
   test("joinGame surfaces syncing error when on-chain confirmation is delayed", async () => {
@@ -183,15 +186,13 @@ describe("GameManager join lifecycle", () => {
     (gm as any).confirmTransactionWithRecovery = async () => "SIG321";
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => false;
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 
@@ -207,19 +208,20 @@ describe("GameManager join lifecycle", () => {
     expect(participantCalls[0][3]?.joinSignature).toBe("SIG321");
 
     expect(capturedJoinAccounts).toBeDefined();
-    const ctx = capturedJoinAccounts.gameTokenCtx;
+    const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
+    const ctx = capturedJoinAccounts[fundsContextKey];
     expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
-    expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
     expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-    expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
+    expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+      gameVaultTokenAccount.toBase58(),
+    );
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
-    expect(capturedJoinAccounts.gameToken).toBeUndefined();
     expect(capturedJoinAccounts.gameVault).toBeUndefined();
-    expect(capturedJoinAccounts.gameTokenAccount).toBeUndefined();
+    expect(capturedJoinAccounts.gameVaultTokenAccount).toBeUndefined();
   });
 
   test("joinGame asks oracle to complete when verified join fills the game", async () => {
@@ -300,15 +302,13 @@ describe("GameManager join lifecycle", () => {
       },
     };
 
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 
@@ -546,16 +546,14 @@ describe("GameManager join lifecycle", () => {
       performJustInTimeSolSwap: async () => ({ swapped: false }),
     };
 
-    const gameToken = Keypair.generate().publicKey;
     const gameVault = Keypair.generate().publicKey;
-    const gameTokenAccount = Keypair.generate().publicKey;
+    const gameVaultTokenAccount = Keypair.generate().publicKey;
     const playerTokenAccount = Keypair.generate().publicKey;
 
-    (gm as any).resolveGameTokenAccounts = async () => ({
+    (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     });
     (gm as any).deriveAta = async () => playerTokenAccount;
 

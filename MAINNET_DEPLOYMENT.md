@@ -8,6 +8,8 @@ Copy `.env.example` to `.env` and set the production values. For the shared root
 
 `SOLANA_NETWORK` accepts a JSON array or comma-separated RPC list and fails over in order.
 
+Set `CONTRACT_VERSION=0.2.0` before the program upgrade. Change it to `0.3.0` only during the coordinated migration; both versions use the same program address.
+
 Keep these files outside `.env` and set them to mode `600`:
 
 - `operator-keypair.json` (the shared bot/oracle operator)
@@ -42,6 +44,7 @@ Do not use `sudo` for rootless Podman. If the checkout path changes, update the 
 
 - Verify `/balance` and `/oracle` return mainnet data.
 - Confirm the Bot can reach `http://oracle:3001` on the private Podman network.
+- On v0.2.0, confirm the expected `GameToken` accounts exist. On v0.3.0, confirm the authenticated Oracle `/token-policies` endpoint returns the expected enabled mints and minimum amounts.
 - Keep its Solana wallets funded.
 
 For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.

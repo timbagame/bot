@@ -18,6 +18,7 @@ const DEFAULTS = {
   TELEGRAM_TOKEN: "TEST_TOKEN",
   MNEMONIC: "test walk nut penalty hip pave soap entry language right filter choice",
   SOLANA_NETWORK: "http://localhost:8899",
+  CONTRACT_VERSION: "0.3.0",
 };
 
 process.env.NODE_ENV = "test";

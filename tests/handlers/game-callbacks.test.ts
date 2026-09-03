@@ -70,7 +70,7 @@ const makeDeps = () => {
     pendingGameCreations: new Set(),
     getOracleMaxPlayers: () => 100,
     getDefaultTokenMetadata: async () => ({ decimals: 6 }),
-    getContractMinimumAmount: async () => ({ formatted: 1, raw: 1, decimals: 6 }),
+    getTokenPolicyMinimumAmount: async () => ({ formatted: 1, raw: 1, decimals: 6 }),
     fetchTokenPriceUSD: async () => null,
     getProgram: () => fakeProgram,
     validateGameTokenData: () => ({ isValid: true }),

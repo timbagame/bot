@@ -14,6 +14,7 @@ import { escapeHtml } from "./format-amount";
 import { createSingleton } from "./singleton";
 import { getUsdPrice, type CachedPriceLookup } from "./price-service";
 import { sanitizeTokenSymbol } from "./token-display";
+import { contractCapabilities } from "./contract-idl";
 
 type TokenMetadataResolverResult =
   { symbol?: string | null; decimals?: number | null } | null | undefined;
@@ -141,6 +142,10 @@ export class TokenManager {
     options?: { chatId?: number },
   ): boolean {
     if (isSol) {
+      return true;
+    }
+
+    if (contractCapabilities.oracleTokenPolicy) {
       return true;
     }
 

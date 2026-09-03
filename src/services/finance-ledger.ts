@@ -1,4 +1,4 @@
-import type { Program } from "@anchor-lang/core";
+import { BorshCoder, type Program } from "@anchor-lang/core";
 import { ReferralProvider } from "@jup-ag/referral-sdk";
 import {
   PublicKey,
@@ -6,7 +6,8 @@ import {
   type TokenBalance,
   type VersionedTransactionResponse,
 } from "@solana/web3.js";
-import type { Timba } from "../../idl/idlType";
+import type { Timba } from "../types/contract";
+import { contractCapabilities, contractVersion, getContractIdl } from "../utils/contract-idl";
 import { parseProgramEventsFromTransaction } from "../utils/program-event-parser";
 import type {
   FinanceBackfillProgress,
@@ -136,6 +137,9 @@ export class FinanceLedgerService {
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => number;
   private readonly resolveGameMint?: (gameAddress: string) => string | null | undefined;
+  private readonly historicalEventCoders = ["0.2.0", "0.3.0"]
+    .filter((version) => version !== contractVersion)
+    .map((version) => new BorshCoder(getContractIdl(version as "0.2.0" | "0.3.0") as any));
 
   constructor(
     private readonly connection: Connection,
@@ -288,7 +292,11 @@ export class FinanceLedgerService {
     entry: { signature: string; blockTime?: number | null; slot: number },
     transaction: VersionedTransactionResponse,
   ): void {
-    const events = parseProgramEventsFromTransaction(this.program, transaction.meta?.logMessages);
+    const events = parseProgramEventsFromTransaction(
+      this.program,
+      transaction.meta?.logMessages,
+      this.historicalEventCoders,
+    );
     const gameMints = new Map<string, string>();
 
     for (const event of events) {
@@ -404,16 +412,18 @@ export class FinanceLedgerService {
     backfill: FinanceBackfillProgress,
   ): Promise<FinanceLedgerSnapshot> {
     const [gameAccounts, referralAccounts] = await Promise.all([
-      this.program.account.gameToken.all(),
+      contractCapabilities.gameTokenAccount
+        ? (this.program.account as any).gameToken.all()
+        : Promise.resolve([]),
       this.referralAccounts(),
     ]);
     return {
       gameClaimable: gameAccounts
-        .map(({ account }) => ({
+        .map(({ account }: { account: { tokenMint: PublicKey; feeAmount: unknown } }) => ({
           mint: account.tokenMint.toBase58(),
           amountRaw: asBigInt(account.feeAmount),
         }))
-        .filter(({ amountRaw }) => amountRaw > 0n),
+        .filter(({ amountRaw }: { amountRaw: bigint }) => amountRaw > 0n),
       swapClaimable: referralAccounts
         .map(({ account }) => ({ mint: account.mint.toBase58(), amountRaw: account.amount }))
         .filter(({ amountRaw }) => amountRaw > 0n),

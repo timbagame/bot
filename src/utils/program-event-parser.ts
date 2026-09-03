@@ -3,7 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 
 /**
  * PlayerUnjoined discriminator (unchanged when moved_participant was added).
- * From idl.json — keep in sync if the event is renamed/regenerated.
+ * From the versioned Anchor IDL — keep in sync if the event is renamed.
  */
 export const PLAYER_UNJOINED_DISCRIMINATOR = Buffer.from([191, 34, 140, 22, 253, 20, 237, 73]);
 
@@ -77,18 +77,32 @@ export function decodeLegacyPlayerUnjoined(logBase64: string): ProgramEvent | nu
 export function decodeProgramEventLog(
   logBase64: string,
   decodeCurrent: (log: string) => ProgramEvent | null,
+  decodeFallbacks: ReadonlyArray<(log: string) => ProgramEvent | null> = [],
 ): ProgramEvent | null {
   const legacy = decodeLegacyPlayerUnjoined(logBase64);
   if (legacy) return legacy;
 
-  try {
-    return decodeCurrent(logBase64);
-  } catch {
-    return null;
+  for (const decode of [decodeCurrent, ...decodeFallbacks]) {
+    try {
+      const event = decode(logBase64);
+      if (event) return event;
+    } catch {
+      // Try the next versioned decoder.
+    }
   }
+  return null;
 }
 
 type EventCoderLike = Pick<Coder, "events">;
+
+function normalizeEventData(data: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+}
 
 /**
  * Parse a transaction's program logs with dual-layout support so a single
@@ -98,16 +112,32 @@ export function parseProgramEventLogs(
   programId: PublicKey,
   coder: EventCoderLike,
   logs: readonly string[],
+  fallbackCoders: readonly EventCoderLike[] = [],
 ): ProgramEvent[] {
   const resilientCoder = {
     events: {
       decode: (log: string) =>
-        decodeProgramEventLog(log, (entry) => {
-          const decoded = coder.events.decode(entry);
-          return decoded
-            ? { name: decoded.name, data: decoded.data as Record<string, unknown> }
-            : null;
-        }),
+        decodeProgramEventLog(
+          log,
+          (entry) => {
+            const decoded = coder.events.decode(entry);
+            return decoded
+              ? {
+                  name: decoded.name,
+                  data: normalizeEventData(decoded.data as Record<string, unknown>),
+                }
+              : null;
+          },
+          fallbackCoders.map((fallback) => (entry: string) => {
+            const decoded = fallback.events.decode(entry);
+            return decoded
+              ? {
+                  name: decoded.name,
+                  data: normalizeEventData(decoded.data as Record<string, unknown>),
+                }
+              : null;
+          }),
+        ),
     },
   } satisfies EventCoderLike;
 
@@ -128,6 +158,7 @@ export function parseProgramEventLogs(
 export function parseProgramEventsFromTransaction(
   program: Pick<Program, "programId" | "coder">,
   logs: readonly string[] | null | undefined,
+  fallbackCoders: readonly EventCoderLike[] = [],
 ): ProgramEvent[] {
-  return parseProgramEventLogs(program.programId, program.coder, logs ?? []);
+  return parseProgramEventLogs(program.programId, program.coder, logs ?? [], fallbackCoders);
 }

@@ -46,7 +46,7 @@ type CreateGameViaCommandDeps = {
     getBalance: (telegramId: bigint) => Promise<number>;
     formatSolBalance: (lamports: number) => string;
   };
-  getContractMinimumAmount: (
+  getTokenPolicyMinimumAmount: (
     tokenMint?: string,
     decimalsHint?: number,
   ) => Promise<{ formatted: number; raw: number; decimals: number }>;
@@ -64,7 +64,7 @@ export type GameCommandsModuleDeps = {
   parseAmount: CreateGameViaCommandDeps["parseAmount"];
   inferMaxPlayers: CreateGameViaCommandDeps["inferMaxPlayers"];
   wallet: CreateGameViaCommandDeps["wallet"];
-  getContractMinimumAmount: CreateGameViaCommandDeps["getContractMinimumAmount"];
+  getTokenPolicyMinimumAmount: CreateGameViaCommandDeps["getTokenPolicyMinimumAmount"];
   gameManager: CreateGameViaCommandDeps["gameManager"];
   getOracleMaxPlayers: () => number;
   isGroupChat: (ctx: Context) => boolean;
@@ -143,7 +143,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       parseAmount: deps.parseAmount,
       inferMaxPlayers: deps.inferMaxPlayers,
       wallet: deps.wallet,
-      getContractMinimumAmount: deps.getContractMinimumAmount,
+      getTokenPolicyMinimumAmount: deps.getTokenPolicyMinimumAmount,
       gameManager: deps.gameManager,
     },
   ): Promise<void> => {
@@ -207,7 +207,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       const maxPlayers = inferred.value;
       const tokenMetadata = await createDeps.wallet.getTokenMetadata(parsedAmount.tokenMint);
-      const { raw: minAmountRaw } = await createDeps.getContractMinimumAmount(
+      const { raw: minAmountRaw } = await createDeps.getTokenPolicyMinimumAmount(
         parsedAmount.tokenMint,
         tokenMetadata.decimals,
       );
@@ -218,7 +218,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           tokenMetadata.decimals,
         );
         await ctx.reply(
-          `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`,
+          `❌ Amount below current minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`,
         );
         return;
       }

@@ -7,6 +7,7 @@ import { WSOL_MINT, TOKEN_MANAGER_KNOWN_CACHE_TTL_MS } from "../src/utils/consta
 import * as priceService from "../src/utils/price-service";
 import { __test_clearPriceServiceCache } from "../src/utils/price-service";
 import { createWalletStub, resetTokenManagerState } from "./helpers/fixtures";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -52,13 +53,18 @@ test("resolveGameTokenContext falls back to chat defaults", async () => {
   expect(resolved.decimals).toBe(9);
 });
 
-test("resolveGameTokenContext rejects unsupported game tokens", async () => {
+test("resolveGameTokenContext defers v0.3 support decisions to Oracle policy", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const unsupportedMint = Keypair.generate().publicKey.toBase58();
   await tm.addToken(unsupportedMint, "SIDE", 6);
 
   const resolved = await tm.resolveGameTokenContext(123, "SIDE", "game");
-  expect(resolved.success).toBe(false);
+  expect(resolved.success).toBe(contractCapabilities.oracleTokenPolicy);
+  if (contractCapabilities.oracleTokenPolicy) {
+    if (!resolved.success) throw new Error("expected v0.3 token resolution to succeed");
+    expect(resolved.tokenMint).toBe(unsupportedMint);
+    return;
+  }
   if (resolved.success) {
     throw new Error("expected failure for unsupported game token");
   }
@@ -288,14 +294,19 @@ test("parseAmount uses chat default token when none specified", async () => {
   expect(d.tokenTicker).toBe("CHAT");
 });
 
-test("parseAmount rejects unsupported chat default tokens for games", async () => {
+test("parseAmount defers v0.3 chat-default support decisions to Oracle policy", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "DEF_MINT", "DEF");
   const unsupportedMint = Keypair.generate().publicKey.toBase58();
   tm.setChatDefaultToken(321, unsupportedMint, "CHAT", "userZ");
 
   const res = await tm.parseAmount(["/cf", "1"], 1, 321, "game");
 
-  expect(res.success).toBe(false);
+  expect(res.success).toBe(contractCapabilities.oracleTokenPolicy);
+  if (contractCapabilities.oracleTokenPolicy) {
+    if (!res.success) throw new Error("expected v0.3 chat token resolution to succeed");
+    expect(res.data.tokenMint).toBe(unsupportedMint);
+    return;
+  }
   if (res.success) {
     throw new Error("expected chat default unsupported failure");
   }
@@ -318,13 +329,19 @@ test("parseAmount accepts token mint addresses when provided", async () => {
   expect(data.tokenWasSpecified).toBe(true);
 });
 
-test("parseAmount rejects valid mint strings for unsupported game tokens", async () => {
+test("parseAmount defers valid v0.3 mint support decisions to Oracle policy", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const mint = "BPFLoader1111111111111111111111111111111111";
 
   const res = await tm.parseAmount(["/cf", "4", mint], 1, 321, "game");
 
-  expect(res.success).toBe(false);
+  expect(res.success).toBe(contractCapabilities.oracleTokenPolicy);
+  if (contractCapabilities.oracleTokenPolicy) {
+    if (!res.success) throw new Error("expected v0.3 mint resolution to succeed");
+    expect(res.data.tokenMint).toBe(mint);
+    expect(tm.getKnownTokenByMint(mint)).toBeNull();
+    return;
+  }
   if (res.success) {
     throw new Error("expected unsupported token failure");
   }
@@ -334,7 +351,7 @@ test("parseAmount rejects valid mint strings for unsupported game tokens", async
   expect(tm.getKnownTokenByMint(mint)).toBeNull();
 });
 
-test("parseAmount rejects unsupported mints even when ticker is whitelisted", async () => {
+test("parseAmount keeps v0.2 allowlisting while v0.3 defers to Oracle policy", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const spoofMint = Keypair.generate().publicKey.toBase58();
 
@@ -349,7 +366,12 @@ test("parseAmount rejects unsupported mints even when ticker is whitelisted", as
   const res = await tm.parseAmount(["/cf", "5", spoofMint], 1, 9, "game");
   (tm as any).resolveSwapToken = originalResolveSwapToken;
 
-  expect(res.success).toBe(false);
+  expect(res.success).toBe(contractCapabilities.oracleTokenPolicy);
+  if (contractCapabilities.oracleTokenPolicy) {
+    if (!res.success) throw new Error("expected v0.3 mint resolution to succeed");
+    expect(res.data.tokenMint).toBe(spoofMint);
+    return;
+  }
   if (res.success) {
     throw new Error("expected unsupported token failure");
   }
@@ -357,7 +379,7 @@ test("parseAmount rejects unsupported mints even when ticker is whitelisted", as
   expect(res.unknownToken).toBe("USDC");
 });
 
-test("games reject chat default tokens discovered via tips", async () => {
+test("games defer discovered v0.3 chat tokens to Oracle policy", async () => {
   const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const discoveredMint = Keypair.generate().publicKey.toBase58();
 
@@ -371,7 +393,13 @@ test("games reject chat default tokens discovered via tips", async () => {
 
   const gameResult = await tm.parseAmount(["/cf", "1"], 1, 999, "game");
 
-  expect(gameResult.success).toBe(false);
+  expect(gameResult.success).toBe(contractCapabilities.oracleTokenPolicy);
+  if (contractCapabilities.oracleTokenPolicy) {
+    if (!gameResult.success) throw new Error("expected v0.3 chat token resolution to succeed");
+    expect(gameResult.data.tokenMint).toBe(discoveredMint);
+    expect(tm.getKnownTokenByMint(discoveredMint)).not.toBeNull();
+    return;
+  }
   if (gameResult.success) {
     throw new Error("expected unsupported token for discovered chat default");
   }

@@ -46,9 +46,7 @@ export class PDAManager {
 
   // PlayerGames PDA not used in current participation tracking model
 
-  /**
-   * Get Game Token PDA - Used for game token configuration
-   */
+  /** Get the v0.2.0 GameToken configuration PDA for a mint. */
   static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
     return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
   }

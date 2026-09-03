@@ -194,7 +194,7 @@ describe("active game keyboard helpers", () => {
       pendingGameCreations: new Set<string>(),
       getOracleMaxPlayers: () => 0,
       getDefaultTokenMetadata: async () => ({ decimals: 6 }),
-      getContractMinimumAmount: async () => ({
+      getTokenPolicyMinimumAmount: async () => ({
         formatted: 0,
         raw: 0,
         decimals: 6,

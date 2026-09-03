@@ -56,7 +56,7 @@ src/
 
 The report includes the $7/month DigitalOcean VPS cost and the timba.cc domain renewal amortized from $8/year. A 30-day report uses one full monthly charge; the 7-day report prorates it. New game completions and swaps store exact fee data and transaction costs, while older records remain explicitly marked as estimates.
 
-Contract deposits are read from the live program, ProgramData, oracle, game-token, and vault accounts. They are valued at the current SOL price and shown as assets, not expenses or profit.
+Contract deposits are read from the live program, ProgramData, Oracle, and the configured game-vault token accounts. They are valued at the current SOL price and shown as assets, not expenses or profit.
 
 ## 🏗️ Architecture
 
@@ -70,6 +70,7 @@ Contract deposits are read from the live program, ProgramData, oracle, game-toke
 ### Oracle System
 
 - Generates commitments through the separate oracle service; the bot never stores oracle secrets
+- Loads the authenticated Oracle token policy before game creation and fails closed when a mint is unsupported, disabled, below its minimum, or the policy is unavailable
 - Builds creator-funded initialization transactions, obtains the oracle's partial signature, then signs and submits them as the creator
 - Handles game timeouts and cancellations
 - Manages orphaned games from blockchain scans

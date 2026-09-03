@@ -3,6 +3,7 @@ import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {
   // reset singleton
@@ -42,17 +43,15 @@ test("cancelGameWithCreator returns true on successful close", async () => {
   } as any;
   const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
   const tokenMint = Keypair.generate().publicKey;
-  const gameToken = Keypair.generate().publicKey;
   const gameVault = Keypair.generate().publicKey;
-  const gameTokenAccount = Keypair.generate().publicKey;
+  const gameVaultTokenAccount = Keypair.generate().publicKey;
   const creatorTokenAccount = Keypair.generate().publicKey;
-  (gm as any).resolveGameTokenAccounts = async (mint: PublicKey) => {
+  (gm as any).resolveGameVaultAccounts = async (mint: PublicKey) => {
     expect(mint.toBase58()).toBe(tokenMint.toBase58());
     return {
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameToken,
       gameVault,
-      gameTokenAccount,
+      gameVaultTokenAccount,
     };
   };
   (gm as any).deriveAta = async () => creatorTokenAccount;
@@ -70,19 +69,30 @@ test("cancelGameWithCreator returns true on successful close", async () => {
 
   const accounts = (program as any).__captures.closeGameAccounts;
   expect(accounts).toBeDefined();
-  const ctx = accounts.gameTokenCtx;
+  const fundsContextKey = contractCapabilities.gameTokenAccount ? "gameTokenCtx" : "gameVaultCtx";
+  expect(Object.keys(accounts).sort()).toEqual(
+    [
+      "creator",
+      "creatorTokenAccount",
+      "game",
+      fundsContextKey,
+      "oracle",
+      ...(contractCapabilities.gameTokenAccount ? ["systemProgram"] : []),
+    ].sort(),
+  );
+  const ctx = accounts[fundsContextKey];
   expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
-  expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
   expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
-  expect(ctx.gameTokenAccount.toBase58()).toBe(gameTokenAccount.toBase58());
+  expect((ctx.gameVaultTokenAccount ?? ctx.gameTokenAccount).toBase58()).toBe(
+    gameVaultTokenAccount.toBase58(),
+  );
   expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
   expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
   expect(accounts.creatorTokenAccount.toBase58()).toBe(creatorTokenAccount.toBase58());
   expect(accounts.tokenMint).toBeUndefined();
   expect(accounts.tokenProgram).toBeUndefined();
-  expect(accounts.gameToken).toBeUndefined();
   expect(accounts.gameVault).toBeUndefined();
-  expect(accounts.gameTokenAccount).toBeUndefined();
+  expect(accounts.gameVaultTokenAccount).toBeUndefined();
 });
 
 test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on probe recovery", async () => {
@@ -152,11 +162,10 @@ test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on 
   const creatorTelegramId = "777";
   const creatorKeypair = wallet.getKeyPair(BigInt(creatorTelegramId));
 
-  (gm as any).resolveGameTokenAccounts = async () => ({
+  (gm as any).resolveGameVaultAccounts = async () => ({
     tokenProgram: TOKEN_PROGRAM_ID,
-    gameToken: Keypair.generate().publicKey,
     gameVault: Keypair.generate().publicKey,
-    gameTokenAccount: Keypair.generate().publicKey,
+    gameVaultTokenAccount: Keypair.generate().publicKey,
   });
   (gm as any).deriveAta = async () => Keypair.generate().publicKey;
 
@@ -222,11 +231,10 @@ test("closeGameWithCreatorAuthority resubmits when helper is unavailable", async
     getGameParticipants: () => [],
   } as any);
 
-  (gm as any).resolveGameTokenAccounts = async () => ({
+  (gm as any).resolveGameVaultAccounts = async () => ({
     tokenProgram: TOKEN_PROGRAM_ID,
-    gameToken: Keypair.generate().publicKey,
     gameVault: Keypair.generate().publicKey,
-    gameTokenAccount: Keypair.generate().publicKey,
+    gameVaultTokenAccount: Keypair.generate().publicKey,
   });
   (gm as any).deriveAta = async () => Keypair.generate().publicKey;
 

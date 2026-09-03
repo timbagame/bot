@@ -2,7 +2,6 @@ const COMMANDS = [
   "close-orphaned-games",
   "initialize-referral-token-accounts",
   "show-swap-stats",
-  "withdraw-token-fees",
   "sweep-to-sol",
 ] as const;
 
@@ -20,7 +19,6 @@ export function usage(): string {
     "  close-orphaned-games",
     "  initialize-referral-token-accounts <mint> [mint...]",
     "  show-swap-stats",
-    "  withdraw-token-fees",
     "  sweep-to-sol",
   ].join("\n");
 }
@@ -44,11 +42,6 @@ export async function runServiceAdmin(
     case "show-swap-stats": {
       const { showSwapStats } = await import("./show-swap-stats");
       showSwapStats();
-      return;
-    }
-    case "withdraw-token-fees": {
-      const { withdrawTokenFees } = await import("./withdraw-token-fees");
-      await withdrawTokenFees();
       return;
     }
     case "sweep-to-sol": {
