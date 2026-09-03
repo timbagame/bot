@@ -3844,7 +3844,16 @@ export class GameManager {
           debugLog("⏳ Giveaway has participants; waiting for oracle to complete.");
           return false;
         }
-        debugLog("⌛ Giveaway buffer elapsed; awaiting oracle completion.");
+        debugLog("⏰ Giveaway buffer elapsed; closing the unresolved game.");
+        const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+        if (result.success) {
+          return {
+            cancelled: true,
+            amount: Number(gameAccount.ticketAmount),
+            creator: gameAccount.creator.toBase58(),
+            tx: result.tx!,
+          };
+        }
       }
       return false;
     }
@@ -3937,16 +3946,6 @@ export class GameManager {
       return false;
     }
 
-    // For giveaways with buffer elapsed, force close
-    const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
-    if (result.success) {
-      return {
-        cancelled: true,
-        amount: Number(gameAccount.ticketAmount),
-        creator: gameAccount.creator.toBase58(),
-        tx: result.tx!,
-      };
-    }
     return false;
   }
 
