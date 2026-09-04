@@ -948,61 +948,91 @@ describe("GameManager.createGame", () => {
     (PDAManager as any).getGamePDA = original;
   });
 
-  test("does not save a phantom game when the confirmed account cannot be fetched", async () => {
-    resetGM();
-    const wallet = makeWallet({
-      getTokenMetadata: async () => ({ decimals: 6 }),
-      getTokenBalance: async () => 2_000_000,
-      getBalance: async () => 3_000_000,
-      sendTransaction: async () => "SIG",
-    });
-    const saveGame = vi.fn();
-    const db = {
-      savePlayerMapping: () => {},
-      saveGame,
-      countActiveGamesByCreator: () => 0,
-      countRecentGamesByCreator: () => 0,
-    } as any;
-    const program = makeProgram(wallet.connection);
-    program.account.game.fetch = async () => {
-      throw new Error("Account does not exist");
-    };
-    const gm = getGameManager(program, wallet, db);
-    (gm as any).oracleClient = {
-      requireTokenPolicy: async () => ({}),
-      isHealthy: async () => true,
-      generateGameSecrets: async () => ({
-        randomHash: "f".repeat(64),
-        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
-      }),
-      signGameTransaction: signGameTransactionAsOracle,
-      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
-    };
-    (gm as any).resolveGameVaultAccounts = async () => ({
-      tokenProgram: TOKEN_PROGRAM_ID,
-      gameVault: Keypair.generate().publicKey,
-      gameVaultTokenAccount: Keypair.generate().publicKey,
-    });
-    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
-    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
+  test.each(["RPC timeout", "Account does not exist", "unavailable", "mismatch"])(
+    "recovers confirmed creation safely after %s",
+    async (failure) => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        getTokenBalance: async () => 2_000_000,
+        getBalance: async () => 3_000_000,
+        sendTransaction: vi.fn(async () => "SIG"),
+      });
+      const saveGame = vi.fn();
+      const saveGameParticipant = vi.fn();
+      const db = {
+        savePlayerMapping: () => {},
+        saveGame,
+        saveGameParticipant,
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: () => 0,
+      } as any;
+      const program = makeProgram(wallet.connection);
+      const fetchAccount = program.account.game.fetch;
+      let reads = 0;
+      program.account.game.fetch = async () => {
+        reads += 1;
+        if (failure === "unavailable" || (reads === 1 && failure !== "mismatch")) {
+          throw new Error(failure);
+        }
+        const account = await fetchAccount();
+        return failure === "mismatch" ? { ...account, maxTickets: 99 } : account;
+      };
+      const gm = getGameManager(program, wallet, db);
+      (gm as any).oracleClient = {
+        requireTokenPolicy: async () => ({}),
+        isHealthy: async () => true,
+        generateGameSecrets: async () => ({
+          randomHash: "f".repeat(64),
+          oracleOperator: TEST_ORACLE.publicKey.toBase58(),
+        }),
+        signGameTransaction: vi.fn(signGameTransactionAsOracle),
+        hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+      };
+      (gm as any).resolveGameVaultAccounts = async () => ({
+        tokenProgram: TOKEN_PROGRAM_ID,
+        gameVault: Keypair.generate().publicKey,
+        gameVaultTokenAccount: Keypair.generate().publicKey,
+      });
+      (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+      (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
 
-    const result = await gm.createGame(
-      "coinflip",
-      {
-        amount: 1_000_000,
-        tokenMint: PublicKey.default.toBase58(),
-        tokenTicker: "TIMBA",
-        isSol: false,
-      },
-      2,
-      2,
-      60,
-      1n,
-    );
+      const result = await gm.createGame(
+        "coinflip",
+        {
+          amount: 1_000_000,
+          tokenMint: PublicKey.default.toBase58(),
+          tokenTicker: "TIMBA",
+          isSol: false,
+        },
+        2,
+        2,
+        60,
+        1n,
+      );
 
-    expect(result.success).toBe(false);
-    expect(saveGame).not.toHaveBeenCalled();
-  });
+      expect(wallet.sendTransaction).toHaveBeenCalledTimes(1);
+      expect((gm as any).oracleClient.signGameTransaction).toHaveBeenCalledTimes(1);
+      if (failure === "unavailable" || failure === "mismatch") {
+        expect(result.success).toBe(false);
+        expect(saveGame).not.toHaveBeenCalled();
+        expect(saveGameParticipant).not.toHaveBeenCalled();
+        expect(result.gameAddress).toBe(program.__captures.initializeGameAccounts.game.toBase58());
+        expect(result.confirmedSignature).toBe("CONFIRMED_SIG");
+        expect(reads).toBe(failure === "unavailable" ? 7 : 1);
+      } else {
+        expect(result.success).toBe(true);
+        expect(reads).toBe(2);
+        expect(saveGame).toHaveBeenCalledTimes(1);
+        expect(saveGameParticipant).toHaveBeenCalledWith(
+          result.gameAddress,
+          "1",
+          expect.any(String),
+          expect.objectContaining({ status: "confirmed", joinSignature: "CONFIRMED_SIG" }),
+        );
+      }
+    },
+  );
 
   test("creates game after SOL swap refreshes cached balance", async () => {
     resetGM();

@@ -1,6 +1,16 @@
 import { copyableHtml, escapeHtml, formatCompactTokenDisplay } from "./format-amount";
 import { formatDuration } from "./format-time";
 
+export function buildConfirmedGameRecoveryMessage(gameAddress: string, signature: string): string {
+  return (
+    "⚠️ Your game transaction was confirmed, but game setup could not finish. " +
+    "Funds may already be committed. Do not create the game again. " +
+    "Keep these details for recovery:\n" +
+    `Game: <code>${escapeHtml(gameAddress)}</code>\n` +
+    `Transaction: <code>${escapeHtml(signature)}</code>`
+  );
+}
+
 export function formatPlayerAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }

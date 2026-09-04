@@ -14,6 +14,7 @@ import type { ChatGameSettings, ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
 import type { GameSetupCopy } from "./game-setup";
 import { containsBalanceInfo } from "../utils/context-helpers";
+import { buildConfirmedGameRecoveryMessage } from "../utils/game-ui";
 
 export type CreateGameViaCommandOptions = {
   gameType: "coinflip" | "giveaway";
@@ -290,6 +291,16 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       );
 
       if (!gameResult.success) {
+        if (gameResult.confirmedSignature && gameResult.gameAddress) {
+          await ctx.reply(
+            buildConfirmedGameRecoveryMessage(
+              gameResult.gameAddress,
+              gameResult.confirmedSignature,
+            ),
+            { parse_mode: "HTML" },
+          );
+          return;
+        }
         const finalError = gameResult.error ?? "❌ Failed to create game";
         const isCreationRateLimit = /game creation rate limit/i.test(finalError);
 

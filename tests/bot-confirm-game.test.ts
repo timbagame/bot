@@ -159,84 +159,100 @@ test("confirm_game skips fallback edit when confirmation message is missing", as
   expect(sendCalls.length).toBe(0);
 }, 15000);
 
-test("confirm_game replies directly when confirmation message is missing and creation fails", async () => {
-  const opaque = "database credential xyz exploded";
-  const userId = 7200;
-  const chatId = 8300;
-  const messageId = 92;
+test.each([false, true])(
+  "confirm_game replies directly when confirmation message is missing and creation fails (confirmed=%s)",
+  async (confirmed) => {
+    const opaque = "database credential xyz exploded";
+    const userId = confirmed ? 7201 : 7200;
+    const chatId = 8300;
+    const messageId = 92;
 
-  upsertGameSetupSession(`${chatId}_${messageId}`, {
-    waitingFor: "setup",
-    gameType: "coinflip",
-    userBalance: 50,
-    messageId,
-    chatId,
-    amount: "2",
-    creatorId: String(userId),
-    tokenMint: "So11111111111111111111111111111111111111112",
-    tokenTicker: "SOL",
-    tokenDecimals: 9,
-  });
-
-  const editCalls: any[] = [];
-  const deleteCalls: any[] = [];
-  const sendCalls: any[] = [];
-
-  const editError = new Error("Bad Request: message to edit not found");
-  (editError as any).description = "Bad Request: message to edit not found";
-
-  apiHandlers["editMessageText"] = async (payload: any) => {
-    editCalls.push(payload);
-    throw editError;
-  };
-
-  apiHandlers["deleteMessage"] = async (payload: any) => {
-    deleteCalls.push(payload);
-    return { ok: true, result: true };
-  };
-
-  apiHandlers["sendMessage"] = async (payload: any) => {
-    sendCalls.push(payload);
-    return { ok: true, result: { message_id: 1000, ...payload } };
-  };
-
-  botModule.__test_setGameManager({
-    createGame: async () => ({ success: false, error: opaque }),
-    createGameMessage: async () => {},
-    updateGameMessageFromData: async () => {},
-  } as any);
-
-  const confirmPayload =
-    encodeGameConfirmPayload({
+    upsertGameSetupSession(`${chatId}_${messageId}`, {
+      waitingFor: "setup",
       gameType: "coinflip",
+      userBalance: 50,
+      messageId,
+      chatId,
       amount: "2",
-      players: 2,
-      timeoutSeconds: 3600,
-      minPlayers: 2,
-      isPrivate: true,
       creatorId: String(userId),
-    }) ?? "";
+      tokenMint: "So11111111111111111111111111111111111111112",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+    });
 
-  await bot.handleUpdate({
-    update_id: 2,
-    callback_query: {
-      id: "cb-2",
-      from: { id: userId } as any,
-      message: {
-        message_id: messageId,
-        date: Math.floor(Date.now() / 1000),
-        chat: { id: chatId, type: "private" },
-      } as any,
-      data: confirmPayload,
-    },
-  } as any);
+    const editCalls: any[] = [];
+    const deleteCalls: any[] = [];
+    const sendCalls: any[] = [];
 
-  expect(editCalls.length).toBe(1);
-  expect(deleteCalls.length).toBe(0);
-  expect(sendCalls.length).toBe(1);
-  expect(sendCalls[0].text).toBe("❌ Failed to create game. Please try again.");
-  expect(JSON.stringify(sendCalls)).not.toContain(opaque);
-}, 15000);
+    const editError = new Error("Bad Request: message to edit not found");
+    (editError as any).description = "Bad Request: message to edit not found";
+
+    apiHandlers["editMessageText"] = async (payload: any) => {
+      editCalls.push(payload);
+      throw editError;
+    };
+
+    apiHandlers["deleteMessage"] = async (payload: any) => {
+      deleteCalls.push(payload);
+      return { ok: true, result: true };
+    };
+
+    apiHandlers["sendMessage"] = async (payload: any) => {
+      sendCalls.push(payload);
+      return { ok: true, result: { message_id: 1000, ...payload } };
+    };
+
+    botModule.__test_setGameManager({
+      createGame: async () => ({
+        success: false,
+        error: opaque,
+        ...(confirmed ? { gameAddress: "GAME<123>", confirmedSignature: "CONFIRMED_SIG" } : {}),
+      }),
+      createGameMessage: async () => {},
+      updateGameMessageFromData: async () => {},
+    } as any);
+
+    const confirmPayload =
+      encodeGameConfirmPayload({
+        gameType: "coinflip",
+        amount: "2",
+        players: 2,
+        timeoutSeconds: 3600,
+        minPlayers: 2,
+        isPrivate: true,
+        creatorId: String(userId),
+      }) ?? "";
+
+    await bot.handleUpdate({
+      update_id: 2,
+      callback_query: {
+        id: "cb-2",
+        from: { id: userId } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: chatId, type: "private" },
+        } as any,
+        data: confirmPayload,
+      },
+    } as any);
+
+    expect(editCalls.length).toBe(1);
+    expect(deleteCalls.length).toBe(0);
+    expect(sendCalls.length).toBe(1);
+    if (confirmed) {
+      expect(sendCalls[0].text).toContain("transaction was confirmed");
+      expect(sendCalls[0].text).toContain("Do not create the game again");
+      expect(sendCalls[0].text).toContain("GAME&lt;123&gt;");
+      expect(sendCalls[0].text).toContain("CONFIRMED_SIG");
+      expect(sendCalls[0].text).not.toContain("Please try again");
+    } else {
+      expect(sendCalls[0].text).toBe("❌ Failed to create game. Please try again.");
+    }
+    expect(JSON.stringify(sendCalls)).not.toContain(opaque);
+  },
+  15000,
+);
 
 test("confirm_game clears pending state and surfaces limit errors", async () => {
   const userId = 7300;

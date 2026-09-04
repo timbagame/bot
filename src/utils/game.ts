@@ -68,6 +68,7 @@ import {
   buildPrizeLine,
   buildParticipantsList,
   buildExpirationText,
+  buildConfirmedGameRecoveryMessage,
 } from "./game-ui";
 import {
   sanitizeTelegramDisplayName,
@@ -76,7 +77,11 @@ import {
 import { getUsdPrice, rememberPriceLookup, type CachedPriceLookup } from "./price-service";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
-import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
+import {
+  confirmTransactionWithRecovery,
+  getConfirmationRetryDelays,
+  type TransactionProbe,
+} from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
 import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
@@ -3368,6 +3373,19 @@ export class GameManager {
     }
   }
 
+  private async fetchConfirmedGame(gamePda: PublicKey) {
+    const retryDelays = getConfirmationRetryDelays();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.program.account.game.fetch(gamePda);
+      } catch (error) {
+        if (attempt >= retryDelays.length) throw error;
+        console.warn(`Retrying confirmed game account read for ${gamePda.toBase58()}:`, error);
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      }
+    }
+  }
+
   public async createGame(
     gameType: GameType,
     parsedAmount: Pick<
@@ -3385,6 +3403,7 @@ export class GameManager {
     success: boolean;
     error?: string;
     gameAddress?: string;
+    confirmedSignature?: string;
     autoJoinResult?: { success: boolean; error?: string };
   }> {
     if (parsedAmount.isSol && !parsedAmount.requestedNativeSol) {
@@ -3442,6 +3461,7 @@ export class GameManager {
     this.trackPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
     this.incrementInFlightCreations(telegramIdStr);
 
+    let confirmedCreation: { gameAddress: string; confirmedSignature: string } | undefined;
     try {
       const { tokenMint, tokenTicker, amount } = parsedAmount;
       if (contractCapabilities.oracleTokenPolicy) {
@@ -3732,7 +3752,11 @@ export class GameManager {
         sendCreationTransaction,
       );
 
-      const createdGameAccount = await this.program.account.game.fetch(gamePda);
+      confirmedCreation = {
+        gameAddress: gamePda.toBase58(),
+        confirmedSignature: confirmedCreationTx,
+      };
+      const createdGameAccount = await this.fetchConfirmedGame(gamePda);
       if (!createdGameAccount.creator.equals(playerKp.publicKey)) {
         throw new Error("Confirmed game creator does not match the requesting wallet");
       }
@@ -3794,6 +3818,17 @@ export class GameManager {
         autoJoinResult,
       };
     } catch (error: any) {
+      if (confirmedCreation) {
+        console.error("Failed to finish confirmed game creation", confirmedCreation, error);
+        return {
+          success: false,
+          ...confirmedCreation,
+          error: buildConfirmedGameRecoveryMessage(
+            confirmedCreation.gameAddress,
+            confirmedCreation.confirmedSignature,
+          ),
+        };
+      }
       const policyMessage = formatOraclePolicyError(error);
       if (policyMessage) {
         return { success: false, error: policyMessage };
