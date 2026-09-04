@@ -8,7 +8,7 @@ const GECKO_POOL_TRADES_URL = "https://api.geckoterminal.com/api/v2/networks/sol
 const TRADE_FETCH_TIMEOUT_MS = 5_000;
 // The keyless limit is dynamic and shared by source IP. Leave headroom and
 // honor server-directed cooldowns when the public pool is saturated.
-const GECKO_MIN_REQUEST_INTERVAL_MS = 5_000;
+const GECKO_MIN_REQUEST_INTERVAL_MS = 10_000;
 const GECKO_DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 const GECKO_MAX_RATE_LIMIT_COOLDOWN_MS = 15 * 60_000;
 const GECKO_RATE_LIMIT_LOG_INTERVAL_MS = 60_000;
@@ -39,11 +39,14 @@ export function parseRetryAfterMs(value: string | null, nowMs = Date.now()): num
   return Math.max(0, retryAt - nowMs);
 }
 
-function rateLimitCooldownMs(error: GeckoRateLimitError): number {
-  return Math.min(
-    error.retryAfterMs ?? GECKO_DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+function rateLimitCooldownMs(error: GeckoRateLimitError, failures = 1): number {
+  const backoffMs = Math.min(
+    GECKO_DEFAULT_RATE_LIMIT_COOLDOWN_MS * 2 ** Math.min(Math.max(0, failures - 1), 4),
     GECKO_MAX_RATE_LIMIT_COOLDOWN_MS,
   );
+  // A zero or expired Retry-After must not disable backoff. Never shorten a
+  // longer server-directed cooldown to our local exponential-backoff cap.
+  return Math.max(error.retryAfterMs ?? 0, backoffMs);
 }
 
 export function rememberSignature(
@@ -214,7 +217,17 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
           : Math.floor(intervalMs / minRequestIntervalMs)),
     ),
   );
-  const onError = options.onError ?? ((error: unknown) => console.error(error));
+  const onError =
+    options.onError ??
+    ((error: unknown) => {
+      if (error instanceof GeckoRateLimitError) {
+        console.warn(
+          `GeckoTerminal rate limited buy alerts; retrying in ${Math.ceil(Math.max(0, nextTradeFetchAt - now()) / 1_000)}s`,
+        );
+      } else {
+        console.error(error);
+      }
+    });
   const now = options.now ?? Date.now;
   const wait =
     options.wait ??
@@ -246,7 +259,11 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
         return;
       }
       nextRateLimitReportAt =
-        current + Math.max(GECKO_RATE_LIMIT_LOG_INTERVAL_MS, rateLimitCooldownMs(error));
+        current +
+        Math.max(
+          GECKO_RATE_LIMIT_LOG_INTERVAL_MS,
+          rateLimitCooldownMs(error, consecutiveTradeFailures),
+        );
     }
     try {
       onError(error);
@@ -270,7 +287,10 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     if (minRequestIntervalMs <= 0) return;
     const multiplier = 2 ** Math.min(consecutiveTradeFailures - 1, 4);
     const exponentialDelayMs = minRequestIntervalMs * multiplier;
-    const serverDelayMs = error instanceof GeckoRateLimitError ? rateLimitCooldownMs(error) : 0;
+    const serverDelayMs =
+      error instanceof GeckoRateLimitError
+        ? rateLimitCooldownMs(error, consecutiveTradeFailures)
+        : 0;
     nextTradeFetchAt = Math.max(
       nextTradeFetchAt,
       now() + Math.max(exponentialDelayMs, serverDelayMs),
