@@ -1,6 +1,7 @@
 import { InlineKeyboard, type Bot, type Context, type MiddlewareFn } from "grammy";
 import type { NextFunction } from "grammy";
 import { PublicKey } from "#solana";
+import { buildConfirmedGameRecoveryMessage } from "../utils/game-ui";
 
 import {
   DEFAULT_GAME_TIMEOUT,
@@ -1468,6 +1469,20 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                   logLabel: "confirm_game_error",
                 } as const;
 
+                if (result.confirmedSignature && result.gameAddress) {
+                  await respondWithMenu(
+                    ctx,
+                    {
+                      text: buildConfirmedGameRecoveryMessage(
+                        result.gameAddress,
+                        result.confirmedSignature,
+                      ),
+                      parseMode: "HTML",
+                    },
+                    options,
+                  );
+                  return;
+                }
                 const rawError = result.error || "❌ Failed to create game";
                 const hasBalanceInfo = containsBalanceInfo(rawError);
                 const isCreationRateLimit = /game creation rate limit/i.test(rawError);

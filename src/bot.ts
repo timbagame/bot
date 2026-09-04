@@ -1437,6 +1437,42 @@ const buildActiveGamesKeyboard = (
   return inlineKeyboard;
 };
 
+const replyWithActiveGamesMenu = async (
+  ctx: Context,
+  games: ActiveGameListing[],
+  options: {
+    emptyText: string;
+    title: string;
+    callbackPrefix: string;
+  },
+): Promise<void> => {
+  if (games.length === 0) {
+    await ctx.reply(options.emptyText, {
+      reply_to_message_id: ctx.message?.message_id,
+    });
+    return;
+  }
+
+  const normalizedGames = games.map((game) => ({
+    ...game,
+    keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+  }));
+  const totalGames = normalizedGames.length;
+  const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+  const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames.slice(0, ACTIVE_GAMES_PER_PAGE), {
+    page: 0,
+    totalGames,
+    callbackPrefix: options.callbackPrefix,
+  });
+  const pageInfo = totalPages > 1 ? ` • Page 1/${totalPages}` : "";
+
+  await ctx.reply(`${options.title} (${totalGames})${pageInfo}`, {
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: inlineKeyboard },
+    reply_to_message_id: ctx.message?.message_id,
+  });
+};
+
 export const __test_extractCondensedGameLabel = extractCondensedGameLabel;
 export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
 
@@ -4034,55 +4070,18 @@ const handleActiveCommand = async (ctx: Context) => {
         return;
       }
 
-      const chatActiveGames = await gameManager.getChatActiveGames(ctx, ctx.chat.id);
-
-      if (chatActiveGames.length === 0) {
-        await ctx.reply("No active games in this chat.", {
-          reply_to_message_id: ctx.message?.message_id,
-        });
-        return;
-      }
-
-      const normalizedGames: ActiveGameListing[] = chatActiveGames.map((game) => ({
-        ...game,
-        keyboard: cloneInlineKeyboard(game.keyboard ?? []),
-      }));
-
-      if (normalizedGames.length === 0) {
-        await ctx.reply("No active games in this chat.", {
-          reply_to_message_id: ctx.message?.message_id,
-        });
-        return;
-      }
-
-      const page = 0;
-      const totalGames = normalizedGames.length;
-      const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
-      const pageGames = normalizedGames.slice(0, ACTIVE_GAMES_PER_PAGE);
-
-      const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
-        page,
-        totalGames,
+      await replyWithActiveGamesMenu(ctx, await gameManager.getChatActiveGames(ctx, ctx.chat.id), {
+        emptyText: "No active games in this chat.",
+        title: "🎮 Active games",
         callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
-      });
-      const pageInfo = totalPages > 1 ? ` • Page 1/${totalPages}` : "";
-      const summaryText = `🎮 <b>Active games (${totalGames})</b>${pageInfo}`;
-
-      await ctx.reply(summaryText, {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: inlineKeyboard },
-        reply_to_message_id: ctx.message?.message_id,
       });
       return;
     }
 
-    const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
-
-    const response = activeGames || "You don't have any active games.";
-
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
+    await replyWithActiveGamesMenu(ctx, await gameManager.getUserActiveGames(ctx, telegramId), {
+      emptyText: "You don't have any active games.",
+      title: "🎮 Active games",
+      callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "active");
@@ -4098,44 +4097,10 @@ const handlePublicCommand = async (ctx: Context) => {
   }
 
   try {
-    const publicActiveGames = await gameManager.getAllActivePublicGames(ctx);
-
-    if (publicActiveGames.length === 0) {
-      await ctx.reply("No active public games found.", {
-        reply_to_message_id: ctx.message?.message_id,
-      });
-      return;
-    }
-
-    const normalizedGames: ActiveGameListing[] = publicActiveGames.map((game) => ({
-      ...game,
-      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
-    }));
-
-    if (normalizedGames.length === 0) {
-      await ctx.reply("No active public games found.", {
-        reply_to_message_id: ctx.message?.message_id,
-      });
-      return;
-    }
-
-    const page = 0;
-    const totalGames = normalizedGames.length;
-    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
-    const pageGames = normalizedGames.slice(0, ACTIVE_GAMES_PER_PAGE);
-
-    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
-      page,
-      totalGames,
+    await replyWithActiveGamesMenu(ctx, await gameManager.getAllActivePublicGames(ctx), {
+      emptyText: "No active public games found.",
+      title: "🌐 Active Public Games",
       callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
-    });
-    const pageInfo = totalPages > 1 ? ` • Page 1/${totalPages}` : "";
-    const summaryText = `🌐 <b>Active Public Games (${totalGames})</b>${pageInfo}`;
-
-    await ctx.reply(summaryText, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: inlineKeyboard },
-      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "public");
@@ -4296,7 +4261,7 @@ bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
 });
 
 // Pagination callback for /active command
-bot.callbackQuery(/^active_page:(\d+)$/, async (ctx: Context) => {
+const handleActivePageCallback = async (ctx: Context) => {
   try {
     const match = ctx.callbackQuery?.data?.match(/^active_page:(\d+)$/);
     if (!match || !match[1]) {
@@ -4305,13 +4270,15 @@ bot.callbackQuery(/^active_page:(\d+)$/, async (ctx: Context) => {
     }
     const page = parseInt(match[1], 10);
 
-    if (!ctx.chat?.id || !isGroupChat(ctx)) {
-      await safeAnswerCallbackQuery(ctx, "This only works in group chats.");
+    if (!ctx.chat?.id || !ctx.from?.id) {
+      await safeAnswerCallbackQuery(ctx, "Unable to determine the active-game scope.");
       return;
     }
 
-    const chatActiveGames = await gameManager.getChatActiveGames(ctx, ctx.chat.id);
-    const normalizedGames: ActiveGameListing[] = chatActiveGames.map((game) => ({
+    const activeGames = isGroupChat(ctx)
+      ? await gameManager.getChatActiveGames(ctx, ctx.chat.id)
+      : await gameManager.getUserActiveGames(ctx, BigInt(ctx.from.id));
+    const normalizedGames: ActiveGameListing[] = activeGames.map((game) => ({
       ...game,
       keyboard: cloneInlineKeyboard(game.keyboard ?? []),
     }));
@@ -4343,7 +4310,10 @@ bot.callbackQuery(/^active_page:(\d+)$/, async (ctx: Context) => {
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "active page navigation");
   }
-});
+};
+
+bot.callbackQuery(/^active_page:(\d+)$/, handleActivePageCallback);
+export const __test_handleActivePageCallback = handleActivePageCallback;
 
 // Pagination callback for /public command
 bot.callbackQuery(/^public_page:(\d+)$/, async (ctx: Context) => {

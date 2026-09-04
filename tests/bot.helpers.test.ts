@@ -1069,23 +1069,38 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__deleted?.length).toBe(1);
   });
 
-  test("does not emit opaque game creation diagnostics", async () => {
-    const opaque = "database credential xyz exploded";
-    const ctx: any = makeCtx();
-    const deps = makeDeps({
-      gameManager: {
-        createGame: async () => ({ success: false, error: opaque }),
-        createGameMessage: async () => {
-          throw new Error("should not send message when creation fails");
+  test.each([false, true])(
+    "does not emit opaque game creation diagnostics (confirmed=%s)",
+    async (confirmed) => {
+      const opaque = "database credential xyz exploded";
+      const ctx: any = makeCtx();
+      const deps = makeDeps({
+        gameManager: {
+          createGame: async () => ({
+            success: false,
+            error: opaque,
+            ...(confirmed ? { gameAddress: "GAME<123>", confirmedSignature: "CONFIRMED_SIG" } : {}),
+          }),
+          createGameMessage: async () => {
+            throw new Error("should not send message when creation fails");
+          },
         },
-      },
-    });
+      });
 
-    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
+      await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls[1]).toBe("❌ Failed to create game. Please try again.");
-    expect(ctx.__calls.join(" ")).not.toContain(opaque);
-  });
+      if (confirmed) {
+        expect(ctx.__calls[1]).toContain("transaction was confirmed");
+        expect(ctx.__calls[1]).toContain("Do not create the game again");
+        expect(ctx.__calls[1]).toContain("GAME&lt;123&gt;");
+        expect(ctx.__calls[1]).toContain("CONFIRMED_SIG");
+        expect(ctx.__calls[1]).not.toContain("Please try again");
+      } else {
+        expect(ctx.__calls[1]).toBe("❌ Failed to create game. Please try again.");
+      }
+      expect(ctx.__calls.join(" ")).not.toContain(opaque);
+    },
+  );
 
   test("maps creation rate limit failures to a fixed message", async () => {
     const ctx: any = makeCtx();

@@ -100,6 +100,35 @@ describe("GameManager confirm/reload helpers", () => {
     ]);
   });
 
+  test("does not treat a resubmission as successful until its signature confirms", async () => {
+    const confirmationAttempts: string[] = [];
+    const wallet = {
+      confirmTransaction: async (signature: string) => {
+        confirmationAttempts.push(signature);
+        if (signature !== "SIG_RETRY_2") {
+          throw new Error("transaction confirmation timeout");
+        }
+      },
+    } as any;
+    const { gm } = setupGameManager({ wallet });
+    const resubmittedFrom: string[] = [];
+
+    const finalSignature = await (gm as any).confirmTransactionWithRecovery(
+      "SIG_ORIGINAL",
+      DEFAULT_GAME_PDA,
+      "Game creation",
+      undefined,
+      async (_attempt: number, previousSignature: string) => {
+        resubmittedFrom.push(previousSignature);
+        return resubmittedFrom.length === 1 ? "SIG_RETRY_1" : "SIG_RETRY_2";
+      },
+    );
+
+    expect(finalSignature).toBe("SIG_RETRY_2");
+    expect(confirmationAttempts).toEqual(["SIG_ORIGINAL", "SIG_RETRY_1", "SIG_RETRY_2"]);
+    expect(resubmittedFrom).toEqual(["SIG_ORIGINAL", "SIG_RETRY_1"]);
+  });
+
   test("confirmTransactionWithRecovery treats expirations as recoverable", async () => {
     const wallet = {
       confirmTransaction: async () => {

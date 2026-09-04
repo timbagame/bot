@@ -154,7 +154,11 @@ export const confirmTransactionWithRecovery = async (
 
           currentSignature = resubmittedSignature;
           logDebug(
-            `✅ ${operationLabel} transaction resubmitted successfully ${attemptLabel}, obtained signature: ${currentSignature}`,
+            `🔍 ${operationLabel} transaction resubmitted ${attemptLabel}; confirming signature: ${currentSignature}`,
+          );
+          await wallet.confirmTransaction(currentSignature);
+          logDebug(
+            `✅ ${operationLabel} resubmitted transaction confirmed ${attemptLabel}: ${currentSignature}`,
           );
           return currentSignature;
         } catch (resubmitError) {

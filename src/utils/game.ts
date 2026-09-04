@@ -1,11 +1,4 @@
-import {
-  PublicKey,
-  Keypair,
-  Connection,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-} from "#solana";
+import { PublicKey, Keypair, Connection, SystemProgram, TransactionInstruction } from "#solana";
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -75,6 +68,7 @@ import {
   buildPrizeLine,
   buildParticipantsList,
   buildExpirationText,
+  buildConfirmedGameRecoveryMessage,
 } from "./game-ui";
 import {
   sanitizeTelegramDisplayName,
@@ -83,12 +77,20 @@ import {
 import { getUsdPrice, rememberPriceLookup, type CachedPriceLookup } from "./price-service";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
-import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
+import {
+  confirmTransactionWithRecovery,
+  getConfirmationRetryDelays,
+  type TransactionProbe,
+} from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
 import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpoints";
 import { contractCapabilities, contractVersion } from "./contract-idl";
 import { buildGameFundsContext, type ResolvedContractTokenAccounts } from "./contract-adapter";
+import {
+  buildOracleSignableGameTransaction,
+  finalizeOracleSignedGameTransaction,
+} from "./game-transaction";
 
 const resolveGameMedia = (
   gameType: string,
@@ -2174,13 +2176,14 @@ export class GameManager {
     gamePda: PublicKey,
     amountLamportsInput: number | bigint,
     providedTotalPotInput?: number | bigint,
+    providedGameAccount?: any,
   ) {
     const baseAmountLamports = coerceLamportValue(amountLamportsInput) ?? 0n;
     const providedTotalPot =
       providedTotalPotInput !== undefined ? coerceLamportValue(providedTotalPotInput) : null;
 
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAccount = providedGameAccount ?? (await this.program.account.game.fetch(gamePda));
       const currentTickets = Number(gameAccount.ticketsCount ?? 0);
       const maxTickets = Number(gameAccount.maxTickets ?? 0);
       const minTickets = Number(gameAccount.minTickets ?? 0);
@@ -2451,6 +2454,7 @@ export class GameManager {
     options?: {
       suppressMentions?: boolean;
       priceHint?: CachedPriceLookup | null;
+      gameAccount?: any;
     },
   ): Promise<GameMessageFormat> {
     const suppressMentions = options?.suppressMentions === true;
@@ -2471,7 +2475,12 @@ export class GameManager {
 
     const gameStats = isCompleted
       ? await this.getCompletedGameStats(gamePda, amountLamports, coerceProvidedTotal ?? undefined)
-      : await this.getActiveGameStats(gamePda, amountLamports, coerceProvidedTotal ?? undefined);
+      : await this.getActiveGameStats(
+          gamePda,
+          amountLamports,
+          coerceProvidedTotal ?? undefined,
+          options?.gameAccount,
+        );
 
     const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats as any;
     const tokenMintHint = (gameStats as { tokenMint?: string | null }).tokenMint;
@@ -3364,6 +3373,19 @@ export class GameManager {
     }
   }
 
+  private async fetchConfirmedGame(gamePda: PublicKey) {
+    const retryDelays = getConfirmationRetryDelays();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.program.account.game.fetch(gamePda);
+      } catch (error) {
+        if (attempt >= retryDelays.length) throw error;
+        console.warn(`Retrying confirmed game account read for ${gamePda.toBase58()}:`, error);
+        await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+      }
+    }
+  }
+
   public async createGame(
     gameType: GameType,
     parsedAmount: Pick<
@@ -3381,6 +3403,7 @@ export class GameManager {
     success: boolean;
     error?: string;
     gameAddress?: string;
+    confirmedSignature?: string;
     autoJoinResult?: { success: boolean; error?: string };
   }> {
     if (parsedAmount.isSol && !parsedAmount.requestedNativeSol) {
@@ -3438,6 +3461,7 @@ export class GameManager {
     this.trackPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
     this.incrementInFlightCreations(telegramIdStr);
 
+    let confirmedCreation: { gameAddress: string; confirmedSignature: string } | undefined;
     try {
       const { tokenMint, tokenTicker, amount } = parsedAmount;
       if (contractCapabilities.oracleTokenPolicy) {
@@ -3645,7 +3669,7 @@ export class GameManager {
           game: gamePda,
           creator: playerKp.publicKey,
           oracle: oraclePda,
-          oracleOperator: usesAtomicCreatorJoin ? oracleOperator : Keypair.generate().publicKey,
+          oracleOperator,
           ...gameFundsContext,
           creatorTokenAccount,
           systemProgram: SystemProgram.programId,
@@ -3695,19 +3719,26 @@ export class GameManager {
         ];
       }
 
+      let submitPreparedCreation: (() => Promise<string>) | undefined;
       const sendCreationTransaction = async () => {
+        if (submitPreparedCreation) {
+          return submitPreparedCreation();
+        }
         const latestBlockhash = await this.wallet.getLatestBlockhash();
-        const unsigned = new Transaction({
-          feePayer: playerKp.publicKey,
-          ...latestBlockhash,
-        }).add(...creationInstructions);
-        if (usesAtomicCreatorJoin) await unsigned.partialSign(playerKp);
-        const oracleSigned = await this.oracleClient.signGameTransaction(unsigned);
-        return this.wallet.sendPartiallySignedTransaction(
-          oracleSigned,
-          [playerKp],
-          latestBlockhash,
-        );
+        const prepared = await buildOracleSignableGameTransaction({
+          instructions: creationInstructions,
+          creator: playerKp,
+          blockhash: latestBlockhash,
+        });
+        const oracleSignedBase64 = await this.oracleClient.signGameTransaction(prepared.txBase64);
+        const fullySigned = await finalizeOracleSignedGameTransaction({
+          oracleSignedBase64,
+          expectedMessageBytes: prepared.messageBytes,
+          creator: playerKp,
+        });
+        submitPreparedCreation = () =>
+          this.wallet.sendFullySignedGameTransaction(fullySigned, latestBlockhash);
+        return submitPreparedCreation();
       };
       const creationTx = await sendCreationTransaction();
 
@@ -3720,6 +3751,26 @@ export class GameManager {
         undefined,
         sendCreationTransaction,
       );
+
+      confirmedCreation = {
+        gameAddress: gamePda.toBase58(),
+        confirmedSignature: confirmedCreationTx,
+      };
+      const createdGameAccount = await this.fetchConfirmedGame(gamePda);
+      if (!createdGameAccount.creator.equals(playerKp.publicKey)) {
+        throw new Error("Confirmed game creator does not match the requesting wallet");
+      }
+      if (!createdGameAccount.tokenMint.equals(tokenMintPubkey)) {
+        throw new Error("Confirmed game token mint does not match the requested token");
+      }
+      if (
+        this.getGameType(createdGameAccount) !== gameType ||
+        this.getDisplayAmountFromAccount(createdGameAccount, gameType) !== amount ||
+        Number(createdGameAccount.maxTickets) !== maxTickets ||
+        Number(createdGameAccount.minTickets) !== minTickets
+      ) {
+        throw new Error("Confirmed game account does not match the requested configuration");
+      }
 
       // Save game
       this.gameDb.saveGame(
@@ -3767,6 +3818,17 @@ export class GameManager {
         autoJoinResult,
       };
     } catch (error: any) {
+      if (confirmedCreation) {
+        console.error("Failed to finish confirmed game creation", confirmedCreation, error);
+        return {
+          success: false,
+          ...confirmedCreation,
+          error: buildConfirmedGameRecoveryMessage(
+            confirmedCreation.gameAddress,
+            confirmedCreation.confirmedSignature,
+          ),
+        };
+      }
       const policyMessage = formatOraclePolicyError(error);
       if (policyMessage) {
         return { success: false, error: policyMessage };
@@ -5405,57 +5467,66 @@ export class GameManager {
 
     const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
-        if (!gameData?.game_address) {
-          return null;
-        }
-
-        let gamePda: PublicKey;
         try {
-          gamePda = new PublicKey(gameData.game_address);
-        } catch (error) {
-          console.error("Invalid game address", gameData.game_address, error);
-          return null;
-        }
+          if (!gameData?.game_address) {
+            return null;
+          }
 
-        const creatorUsername = await this.getGameCreatorUsername(ctx, gameData.game_address);
+          let gamePda: PublicKey;
+          try {
+            gamePda = new PublicKey(gameData.game_address);
+          } catch (error) {
+            console.error("Invalid game address", gameData.game_address, error);
+            return null;
+          }
 
-        const { messageText, keyboard } = await this.formatGameMessage(
-          ctx,
-          gamePda,
-          gameData.game_type || "game",
-          Number(gameData.amount) || 0,
-          creatorUsername,
-          gameData.status || "active",
-          gameData.token_ticker || gameData.token_mint || DEFAULT_TOKEN_TICKER,
-          gameData.winner_address,
-          undefined,
-          undefined,
-          { suppressMentions: true },
-        );
-        let currentTickets: number | undefined;
-        let maxTickets: number | undefined;
-        let minTickets: number | undefined;
-        try {
-          const stats = await this.getActiveGameStats(
+          const accountApi = this.program.account.game as any;
+          const onChainGame = accountApi.fetchNullable
+            ? await accountApi.fetchNullable(gamePda)
+            : await accountApi.fetch(gamePda).catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message.includes("does not exist")) return null;
+                throw error;
+              });
+          if (!onChainGame) {
+            console.warn(`Omitting stale active game ${gameData.game_address}; account is absent`);
+            return null;
+          }
+
+          const creatorUsername = await this.getGameCreatorUsername(ctx, gameData.game_address);
+
+          const { messageText, keyboard } = await this.formatGameMessage(
+            ctx,
             gamePda,
+            gameData.game_type || "game",
             Number(gameData.amount) || 0,
+            creatorUsername,
+            gameData.status || "active",
+            gameData.token_ticker || gameData.token_mint || DEFAULT_TOKEN_TICKER,
+            gameData.winner_address,
             undefined,
+            undefined,
+            { suppressMentions: true, gameAccount: onChainGame },
           );
-          currentTickets = stats?.currentTickets;
-          maxTickets = stats?.maxTickets;
-          minTickets = stats?.minTickets;
-        } catch (statError) {
-          console.warn("Failed to fetch game stats for active list:", statError);
-        }
+          const currentTickets = Number(onChainGame.ticketsCount ?? 0);
+          const maxTickets = Number(onChainGame.maxTickets ?? 0);
+          const minTickets = Number(onChainGame.minTickets ?? 0);
 
-        return {
-          messageText,
-          keyboard,
-          gameAddress: gameData.game_address,
-          currentTickets,
-          maxTickets,
-          minTickets,
-        };
+          return {
+            messageText,
+            keyboard,
+            gameAddress: gameData.game_address,
+            currentTickets,
+            maxTickets,
+            minTickets,
+          };
+        } catch (error) {
+          console.warn(
+            `Failed to format active game ${gameData?.game_address ?? "unknown"}:`,
+            error,
+          );
+          return null;
+        }
       }),
     );
 
@@ -5476,6 +5547,23 @@ export class GameManager {
     }>
   > {
     const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
+    return this.formatActiveGamesList(ctx, activeGamesData);
+  }
+
+  public async getUserActiveGames(
+    ctx: Context,
+    telegramId: bigint,
+  ): Promise<
+    Array<{
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
+    }>
+  > {
+    const activeGamesData = this.gameDb.getActiveGames(telegramId.toString());
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 

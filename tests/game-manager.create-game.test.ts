@@ -1,4 +1,9 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, vi } from "bun:test";
+import {
+  getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
+  partiallySignTransactionWithSigners,
+} from "@solana/kit";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair, TransactionInstruction } from "#solana";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "#token";
@@ -11,6 +16,15 @@ import {
   WSOL_MINT,
 } from "../src/utils/constants";
 import { contractCapabilities } from "../src/utils/contract-idl";
+import { decodeGameTransaction } from "../src/utils/game-transaction";
+
+const TEST_ORACLE = Keypair.generate();
+
+async function signGameTransactionAsOracle(txBase64: string): Promise<string> {
+  const transaction = decodeGameTransaction(txBase64);
+  const signed = await partiallySignTransactionWithSigners([TEST_ORACLE], transaction);
+  return getBase64EncodedWireTransaction(signed);
+}
 
 function resetGM() {
   // @ts-ignore
@@ -51,12 +65,21 @@ function makeProgram(connection = createConnectionStub()) {
     provider: { connection },
     __captures: captures,
     methods: {
-      initializeGame: (_cfg: any, _hash: any) => ({
+      initializeGame: (cfg: any, _hash: any) => ({
         accounts: (accs: any) => {
           captures["initializeGameAccounts"] = accs;
+          captures["initializeGameConfig"] = cfg;
           return {
             instruction: async () =>
-              new TransactionInstruction({ programId, keys: [], data: Buffer.alloc(0) }),
+              new TransactionInstruction({
+                programId,
+                keys: [
+                  { pubkey: accs.game, isSigner: false, isWritable: true },
+                  { pubkey: accs.creator, isSigner: true, isWritable: true },
+                  { pubkey: accs.oracleOperator, isSigner: true, isWritable: false },
+                ],
+                data: Buffer.alloc(0),
+              }),
           };
         },
       }),
@@ -68,9 +91,13 @@ function makeProgram(connection = createConnectionStub()) {
               const instruction = new TransactionInstruction({
                 programId,
                 keys: [
-                  { pubkey: PublicKey.default, isSigner: false, isWritable: true },
-                  { pubkey: PublicKey.default, isSigner: true, isWritable: true },
-                  { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: false },
+                  { pubkey: accs.game, isSigner: false, isWritable: true },
+                  { pubkey: accs.player, isSigner: true, isWritable: true },
+                  {
+                    pubkey: accs.oracleOperator ?? programId,
+                    isSigner: Boolean(accs.oracleOperator),
+                    isWritable: false,
+                  },
                 ],
                 data: Buffer.alloc(0),
               });
@@ -81,7 +108,24 @@ function makeProgram(connection = createConnectionStub()) {
         },
       }),
     },
-    account: { game: { fetch: async () => ({}) } },
+    account: {
+      game: {
+        fetch: async () => {
+          const accounts = captures["initializeGameAccounts"];
+          const config = captures["initializeGameConfig"];
+          const funds = accounts.gameVaultCtx ?? accounts.gameTokenCtx;
+          return {
+            creator: accounts.creator,
+            tokenMint: funds.tokenMint,
+            gameType: config.gameType,
+            ticketAmount: config.amount,
+            totalAmount: config.amount,
+            maxTickets: config.maxTickets,
+            minTickets: config.minTickets,
+          };
+        },
+      },
+    },
   } as any;
 }
 
@@ -105,8 +149,10 @@ function makeWallet(overrides: Record<string, any>) {
     blockhash: PublicKey.default.toBase58(),
     lastValidBlockHeight: 1,
   });
-  wallet.sendPartiallySignedTransaction ??= async (transaction: any) =>
-    wallet.sendTransaction(transaction.instructions, []);
+  wallet.sendFullySignedGameTransaction ??= async (transaction: any) => {
+    wallet.__lastGameTransaction = transaction;
+    return wallet.sendTransaction?.([], []) ?? "SIG";
+  };
 
   return wallet;
 }
@@ -643,9 +689,9 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "0".repeat(64),
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: signGameTransactionAsOracle,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     const res = await gm.createGame(
@@ -713,9 +759,9 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "1".repeat(64),
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: signGameTransactionAsOracle,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
 
@@ -742,13 +788,13 @@ describe("GameManager.createGame", () => {
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
     let signingCalls = 0;
-    let sentInstructions: TransactionInstruction[] = [];
+    let sendCalls = 0;
     const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      sendTransaction: async (instructions: TransactionInstruction[]) => {
-        sentInstructions = instructions;
+      sendTransaction: async () => {
+        sendCalls += 1;
         return "SIG";
       },
     });
@@ -768,11 +814,11 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "deadbeef",
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => {
+      signGameTransaction: async (transaction: string) => {
         signingCalls += 1;
-        return transaction;
+        return signGameTransactionAsOracle(transaction);
       },
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
@@ -789,7 +835,16 @@ describe("GameManager.createGame", () => {
     const pda = new PublicKey("11111111111111111111111111111111");
     const original = (PDAManager as any).getGamePDA;
     (PDAManager as any).getGamePDA = () => pda;
-    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
+    (gm as any).confirmTransactionWithRecovery = async (
+      _signature: string,
+      _gamePda: PublicKey,
+      _label: string,
+      _player: PublicKey | undefined,
+      resubmit: (attempt: number, previousSignature: string) => Promise<string>,
+    ) => {
+      await resubmit(0, "SIG");
+      return "CONFIRMED_SIG";
+    };
 
     const res = await gm.createGame(
       "coinflip",
@@ -808,13 +863,27 @@ describe("GameManager.createGame", () => {
     );
     expect(res.success).toBe(true);
     expect(signingCalls).toBe(1);
-    expect(sentInstructions).toHaveLength(contractCapabilities.gameTokenAccount ? 2 : 3);
-    expect(sentInstructions[0]?.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(
-      !contractCapabilities.gameTokenAccount,
+    expect(sendCalls).toBe(2);
+    const compiledMessage = getCompiledTransactionMessageDecoder().decode(
+      wallet.__lastGameTransaction.messageBytes,
+    );
+    expect(compiledMessage.version).toBe("legacy");
+    if (compiledMessage.version !== "legacy") {
+      throw new Error("Expected a legacy game transaction");
+    }
+    expect(compiledMessage.instructions).toHaveLength(
+      contractCapabilities.gameTokenAccount ? 2 : 3,
     );
     if (!contractCapabilities.gameTokenAccount) {
-      expect(sentInstructions[0]?.keys[1]?.pubkey.equals(gameVaultTokenAccount)).toBe(true);
-      expect(sentInstructions[0]?.keys[2]?.pubkey.equals(gameVault)).toBe(true);
+      const setupInstruction = compiledMessage.instructions[0]!;
+      expect(compiledMessage.staticAccounts[setupInstruction.programAddressIndex]).toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+      );
+      const setupAccounts = (setupInstruction.accountIndices ?? []).map(
+        (index) => compiledMessage.staticAccounts[index],
+      );
+      expect(setupAccounts).toContain(gameVaultTokenAccount.toBase58());
+      expect(setupAccounts).toContain(gameVault.toBase58());
     }
     expect(res.gameAddress).toBe(pda.toBase58());
     expect(saved.length).toBe(1);
@@ -879,6 +948,92 @@ describe("GameManager.createGame", () => {
     (PDAManager as any).getGamePDA = original;
   });
 
+  test.each(["RPC timeout", "Account does not exist", "unavailable", "mismatch"])(
+    "recovers confirmed creation safely after %s",
+    async (failure) => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        getTokenBalance: async () => 2_000_000,
+        getBalance: async () => 3_000_000,
+        sendTransaction: vi.fn(async () => "SIG"),
+      });
+      const saveGame = vi.fn();
+      const saveGameParticipant = vi.fn();
+      const db = {
+        savePlayerMapping: () => {},
+        saveGame,
+        saveGameParticipant,
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: () => 0,
+      } as any;
+      const program = makeProgram(wallet.connection);
+      const fetchAccount = program.account.game.fetch;
+      let reads = 0;
+      program.account.game.fetch = async () => {
+        reads += 1;
+        if (failure === "unavailable" || (reads === 1 && failure !== "mismatch")) {
+          throw new Error(failure);
+        }
+        const account = await fetchAccount();
+        return failure === "mismatch" ? { ...account, maxTickets: 99 } : account;
+      };
+      const gm = getGameManager(program, wallet, db);
+      (gm as any).oracleClient = {
+        requireTokenPolicy: async () => ({}),
+        isHealthy: async () => true,
+        generateGameSecrets: async () => ({
+          randomHash: "f".repeat(64),
+          oracleOperator: TEST_ORACLE.publicKey.toBase58(),
+        }),
+        signGameTransaction: vi.fn(signGameTransactionAsOracle),
+        hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+      };
+      (gm as any).resolveGameVaultAccounts = async () => ({
+        tokenProgram: TOKEN_PROGRAM_ID,
+        gameVault: Keypair.generate().publicKey,
+        gameVaultTokenAccount: Keypair.generate().publicKey,
+      });
+      (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+      (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
+
+      const result = await gm.createGame(
+        "coinflip",
+        {
+          amount: 1_000_000,
+          tokenMint: PublicKey.default.toBase58(),
+          tokenTicker: "TIMBA",
+          isSol: false,
+        },
+        2,
+        2,
+        60,
+        1n,
+      );
+
+      expect(wallet.sendTransaction).toHaveBeenCalledTimes(1);
+      expect((gm as any).oracleClient.signGameTransaction).toHaveBeenCalledTimes(1);
+      if (failure === "unavailable" || failure === "mismatch") {
+        expect(result.success).toBe(false);
+        expect(saveGame).not.toHaveBeenCalled();
+        expect(saveGameParticipant).not.toHaveBeenCalled();
+        expect(result.gameAddress).toBe(program.__captures.initializeGameAccounts.game.toBase58());
+        expect(result.confirmedSignature).toBe("CONFIRMED_SIG");
+        expect(reads).toBe(failure === "unavailable" ? 7 : 1);
+      } else {
+        expect(result.success).toBe(true);
+        expect(reads).toBe(2);
+        expect(saveGame).toHaveBeenCalledTimes(1);
+        expect(saveGameParticipant).toHaveBeenCalledWith(
+          result.gameAddress,
+          "1",
+          expect.any(String),
+          expect.objectContaining({ status: "confirmed", joinSignature: "CONFIRMED_SIG" }),
+        );
+      }
+    },
+  );
+
   test("creates game after SOL swap refreshes cached balance", async () => {
     resetGM();
     const playerKp = Keypair.generate();
@@ -933,9 +1088,9 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "cafebabe",
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: signGameTransactionAsOracle,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     const gameVault = Keypair.generate().publicKey;
@@ -1012,9 +1167,9 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "a".repeat(64),
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => transaction,
+      signGameTransaction: signGameTransactionAsOracle,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
     (gm as any).resolveGameVaultAccounts = async () => ({
@@ -1110,11 +1265,11 @@ describe("GameManager.createGame", () => {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({
         randomHash: "a".repeat(64),
-        oracleOperator: PublicKey.default.toBase58(),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
       }),
-      signGameTransaction: async (transaction: any) => {
+      signGameTransaction: async (transaction: string) => {
         signingCalls += 1;
-        return transaction;
+        return signGameTransactionAsOracle(transaction);
       },
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
