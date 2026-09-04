@@ -1,11 +1,20 @@
 import { mnemonicToSeedSync } from "bip39";
 import bs58 from "bs58";
 import {
+  assertIsFullySignedTransaction,
+  assertIsTransactionWithinSizeLimit,
+  createSolanaRpc,
+  getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
+  type Base64EncodedWireTransaction,
+  type FullySignedTransaction,
+  type Transaction as KitTransaction,
+} from "@solana/kit";
+import {
   Connection,
   Keypair,
   PublicKey,
   TransactionInstruction,
-  Transaction,
   VersionedTransaction,
   asBlockhash,
   TransactionMessage,
@@ -172,6 +181,7 @@ type WalletDeps = {
     | { decimals: number; symbol?: string; name?: string }
     | null;
   tokenDb?: TokenDatabase;
+  sendGameTransaction?: (rpcUrl: string, txBase64: string) => Promise<string>;
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
@@ -308,6 +318,7 @@ export class WalletManager {
   private operatorKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
   private tokenDb: TokenDatabase;
+  private sendGameTransaction: (rpcUrl: string, txBase64: string) => Promise<string>;
 
   // Simplified caching
   private keypairCache = new KeypairCache();
@@ -475,6 +486,19 @@ export class WalletManager {
       name?: string;
     }>(TOKEN_METADATA_CACHE_DURATION_MS);
     this.tokenDb = deps?.tokenDb ?? TokenDatabase.getInstance();
+    this.sendGameTransaction =
+      deps?.sendGameTransaction ??
+      (async (rpcUrl, txBase64) =>
+        String(
+          await createSolanaRpc(rpcUrl as `${string}://${string}`)
+            .sendTransaction(txBase64 as Base64EncodedWireTransaction, {
+              encoding: "base64",
+              skipPreflight: false,
+              preflightCommitment: "confirmed",
+              maxRetries: 3n,
+            })
+            .send(),
+        ));
     this.loadOperatorKeypair();
   }
 
@@ -2506,19 +2530,32 @@ export class WalletManager {
     return signature;
   }
 
-  public async sendPartiallySignedTransaction(
-    transaction: Transaction,
-    signers: Keypair[],
+  public async sendFullySignedGameTransaction(
+    transaction: KitTransaction & FullySignedTransaction,
     blockhash: { blockhash: string; lastValidBlockHeight: number },
   ): Promise<string> {
-    if (signers.length === 0) throw new Error("No creator signer provided");
-    await transaction.partialSign(...signers);
-    const serialized = await transaction.serialize();
-    const signature = await this.connection.sendRawTransaction(serialized, {
-      skipPreflight: false,
-      preflightCommitment: "confirmed",
-      maxRetries: 3n,
-    });
+    assertIsFullySignedTransaction(transaction);
+    assertIsTransactionWithinSizeLimit(transaction);
+
+    const preparedSignature = getSignatureFromTransaction(transaction);
+    const activeEndpoint = this.connection.rpcEndpoint;
+    const rpcUrl = new URL(activeEndpoint);
+    if (
+      process.env.HELIUS_REBATE_ADDRESS?.trim() &&
+      /(^|\.)helius-rpc\.com$/i.test(rpcUrl.hostname)
+    ) {
+      rpcUrl.searchParams.set("rebate-address", process.env.HELIUS_REBATE_ADDRESS.trim());
+    }
+    const signature = await this.sendGameTransaction(
+      rpcUrl.toString(),
+      getBase64EncodedWireTransaction(transaction),
+    );
+    if (signature !== preparedSignature) {
+      throw new Error(
+        `RPC returned an unexpected game transaction signature: expected ${preparedSignature}, received ${signature}`,
+      );
+    }
+
     this.pendingSignatures.set(signature, {
       ...blockhash,
       recordedAt: Date.now(),

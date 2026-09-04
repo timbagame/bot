@@ -163,6 +163,48 @@ describe("/active command in group chats", () => {
     // Restore original network
     process.env.SOLANA_NETWORK = savedNetwork;
   });
+
+  test("renders private-chat active games with the same menu as /public", async () => {
+    const mockGames = [
+      {
+        messageText: "<b>Coinflip • 25k TIMBA ($0.13)</b>\nDetails",
+        keyboard: [[{ text: "🎮 Join", callback_data: "join_private" }]],
+        gameAddress: "private-game",
+        currentTickets: 1,
+        maxTickets: 5,
+        minTickets: 2,
+      },
+    ];
+    const stubGameManager = {
+      getUserActiveGames: vi.fn(async () => mockGames),
+      getUserGames: vi.fn(async () => ({ activeGames: "legacy text" })),
+    } as any;
+    botModule.__test_setGameManager(stubGameManager);
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handleActiveCommand({
+      chat: { id: 1234, type: "private" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 11,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 1234, type: "private" },
+        text: "/active",
+      },
+      reply,
+    } as any);
+
+    expect(stubGameManager.getUserActiveGames).toHaveBeenCalledWith(expect.anything(), 1234n);
+    expect(stubGameManager.getUserGames).not.toHaveBeenCalled();
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active games (1)");
+    expect(options.reply_markup.inline_keyboard[0][0]).toMatchObject({
+      text: "1. Coinflip (1/5) • TIMBA",
+    });
+    expect(options.reply_markup.inline_keyboard[1][0]).toMatchObject({
+      callback_data: "join_private",
+    });
+  });
 });
 
 describe("active game keyboard helpers", () => {
@@ -315,6 +357,31 @@ describe("/active command pagination", () => {
     const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
     const hasNavButtons = lastRow?.some((btn) => btn.text === "Next →" || btn.text === "← Prev");
     expect(hasNavButtons).toBeFalsy();
+  });
+
+  test("loads the user's games when a private-chat active page changes", async () => {
+    const mockGames = Array.from({ length: 8 }, (_, i) => createMockGame(i + 1));
+    const stubGameManager = {
+      getUserActiveGames: vi.fn(async () => mockGames),
+      getChatActiveGames: vi.fn(),
+    } as any;
+    botModule.__test_setGameManager(stubGameManager);
+    const editMessageText = vi.fn(async (_text: string, _options: any) => undefined);
+    const answerCallbackQuery = vi.fn(async () => undefined);
+
+    await botModule.__test_handleActivePageCallback({
+      chat: { id: 1234, type: "private" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      callbackQuery: { id: "callback", data: "active_page:1" },
+      editMessageText,
+      answerCallbackQuery,
+    } as any);
+
+    expect(stubGameManager.getUserActiveGames).toHaveBeenCalledWith(expect.anything(), 1234n);
+    expect(stubGameManager.getChatActiveGames).not.toHaveBeenCalled();
+    const [text, options] = editMessageText.mock.calls[0]!;
+    expect(text).toContain("Page 2/2");
+    expect(options.reply_markup.inline_keyboard[0][0].text).toContain("6.");
   });
 
   test("buildActiveGamesKeyboard adds navigation buttons correctly", () => {

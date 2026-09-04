@@ -150,7 +150,11 @@ describe("Oracle token policy", () => {
     client.setOracleUrl("http://oracle.test");
 
     try {
-      await client.signGameTransaction(transaction);
+      await client.signGameTransaction(
+        Buffer.from(
+          await transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+        ).toString("base64"),
+      );
       throw new Error("Expected signing to be rejected");
     } catch (error) {
       expect(error).toBeInstanceOf(OraclePolicyError);
