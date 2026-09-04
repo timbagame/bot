@@ -53,7 +53,7 @@ test("parseRetryAfterMs accepts seconds and HTTP dates", () => {
   expect(parseRetryAfterMs("invalid", now)).toBeNull();
 });
 
-test("pool trade poller honors rate-limit cooldowns and suppresses repeated logs", async () => {
+test("pool trade poller applies a minimum cooldown to short Retry-After values", async () => {
   const errors: unknown[] = [];
   const delays: number[] = [];
   let now = 0;
@@ -84,11 +84,57 @@ test("pool trade poller honors rate-limit cooldowns and suppresses repeated logs
   poller.setMints([mint]);
   await poller.pollNow();
 
-  expect(delays).toEqual([30_000]);
-  expect(errors).toHaveLength(1);
+  expect(delays).toEqual([60_000]);
+  expect(errors).toHaveLength(2);
   expect(errors[0]).toBeInstanceOf(GeckoRateLimitError);
   poller.stop();
 });
+
+for (const retryAfterMs of [0, null, 30 * 60_000]) {
+  test(`rate-limit backoff grows, respects Retry-After ${retryAfterMs}, and resets on success`, async () => {
+    let now = 0;
+    let requests = 0;
+    const delays: number[] = [];
+    const poller = createPoolTradePoller({
+      intervalMs: 60_000,
+      minRequestIntervalMs: 1_000,
+      fetchPairStats: async () => ({
+        priceUsd: 1,
+        marketCapUsd: 1,
+        priceChangeH24: 1,
+        url: null,
+        dexId: "raydium",
+        quoteSymbol: "SOL",
+        pairAddress: "pair-backoff",
+        tokenName: "TOKEN",
+      }),
+      fetchTrades: async () => {
+        requests += 1;
+        if (requests === 7) return { data: [] };
+        throw new GeckoRateLimitError(retryAfterMs);
+      },
+      onError: () => {},
+      now: () => now,
+      wait: async (delayMs) => {
+        delays.push(delayMs);
+        now += delayMs;
+      },
+    });
+    try {
+      poller.setMints([mint]); // Starts the first request.
+      for (let index = 0; index < 8; index += 1) await poller.pollNow();
+      expect(delays).toEqual([
+        ...[60_000, 120_000, 240_000, 480_000, 900_000, 900_000].map((delay) =>
+          Math.max(delay, retryAfterMs ?? 0),
+        ),
+        1_000,
+        Math.max(60_000, retryAfterMs ?? 0),
+      ]);
+    } finally {
+      poller.stop();
+    }
+  });
+}
 
 test("parseGeckoPoolTrade accepts the watched mint on the quote side", () => {
   expect(
