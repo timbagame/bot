@@ -124,11 +124,23 @@ function accountClient<T>(options: {
   normalize: (data: any) => T;
   supported?: boolean;
 }): TimbaAccountClient<T> {
-  const decode = (data: Uint8Array): T => options.normalize(options.decoder.decode(data));
+  const decode = (data: Uint8Array): T => {
+    if (
+      data.length < options.discriminator.length ||
+      options.discriminator.some((byte, index) => data[index] !== byte)
+    ) {
+      throw new Error("Account discriminator does not match the expected Timba account type");
+    }
+    return options.normalize(options.decoder.decode(data));
+  };
   const fetchNullable = async (address: PublicKey): Promise<T | null> => {
     if (options.supported === false) return null;
     const info = await options.connection.getAccountInfo(address, "confirmed");
-    return info ? decode(Uint8Array.from(info.data)) : null;
+    if (!info) return null;
+    if (!info.owner.equals(options.programId)) {
+      throw new Error(`Account ${address.toBase58()} is not owned by the Timba program`);
+    }
+    return decode(Uint8Array.from(info.data));
   };
   return {
     fetch: async (address) => {

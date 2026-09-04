@@ -18,6 +18,8 @@ import {
 } from "#token";
 
 export const REFERRAL_PROGRAM_ID = new PublicKey("REFER4ZgmyYx9c6He5XfaTMiGfdLwRnkV4RPp9t9iF3");
+const REFERRAL_LOOKUP_TABLE = new PublicKey("GBzQG2iFrPwXjGtCnwNt9S5eHd8xAR8jUMt3QDJpnjud");
+const CLAIMS_PER_TRANSACTION = 4;
 
 export type ReferralTokenAccount = {
   pubkey: PublicKey;
@@ -192,12 +194,33 @@ export class ReferralProvider {
       input.referralAccountPubKey.toBase58(),
     );
     const latestBlockhash = await this.connection.getLatestBlockhash("confirmed");
+    const lookupTable = await this.connection
+      .getAddressLookupTable(REFERRAL_LOOKUP_TABLE)
+      .then(({ value }) => value)
+      .catch(() => null);
     const transactions: VersionedTransaction[] = [];
 
     for (const [accounts, tokenProgram] of [
       [tokenAccounts, TOKEN_PROGRAM_ID],
       [token2022Accounts, TOKEN_2022_PROGRAM_ID],
     ] as const) {
+      let batch: TransactionInstruction[] = [];
+      let claimCount = 0;
+      const flush = () => {
+        if (batch.length === 0) return;
+        transactions.push(
+          new VersionedTransaction(
+            new TransactionMessage({
+              payerKey: input.payerPubKey,
+              recentBlockhash: String(latestBlockhash.blockhash),
+              instructions: batch,
+            }).compileToV0Message(lookupTable ? [lookupTable] : []),
+          ),
+        );
+        batch = [];
+        claimCount = 0;
+      };
+
       for (const token of accounts) {
         if (token.account.amount <= 0n || token.account.state !== 1) continue;
         const mint = token.account.mint;
@@ -213,7 +236,7 @@ export class ReferralProvider {
           true,
           tokenProgram,
         );
-        const instructions = [
+        batch.push(
           createAssociatedTokenAccountIdempotentInstruction(
             input.payerPubKey,
             partnerTokenAccount,
@@ -241,17 +264,11 @@ export class ReferralProvider {
             mint,
             tokenProgram,
           }),
-        ];
-        transactions.push(
-          new VersionedTransaction(
-            new TransactionMessage({
-              payerKey: input.payerPubKey,
-              recentBlockhash: String(latestBlockhash.blockhash),
-              instructions,
-            }).compileToV0Message(),
-          ),
         );
+        claimCount += 1;
+        if (claimCount === CLAIMS_PER_TRANSACTION) flush();
       }
+      flush();
     }
     return transactions;
   }

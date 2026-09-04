@@ -3,7 +3,13 @@ import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
 } from "#token";
-import { PublicKey, Keypair, sendAndConfirmRawTransaction, type Connection } from "#solana";
+import {
+  PublicKey,
+  Keypair,
+  asBlockhash,
+  sendAndConfirmRawTransaction,
+  type Connection,
+} from "#solana";
 import { ReferralProvider } from "../utils/referral-client";
 import type { TimbaProgram } from "../utils/timba-program";
 import { WalletManager } from "../utils/wallet";
@@ -524,6 +530,8 @@ async function runReferralSweep(
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
     if (!tx) continue;
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+    tx.message.recentBlockhash = asBlockhash(String(latestBlockhash.blockhash));
     await tx.sign([payer]);
     const sig = await sendAndConfirmRawTransaction(
       connection as unknown as Connection,

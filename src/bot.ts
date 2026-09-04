@@ -4761,10 +4761,10 @@ registerCaseInsensitiveCommand(
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${formatDuration(oracleAccount.minTimeout.toNumber())}`,
-      `Max Timeout: ${formatDuration(oracleAccount.maxTimeout.toNumber())}`,
+      `Min Timeout: ${formatDuration(Number(oracleAccount.minTimeout))}`,
+      `Max Timeout: ${formatDuration(Number(oracleAccount.maxTimeout))}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDuration(oracleAccount.oracleBufferTime.toNumber())}`,
+      `Oracle Buffer Time: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
     ].join("\n");
 
     await ctx.reply(response, {

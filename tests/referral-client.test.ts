@@ -57,6 +57,7 @@ describe("Kit Jupiter referral client", () => {
         blockhash: Keypair.generate().publicKey.toBase58(),
         lastValidBlockHeight: 1n,
       }),
+      getAddressLookupTable: async () => ({ value: null }),
     } as unknown as Connection;
 
     const transactions = await new ReferralProvider(connection).claimAllV2({
@@ -79,5 +80,55 @@ describe("Kit Jupiter referral client", () => {
     ]);
     expect([...instructions[1]!.data]).toEqual([102, 86, 232, 205, 140, 111, 8, 116]);
     expect([...instructions[2]!.data]).toEqual([229, 87, 46, 162, 21, 157, 231, 114]);
+  });
+
+  test("batches four token claims within the transaction size limit", async () => {
+    const payer = Keypair.generate().publicKey;
+    const referralAddress = Keypair.generate().publicKey;
+    const partner = Keypair.generate().publicKey;
+    const projectAddress = Keypair.generate().publicKey;
+    const projectBase = Keypair.generate().publicKey;
+    const projectAdmin = Keypair.generate().publicKey;
+    const referralData = Buffer.alloc(72);
+    partner.toBuffer().copy(referralData, 8);
+    projectAddress.toBuffer().copy(referralData, 40);
+    const projectData = Buffer.alloc(72);
+    projectBase.toBuffer().copy(projectData, 8);
+    projectAdmin.toBuffer().copy(projectData, 40);
+    const tokenAccounts = Array.from({ length: 5 }, () => {
+      const pubkey = Keypair.generate().publicKey;
+      const mint = Keypair.generate().publicKey;
+      const data = Buffer.alloc(AccountLayout.span);
+      AccountLayout.encode(
+        { mint, owner: referralAddress, amount: 10n, state: AccountState.Initialized },
+        data,
+      );
+      return { pubkey, account: accountInfo(TOKEN_PROGRAM_ID, data) };
+    });
+    const connection = {
+      getAccountInfo: async (address: typeof referralAddress) => {
+        if (address.equals(referralAddress)) return accountInfo(REFERRAL_PROGRAM_ID, referralData);
+        if (address.equals(projectAddress)) return accountInfo(REFERRAL_PROGRAM_ID, projectData);
+        return null;
+      },
+      getTokenAccountsByOwner: async (
+        _owner: typeof referralAddress,
+        filter: { programId: typeof TOKEN_PROGRAM_ID },
+      ) => ({ value: filter.programId.equals(TOKEN_PROGRAM_ID) ? tokenAccounts : [] }),
+      getLatestBlockhash: async () => ({
+        blockhash: Keypair.generate().publicKey.toBase58(),
+        lastValidBlockHeight: 1n,
+      }),
+      getAddressLookupTable: async () => ({ value: null }),
+    } as unknown as Connection;
+
+    const transactions = await new ReferralProvider(connection).claimAllV2({
+      payerPubKey: payer,
+      referralAccountPubKey: referralAddress,
+    });
+
+    expect(transactions).toHaveLength(2);
+    expect(transactions.map(({ message }) => message.compiledInstructions.length)).toEqual([12, 3]);
+    expect(transactions[0]!.serialize().length).toBeLessThanOrEqual(1_232);
   });
 });
