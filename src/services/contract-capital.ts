@@ -1,5 +1,5 @@
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "#token";
+import { Connection, PublicKey } from "#solana";
 
 import { PDAManager } from "../utils/pda";
 
@@ -42,7 +42,7 @@ export async function getContractCapitalLamports(
     expectedOwners.set(address.toBase58(), { address, owner, required });
 
   add(program.programId, UPGRADEABLE_LOADER);
-  add(getProgramDataAddress(programInfo.data), UPGRADEABLE_LOADER);
+  add(getProgramDataAddress(Buffer.from(programInfo.data)), UPGRADEABLE_LOADER);
   add(PDAManager.getOraclePDA(program.programId), program.programId);
 
   const configuredMints = new Map<string, PublicKey>();

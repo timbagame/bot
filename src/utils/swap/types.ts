@@ -1,4 +1,4 @@
-import type { Keypair } from "@solana/web3.js";
+import type { Keypair } from "#solana";
 import type { JupiterBuildResponse, JupiterQuoteResponse } from "../jupiter";
 import type { IntegratorSwapParams } from "../integrator-fees";
 

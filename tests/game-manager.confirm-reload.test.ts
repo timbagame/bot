@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import { formatUserFriendlyError } from "../src/utils/errors";
 import { TRANSACTION_RESUBMIT_ATTEMPTS } from "../src/utils/constants";
 

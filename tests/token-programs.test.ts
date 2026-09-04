@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey } from "#solana";
+import { TOKEN_2022_PROGRAM_ID } from "#token";
 import { detectTokenProgram } from "../src/utils/token-programs";
 
 class StubConnection {

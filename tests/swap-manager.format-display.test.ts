@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn } from "bun:test";
-import { Connection } from "@solana/web3.js";
+import { Connection } from "#solana";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 

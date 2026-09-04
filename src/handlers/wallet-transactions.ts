@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 
 import {
   createSolConversionUtilities,

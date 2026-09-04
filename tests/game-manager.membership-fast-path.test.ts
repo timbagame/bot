@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 
 const reset = () => {

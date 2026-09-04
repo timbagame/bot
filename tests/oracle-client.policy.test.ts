@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, Transaction } from "#solana";
 
 import { OracleClient, OraclePolicyError, formatOraclePolicyError } from "../src/utils/oracle";
 import { oracleResponse, TEST_GAME_ADDRESS } from "./helpers/oracle-response";

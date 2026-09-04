@@ -1,14 +1,13 @@
-import { BorshCoder, type Program } from "@anchor-lang/core";
-import { ReferralProvider } from "@jup-ag/referral-sdk";
+import { ReferralProvider } from "../utils/referral-client";
 import {
   PublicKey,
   type Connection,
   type TokenBalance,
   type VersionedTransactionResponse,
-} from "@solana/web3.js";
-import type { Timba } from "../types/contract";
-import { contractCapabilities, contractVersion, getContractIdl } from "../utils/contract-idl";
+} from "#solana";
+import { contractCapabilities } from "../utils/contract-idl";
 import { parseProgramEventsFromTransaction } from "../utils/program-event-parser";
+import type { TimbaProgram } from "../utils/timba-program";
 import type {
   FinanceBackfillProgress,
   FinanceBackfillSource,
@@ -137,13 +136,9 @@ export class FinanceLedgerService {
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => number;
   private readonly resolveGameMint?: (gameAddress: string) => string | null | undefined;
-  private readonly historicalEventCoders = ["0.2.0", "0.3.0"]
-    .filter((version) => version !== contractVersion)
-    .map((version) => new BorshCoder(getContractIdl(version as "0.2.0" | "0.3.0") as any));
-
   constructor(
     private readonly connection: Connection,
-    private readonly program: Program<Timba>,
+    private readonly program: TimbaProgram,
     private readonly history: FinanceHistoryStore,
     private readonly expensePayer?: PublicKey,
     private readonly referralReader: ReferralReader = new ReferralProvider(connection),
@@ -254,7 +249,7 @@ export class FinanceLedgerService {
     let processed = 0;
     let cursor = source.beforeSignature;
     for (const entry of signatures) {
-      if (entry.blockTime != null && entry.blockTime * 1_000 < source.startTimeMs) {
+      if (entry.blockTime != null && Number(entry.blockTime) * 1_000 < source.startTimeMs) {
         this.history.advanceFinanceBackfillSource(source.sourceKey, cursor, true, 0);
         return processed;
       }
@@ -266,9 +261,24 @@ export class FinanceLedgerService {
         });
         if (transaction && !transaction.meta?.err) {
           if (source.sourceType === "program") {
-            this.recordProgramEvents(entry, transaction);
+            this.recordProgramEvents(
+              {
+                signature: entry.signature,
+                blockTime: entry.blockTime == null ? null : Number(entry.blockTime),
+                slot: Number(entry.slot),
+              },
+              transaction,
+            );
           } else {
-            this.recordReferralEvent(source.address, entry, transaction);
+            this.recordReferralEvent(
+              source.address,
+              {
+                signature: entry.signature,
+                blockTime: entry.blockTime == null ? null : Number(entry.blockTime),
+                slot: Number(entry.slot),
+              },
+              transaction,
+            );
           }
         }
       } catch (error) {
@@ -292,11 +302,7 @@ export class FinanceLedgerService {
     entry: { signature: string; blockTime?: number | null; slot: number },
     transaction: VersionedTransactionResponse,
   ): void {
-    const events = parseProgramEventsFromTransaction(
-      this.program,
-      transaction.meta?.logMessages,
-      this.historicalEventCoders,
-    );
+    const events = parseProgramEventsFromTransaction(this.program, transaction.meta?.logMessages);
     const gameMints = new Map<string, string>();
 
     for (const event of events) {
@@ -331,7 +337,9 @@ export class FinanceLedgerService {
           networkFeeLamports: this.networkFee(transaction),
           timestamp: timestampMs(
             data["timestamp"],
-            transaction.blockTime ?? entry.blockTime ?? null,
+            transaction.blockTime == null
+              ? (entry.blockTime ?? null)
+              : Number(transaction.blockTime),
           ),
           slot: entry.slot,
         };
@@ -347,7 +355,8 @@ export class FinanceLedgerService {
           amountRaw: asBigInt(data["amount"]).toString(),
           networkFeeLamports: this.networkFee(transaction),
           timestamp:
-            (transaction.blockTime ?? entry.blockTime ?? Math.floor(this.now() / 1_000)) * 1_000,
+            Number(transaction.blockTime ?? entry.blockTime ?? Math.floor(this.now() / 1_000)) *
+            1_000,
           slot: entry.slot,
         };
       }
@@ -364,7 +373,9 @@ export class FinanceLedgerService {
       ...result.tokenAccounts,
       ...result.token2022Accounts,
     ] as ReferralAccountInfo[];
-    const byAddress = new Map(accounts.map((account) => [account.pubkey.toBase58(), account]));
+    const byAddress = new Map(
+      accounts.map((account) => [String(account.pubkey.toBase58()), account]),
+    );
     if (config.buildFeeAccount && !byAddress.has(config.buildFeeAccount)) {
       const info = await this.connection.getParsedAccountInfo(
         new PublicKey(config.buildFeeAccount),
@@ -402,7 +413,7 @@ export class FinanceLedgerService {
       amountRaw: (delta.delta < 0n ? -delta.delta : delta.delta).toString(),
       networkFeeLamports: kind === "claimed" ? this.networkFee(transaction) : null,
       timestamp:
-        (transaction.blockTime ?? entry.blockTime ?? Math.floor(this.now() / 1_000)) * 1_000,
+        Number(transaction.blockTime ?? entry.blockTime ?? Math.floor(this.now() / 1_000)) * 1_000,
       slot: entry.slot,
     });
   }

@@ -1,17 +1,11 @@
 import { expect, test, vi } from "bun:test";
 import { Buffer } from "buffer";
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  TransactionInstruction,
-} from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID } from "#token";
 
 class ConnFailTime implements Partial<Connection> {
-  async getSlot(_cfg?: any): Promise<number> {
+  async getSlot(_cfg?: any): Promise<bigint> {
     throw new Error("rpc down");
   }
   async getBlockTime(_slot: number) {
@@ -331,7 +325,7 @@ test("unwrapSolWithKeypair unwraps and reimburses estimated sponsor costs atomic
   expect(ixs[0]).toBe(unwrapInstruction);
   expect(ixs[1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
   expect(ixs[1]!.keys[1]!.pubkey).toEqual(operatorKeypair.publicKey);
-  expect(Number((ixs[1]!.data as Buffer).readBigUInt64LE(4))).toBe(800);
+  expect(Buffer.from(ixs[1]!.data).readBigUInt64LE(4)).toBe(800n);
   expect(options).toEqual({ operationLabel: "Unwrap WSOL", maxResubmits: 0 });
 
   expect(result).toEqual({
@@ -534,7 +528,7 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
   const [ixs] = sendSpy.mock.calls[0] as [TransactionInstruction[]];
   // Check that transfer instruction was created with correct amount
   const transferIx = ixs[0];
-  const lamports = Number((transferIx!.data as Buffer).readBigUInt64LE(4));
+  const lamports = Number(Buffer.from(transferIx!.data).readBigUInt64LE(4));
   expect(lamports).toBe(500);
 });
 
@@ -558,7 +552,7 @@ test("transferSol preserves lamports for dust transfers", async () => {
   const sig = await wm.transferSol(1n, destination, 1);
 
   expect(sig).toBe("SIG_DUST");
-  const dataBuffer: Buffer = instructions[0]![0]!.data as Buffer;
+  const dataBuffer = Buffer.from(instructions[0]![0]!.data);
   const lamports = Number(dataBuffer.readBigUInt64LE(4));
   expect(lamports).toBe(1);
 });
@@ -614,7 +608,7 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
   const lamportTransfers: number[] = [];
   (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
     const instruction = ixs[0]!;
-    const lamports = Number((instruction.data as Buffer).readBigUInt64LE(4));
+    const lamports = Number(Buffer.from(instruction.data).readBigUInt64LE(4));
     lamportTransfers.push(lamports);
     return "WITHDRAW_SIG";
   };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 
 function resetGameManager() {

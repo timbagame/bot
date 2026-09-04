@@ -1,13 +1,13 @@
 import { expect, test, describe } from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import {
   AccountLayout,
   AccountState,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddress,
-} from "@solana/spl-token";
+} from "#token";
 
 // Minimal Response-like factory
 const makeResponse = (ok: boolean, status: number, body: any) => ({

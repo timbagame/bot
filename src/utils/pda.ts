@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 
 /**
  * Simplified PDA (Program Derived Address) management utility

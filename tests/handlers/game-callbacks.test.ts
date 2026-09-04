@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "bun:test";
 import type { Context } from "grammy";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import { BN } from "bn.js";
 import type { GameManager } from "../../src/utils/game";
 import {

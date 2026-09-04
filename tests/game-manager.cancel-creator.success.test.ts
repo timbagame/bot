@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "#token";
 import { contractCapabilities } from "../src/utils/contract-idl";
 
 function resetGM() {

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 
 const resetGM = () => {
   Reflect.set(GameManager as unknown as Record<string, unknown>, "instance", undefined);

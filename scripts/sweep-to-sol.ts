@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens, WSOL_MINT } from "../src/utils/token-registry";
 import { getUsdPrice } from "../src/utils/price-service";

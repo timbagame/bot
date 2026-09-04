@@ -1,6 +1,6 @@
 import { describe, expect, test, vi, beforeEach } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 
 // Mock dependencies
 const mockGameDb = {

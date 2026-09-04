@@ -1,6 +1,6 @@
-import { PublicKey } from "@solana/web3.js";
-import type { Connection } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey } from "#solana";
+import type { Connection } from "#solana";
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "#token";
 
 export type TokenProgramDetection = {
   programId: PublicKey;

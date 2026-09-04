@@ -1,5 +1,5 @@
 import { InlineKeyboard } from "grammy";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 
 export const BUY_ALERT_CALLBACK_PREFIX = "buy_alert_";
 export const BUY_ALERT_START_PREFIX = "ba_";

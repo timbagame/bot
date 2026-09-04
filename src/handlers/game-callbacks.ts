@@ -1,7 +1,6 @@
 import { InlineKeyboard, type Bot, type Context, type MiddlewareFn } from "grammy";
 import type { NextFunction } from "grammy";
-import { PublicKey } from "@solana/web3.js";
-import type { Program } from "@anchor-lang/core";
+import { PublicKey } from "#solana";
 
 import {
   DEFAULT_GAME_TIMEOUT,
@@ -61,7 +60,7 @@ import type { GameManager } from "../utils/game";
 import type { GameDatabase } from "../utils/game-database";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
 import type { CreatorCallbackContext, GameSetupCopy, GameSetupModule } from "./game-setup";
-import type { Timba } from "../types/contract";
+import type { TimbaProgram } from "../utils/timba-program";
 import { createNextGuard, getGameOperationQueue } from "../utils/telegram-rate-limiter";
 
 export type GameCallbacksModuleDeps = {
@@ -80,7 +79,7 @@ export type GameCallbacksModuleDeps = {
     decimalsHint?: number,
   ) => Promise<{ formatted: number; raw: number; decimals: number }>;
   fetchTokenPriceUSD: (input: { tokenMint: string }) => Promise<number | null>;
-  getProgram: () => Program<Timba>;
+  getProgram: () => TimbaProgram;
   validateGameTokenData: (gameData: any) => {
     isValid: boolean;
     error?: string;

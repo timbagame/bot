@@ -1,5 +1,5 @@
 import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS, WSOL_MINT } from "./constants";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { z } from "zod";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";

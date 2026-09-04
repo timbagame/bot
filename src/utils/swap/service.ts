@@ -1,5 +1,5 @@
-import { PublicKey, type Keypair } from "@solana/web3.js";
-import { getAccount, getAssociatedTokenAddress } from "@solana/spl-token";
+import { PublicKey, type Keypair } from "#solana";
+import { getAccount, getAssociatedTokenAddress } from "#token";
 
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../constants";
 import type { IntegratorSwapParams } from "../integrator-fees";

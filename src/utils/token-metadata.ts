@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "#solana";
 import { fetchJupiterTokenMetadata } from "./jupiter";
 import type { FetchLike } from "../types";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";

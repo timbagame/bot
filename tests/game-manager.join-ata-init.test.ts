@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, TransactionInstruction } from "#solana";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
-} from "@solana/spl-token";
+} from "#token";
 import { GameManager } from "../src/utils/game";
 
 describe("GameManager join initializes missing ATAs", () => {
@@ -181,7 +181,9 @@ describe("GameManager join initializes missing ATAs", () => {
         instructions: TransactionInstruction[],
       ): Promise<string> => {
         const ataInstruction = instructions[0];
-        const isIdempotent = ataInstruction?.data?.equals(expectedAtaInstruction.data);
+        const isIdempotent = Buffer.from(ataInstruction?.data ?? []).equals(
+          Buffer.from(expectedAtaInstruction.data),
+        );
         if (ataCreated && !isIdempotent) {
           throw new Error("Token account already in use");
         }

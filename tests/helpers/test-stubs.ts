@@ -1,4 +1,4 @@
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 import { FeeBudgetManager } from "../../src/utils/fee-budget";
 import { wallet } from "../../src/bot";
 

@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import type { PublicKey } from "@solana/web3.js";
+import type { PublicKey } from "#solana";
 import type { ParseAmountResult } from "../types";
 import type { FaucetDatabase, FaucetProgress, FaucetRecord } from "../utils/faucet-database";
 import type { InferPlayersResult } from "../utils/arg-parsing";

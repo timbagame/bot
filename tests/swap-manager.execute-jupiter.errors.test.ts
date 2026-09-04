@@ -1,13 +1,7 @@
 import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  TransactionMessage,
-  VersionedTransaction,
-} from "@solana/web3.js";
-import { AccountLayout, AccountState, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Connection, Keypair, PublicKey, TransactionMessage, VersionedTransaction } from "#solana";
+import { AccountLayout, AccountState, TOKEN_PROGRAM_ID } from "#token";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
 import type { JupiterOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { PublicKey, Keypair } from "@solana/web3.js";
-import { AccountLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
+import { PublicKey, Keypair } from "#solana";
+import { AccountLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "#token";
 
 import { WalletManager } from "../src/utils/wallet";
 

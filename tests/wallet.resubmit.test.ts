@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair, TransactionInstruction } from "@solana/web3.js";
+import { Connection, Keypair, TransactionInstruction } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 
 const MNEMONIC =

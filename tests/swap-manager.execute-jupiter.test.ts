@@ -9,7 +9,7 @@ import {
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
-} from "@solana/web3.js";
+} from "#solana";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 

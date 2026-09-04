@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { FinanceLedgerService, referralDeltaFromTransaction } from "../src/services/finance-ledger";
 
 const ACCOUNT = new PublicKey("11111111111111111111111111111111");

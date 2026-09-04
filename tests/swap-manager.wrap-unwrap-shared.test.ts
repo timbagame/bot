@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 
 import { SwapManager } from "../src/utils/swap-manager";
 import type { WalletManager } from "../src/utils/wallet";

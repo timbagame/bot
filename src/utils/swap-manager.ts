@@ -8,8 +8,9 @@ import {
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
-} from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, unpackAccount } from "@solana/spl-token";
+  asBlockhash,
+} from "#solana";
+import { TOKEN_PROGRAM_ID, unpackAccount } from "#token";
 import {
   JupiterClient,
   JupiterReferralUnavailableError,
@@ -575,7 +576,7 @@ export class SwapManager {
       minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
     const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
 
-    const currentLamports = await this.connection.getBalance(userKeypair.publicKey);
+    const currentLamports = Number(await this.connection.getBalance(userKeypair.publicKey));
 
     if (currentLamports >= targetLamports) {
       return {
@@ -1329,7 +1330,7 @@ export class SwapManager {
       console.log(
         `🔄 JIT swap: signing transaction with ${relevantSigners.length}/${signers.length} signers...`,
       );
-      versionedTx.sign(relevantSigners);
+      await versionedTx.sign(relevantSigners);
 
       const signedTransaction = Buffer.from(versionedTx.serialize()).toString("base64");
 
@@ -1530,7 +1531,7 @@ export class SwapManager {
           key: new PublicKey(key),
           state: {
             deactivationSlot: BigInt("18446744073709551615"),
-            lastExtendedSlot: 0,
+            lastExtendedSlot: 0n,
             lastExtendedSlotStartIndex: 0,
             addresses: addresses.map((address) => new PublicKey(address)),
           },
@@ -1553,7 +1554,7 @@ export class SwapManager {
 
     return new TransactionMessage({
       payerKey: operatorKeypair.publicKey,
-      recentBlockhash: this.getJupiterBuildBlockhash(build),
+      recentBlockhash: asBlockhash(this.getJupiterBuildBlockhash(build)),
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
         ...this.getJupiterComputeBudgetInstructions(build),
@@ -1619,7 +1620,7 @@ export class SwapManager {
     const jupiterComputeBudgetInstructions = this.getJupiterComputeBudgetInstructions(build);
     const simulationMessage = new TransactionMessage({
       payerKey: operatorKeypair.publicKey,
-      recentBlockhash,
+      recentBlockhash: asBlockhash(recentBlockhash),
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({
           units: JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX,
@@ -1648,7 +1649,7 @@ export class SwapManager {
     const buildFinalMessage = (reimbursementLamports: number) =>
       new TransactionMessage({
         payerKey: operatorKeypair.publicKey,
-        recentBlockhash,
+        recentBlockhash: asBlockhash(recentBlockhash),
         instructions: [
           ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
           ...jupiterComputeBudgetInstructions,
@@ -1664,7 +1665,7 @@ export class SwapManager {
       }).compileToV0Message(lookupTables);
 
     const feeResponse = await this.connection.getFeeForMessage(buildFinalMessage(0), "confirmed");
-    const networkFeeLamports = feeResponse.value;
+    const networkFeeLamports = feeResponse.value === null ? null : Number(feeResponse.value);
     if (!Number.isSafeInteger(networkFeeLamports) || networkFeeLamports === null) {
       throw new Error("Unable to estimate the Jupiter build transaction fee.");
     }
@@ -1731,18 +1732,20 @@ export class SwapManager {
       throw new Error("Prepared Jupiter build does not use the operator as fee payer.");
     }
     const transaction = new VersionedTransaction(finalMessage);
-    transaction.sign([operatorKeypair, request.userKeypair]);
+    await transaction.sign([operatorKeypair, request.userKeypair]);
 
     const signature = await this.connection.sendTransaction(transaction, {
       skipPreflight: false,
       preflightCommitment: "confirmed",
-      maxRetries: 3,
+      maxRetries: 3n,
     });
     const confirmation = await this.connection.confirmTransaction(
       {
         signature,
-        blockhash: this.getJupiterBuildBlockhash(preparedBuild.build),
-        lastValidBlockHeight: preparedBuild.build.blockhashWithMetadata.lastValidBlockHeight,
+        blockhash: asBlockhash(this.getJupiterBuildBlockhash(preparedBuild.build)),
+        lastValidBlockHeight: BigInt(
+          preparedBuild.build.blockhashWithMetadata.lastValidBlockHeight,
+        ),
       },
       "confirmed",
     );

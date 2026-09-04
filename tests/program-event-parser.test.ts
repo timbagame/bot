@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
-import { BorshCoder } from "@anchor-lang/core";
-import { timbaIdlV020 } from "@timbagame/protocol/contracts/v0.2.0";
-import { timbaIdlV030 } from "@timbagame/protocol/contracts/v0.3.0";
+import { PublicKey } from "#solana";
 import {
   PLAYER_UNJOINED_DISCRIMINATOR,
   decodeLegacyPlayerUnjoined,
@@ -39,6 +36,18 @@ function encodeLegacyPlayerUnjoined(fields: {
   o += 8;
   body.writeBigUInt64LE(fields.timestamp, o);
   return Buffer.concat([PLAYER_UNJOINED_DISCRIMINATOR, body]).toString("base64");
+}
+
+function encodeGameCompleted(feeAmount: bigint): string {
+  const payload = Buffer.alloc(8 + 32 + 32 + 4 + 8 + 8 + 8);
+  Buffer.from([103, 26, 106, 108, 240, 191, 179, 120]).copy(payload, 0);
+  GAME.toBuffer().copy(payload, 8);
+  PLAYER.toBuffer().copy(payload, 40);
+  payload.writeUInt32LE(1, 72);
+  payload.writeBigUInt64LE(10n, 76);
+  payload.writeBigUInt64LE(feeAmount, 84);
+  payload.writeBigUInt64LE(100n, 92);
+  return payload.toString("base64");
 }
 
 describe("legacy PlayerUnjoined layout", () => {
@@ -137,16 +146,11 @@ describe("parseProgramEventLogs", () => {
     mint.toBuffer().copy(payload, 40);
     payload.writeBigUInt64LE(123n, 72);
 
-    const events = parseProgramEventLogs(
-      programId,
-      new BorshCoder(timbaIdlV030 as any),
-      [
-        `Program ${programId.toBase58()} invoke [1]`,
-        `Program data: ${payload.toString("base64")}`,
-        `Program ${programId.toBase58()} success`,
-      ],
-      [new BorshCoder(timbaIdlV020 as any)],
-    );
+    const events = parseProgramEventLogs(programId, [
+      `Program ${programId.toBase58()} invoke [1]`,
+      `Program data: ${payload.toString("base64")}`,
+      `Program ${programId.toBase58()} success`,
+    ]);
 
     expect(events).toHaveLength(1);
     expect(events[0]?.name).toBe("TokenFeeWithdrawn");
@@ -166,19 +170,7 @@ describe("parseProgramEventLogs", () => {
       timestamp: 123n,
     });
 
-    const coder = {
-      events: {
-        decode: (log: string) => {
-          // Simulate current IDL choking on legacy unjoin bodies.
-          if (log === legacyLog) {
-            throw new Error("Invalid option movedParticipant");
-          }
-          return null;
-        },
-      },
-    };
-
-    const events = parseProgramEventLogs(programId, coder, [
+    const events = parseProgramEventLogs(programId, [
       `Program ${programId.toBase58()} invoke [1]`,
       `Program data: ${legacyLog}`,
       `Program ${programId.toBase58()} success`,
@@ -201,21 +193,9 @@ describe("parseProgramEventLogs", () => {
       lastSlot: 9n,
       timestamp: 1n,
     });
-    const feeLog = "fee-event-payload";
+    const feeLog = encodeGameCompleted(7n);
 
-    const coder = {
-      events: {
-        decode: (log: string) => {
-          if (log === legacyLog) throw new Error("Invalid option movedParticipant");
-          if (log === feeLog) {
-            return { name: "GameCompleted", data: { gameKey: GAME, feeAmount: 7n } };
-          }
-          return null;
-        },
-      },
-    };
-
-    const events = parseProgramEventLogs(programId, coder, [
+    const events = parseProgramEventLogs(programId, [
       `Program ${programId.toBase58()} invoke [1]`,
       `Program data: ${legacyLog}`,
       `Program data: ${feeLog}`,

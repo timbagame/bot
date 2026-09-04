@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Keypair, PublicKey } from "#solana";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "#token";
 import { GameManager } from "../src/utils/game";
 import { contractCapabilities } from "../src/utils/contract-idl";
 
@@ -116,7 +116,7 @@ describe("GameManager join lifecycle", () => {
     expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
     expect(ctx.associatedTokenProgram.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
     expect(capturedJoinAccounts.playerTokenAccount.toBase58()).toBe(playerTokenAccount.toBase58());
-    // Optional signer should be populated so Anchor doesn't inject the default null signer
+    // Direct joins populate the optional signer slot with the player.
     expect(capturedJoinAccounts.oracleOperator?.toBase58()).toBe(playerKp.publicKey.toBase58());
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();

@@ -1,4 +1,4 @@
-import { Transaction, type PublicKey } from "@solana/web3.js";
+import { Transaction, type PublicKey } from "#solana";
 import type { AuthorizationResult, OracleStats } from "../types";
 import { GameDatabase } from "./game-database";
 import type { WalletManager } from "./wallet";
@@ -152,9 +152,9 @@ export class OracleClient {
   }
 
   public async signGameTransaction(transaction: Transaction): Promise<Transaction> {
-    const txBase64 = transaction
-      .serialize({ requireAllSignatures: false, verifySignatures: false })
-      .toString("base64");
+    const txBase64 = Buffer.from(
+      await transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+    ).toString("base64");
     try {
       const data = expectStatus(
         await this.apiClient().signGameTransaction({ body: { txBase64 } }),

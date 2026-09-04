@@ -1,7 +1,7 @@
 import { beforeEach, afterAll, describe, expect, test } from "bun:test";
 import { OracleClient } from "../src/utils/oracle";
 import { GameDatabase } from "../src/utils/game-database";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { resetTestDatabase } from "./helpers/database";
 import {
   completeOracleStats,
