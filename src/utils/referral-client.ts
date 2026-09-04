@@ -39,12 +39,19 @@ type Project = {
 const discriminator = (namespace: "account" | "global", name: string): Buffer =>
   createHash("sha256").update(`${namespace}:${name}`).digest().subarray(0, 8);
 
+const REFERRAL_ACCOUNT_DISCRIMINATOR = discriminator("account", "ReferralAccount");
+const PROJECT_DISCRIMINATOR = discriminator("account", "Project");
 const CREATE_ADMIN_TOKEN_ACCOUNT = discriminator("global", "create_admin_token_account");
 const CLAIM_V2 = discriminator("global", "claim_v2");
 
 function decodeReferralAccount(data: Uint8Array): ReferralAccount {
   const bytes = Buffer.from(data);
-  if (bytes.length < 72) throw new Error("Invalid Jupiter referral account");
+  if (
+    bytes.length < 72 ||
+    !bytes.subarray(0, REFERRAL_ACCOUNT_DISCRIMINATOR.length).equals(REFERRAL_ACCOUNT_DISCRIMINATOR)
+  ) {
+    throw new Error("Invalid Jupiter referral account");
+  }
   return {
     partner: new PublicKey(bytes.subarray(8, 40)),
     project: new PublicKey(bytes.subarray(40, 72)),
@@ -53,7 +60,12 @@ function decodeReferralAccount(data: Uint8Array): ReferralAccount {
 
 function decodeProject(data: Uint8Array): Project {
   const bytes = Buffer.from(data);
-  if (bytes.length < 72) throw new Error("Invalid Jupiter referral project");
+  if (
+    bytes.length < 72 ||
+    !bytes.subarray(0, PROJECT_DISCRIMINATOR.length).equals(PROJECT_DISCRIMINATOR)
+  ) {
+    throw new Error("Invalid Jupiter referral project");
+  }
   return {
     base: new PublicKey(bytes.subarray(8, 40)),
     admin: new PublicKey(bytes.subarray(40, 72)),
