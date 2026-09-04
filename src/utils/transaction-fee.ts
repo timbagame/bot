@@ -1,4 +1,4 @@
-import type { Connection } from "@solana/web3.js";
+import type { Connection } from "#solana";
 
 export async function getConfirmedTransactionFeeLamports(
   connection: Pick<Connection, "getTransaction">,

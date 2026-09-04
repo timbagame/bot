@@ -1,4 +1,4 @@
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import type { CachedPriceLookup } from "../utils/price-service";
 type BN = any;
 

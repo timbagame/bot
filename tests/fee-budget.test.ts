@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { Connection } from "@solana/web3.js";
+import { lamports } from "@solana/kit";
+import type { Connection } from "#solana";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 
 const createConnectionStub = (
@@ -210,8 +211,8 @@ describe("FeeBudgetManager", () => {
   test("computeSingleTransaction incorporates percentile-based priority fee", async () => {
     const connection = createConnectionStub({
       getFeeForMessage: async () => ({
-        context: { slot: 0 },
-        value: 1_000,
+        context: { slot: 0n },
+        value: lamports(1_000n),
       }),
       getRecentPrioritizationFees: async () =>
         [

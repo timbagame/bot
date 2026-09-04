@@ -1,4 +1,4 @@
-import { Connection, type Commitment } from "@solana/web3.js";
+import { Connection, type Commitment } from "#solana";
 
 export type RpcEndpointLogger = {
   info?: (...args: unknown[]) => void;

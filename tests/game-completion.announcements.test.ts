@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 
 const botModulePromise = import("../src/bot");
 

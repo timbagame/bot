@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { Keypair } from "@solana/web3.js";
-import * as splToken from "@solana/spl-token";
+import { Keypair } from "#solana";
+import * as splToken from "#token";
 
 import {
   __test_prepareIntegratorForQuote as prepareIntegratorForQuote,

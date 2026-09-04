@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection, Keypair } from "#solana";
 
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";

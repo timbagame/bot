@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 
 function resetGM() {

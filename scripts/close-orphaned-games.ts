@@ -1,7 +1,7 @@
 import { GameDatabase } from "../src/utils/game-database";
 import { GameManager } from "../src/utils/game";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
-import { loadProgramContext } from "../src/utils/anchor-context";
+import { loadProgramContext } from "../src/utils/program-context";
 import { loadWalletMnemonic } from "../src/utils/secrets";
 
 const requireEnvVar = (name: string): string => {

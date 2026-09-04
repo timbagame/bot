@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
 import { GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT } from "../src/utils/constants";

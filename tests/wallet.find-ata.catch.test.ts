@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 
 class ConnThrow {

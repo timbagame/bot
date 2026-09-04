@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 import { formatAmount, formatCompactTokenDisplay } from "../src/utils/format-amount";
 import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";

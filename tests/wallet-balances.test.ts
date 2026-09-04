@@ -1,12 +1,12 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "#solana";
 import {
   TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddress,
   AccountLayout,
   AccountState,
   TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+} from "#token";
 import { WalletManager, type WalletTokenCensus } from "../src/utils/wallet";
 import type { TokenDatabase } from "../src/utils/token-database";
 import { TOKEN_DISCOVERY_COOLDOWN_MS } from "../src/utils/constants";

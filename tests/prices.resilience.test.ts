@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 import {
   getPriceUSD,
   getPricesUSD,

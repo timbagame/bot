@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from "bun:test";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";

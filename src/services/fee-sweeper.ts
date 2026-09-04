@@ -1,12 +1,17 @@
-import * as anchor from "@anchor-lang/core";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
-import { PublicKey, Keypair, sendAndConfirmRawTransaction, type Connection } from "@solana/web3.js";
-import { ReferralProvider } from "@jup-ag/referral-sdk";
-import type { Timba } from "../types/contract";
+} from "#token";
+import {
+  PublicKey,
+  Keypair,
+  asBlockhash,
+  sendAndConfirmRawTransaction,
+  type Connection,
+} from "#solana";
+import { ReferralProvider } from "../utils/referral-client";
+import type { TimbaProgram } from "../utils/timba-program";
 import { WalletManager } from "../utils/wallet";
 import { loadWalletMnemonic } from "../utils/secrets";
 import {
@@ -23,14 +28,9 @@ import {
   FEE_SWEEP_SOL_PRICE_MAX_AGE_MS,
   FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO,
 } from "../utils/constants";
-import {
-  bundleFromKeypair,
-  resolveOracleOperatorBundle,
-  uniqueSigners,
-  type KeypairBundle,
-} from "../utils/keypairs";
+import { resolveOracleOperatorKeypair, uniqueSigners } from "../utils/keypairs";
 import { contractCapabilities } from "../utils/contract-idl";
-import { createAnchorContext } from "../utils/anchor-context";
+import { createProgramContext } from "../utils/program-context";
 import { SwapManager } from "../utils/swap-manager";
 import type { SwapRequest } from "../utils/swap/types";
 import { TransactionHistory } from "../utils/transaction-history";
@@ -55,7 +55,7 @@ export interface FeeSweepOptions {
   tokenFeeProcessor?: typeof processTokenFee;
   referralSweeper?: typeof runReferralSweep;
   tokenToSolSweeper?: typeof sweepTokensToSol;
-  contextFactory?: typeof createAnchorContext;
+  contextFactory?: typeof createProgramContext;
   tokenPolicyLoader?: () => Promise<TokenPolicy[]>;
 }
 
@@ -189,7 +189,7 @@ const getSolBalanceUsdValue = async (
   priceResolver: PriceResolver = getUsdPrice,
 ) => {
   const [lamports, solPriceData] = await Promise.all([
-    connection.getBalance(owner),
+    connection.getBalance(owner).then(Number),
     priceResolver({ tokenMint: WSOL_MINT }),
   ]);
   const solPrice = solPriceData?.price ?? 0;
@@ -346,11 +346,11 @@ const unwrapWsolBalance = async (
 };
 
 async function processTokenFee(
-  program: anchor.Program<Timba>,
+  program: TimbaProgram,
   connection: Connection,
   wallet: WalletManager,
-  payerBundle: KeypairBundle,
-  operatorBundle: KeypairBundle,
+  payer: Keypair,
+  operator: Keypair,
   config: TokenConfig,
   priceResolver: PriceResolver,
 ): Promise<boolean> {
@@ -388,11 +388,7 @@ async function processTokenFee(
     address: operatorAta,
     instructions: operatorAtaInstructions,
     programId: tokenProgramId,
-  } = await wallet.ensureAssociatedTokenAccount(
-    operatorBundle.anchor.publicKey,
-    mint,
-    payerBundle.root,
-  );
+  } = await wallet.ensureAssociatedTokenAccount(operator.publicKey, mint, payer);
   if (!tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
     throw new Error("Timba only supports legacy SPL Token mints");
   }
@@ -405,13 +401,13 @@ async function processTokenFee(
   );
 
   console.log(
-    `➡️  Withdrawing ${formattedPending} ${config.ticker} to ${operatorBundle.anchor.publicKey.toBase58()}`,
+    `➡️  Withdrawing ${formattedPending} ${config.ticker} to ${operator.publicKey.toBase58()}`,
   );
   const instruction = await (program.methods as any)
     .withdrawTokenFee()
     .accounts({
       oracle: oraclePda,
-      oracleOperator: operatorBundle.anchor.publicKey,
+      oracleOperator: operator.publicKey,
       oracleOperatorTokenAccount: operatorAta,
       gameTokenCtx: {
         tokenMint: mint,
@@ -425,7 +421,7 @@ async function processTokenFee(
     .instruction();
   const tx = await wallet.sendAndConfirmWithResubmits(
     [...operatorAtaInstructions, instruction],
-    uniqueSigners(payerBundle.root, operatorBundle.root),
+    uniqueSigners(payer, operator),
     { operationLabel: `Withdraw ${config.ticker} fees` },
   );
 
@@ -444,8 +440,8 @@ async function processTokenFee(
         mint: mint.toBase58(),
         amountRaw: pendingFees.toString(),
         networkFeeLamports: String(confirmed.meta?.fee ?? 0),
-        timestamp: (confirmed.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
-        slot: confirmed.slot,
+        timestamp: Number(confirmed.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
+        slot: Number(confirmed.slot),
       });
     }
   } catch (error) {
@@ -456,7 +452,7 @@ async function processTokenFee(
 
 async function runReferralSweep(
   connection: Connection,
-  payerBundle: KeypairBundle,
+  payer: Keypair,
   referralAccountAddress: string,
   priceResolver: PriceResolver = getUsdPrice,
   referralProviderFactory: ReferralProviderFactory = (referralConnection) =>
@@ -519,7 +515,7 @@ async function runReferralSweep(
   console.log(`💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`);
 
   const transactions = await provider.claimAllV2({
-    payerPubKey: payerBundle.anchor.publicKey,
+    payerPubKey: payer.publicKey,
     referralAccountPubKey: referralAccount,
   });
 
@@ -534,7 +530,9 @@ async function runReferralSweep(
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
     if (!tx) continue;
-    tx.sign([payerBundle.anchor]);
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+    tx.message.recentBlockhash = asBlockhash(String(latestBlockhash.blockhash));
+    await tx.sign([payer]);
     const sig = await sendAndConfirmRawTransaction(
       connection as unknown as Connection,
       Buffer.from(tx.serialize()),
@@ -561,8 +559,8 @@ async function runReferralSweep(
             mint: delta.mint,
             amountRaw: (-delta.delta).toString(),
             networkFeeLamports: String(confirmed.meta?.fee ?? 0),
-            timestamp: (confirmed.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
-            slot: confirmed.slot,
+            timestamp: Number(confirmed.blockTime ?? Math.floor(Date.now() / 1000)) * 1_000,
+            slot: Number(confirmed.slot),
           });
         }
       }
@@ -659,9 +657,8 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   console.log("💸 Collecting referral fees and sweeping operator balances...\n");
 
   const wallet = options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
-  const payerRoot = wallet.getOperatorKeypair();
-  const payerBundle = bundleFromKeypair(payerRoot);
-  const operatorBundle = resolveOracleOperatorBundle(payerRoot);
+  const payer = wallet.getOperatorKeypair();
+  const operator = resolveOracleOperatorKeypair(payer);
 
   const tokens = await resolveFeeSweepTokens(
     wallet,
@@ -680,7 +677,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   const tokenFeeProcessor = options.tokenFeeProcessor ?? processTokenFee;
   const referralSweeper = options.referralSweeper ?? runReferralSweep;
   const tokenToSolSweeper = options.tokenToSolSweeper ?? sweepTokensToSol;
-  const contextFactory = options.contextFactory ?? createAnchorContext;
+  const contextFactory = options.contextFactory ?? createProgramContext;
   const solUsdThreshold =
     typeof options.solUsdThreshold === "number" &&
     Number.isFinite(options.solUsdThreshold) &&
@@ -688,12 +685,12 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       ? options.solUsdThreshold
       : FEE_SWEEP_SOL_USD_THRESHOLD;
 
-  const { provider, program } = contextFactory(payerBundle.root, {
+  const { provider, program } = contextFactory({
     rpcUrl,
   });
   const connection = provider.connection as unknown as Connection;
 
-  console.log(`Operator payer: ${payerBundle.anchor.publicKey.toBase58()}`);
+  console.log(`Operator payer: ${payer.publicKey.toBase58()}`);
 
   let tokenWithdrawals = 0;
   if (contractCapabilities.gameTokenAccount) {
@@ -704,8 +701,8 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
             program,
             connection,
             wallet,
-            payerBundle,
-            operatorBundle,
+            payer,
+            operator,
             token,
             priceResolver,
           )
@@ -720,7 +717,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(connection, payerBundle, referralAccount, priceResolver);
+    referralClaims = await referralSweeper(connection, payer, referralAccount, priceResolver);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }
@@ -730,7 +727,7 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
       const shouldSkip = await shouldSkipTokenToSolSweeps({
         connection,
         wallet,
-        owner: payerBundle.root.publicKey,
+        owner: payer.publicKey,
         solUsdThreshold,
         priceResolver,
       });
@@ -747,8 +744,8 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
         await unwrapWsolBalance(
           wallet,
           connection,
-          payerBundle.root.publicKey,
-          payerBundle.root,
+          payer.publicKey,
+          payer,
           priceResolver,
           balanceFetcher,
         );

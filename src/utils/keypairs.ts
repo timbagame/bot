@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as anchor from "@anchor-lang/core";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 
 export const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 
@@ -9,11 +8,6 @@ type PublicKeyLike = { toBase58(): string };
 
 type SignerLike = {
   publicKey: PublicKeyLike;
-};
-
-export type KeypairBundle = {
-  root: Keypair;
-  anchor: anchor.web3.Keypair;
 };
 
 const resolvePath = (filePath: string): string =>
@@ -33,14 +27,6 @@ export const loadKeypairFromPath = (filePath: string): Keypair => {
     throw new Error(`Failed to load keypair from ${resolvedPath}: ${error}`, { cause: error });
   }
 };
-
-const bundleFromSecret = (secret: Uint8Array): KeypairBundle => ({
-  root: Keypair.fromSecretKey(secret),
-  anchor: anchor.web3.Keypair.fromSecretKey(secret),
-});
-
-export const bundleFromKeypair = (keypair: Keypair): KeypairBundle =>
-  bundleFromSecret(keypair.secretKey);
 
 type OracleOperatorOptions = {
   envVar?: string;
@@ -80,14 +66,6 @@ export const resolveOracleOperatorKeypair = (
   const envVar = options.envVar ?? ORACLE_OPERATOR_KEYPAIR_ENV;
   const description = options.description ?? "Oracle operator keypair";
   return resolveKeypairFromEnv(envVar, fallback, description);
-};
-
-export const resolveOracleOperatorBundle = (
-  fallback: Keypair,
-  options: OracleOperatorOptions = {},
-): KeypairBundle => {
-  const resolved = resolveOracleOperatorKeypair(fallback, options);
-  return bundleFromKeypair(resolved);
 };
 
 export const uniqueSigners = <T extends SignerLike>(...signers: (T | null | undefined)[]): T[] => {

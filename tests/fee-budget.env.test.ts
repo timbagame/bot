@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "#solana";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 
 const envBackup: Record<string, string | undefined> = {

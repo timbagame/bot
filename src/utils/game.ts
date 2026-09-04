@@ -5,15 +5,14 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
-} from "@solana/web3.js";
+} from "#solana";
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+} from "#token";
 import { Context } from "grammy";
-import * as anchor from "@anchor-lang/core";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -66,7 +65,7 @@ import type {
   GameType,
   ParsedAmount,
 } from "../types";
-import type { Timba } from "../types/contract";
+import type { TimbaProgram } from "./timba-program";
 import {
   buildPlayerProfileLink,
   formatPlayerAddress,
@@ -451,7 +450,7 @@ const formatCompactAmount = (amount: number, decimals: number = 0): string => {
 export class GameManager {
   private static instance: GameManager;
   private static instanceDeps?: {
-    program: anchor.Program<Timba>;
+    program: TimbaProgram;
     wallet: WalletManager;
     gameDb: GameDatabase;
   };
@@ -479,7 +478,7 @@ export class GameManager {
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
   private constructor(
-    private program: anchor.Program<Timba>,
+    private program: TimbaProgram,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
     private oracleClient: OracleClient,
@@ -553,7 +552,7 @@ export class GameManager {
   }
 
   public static getInstance(
-    program: anchor.Program<Timba>,
+    program: TimbaProgram,
     wallet: WalletManager,
     gameDb: GameDatabase,
   ): GameManager {
@@ -1187,7 +1186,7 @@ export class GameManager {
     const onChainParticipants = new Set(
       rawParticipants.flatMap((participant: any) => {
         try {
-          return [new PublicKey(participant).toBase58()];
+          return [String(new PublicKey(participant).toBase58())];
         } catch (_) {
           return [];
         }
@@ -1207,7 +1206,7 @@ export class GameManager {
       }
 
       try {
-        unmatchedParticipants.delete(new PublicKey(publicKey).toBase58());
+        unmatchedParticipants.delete(String(new PublicKey(publicKey).toBase58()));
       } catch (_) {
         // Ignore invalid stale mappings and continue recovery.
       }
@@ -1235,9 +1234,9 @@ export class GameManager {
         continue;
       }
 
-      if (unmatchedParticipants.has(identifier)) {
+      if (unmatchedParticipants.has(String(identifier))) {
         recovered.push({ telegramId, publicKey });
-        unmatchedParticipants.delete(identifier);
+        unmatchedParticipants.delete(String(identifier));
       }
 
       if (unmatchedParticipants.size === 0) {
@@ -1728,7 +1727,9 @@ export class GameManager {
 
   private async getRentExemptionLamports(accountSize: number, label: string): Promise<number> {
     try {
-      const rent = await this.getConnection().getMinimumBalanceForRentExemption(accountSize);
+      const rent = Number(
+        await this.getConnection().getMinimumBalanceForRentExemption(accountSize),
+      );
       if (Number.isFinite(rent) && rent > 0) {
         return rent;
       }
@@ -3614,12 +3615,12 @@ export class GameManager {
       const gameConfig = {
         gameType: gameType === "coinflip" ? { coinflip: {} } : { giveaway: {} },
         // u64 must be BN
-        amount: new anchor.BN(amount),
+        amount: BigInt(amount),
         // u32 are fine as numbers, but field names must match IDL
         maxTickets: maxTickets,
         minTickets: minTickets,
         // u64 must be BN
-        timeout: new anchor.BN(timeout),
+        timeout: BigInt(timeout),
         isPrivate,
       };
 
@@ -3679,8 +3680,7 @@ export class GameManager {
           .accounts(joinAccounts as any)
           .instruction();
         if (!isPrivate) {
-          // Anchor resolves an omitted optional signer to the provider wallet. Public games
-          // must encode `None` with the program ID placeholder instead.
+          // Public games encode the absent optional signer with the program ID placeholder.
           joinInstruction.keys[2] = {
             pubkey: this.program.programId,
             isSigner: false,
@@ -3701,7 +3701,7 @@ export class GameManager {
           feePayer: playerKp.publicKey,
           ...latestBlockhash,
         }).add(...creationInstructions);
-        if (usesAtomicCreatorJoin) unsigned.partialSign(playerKp);
+        if (usesAtomicCreatorJoin) await unsigned.partialSign(playerKp);
         const oracleSigned = await this.oracleClient.signGameTransaction(unsigned);
         return this.wallet.sendPartiallySignedTransaction(
           oracleSigned,
@@ -4214,8 +4214,7 @@ export class GameManager {
                 gamePda,
                 gameAccount,
                 playerKp.publicKey,
-                // Explicitly fill the optional oracleOperator signer slot with the player
-                // so Anchor doesn't require a signature from the default (all-zeros) key.
+                // Fill the optional oracleOperator signer slot with the player for a direct join.
                 playerKp.publicKey,
               );
             setupInstructions = setupIxs;

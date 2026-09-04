@@ -18,6 +18,4 @@ export function getContractIdl(version: ContractVersion) {
   return idls[version];
 }
 
-export const contractIdl = getContractIdl(contractVersion);
-
 export { parseContractVersion, type ContractVersion } from "@timbagame/protocol/contracts";

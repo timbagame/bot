@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 import { buildGameFundsContext } from "../src/utils/contract-adapter";
 
 describe("contract account adapter", () => {

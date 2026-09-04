@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey, Keypair } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey, Keypair } from "#solana";
+import { TOKEN_2022_PROGRAM_ID } from "#token";
 
 function resetGM() {
   // @ts-ignore

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Connection } from "@solana/web3.js";
+import type { Connection } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 import { WSOL_MINT } from "../src/utils/constants";
 

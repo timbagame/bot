@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { z } from "zod";
 import { escapeHtml, formatRate } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";

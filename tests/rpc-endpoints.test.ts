@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Connection } from "@solana/web3.js";
+import type { Connection } from "#solana";
 import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
@@ -17,13 +17,13 @@ class FakeConnection {
     private readonly shouldFail: boolean,
   ) {}
 
-  public async getSlot(): Promise<number> {
+  public async getSlot(): Promise<bigint> {
     if (this.shouldFail) {
       const error = new Error("ECONNRESET: simulated failure");
       (error as { code?: string }).code = "ECONNRESET";
       throw error;
     }
-    return 42;
+    return 42n;
   }
 }
 
@@ -78,7 +78,7 @@ describe("RpcEndpointManager", () => {
     const connection = manager.getConnection();
     const slot = await connection.getSlot();
 
-    expect(slot).toBe(42);
+    expect(slot).toBe(42n);
     expect(manager.getActiveEndpoint()).toBe("https://rpc-secondary");
   });
 
@@ -120,7 +120,7 @@ describe("RpcEndpointManager", () => {
         public readonly commitment: string,
       ) {}
 
-      public async getSlot(): Promise<number> {
+      public async getSlot(): Promise<bigint> {
         if (this.rpcEndpoint === endpoints[0]) {
           const delay = this.failureDelays.shift() ?? 0;
           await sleep(delay);
@@ -130,7 +130,7 @@ describe("RpcEndpointManager", () => {
         }
 
         await sleep(5);
-        return 99;
+        return 99n;
       }
     }
 
@@ -146,7 +146,7 @@ describe("RpcEndpointManager", () => {
 
     const results = await Promise.all([firstCall, secondCall]);
 
-    expect(results).toEqual([99, 99]);
+    expect(results).toEqual([99n, 99n]);
     expect(manager.getActiveEndpoint()).toBe("https://rpc-secondary");
   });
 });

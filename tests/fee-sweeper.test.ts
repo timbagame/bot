@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import {
   __test_shouldSwapTokenBalance,
   __test_sweepTokensToSol,
@@ -306,17 +306,18 @@ describe("sweeping tokens to SOL", () => {
 
 describe("Jupiter referral sweep threshold", () => {
   const operatorKeypair = Keypair.generate();
-  const adminBundle = {
-    root: operatorKeypair,
-    anchor: operatorKeypair,
-  } as any;
 
   test("returns 0 when referral account is not configured", async () => {
-    const result = await __test_runReferralSweep(buildConnection(), adminBundle, "", async () => ({
-      price: 100,
-      identifier: "test",
-      resolvedAt: Date.now(),
-    }));
+    const result = await __test_runReferralSweep(
+      buildConnection(),
+      operatorKeypair,
+      "",
+      async () => ({
+        price: 100,
+        identifier: "test",
+        resolvedAt: Date.now(),
+      }),
+    );
 
     expect(result).toBe(0);
   });
@@ -325,7 +326,7 @@ describe("Jupiter referral sweep threshold", () => {
     let v2Called = false;
     const result = await __test_runReferralSweep(
       buildConnection(),
-      adminBundle,
+      operatorKeypair,
       Keypair.generate().publicKey.toBase58(),
       buildPriceResolver(1),
       () =>
@@ -423,7 +424,7 @@ describe("Jupiter referral sweep threshold", () => {
           provider: { connection: {} },
           program: { programId: { toBase58: () => "test-program" } },
         }) as any,
-      referralSweeper: async (_connection, _adminBundle, _entries, priceResolver) => {
+      referralSweeper: async (_connection, _adminSigner, _entries, priceResolver) => {
         receivedPriceResolver = priceResolver as TestPriceResolver;
         return 0;
       },

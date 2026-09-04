@@ -1,164 +1,208 @@
-import { EventParser, type Coder, type Program } from "@anchor-lang/core";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
+import type { TimbaProgram } from "./timba-program";
 
-/**
- * PlayerUnjoined discriminator (unchanged when moved_participant was added).
- * From the versioned Anchor IDL — keep in sync if the event is renamed.
- */
 export const PLAYER_UNJOINED_DISCRIMINATOR = Buffer.from([191, 34, 140, 22, 253, 20, 237, 73]);
 
-/** Body size of PlayerUnjoined before moved_participant existed. */
-const LEGACY_PLAYER_UNJOINED_BODY_LEN =
-  32 + // game_key
-  32 + // player
-  8 + // total_amount
-  4 + // tickets_count
-  4 + // ticket_index
-  8 + // last_slot
-  8; // timestamp
+const DISCRIMINATORS = {
+  GameCompleted: Buffer.from([103, 26, 106, 108, 240, 191, 179, 120]),
+  GameInitialized: Buffer.from([82, 221, 11, 2, 244, 52, 240, 250]),
+  PlayerJoined: Buffer.from([39, 144, 49, 106, 108, 210, 183, 38]),
+  PlayerUnjoined: PLAYER_UNJOINED_DISCRIMINATOR,
+  TokenFeeWithdrawn: Buffer.from([92, 98, 195, 90, 108, 129, 244, 119]),
+} as const;
+
+const LEGACY_PLAYER_UNJOINED_BODY_LEN = 32 + 32 + 8 + 4 + 4 + 8 + 8;
 
 export type ProgramEvent = {
   name: string;
   data: Record<string, unknown>;
 };
 
-/**
- * Decode a PlayerUnjoined event emitted before moved_participant was added.
- * Returns null if the log is not that event or is the wrong size.
- */
-export function decodeLegacyPlayerUnjoined(logBase64: string): ProgramEvent | null {
-  let bytes: Buffer;
-  try {
-    bytes = Buffer.from(logBase64, "base64");
-  } catch {
-    return null;
+class EventReader {
+  offset = 8;
+
+  constructor(readonly bytes: Buffer) {}
+
+  publicKey(): PublicKey {
+    const value = new PublicKey(this.bytes.subarray(this.offset, this.offset + 32));
+    this.offset += 32;
+    return value;
   }
 
-  // Exact legacy size only — current IDL handles the longer post-upgrade payload.
+  u8(): number {
+    return this.bytes.readUInt8(this.offset++);
+  }
+
+  u32(): number {
+    const value = this.bytes.readUInt32LE(this.offset);
+    this.offset += 4;
+    return value;
+  }
+
+  u64(): bigint {
+    const value = this.bytes.readBigUInt64LE(this.offset);
+    this.offset += 8;
+    return value;
+  }
+}
+
+function hasDiscriminator(bytes: Buffer, discriminator: Buffer): boolean {
+  return bytes.length >= 8 && bytes.subarray(0, 8).equals(discriminator);
+}
+
+export function decodeLegacyPlayerUnjoined(logBase64: string): ProgramEvent | null {
+  const bytes = Buffer.from(logBase64, "base64");
   if (bytes.length !== 8 + LEGACY_PLAYER_UNJOINED_BODY_LEN) return null;
-  if (!bytes.subarray(0, 8).equals(PLAYER_UNJOINED_DISCRIMINATOR)) return null;
-
-  let o = 8;
-  const gameKey = new PublicKey(bytes.subarray(o, o + 32));
-  o += 32;
-  const player = new PublicKey(bytes.subarray(o, o + 32));
-  o += 32;
-  const totalAmount = bytes.readBigUInt64LE(o);
-  o += 8;
-  const ticketsCount = bytes.readUInt32LE(o);
-  o += 4;
-  const ticketIndex = bytes.readUInt32LE(o);
-  o += 4;
-  const lastSlot = bytes.readBigUInt64LE(o);
-  o += 8;
-  const timestamp = bytes.readBigUInt64LE(o);
-
+  if (!hasDiscriminator(bytes, PLAYER_UNJOINED_DISCRIMINATOR)) return null;
+  const reader = new EventReader(bytes);
   return {
     name: "PlayerUnjoined",
     data: {
-      gameKey,
-      player,
-      totalAmount,
-      ticketsCount,
-      ticketIndex,
+      gameKey: reader.publicKey(),
+      player: reader.publicKey(),
+      totalAmount: reader.u64(),
+      ticketsCount: reader.u32(),
+      ticketIndex: reader.u32(),
       movedParticipant: null,
-      lastSlot,
-      timestamp,
+      lastSlot: reader.u64(),
+      timestamp: reader.u64(),
     },
   };
 }
 
-/**
- * Decode one program-data log.
- * Exact-size pre-upgrade PlayerUnjoined is tried first (current IDL would
- * misread last_slot as moved_participant when its first byte is 0/1).
- * Then the current IDL; layout throws become null so other events still parse.
- */
-export function decodeProgramEventLog(
-  logBase64: string,
-  decodeCurrent: (log: string) => ProgramEvent | null,
-  decodeFallbacks: ReadonlyArray<(log: string) => ProgramEvent | null> = [],
-): ProgramEvent | null {
-  const legacy = decodeLegacyPlayerUnjoined(logBase64);
-  if (legacy) return legacy;
+function decodeKnownEvent(logBase64: string): ProgramEvent | null {
+  const bytes = Buffer.from(logBase64, "base64");
+  const reader = new EventReader(bytes);
 
-  for (const decode of [decodeCurrent, ...decodeFallbacks]) {
-    try {
-      const event = decode(logBase64);
-      if (event) return event;
-    } catch {
-      // Try the next versioned decoder.
-    }
+  if (hasDiscriminator(bytes, DISCRIMINATORS.GameCompleted)) {
+    return {
+      name: "GameCompleted",
+      data: {
+        gameKey: reader.publicKey(),
+        winner: reader.publicKey(),
+        ticketsCount: reader.u32(),
+        winnerAmount: reader.u64(),
+        feeAmount: reader.u64(),
+        timestamp: reader.u64(),
+      },
+    };
+  }
+  if (hasDiscriminator(bytes, DISCRIMINATORS.GameInitialized)) {
+    const gameKey = reader.publicKey();
+    const creator = reader.publicKey();
+    const gameType = reader.u8() === 0 ? { coinflip: {} } : { giveaway: {} };
+    return {
+      name: "GameInitialized",
+      data: {
+        gameKey,
+        creator,
+        gameType,
+        ticketAmount: reader.u64(),
+        totalAmount: reader.u64(),
+        maxTickets: reader.u32(),
+        minTickets: reader.u32(),
+        tokenMint: reader.publicKey(),
+        isPrivate: reader.u8() !== 0,
+        createdAt: reader.u64(),
+        timeout: reader.u64(),
+      },
+    };
+  }
+  if (hasDiscriminator(bytes, DISCRIMINATORS.PlayerJoined)) {
+    return {
+      name: "PlayerJoined",
+      data: {
+        gameKey: reader.publicKey(),
+        player: reader.publicKey(),
+        totalAmount: reader.u64(),
+        ticketsCount: reader.u32(),
+        ticketIndex: reader.u32(),
+        lastSlot: reader.u64(),
+        timestamp: reader.u64(),
+      },
+    };
+  }
+  if (hasDiscriminator(bytes, DISCRIMINATORS.PlayerUnjoined)) {
+    const gameKey = reader.publicKey();
+    const player = reader.publicKey();
+    const totalAmount = reader.u64();
+    const ticketsCount = reader.u32();
+    const ticketIndex = reader.u32();
+    const movedParticipant = reader.u8() === 0 ? null : reader.publicKey();
+    return {
+      name: "PlayerUnjoined",
+      data: {
+        gameKey,
+        player,
+        totalAmount,
+        ticketsCount,
+        ticketIndex,
+        movedParticipant,
+        lastSlot: reader.u64(),
+        timestamp: reader.u64(),
+      },
+    };
+  }
+  if (hasDiscriminator(bytes, DISCRIMINATORS.TokenFeeWithdrawn)) {
+    return {
+      name: "TokenFeeWithdrawn",
+      data: {
+        operator: reader.publicKey(),
+        tokenMint: reader.publicKey(),
+        amount: reader.u64(),
+      },
+    };
   }
   return null;
 }
 
-type EventCoderLike = Pick<Coder, "events">;
-
-function normalizeEventData(data: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(data).map(([key, value]) => [
-      key.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
-      value,
-    ]),
-  );
-}
-
-/**
- * Parse a transaction's program logs with dual-layout support so a single
- * historical event shape cannot abort the whole log stream.
- */
-export function parseProgramEventLogs(
-  programId: PublicKey,
-  coder: EventCoderLike,
-  logs: readonly string[],
-  fallbackCoders: readonly EventCoderLike[] = [],
-): ProgramEvent[] {
-  const resilientCoder = {
-    events: {
-      decode: (log: string) =>
-        decodeProgramEventLog(
-          log,
-          (entry) => {
-            const decoded = coder.events.decode(entry);
-            return decoded
-              ? {
-                  name: decoded.name,
-                  data: normalizeEventData(decoded.data as Record<string, unknown>),
-                }
-              : null;
-          },
-          fallbackCoders.map((fallback) => (entry: string) => {
-            const decoded = fallback.events.decode(entry);
-            return decoded
-              ? {
-                  name: decoded.name,
-                  data: normalizeEventData(decoded.data as Record<string, unknown>),
-                }
-              : null;
-          }),
-        ),
-    },
-  } satisfies EventCoderLike;
-
+export function decodeProgramEventLog(
+  logBase64: string,
+  decodeFallback?: (log: string) => ProgramEvent | null,
+): ProgramEvent | null {
   try {
-    const parser = new EventParser(programId, resilientCoder as Coder);
-    return [...parser.parseLogs([...logs])].map((event) => ({
-      name: event.name,
-      data: event.data as Record<string, unknown>,
-    }));
-  } catch (error) {
-    // Structural log failures (unexpected first line, etc.) — rare and not recoverable.
-    console.warn(`Unable to walk program event logs: ${error}`);
-    return [];
+    return (
+      decodeLegacyPlayerUnjoined(logBase64) ??
+      decodeKnownEvent(logBase64) ??
+      decodeFallback?.(logBase64) ??
+      null
+    );
+  } catch {
+    try {
+      return decodeFallback?.(logBase64) ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 
-/** Convenience for Program callers. */
-export function parseProgramEventsFromTransaction(
-  program: Pick<Program, "programId" | "coder">,
-  logs: readonly string[] | null | undefined,
-  fallbackCoders: readonly EventCoderLike[] = [],
+export function parseProgramEventLogs(
+  programId: PublicKey,
+  logs: readonly string[],
 ): ProgramEvent[] {
-  return parseProgramEventLogs(program.programId, program.coder, logs ?? [], fallbackCoders);
+  const id = programId.toBase58();
+  const stack: string[] = [];
+  const events: ProgramEvent[] = [];
+  for (const line of logs) {
+    const invoke = /^Program (\S+) invoke /.exec(line);
+    if (invoke?.[1]) {
+      stack.push(invoke[1]);
+      continue;
+    }
+    if (/^Program \S+ (?:success|failed:)/.test(line)) {
+      stack.pop();
+      continue;
+    }
+    if (stack.at(-1) !== id || !line.startsWith("Program data: ")) continue;
+    const event = decodeProgramEventLog(line.slice("Program data: ".length));
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+export function parseProgramEventsFromTransaction(
+  program: Pick<TimbaProgram, "programId">,
+  logs: readonly string[] | null | undefined,
+): ProgramEvent[] {
+  return parseProgramEventLogs(program.programId, logs ?? []);
 }

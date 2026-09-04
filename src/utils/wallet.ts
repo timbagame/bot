@@ -7,6 +7,7 @@ import {
   TransactionInstruction,
   Transaction,
   VersionedTransaction,
+  asBlockhash,
   TransactionMessage,
   LAMPORTS_PER_SOL,
   SolanaJSONRPCError,
@@ -14,7 +15,7 @@ import {
   SendTransactionError,
   type SendOptions,
   type AccountInfo,
-} from "@solana/web3.js";
+} from "#solana";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -34,7 +35,7 @@ import {
   getNonTransferable,
   getDefaultAccountState,
   AccountState,
-} from "@solana/spl-token";
+} from "#token";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -740,7 +741,7 @@ export class WalletManager {
     const pubkey = this.getPublicKey(telegramId);
 
     try {
-      const lamports = await this.connection.getBalance(pubkey);
+      const lamports = Number(await this.connection.getBalance(pubkey));
       this.nativeBalanceCache.setWithTTL(cacheKey, lamports, cacheTtlMs);
       return lamports;
     } catch (error) {
@@ -1180,7 +1181,7 @@ export class WalletManager {
         try {
           const account = unpackAccount(
             lookup.address,
-            info as AccountInfo<Buffer>,
+            info as unknown as AccountInfo<Uint8Array>,
             lookup.programId,
           );
           const amount = account.amount ?? 0n;
@@ -2436,12 +2437,12 @@ export class WalletManager {
     const latestBlockhash = await this.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
-      recentBlockhash: latestBlockhash.blockhash,
+      recentBlockhash: asBlockhash(latestBlockhash.blockhash),
       instructions: instructions,
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
-    tx.sign(signers);
+    await tx.sign(signers);
     const preparedSignature = bs58.encode(tx.signatures[0]!);
     options.onPrepared?.(preparedSignature);
 
@@ -2450,7 +2451,7 @@ export class WalletManager {
       signature = await this.sendVersionedTransactionWithRetry(tx, {
         skipPreflight: false,
         preflightCommitment: "confirmed",
-        maxRetries: 3,
+        maxRetries: 3n,
       });
     } catch (error: any) {
       // Enhanced error handling for transaction failures
@@ -2511,11 +2512,12 @@ export class WalletManager {
     blockhash: { blockhash: string; lastValidBlockHeight: number },
   ): Promise<string> {
     if (signers.length === 0) throw new Error("No creator signer provided");
-    transaction.partialSign(...signers);
-    const signature = await this.connection.sendRawTransaction(transaction.serialize(), {
+    await transaction.partialSign(...signers);
+    const serialized = await transaction.serialize();
+    const signature = await this.connection.sendRawTransaction(serialized, {
       skipPreflight: false,
       preflightCommitment: "confirmed",
-      maxRetries: 3,
+      maxRetries: 3n,
     });
     this.pendingSignatures.set(signature, {
       ...blockhash,
@@ -2619,14 +2621,14 @@ export class WalletManager {
       const latestBlockhash = await this.getLatestBlockhash();
       const message = new TransactionMessage({
         payerKey: payer,
-        recentBlockhash: latestBlockhash.blockhash,
+        recentBlockhash: asBlockhash(latestBlockhash.blockhash),
         instructions,
       }).compileToV0Message();
 
       const feeResponse = await this.connection.getFeeForMessage(message);
       const fee = feeResponse?.value;
-      if (typeof fee === "number" && Number.isFinite(fee)) {
-        return fee;
+      if ((typeof fee === "number" || typeof fee === "bigint") && Number.isFinite(Number(fee))) {
+        return Number(fee);
       }
       throw new Error("RPC returned no transaction fee estimate.");
     } catch (error) {
@@ -2654,13 +2656,13 @@ export class WalletManager {
       const tx = VersionedTransaction.deserialize(txBuffer);
 
       // Sign the transaction
-      tx.sign([signer]);
+      await tx.sign([signer]);
 
       // Send the transaction with more permissive settings for Jupiter transactions
       const signature = await this.sendVersionedTransactionWithRetry(tx, {
         skipPreflight: true, // Skip preflight for complex Jupiter transactions
         preflightCommitment: "processed",
-        maxRetries: 5,
+        maxRetries: 5n,
       });
 
       console.log(`📤 Serialized transaction sent: ${signature}`);
@@ -2692,7 +2694,7 @@ export class WalletManager {
     const sendOptions: SendOptions = {
       skipPreflight: sendOptionsInput.skipPreflight ?? false,
       preflightCommitment: sendOptionsInput.preflightCommitment ?? "confirmed",
-      maxRetries: sendOptionsInput.maxRetries ?? 3,
+      maxRetries: BigInt(sendOptionsInput.maxRetries ?? 3),
       minContextSlot: sendOptionsInput.minContextSlot,
     };
 
@@ -2715,7 +2717,7 @@ export class WalletManager {
       if (!blockTime) {
         throw new Error("Could not get blockchain time");
       }
-      return blockTime;
+      return Number(blockTime);
     } catch (error) {
       console.warn("Falling back to system time:", error);
       return Math.floor(Date.now() / 1000);
@@ -2736,8 +2738,12 @@ export class WalletManager {
 
     await this.throttle();
     const result = await this.connection.getLatestBlockhash("confirmed");
-    this.blockhashCache = { ...result, timestamp: now };
-    return result;
+    const normalized = {
+      blockhash: String(result.blockhash),
+      lastValidBlockHeight: Number(result.lastValidBlockHeight),
+    };
+    this.blockhashCache = { ...normalized, timestamp: now };
+    return normalized;
   }
 
   public formatSolBalance(lamports: number | bigint | string): string {

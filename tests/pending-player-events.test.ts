@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import BN from "bn.js";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";

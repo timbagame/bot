@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Keypair } from "@solana/web3.js";
+import { Keypair } from "#solana";
 import {
-  __test_handleGameInitializedAnchorEvent,
+  __test_handleGameInitializedProgramEvent,
   __test_resetChatDatabase,
   __test_resetGameDatabase,
   __test_resetSleepImplementation,
@@ -50,7 +50,7 @@ describe("global public game feed", () => {
   });
 
   test("publishes a new public game only to subscribed chats without an existing message", async () => {
-    await __test_handleGameInitializedAnchorEvent({
+    await __test_handleGameInitializedProgramEvent({
       gameKey: gameAddress,
       creator,
       isPrivate: false,
@@ -60,7 +60,7 @@ describe("global public game feed", () => {
   });
 
   test("does not publish private games", async () => {
-    await __test_handleGameInitializedAnchorEvent({
+    await __test_handleGameInitializedProgramEvent({
       gameKey: gameAddress,
       creator,
       isPrivate: true,

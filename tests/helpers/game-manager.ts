@@ -1,4 +1,4 @@
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 import { GameManager } from "../../src/utils/game";
 
 type WalletStubOptions = {

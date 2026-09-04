@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection, Keypair } from "#solana";
 import {
   SwapManager,
   __test_setJupiterQuoteExpirationMs,

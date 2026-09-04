@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

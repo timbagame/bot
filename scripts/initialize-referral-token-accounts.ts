@@ -1,5 +1,5 @@
-import { ReferralProvider } from "@jup-ag/referral-sdk";
-import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
+import { ReferralProvider } from "../src/utils/referral-client";
+import { PublicKey, sendAndConfirmTransaction } from "#solana";
 import { getReferralConfig } from "../src/utils/token-registry";
 import { loadWalletMnemonic } from "../src/utils/secrets";
 import { WalletManager } from "../src/utils/wallet";

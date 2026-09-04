@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Connection, Keypair, PublicKey } from "#solana";
+import { TOKEN_PROGRAM_ID } from "#token";
 import { WalletManager } from "../src/utils/wallet";
 import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 

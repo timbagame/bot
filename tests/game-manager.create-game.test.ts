@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey, Keypair, TransactionInstruction } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { PublicKey, Keypair, TransactionInstruction } from "#solana";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "#token";
 import { PDAManager } from "../src/utils/pda";
 import { OraclePolicyError } from "../src/utils/oracle";
 import {

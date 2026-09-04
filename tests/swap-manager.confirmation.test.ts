@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "buffer";
-import { Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { Keypair, TransactionMessage, VersionedTransaction } from "#solana";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 

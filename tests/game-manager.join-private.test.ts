@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "#solana";
 
 function resetGM() {
   // @ts-ignore

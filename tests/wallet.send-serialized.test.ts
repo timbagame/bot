@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, VersionedTransaction } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 
 describe("WalletManager.signAndSendSerializedTransaction", () => {

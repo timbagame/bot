@@ -1,5 +1,5 @@
-import { ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import type { PublicKey } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID } from "#token";
+import type { PublicKey } from "#solana";
 import { getContractCapabilities, type ContractVersion } from "@timbagame/protocol/contracts";
 
 export interface ResolvedContractTokenAccounts {

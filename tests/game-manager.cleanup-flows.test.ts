@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair } from "#solana";
 import { GameManager } from "../src/utils/game";
 import { MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS, WSOL_MINT } from "../src/utils/constants";
 

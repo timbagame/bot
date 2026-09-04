@@ -5,7 +5,7 @@ import {
   SystemProgram,
   TransactionInstruction,
   TransactionMessage,
-} from "@solana/web3.js";
+} from "#solana";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000;
@@ -355,7 +355,8 @@ export class FeeBudgetManager implements FeeBudgetProvider {
         instructions,
       }).compileToV0Message();
       const fee = await this.connection.getFeeForMessage(message);
-      const lamports = typeof fee === "number" ? fee : (fee?.value ?? null);
+      const rawLamports = typeof fee === "number" ? fee : (fee?.value ?? null);
+      const lamports = rawLamports === null ? null : Number(rawLamports);
 
       if (typeof lamports === "number" && Number.isFinite(lamports) && lamports > 0) {
         return lamports;

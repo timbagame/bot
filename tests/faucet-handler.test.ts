@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey } from "#solana";
 import { createFaucetModule } from "../src/handlers/faucet";
 import { FaucetDatabase } from "../src/utils/faucet-database";
 import { inferMaxPlayers } from "../src/utils/arg-parsing";

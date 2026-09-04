@@ -2,7 +2,7 @@
  * Error formatting utilities for user-friendly error messages
  */
 
-import type { Connection } from "@solana/web3.js";
+import type { Connection } from "#solana";
 import type { WalletManager } from "../wallet";
 import { LAMPORTS_PER_SOL, CALLBACK_MESSAGE_MAX_LENGTH } from "../constants";
 import { FeeBudgetManager } from "../fee-budget";

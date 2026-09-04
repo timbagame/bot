@@ -13,11 +13,10 @@ import { CommandGroup } from "@grammyjs/commands";
 import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
 import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
-import * as anchor from "@anchor-lang/core";
-import { EventParser } from "@anchor-lang/core";
-import { Connection, PublicKey } from "@solana/web3.js";
-import type { Timba } from "./types/contract";
-import { contractCapabilities, contractIdl, contractVersion } from "./utils/contract-idl";
+import { Connection, PublicKey } from "#solana";
+import { contractCapabilities, contractVersion } from "./utils/contract-idl";
+import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
+import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
 import { GameManager, type GamesTab } from "./utils/game";
@@ -1446,9 +1445,9 @@ export const __test_ACTIVE_GAMES_PER_PAGE = ACTIVE_GAMES_PER_PAGE;
 export const __test_ACTIVE_PAGE_CALLBACK_PREFIX = ACTIVE_PAGE_CALLBACK_PREFIX;
 export const __test_PUBLIC_PAGE_CALLBACK_PREFIX = PUBLIC_PAGE_CALLBACK_PREFIX;
 
-// These will be initialized in setupAnchor
+// These will be initialized in setupProgram
 export let gameManager: GameManager;
-export let program: anchor.Program<Timba>;
+export let program: TimbaProgram;
 const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
 export const __test_getTokenManager = (): TokenManager => tokenManager;
@@ -1464,8 +1463,8 @@ let playerUnjoinedListenerId: number | null = null;
 let rpcEndpointListenerCleanup: (() => void) | null = null;
 let programEventListenersReady = false;
 
-export const __test_setProgram = (nextProgram: anchor.Program<Timba> | undefined) => {
-  program = nextProgram as anchor.Program<Timba>;
+export const __test_setProgram = (nextProgram: TimbaProgram | undefined) => {
+  program = nextProgram as TimbaProgram;
 };
 
 export const __test_resetProgram = () => {
@@ -2102,7 +2101,7 @@ const processGameCompletion = async (
 
   const existing = gameDb.getGame(gameAddress);
   if (existing?.status === "completed") {
-    // The Anchor event and the oracle callback can race. The event may mark the
+    // The program event and the oracle callback can race. The event may mark the
     // game completed before it has a transaction signature; when the oracle's
     // richer callback arrives, still refresh the message so it gains the web
     // verification link without replaying completion side effects.
@@ -2230,7 +2229,7 @@ const runProcessGameCompletion = async (
   }
 
   try {
-    // Finance data is idempotent and must survive the Anchor event/oracle callback race,
+    // Finance data is idempotent and must survive the program event/oracle callback race,
     // even when the user-facing completion work is already running.
     if (typeof gameDb.recordGameCompletionFinance === "function") {
       const resolvedNetworkFee =
@@ -2281,7 +2280,7 @@ export const __test_isCompletionJobActive = (gameAddress: string): boolean => {
 };
 export const __test_resetCompletionJobs = () => inFlightCompletionJobs.clear();
 
-const handleGameCompletedAnchorEvent = async (
+const handleGameCompletedProgramEvent = async (
   event: GameCompletedEvent,
   slot: number,
   signature?: string,
@@ -2316,7 +2315,7 @@ const handleGameCompletedAnchorEvent = async (
   }
 };
 
-const handleGameInitializedAnchorEvent = async (event: GameInitializedEvent): Promise<void> => {
+const handleGameInitializedProgramEvent = async (event: GameInitializedEvent): Promise<void> => {
   if (event.isPrivate) return;
 
   const gameAddress = event.gameKey.toString();
@@ -2368,13 +2367,13 @@ const handleGameInitializedAnchorEvent = async (event: GameInitializedEvent): Pr
   }
 };
 
-export const __test_handleGameInitializedAnchorEvent = handleGameInitializedAnchorEvent;
+export const __test_handleGameInitializedProgramEvent = handleGameInitializedProgramEvent;
 
-const handlePlayerJoinedAnchorEvent = async (event: PlayerJoinedEvent): Promise<void> => {
+const handlePlayerJoinedProgramEvent = async (event: PlayerJoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
 };
 
-const handlePlayerUnjoinedAnchorEvent = async (event: PlayerUnjoinedEvent): Promise<void> => {
+const handlePlayerUnjoinedProgramEvent = async (event: PlayerUnjoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
@@ -2391,7 +2390,7 @@ type ProgramEventDescriptor = {
 const programEventDescriptors: ProgramEventDescriptor[] = [
   {
     eventName: "gameInitialized",
-    handler: handleGameInitializedAnchorEvent,
+    handler: handleGameInitializedProgramEvent,
     label: "GameInitialized",
     getId: () => gameInitializedListenerId,
     setId: (value) => {
@@ -2400,7 +2399,7 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
   },
   {
     eventName: "gameCompleted",
-    handler: handleGameCompletedAnchorEvent,
+    handler: handleGameCompletedProgramEvent,
     label: "GameCompleted",
     getId: () => gameCompletedListenerId,
     setId: (value) => {
@@ -2409,7 +2408,7 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
   },
   {
     eventName: "playerJoined",
-    handler: handlePlayerJoinedAnchorEvent,
+    handler: handlePlayerJoinedProgramEvent,
     label: "PlayerJoined",
     getId: () => playerJoinedListenerId,
     setId: (value) => {
@@ -2418,7 +2417,7 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
   },
   {
     eventName: "playerUnjoined",
-    handler: handlePlayerUnjoinedAnchorEvent,
+    handler: handlePlayerUnjoinedProgramEvent,
     label: "PlayerUnjoined",
     getId: () => playerUnjoinedListenerId,
     setId: (value) => {
@@ -2666,7 +2665,7 @@ const bnLikeToNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-type EventParserLike = Pick<EventParser, "parseLogs">;
+type EventParserLike = { parseLogs(logs: string[]): Iterable<ProgramEvent> };
 
 const parseCompletionEventFromLogs = (
   logs: readonly string[] | null | undefined,
@@ -2771,7 +2770,7 @@ const fetchCompletionDetailsFromHistory = async (
             signature,
             ...(transaction.meta?.fee === undefined
               ? {}
-              : { networkFeeLamports: transaction.meta.fee }),
+              : { networkFeeLamports: Number(transaction.meta.fee) }),
           };
         }
       }
@@ -2790,7 +2789,7 @@ const getDefaultCompletionEventParserFactory = () => () => {
   if (!program) {
     throw new Error("Program not initialized");
   }
-  return new EventParser(program.programId, program.coder);
+  return { parseLogs: (logs: string[]) => parseProgramEventLogs(program.programId, logs) };
 };
 
 let completionEventParserFactory: () => EventParserLike = getDefaultCompletionEventParserFactory();
@@ -3226,34 +3225,18 @@ const formatDefaultTokenSetMessage = (tokenTicker: string, tokenMint: string): s
 export const __test_formatDefaultTokenSetMessage = formatDefaultTokenSetMessage;
 
 // ================================
-// ANCHOR SETUP
+// PROGRAM SETUP
 // ================================
 
-const initializeAnchorProvider = async () => {
-  const operatorKeypair = wallet.getOperatorKeypair();
-  const operatorWallet = new anchor.Wallet(operatorKeypair as unknown as anchor.web3.Keypair);
-  const connection = wallet.getConnection();
-
-  const provider = new anchor.AnchorProvider(
-    connection as unknown as anchor.web3.Connection,
-    operatorWallet,
-    {
-      commitment: "confirmed",
-      preflightCommitment: "confirmed",
-      skipPreflight: false,
-      maxRetries: 3,
-    },
-  );
-
-  anchor.setProvider(provider);
+const initializeProgram = async () => {
   console.log(`Using Timba contract ABI ${contractVersion}`);
-  return new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>;
+  return createTimbaProgram(wallet.getConnection());
 };
 
-const setupAnchor = async () => {
+const setupProgram = async () => {
   try {
-    program = await initializeAnchorProvider();
-    console.log(`Initialized Anchor program: ${program.programId}`);
+    program = await initializeProgram();
+    console.log(`Initialized Timba program: ${program.programId}`);
 
     tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
     console.log(`Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`);
@@ -3269,7 +3252,7 @@ const setupAnchor = async () => {
     await checkOracleStatus();
     await checkTokenPolicyStatus();
   } catch (error) {
-    console.error("Error initializing Anchor program:", error);
+    console.error("Error initializing Timba program:", error);
     console.error(
       "Set OPERATOR_KEYPAIR_PATH or provide operator-keypair.json in the project root directory.",
     );
@@ -4679,7 +4662,7 @@ registerCaseInsensitiveCommand(
 // ================================
 
 let financeLedgerService: FinanceLedgerService | undefined;
-let financeReadContext: { connection: Connection; program: anchor.Program<Timba> } | undefined;
+let financeReadContext: { connection: Connection; program: TimbaProgram } | undefined;
 
 const getFinanceReadContext = () => {
   if (financeReadContext) return financeReadContext;
@@ -4688,18 +4671,9 @@ const getFinanceReadContext = () => {
     commitment: "confirmed",
     disableRetryOnRateLimit: true,
   });
-  const operatorWallet = new anchor.Wallet(
-    wallet.getOperatorKeypair() as unknown as anchor.web3.Keypair,
-  );
-  const provider = new anchor.AnchorProvider(connection, operatorWallet, {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-    skipPreflight: false,
-    maxRetries: 0,
-  });
   financeReadContext = {
     connection,
-    program: new anchor.Program(contractIdl as Timba, provider) as anchor.Program<Timba>,
+    program: createTimbaProgram(connection),
   };
   return financeReadContext;
 };
@@ -4787,10 +4761,10 @@ registerCaseInsensitiveCommand(
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${formatDuration(oracleAccount.minTimeout.toNumber())}`,
-      `Max Timeout: ${formatDuration(oracleAccount.maxTimeout.toNumber())}`,
+      `Min Timeout: ${formatDuration(Number(oracleAccount.minTimeout))}`,
+      `Max Timeout: ${formatDuration(Number(oracleAccount.maxTimeout))}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDuration(oracleAccount.oracleBufferTime.toNumber())}`,
+      `Oracle Buffer Time: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
     ].join("\n");
 
     await ctx.reply(response, {
@@ -5371,7 +5345,7 @@ const buildAdminIntegratorConfig = async ({
     extraAtaLamports,
     priorityBufferLamports,
   );
-  const adminBalance = await wallet.getConnection().getBalance(operatorKeypair.publicKey);
+  const adminBalance = Number(await wallet.getConnection().getBalance(operatorKeypair.publicKey));
 
   if (adminBalance < requiredLamports) {
     throw new Error(
@@ -6331,9 +6305,9 @@ export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
 export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
-// Start the bot and setup Anchor (skip during tests)
+// Start the bot and set up the program client (skip during tests)
 if (process.env.NODE_ENV !== "test") {
-  setupAnchor()
+  setupProgram()
     .then(async () => {
       console.log("Starting bot...");
 
@@ -6611,6 +6585,6 @@ if (process.env.NODE_ENV !== "test") {
         });
     })
     .catch((error) => {
-      console.error("Failed to setup Anchor:", error);
+      console.error("Failed to set up program client:", error);
     });
 }

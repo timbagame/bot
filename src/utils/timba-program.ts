@@ -1,0 +1,345 @@
+import bs58 from "bs58";
+import type { Address, Decoder, Instruction } from "@solana/kit";
+import {
+  GAME_DISCRIMINATOR as GAME_DISCRIMINATOR_V020,
+  GAME_TOKEN_DISCRIMINATOR,
+  ORACLE_DISCRIMINATOR as ORACLE_DISCRIMINATOR_V020,
+  TIMBA_PROGRAM_ADDRESS as TIMBA_PROGRAM_ADDRESS_V020,
+  GameType as GameTypeV020,
+  getCloseGameInstruction as getCloseGameInstructionV020,
+  getGameDecoder as getGameDecoderV020,
+  getGameTokenDecoder,
+  getInitializeGameInstruction as getInitializeGameInstructionV020,
+  getJoinGameInstruction as getJoinGameInstructionV020,
+  getOracleDecoder as getOracleDecoderV020,
+  getUnjoinGameInstruction as getUnjoinGameInstructionV020,
+  getWithdrawTokenFeeInstruction,
+} from "@timbagame/protocol/contracts/v0.2.0/kit";
+import {
+  GAME_DISCRIMINATOR as GAME_DISCRIMINATOR_V030,
+  ORACLE_DISCRIMINATOR as ORACLE_DISCRIMINATOR_V030,
+  TIMBA_PROGRAM_ADDRESS as TIMBA_PROGRAM_ADDRESS_V030,
+  GameType as GameTypeV030,
+  getCloseGameInstruction as getCloseGameInstructionV030,
+  getGameDecoder as getGameDecoderV030,
+  getInitializeGameInstruction as getInitializeGameInstructionV030,
+  getJoinGameInstruction as getJoinGameInstructionV030,
+  getOracleDecoder as getOracleDecoderV030,
+  getUnjoinGameInstruction as getUnjoinGameInstructionV030,
+} from "@timbagame/protocol/contracts/v0.3.0/kit";
+import {
+  PublicKey,
+  addressOnlySigner,
+  toTransactionInstruction,
+  type Connection,
+  type TransactionInstruction,
+} from "#solana";
+import { contractVersion } from "./contract-idl";
+import { parseProgramEventLogs } from "./program-event-parser";
+
+type AccountRecord = Record<string, unknown>;
+
+export interface TimbaAccountClient<T = any> {
+  fetch(address: PublicKey): Promise<T>;
+  fetchNullable(address: PublicKey): Promise<T | null>;
+  all(): Promise<Array<{ publicKey: PublicKey; account: T }>>;
+}
+
+export interface TimbaProgram {
+  readonly programId: PublicKey;
+  readonly provider: { readonly connection: Connection };
+  readonly account: {
+    readonly game: TimbaAccountClient;
+    readonly oracle: TimbaAccountClient;
+    readonly gameToken: TimbaAccountClient;
+  };
+  readonly methods: {
+    initializeGame(config: AccountRecord, randomHash: readonly number[]): InstructionBuilder;
+    joinGame(): InstructionBuilder;
+    unjoinGame(): InstructionBuilder;
+    closeGame(): InstructionBuilder;
+    withdrawTokenFee(): InstructionBuilder;
+  };
+  addEventListener(
+    eventName: string,
+    handler: (event: any, slot: bigint, signature: string) => void,
+  ): Promise<number>;
+  removeEventListener(id: number): Promise<void>;
+}
+
+interface InstructionBuilder {
+  accounts(accounts: AccountRecord): { instruction(): Promise<TransactionInstruction> };
+}
+
+const asAddress = (value: unknown): Address => {
+  if (value instanceof PublicKey) return value.toBase58();
+  if (typeof value === "string") return value as Address;
+  if (value && typeof value === "object" && "toBase58" in value) {
+    return (value as { toBase58(): string }).toBase58() as Address;
+  }
+  throw new TypeError(`Expected a Solana address, received ${String(value)}`);
+};
+
+const signer = (value: unknown) => addressOnlySigner(new PublicKey(asAddress(value)));
+const bigint = (value: unknown): bigint =>
+  typeof value === "bigint" ? value : BigInt(String(value ?? 0));
+
+const funds = (accounts: AccountRecord): AccountRecord =>
+  (accounts["gameTokenCtx"] ?? accounts["gameVaultCtx"] ?? {}) as AccountRecord;
+
+function instructionBuilder(build: (accounts: AccountRecord) => Instruction): InstructionBuilder {
+  return {
+    accounts: (accounts) => ({
+      instruction: async () => toTransactionInstruction(build(accounts)),
+    }),
+  };
+}
+
+function normalizeGame(data: any): any {
+  return {
+    ...data,
+    creator: new PublicKey(data.creator),
+    tokenMint: new PublicKey(data.tokenMint),
+    participants: data.participants.map((participant: Address) => new PublicKey(participant)),
+    gameType:
+      data.gameType === GameTypeV020.Coinflip || data.gameType === GameTypeV030.Coinflip
+        ? { coinflip: {} }
+        : { giveaway: {} },
+  };
+}
+
+function normalizeOracle(data: any): any {
+  return { ...data, operator: new PublicKey(data.operator) };
+}
+
+function normalizeGameToken(data: any): any {
+  return { ...data, tokenMint: new PublicKey(data.tokenMint) };
+}
+
+function accountClient<T>(options: {
+  connection: Connection;
+  programId: PublicKey;
+  discriminator: Uint8Array;
+  decoder: Decoder<any>;
+  normalize: (data: any) => T;
+  supported?: boolean;
+}): TimbaAccountClient<T> {
+  const decode = (data: Uint8Array): T => {
+    if (
+      data.length < options.discriminator.length ||
+      options.discriminator.some((byte, index) => data[index] !== byte)
+    ) {
+      throw new Error("Account discriminator does not match the expected Timba account type");
+    }
+    return options.normalize(options.decoder.decode(data));
+  };
+  const fetchNullable = async (address: PublicKey): Promise<T | null> => {
+    if (options.supported === false) return null;
+    const info = await options.connection.getAccountInfo(address, "confirmed");
+    if (!info) return null;
+    if (!info.owner.equals(options.programId)) {
+      throw new Error(`Account ${address.toBase58()} is not owned by the Timba program`);
+    }
+    return decode(Uint8Array.from(info.data));
+  };
+  return {
+    fetch: async (address) => {
+      const account = await fetchNullable(address);
+      if (!account) throw new Error(`Account ${address.toBase58()} does not exist`);
+      return account;
+    },
+    fetchNullable,
+    all: async () => {
+      if (options.supported === false) return [];
+      const accounts = await options.connection.getProgramAccounts(options.programId, {
+        commitment: "confirmed",
+        withContext: false,
+        filters: [{ memcmp: { offset: 0n, bytes: bs58.encode(options.discriminator) } }],
+      });
+      return accounts.map(({ pubkey, account }) => ({
+        publicKey: pubkey,
+        account: decode(Uint8Array.from(account.data)),
+      }));
+    },
+  };
+}
+
+export function createTimbaProgram(connection: Connection): TimbaProgram {
+  const version030 = contractVersion === "0.3.0";
+  const programId = new PublicKey(
+    version030 ? TIMBA_PROGRAM_ADDRESS_V030 : TIMBA_PROGRAM_ADDRESS_V020,
+  );
+  const programAddress = programId.toBase58() as Address;
+  const gameDecoder = version030 ? getGameDecoderV030() : getGameDecoderV020();
+  const oracleDecoder = version030 ? getOracleDecoderV030() : getOracleDecoderV020();
+  const gameDiscriminator = version030 ? GAME_DISCRIMINATOR_V030 : GAME_DISCRIMINATOR_V020;
+  const oracleDiscriminator = version030 ? ORACLE_DISCRIMINATOR_V030 : ORACLE_DISCRIMINATOR_V020;
+
+  const buildInitialize = (config: AccountRecord, randomHash: readonly number[]) =>
+    instructionBuilder((accounts) => {
+      const context = funds(accounts);
+      const input: any = {
+        game: asAddress(accounts["game"]),
+        creator: signer(accounts["creator"]),
+        oracle: asAddress(accounts["oracle"]),
+        oracleOperator: signer(accounts["oracleOperator"]),
+        tokenMint: asAddress(context["tokenMint"]),
+        gameVault: asAddress(context["gameVault"]),
+        tokenProgram: asAddress(context["tokenProgram"]),
+        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
+        creatorTokenAccount: asAddress(accounts["creatorTokenAccount"]),
+        systemProgram: asAddress(accounts["systemProgram"]),
+        gameType: "coinflip" in (config["gameType"] as AccountRecord) ? 0 : 1,
+        amount: bigint(config["amount"]),
+        maxTickets: Number(config["maxTickets"]),
+        minTickets: Number(config["minTickets"]),
+        timeout: bigint(config["timeout"]),
+        isPrivate: Boolean(config["isPrivate"]),
+        randomHash: Uint8Array.from(randomHash),
+      };
+      if (version030) {
+        input.gameVaultTokenAccount = asAddress(context["gameVaultTokenAccount"]);
+        return getInitializeGameInstructionV030(input, { programAddress });
+      }
+      input.gameToken = asAddress(context["gameToken"]);
+      input.gameTokenAccount = asAddress(context["gameTokenAccount"]);
+      return getInitializeGameInstructionV020(input, { programAddress });
+    });
+
+  const buildJoin = () =>
+    instructionBuilder((accounts) => {
+      const context = funds(accounts);
+      const input: any = {
+        game: asAddress(accounts["game"]),
+        player: signer(accounts["player"]),
+        tokenMint: asAddress(context["tokenMint"]),
+        gameVault: asAddress(context["gameVault"]),
+        tokenProgram: asAddress(context["tokenProgram"]),
+        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
+        playerTokenAccount: asAddress(accounts["playerTokenAccount"]),
+        oracle: asAddress(accounts["oracle"]),
+      };
+      if (accounts["oracleOperator"]) input.oracleOperator = signer(accounts["oracleOperator"]);
+      if (version030) {
+        input.gameVaultTokenAccount = asAddress(context["gameVaultTokenAccount"]);
+        return getJoinGameInstructionV030(input, { programAddress });
+      }
+      input.gameToken = asAddress(context["gameToken"]);
+      input.gameTokenAccount = asAddress(context["gameTokenAccount"]);
+      return getJoinGameInstructionV020(input, { programAddress });
+    });
+
+  const buildUnjoin = () =>
+    instructionBuilder((accounts) => {
+      const context = funds(accounts);
+      const input: any = {
+        game: asAddress(accounts["game"]),
+        player: asAddress(accounts["player"]),
+        authority: signer(accounts["authority"]),
+        oracle: asAddress(accounts["oracle"]),
+        tokenMint: asAddress(context["tokenMint"]),
+        gameVault: asAddress(context["gameVault"]),
+        tokenProgram: asAddress(context["tokenProgram"]),
+        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
+        playerTokenAccount: asAddress(accounts["playerTokenAccount"]),
+      };
+      if (version030) {
+        input.gameVaultTokenAccount = asAddress(context["gameVaultTokenAccount"]);
+        return getUnjoinGameInstructionV030(input, { programAddress });
+      }
+      input.gameToken = asAddress(context["gameToken"]);
+      input.gameTokenAccount = asAddress(context["gameTokenAccount"]);
+      return getUnjoinGameInstructionV020(input, { programAddress });
+    });
+
+  const buildClose = () =>
+    instructionBuilder((accounts) => {
+      const context = funds(accounts);
+      const input: any = {
+        game: asAddress(accounts["game"]),
+        creator: signer(accounts["creator"]),
+        oracle: asAddress(accounts["oracle"]),
+        tokenMint: asAddress(context["tokenMint"]),
+        gameVault: asAddress(context["gameVault"]),
+        tokenProgram: asAddress(context["tokenProgram"]),
+        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
+        creatorTokenAccount: asAddress(accounts["creatorTokenAccount"]),
+      };
+      if (version030) {
+        input.gameVaultTokenAccount = asAddress(context["gameVaultTokenAccount"]);
+        return getCloseGameInstructionV030(input, { programAddress });
+      }
+      input.gameToken = asAddress(context["gameToken"]);
+      input.gameTokenAccount = asAddress(context["gameTokenAccount"]);
+      return getCloseGameInstructionV020(input, { programAddress });
+    });
+
+  const buildWithdraw = () =>
+    instructionBuilder((accounts) => {
+      if (version030) throw new Error("v0.3.0 transfers completion fees directly");
+      const context = funds(accounts);
+      return getWithdrawTokenFeeInstruction(
+        {
+          tokenMint: asAddress(context["tokenMint"]),
+          gameToken: asAddress(context["gameToken"]),
+          gameVault: asAddress(context["gameVault"]),
+          gameTokenAccount: asAddress(context["gameTokenAccount"]),
+          tokenProgram: asAddress(context["tokenProgram"]),
+          associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
+          oracle: asAddress(accounts["oracle"]),
+          oracleOperator: signer(accounts["oracleOperator"]),
+          oracleOperatorTokenAccount: asAddress(accounts["oracleOperatorTokenAccount"]),
+        },
+        { programAddress },
+      );
+    });
+
+  return {
+    programId,
+    provider: { connection },
+    account: {
+      game: accountClient({
+        connection,
+        programId,
+        discriminator: Uint8Array.from(gameDiscriminator),
+        decoder: gameDecoder,
+        normalize: normalizeGame,
+      }),
+      oracle: accountClient({
+        connection,
+        programId,
+        discriminator: Uint8Array.from(oracleDiscriminator),
+        decoder: oracleDecoder,
+        normalize: normalizeOracle,
+      }),
+      gameToken: accountClient({
+        connection,
+        programId,
+        discriminator: Uint8Array.from(GAME_TOKEN_DISCRIMINATOR),
+        decoder: getGameTokenDecoder(),
+        normalize: normalizeGameToken,
+        supported: !version030,
+      }),
+    },
+    methods: {
+      initializeGame: buildInitialize,
+      joinGame: buildJoin,
+      unjoinGame: buildUnjoin,
+      closeGame: buildClose,
+      withdrawTokenFee: buildWithdraw,
+    },
+    addEventListener: async (eventName, handler) =>
+      connection.onLogs(
+        programId,
+        ({ logs, signature }, context) => {
+          for (const event of parseProgramEventLogs(programId, logs)) {
+            if (event.name.toLowerCase() === eventName.toLowerCase()) {
+              handler(event.data, context.slot, signature);
+            }
+          }
+        },
+        "confirmed",
+      ),
+    removeEventListener: async (id) => connection.removeOnLogsListener(id),
+  };
+}
