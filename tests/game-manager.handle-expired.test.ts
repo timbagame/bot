@@ -27,7 +27,7 @@ function baseDb(overrides: Partial<any> = {}) {
 describe("GameManager.handleExpiredGame", () => {
   test("giveaway expired triggers cancelGameWithPlayerKeys and returns true", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
     (gm as any).cancelGameWithPlayerKeys = async () => ({ success: true, tx: "tx123" });
     const now = Math.floor(Date.now() / 1000);
     const gameAccount = {
@@ -48,7 +48,7 @@ describe("GameManager.handleExpiredGame", () => {
 
   test("coinflip chooses complete cleanup strategy when canCompleteCleanup", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
     (gm as any).analyzePlayerKeys = () => ({
       available: [1, 2],
       total: 2,
@@ -75,7 +75,7 @@ describe("GameManager.handleExpiredGame", () => {
 
   test("coinflip chooses partial cleanup when cannot complete cleanup", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
     (gm as any).analyzePlayerKeys = () => ({ available: [1], total: 2, canCompleteCleanup: false });
     (gm as any).executePartialCleanup = async () => true;
     const now = Math.floor(Date.now() / 1000);
@@ -100,7 +100,7 @@ describe("GameManager.handleExpiredGame", () => {
     const cleanupAddress = new PublicKey("BPFLoader5111111111111111111111111111111111");
     const refreshedCreator = new PublicKey("BPFLoader6111111111111111111111111111111111");
 
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
 
     let cleanupCalled = false;
     (gm as any).handleExpiredCoinflip = async () => {
@@ -160,7 +160,7 @@ describe("GameManager.handleExpiredGame", () => {
     const gameAddress = new PublicKey("BPFLoader7111111111111111111111111111111111");
     const webCreator = new PublicKey("BPFLoader8111111111111111111111111111111111");
     const botPlayer = new PublicKey("BPFLoader9111111111111111111111111111111111");
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
 
     (gm as any).analyzePlayerKeys = () => ({
       available: [{ pubkey: botPlayer, telegramId: "42", isCreator: false }],
@@ -205,7 +205,7 @@ describe("GameManager.handleExpiredGame", () => {
 
   test("coinflip with minimum players waits until buffer elapses", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
 
     (gm as any).handleExpiredCoinflip = async () => {
       throw new Error("should not attempt cleanup before buffer elapses");
@@ -242,7 +242,7 @@ describe("GameManager.handleExpiredGame", () => {
   test("coinflip with minimum players force-cancels after buffer elapses", async () => {
     resetGM();
     const refreshedCreator = new PublicKey("BPFLoader6511111111111111111111111111111111");
-    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram(), await baseWallet(), baseDb());
 
     let cleanupCalled = false;
     (gm as any).handleExpiredCoinflip = async () => {

@@ -111,13 +111,13 @@ export type WalletTransactionsModuleOptions = {
   registerCallbackPrefixHandler: RegisterCallbackPrefixHandler;
   defaultWalletActionMenuDeps: {
     requireTelegramId: typeof requireTelegramId;
-    getWalletAddress: (telegramId: bigint) => string;
+    getWalletAddress: (telegramId: bigint) => string | Promise<string>;
     getWalletBalances: (telegramId: bigint) => Promise<WalletMenuBalances>;
     formatSolBalance: (lamports: number) => string;
     formatTokenBalance: (balance: number, decimals: number) => string;
   };
   getCachedWalletData: (telegramId: bigint) => Promise<CachedWalletData>;
-  clearWalletCache: (telegramId: bigint) => void;
+  clearWalletCache: (telegramId: bigint) => void | Promise<void>;
   wrapCallbackHandler: WrapCallbackHandler;
   getSolFeeBufferLamports: () => number;
 };
@@ -146,13 +146,16 @@ export type WalletTransactionsModule = {
 const toRawAmount = (value: string, decimals: number): number =>
   parseDecimalAmount(value, decimals, { returnType: "number" });
 
-const tryGetUserWalletAddress = (wallet: WalletManager, telegramId: bigint): string | undefined => {
+const tryGetUserWalletAddress = async (
+  wallet: WalletManager,
+  telegramId: bigint,
+): Promise<string | undefined> => {
   if (telegramId === 0n) {
     return undefined;
   }
 
   try {
-    return wallet.getKeyPair(telegramId).publicKey.toBase58();
+    return (await wallet.getKeyPair(telegramId)).publicKey.toBase58();
   } catch {
     return undefined;
   }
@@ -453,7 +456,7 @@ export const createWalletTransactionsModule = (
       throw new Error(`Token ${token} not found in wallet`);
     }
 
-    const exampleAddress = tryGetUserWalletAddress(wallet, telegramId);
+    const exampleAddress = await tryGetUserWalletAddress(wallet, telegramId);
     const amountResolution = resolveSendAmountSelection({
       token: displayToken,
       rawAmount: amount,
@@ -1067,7 +1070,7 @@ export const createWalletTransactionsModule = (
           return;
         }
 
-        const exampleAddress = tryGetUserWalletAddress(wallet, telegramId);
+        const exampleAddress = await tryGetUserWalletAddress(wallet, telegramId);
         const amountResolution = resolveSendAmountSelection({
           token: displayToken,
           rawAmount: amountChoice,
@@ -1204,7 +1207,7 @@ export const createWalletTransactionsModule = (
           }
 
           await wallet.confirmTransaction(txSignature);
-          clearWalletCache(telegramId);
+          await clearWalletCache(telegramId);
 
           const { text: successMessage, disablePreview } = renderSendSuccessMessage({
             formattedAmount,

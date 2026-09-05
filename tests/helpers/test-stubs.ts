@@ -10,9 +10,9 @@ export const stubWalletConnection = (lamports: number) => {
   };
 };
 
-export const stubOperatorKeypair = () => {
+export const stubOperatorKeypair = async () => {
   const original = (wallet as any).getOperatorKeypair;
-  const kp = Keypair.generate();
+  const kp = await Keypair.generate();
   (wallet as any).getOperatorKeypair = () => kp;
   return () => {
     (wallet as any).getOperatorKeypair = original;

@@ -1,4 +1,5 @@
 import {
+  findAssociatedTokenPda,
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   TOKEN_PROGRAM_ADDRESS,
   getCloseAccountInstruction,
@@ -175,22 +176,6 @@ export const getNonTransferable = (mint: MintWithExtensions) => extension(mint, 
 export const getDefaultAccountState = (mint: MintWithExtensions) =>
   extension(mint, "DefaultAccountState");
 
-export function getAssociatedTokenAddressSync(
-  mint: PublicKey,
-  owner: PublicKey,
-  allowOwnerOffCurve = false,
-  programId: PublicKey = TOKEN_PROGRAM_ID,
-  associatedTokenProgramId: PublicKey = ASSOCIATED_TOKEN_PROGRAM_ID,
-): PublicKey {
-  if (!allowOwnerOffCurve && !PublicKey.isOnCurve(owner.toBytes())) {
-    throw new TypeError("Token owner is off curve");
-  }
-  return PublicKey.findProgramAddressSync(
-    [owner.toBuffer(), programId.toBuffer(), mint.toBuffer()],
-    associatedTokenProgramId,
-  )[0];
-}
-
 export async function getAssociatedTokenAddress(
   mint: PublicKey,
   owner: PublicKey,
@@ -198,12 +183,15 @@ export async function getAssociatedTokenAddress(
   programId: PublicKey = TOKEN_PROGRAM_ID,
   associatedTokenProgramId: PublicKey = ASSOCIATED_TOKEN_PROGRAM_ID,
 ): Promise<PublicKey> {
-  return getAssociatedTokenAddressSync(
-    mint,
-    owner,
-    allowOwnerOffCurve,
-    programId,
-    associatedTokenProgramId,
+  if (!allowOwnerOffCurve && !PublicKey.isOnCurve(owner.toBytes()))
+    throw new TypeError("Token owner is off curve");
+  return new PublicKey(
+    (
+      await findAssociatedTokenPda(
+        { mint: address(mint), owner: address(owner), tokenProgram: address(programId) },
+        { programAddress: address(associatedTokenProgramId) },
+      )
+    )[0],
   );
 }
 

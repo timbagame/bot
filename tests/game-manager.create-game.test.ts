@@ -18,7 +18,7 @@ import {
 import { contractCapabilities } from "../src/utils/contract-idl";
 import { decodeGameTransaction } from "../src/utils/game-transaction";
 
-const TEST_ORACLE = Keypair.generate();
+const TEST_ORACLE = await Keypair.generate();
 
 async function signGameTransactionAsOracle(txBase64: string): Promise<string> {
   const transaction = decodeGameTransaction(txBase64);
@@ -135,7 +135,7 @@ function makeWallet(overrides: Record<string, any>) {
   const wallet: any = {
     connection,
     getConnection: () => connection,
-    getKeyPair: (_: bigint) => Keypair.generate(),
+    getKeyPair: async (_: bigint) => await Keypair.generate(),
     formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
     formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toString(),
     ...rest,
@@ -822,9 +822,9 @@ describe("GameManager.createGame", () => {
       },
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const creatorTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const creatorTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -991,10 +991,10 @@ describe("GameManager.createGame", () => {
       };
       (gm as any).resolveGameVaultAccounts = async () => ({
         tokenProgram: TOKEN_PROGRAM_ID,
-        gameVault: Keypair.generate().publicKey,
-        gameVaultTokenAccount: Keypair.generate().publicKey,
+        gameVault: (await Keypair.generate()).publicKey,
+        gameVaultTokenAccount: (await Keypair.generate()).publicKey,
       });
-      (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+      (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
       (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
 
       const result = await gm.createGame(
@@ -1036,7 +1036,7 @@ describe("GameManager.createGame", () => {
 
   test("creates game after SOL swap refreshes cached balance", async () => {
     resetGM();
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const initialLamports = 100_000;
     // Must be >= minSolBuffer (800k) + gameRent (0) + nativeRentExemption (890,880) = 1,690,880
     const refreshedLamports = 1_800_000;
@@ -1093,9 +1093,9 @@ describe("GameManager.createGame", () => {
       signGameTransaction: signGameTransactionAsOracle,
       hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
     };
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const creatorTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const creatorTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -1174,13 +1174,13 @@ describe("GameManager.createGame", () => {
     };
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameVault: Keypair.generate().publicKey,
-      gameVaultTokenAccount: Keypair.generate().publicKey,
+      gameVault: (await Keypair.generate()).publicKey,
+      gameVaultTokenAccount: (await Keypair.generate()).publicKey,
     });
-    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+    (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
 
-    const tokenMint = Keypair.generate().publicKey.toBase58();
+    const tokenMint = (await Keypair.generate()).publicKey.toBase58();
     const creationArgs: Parameters<GameManager["createGame"]> = [
       "coinflip",
       { amount: 1_000_000, tokenMint, tokenTicker: "TOK", isSol: false },
@@ -1275,10 +1275,10 @@ describe("GameManager.createGame", () => {
     };
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
-      gameVault: Keypair.generate().publicKey,
-      gameVaultTokenAccount: Keypair.generate().publicKey,
+      gameVault: (await Keypair.generate()).publicKey,
+      gameVaultTokenAccount: (await Keypair.generate()).publicKey,
     });
-    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+    (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
     (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
     const originalGetGamePda = (PDAManager as any).getGamePDA;
     (PDAManager as any).getGamePDA = () => new PublicKey("11111111111111111111111111111111");

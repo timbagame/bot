@@ -6,6 +6,7 @@ import { loadOracleApiToken } from "./secrets";
 import { createRestClient, expectStatus, ProtocolHttpError } from "@timbagame/protocol/common";
 import {
   oracleContract,
+  evaluateTokenPolicy,
   type CreationPolicyRejection,
   type CreationPolicyRejectionCode,
   type TokenPolicy,
@@ -212,17 +213,19 @@ export class OracleClient {
   }
 
   public async requireTokenPolicy(mint: string, amountRaw?: bigint): Promise<TokenPolicy> {
-    const policy = (await this.getTokenPolicies()).find((candidate) => candidate.mint === mint);
+    const result = evaluateTokenPolicy(await this.getTokenPolicies(), mint, amountRaw);
+    if (result.accepted) return result.policy;
+    const policy = result.policy;
     if (!policy) {
       throw new OraclePolicyError("unsupported_mint", "Token is not supported", { mint });
     }
-    if (!policy.enabled) {
+    if (result.code === "token_disabled") {
       throw new OraclePolicyError("token_disabled", "Token is disabled", {
         mint: policy.mint,
         revision: policy.revision,
       });
     }
-    if (amountRaw !== undefined && amountRaw < BigInt(policy.acceptedMinimumAmountRaw)) {
+    if (result.code === "amount_below_minimum") {
       throw new OraclePolicyError("amount_below_minimum", "Amount is below the token minimum", {
         mint: policy.mint,
         minimumAmountRaw: policy.minimumAmountRaw,
@@ -312,7 +315,7 @@ export class OracleClient {
         return { authorized: false, error: "Wallet manager not available" };
       }
 
-      const operatorKeypair = this.wallet.getOperatorKeypair();
+      const operatorKeypair = await this.wallet.getOperatorKeypair();
       return { authorized: true, operatorKeypair };
     } catch (error) {
       console.error(`Error authorizing player:`, error);

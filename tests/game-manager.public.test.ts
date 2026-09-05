@@ -38,10 +38,10 @@ describe("GameManager Public Games", () => {
 
   test("getAllActivePublicGames fetches from blockchain and filters private games", async () => {
     // Generate valid random keys
-    const game1 = Keypair.generate().publicKey;
-    const game2 = Keypair.generate().publicKey;
-    const tokenMint1 = Keypair.generate().publicKey;
-    const tokenMint2 = Keypair.generate().publicKey;
+    const game1 = (await Keypair.generate()).publicKey;
+    const game2 = (await Keypair.generate()).publicKey;
+    const tokenMint1 = (await Keypair.generate()).publicKey;
+    const tokenMint2 = (await Keypair.generate()).publicKey;
     const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
@@ -90,8 +90,8 @@ describe("GameManager Public Games", () => {
   });
 
   test("getAllActivePublicGames handles missing token metadata", async () => {
-    const game1 = Keypair.generate().publicKey;
-    const tokenMint1 = Keypair.generate().publicKey;
+    const game1 = (await Keypair.generate()).publicKey;
+    const tokenMint1 = (await Keypair.generate()).publicKey;
     const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
@@ -121,8 +121,8 @@ describe("GameManager Public Games", () => {
   });
 
   test("getAllActivePublicGames uses totalAmount for giveaway display", async () => {
-    const giveawayGame = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const giveawayGame = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
     const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
@@ -154,10 +154,10 @@ describe("GameManager Public Games", () => {
   });
 
   test("getAllActivePublicGames skips expired games", async () => {
-    const activeGame = Keypair.generate().publicKey;
-    const expiredGame = Keypair.generate().publicKey;
-    const tokenMint1 = Keypair.generate().publicKey;
-    const tokenMint2 = Keypair.generate().publicKey;
+    const activeGame = (await Keypair.generate()).publicKey;
+    const expiredGame = (await Keypair.generate()).publicKey;
+    const tokenMint1 = (await Keypair.generate()).publicKey;
+    const tokenMint2 = (await Keypair.generate()).publicKey;
     const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
@@ -199,10 +199,10 @@ describe("GameManager Public Games", () => {
   });
 
   test("getAllActivePublicGames orders by soonest expiry", async () => {
-    const soonGame = Keypair.generate().publicKey;
-    const laterGame = Keypair.generate().publicKey;
-    const noExpiryGame = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const soonGame = (await Keypair.generate()).publicKey;
+    const laterGame = (await Keypair.generate()).publicKey;
+    const noExpiryGame = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
     const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [

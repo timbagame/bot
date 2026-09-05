@@ -38,9 +38,11 @@ async function tryMetaplexMetadata(
 ): Promise<TokenMetadataResult | null> {
   try {
     const mint = new PublicKey(mintAddress);
-    const metadataPda = PublicKey.findProgramAddressSync(
-      [Buffer.from("metadata"), METAPLEX_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-      METAPLEX_PROGRAM_ID,
+    const metadataPda = (
+      await PublicKey.findProgramAddress(
+        [Buffer.from("metadata"), METAPLEX_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        METAPLEX_PROGRAM_ID,
+      )
     )[0];
 
     const metadataAccount = await connection.getAccountInfo(metadataPda);

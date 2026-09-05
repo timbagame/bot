@@ -227,7 +227,9 @@ describe("price utilities resilience", () => {
   });
 
   test("getPricesUSD chunks requests at Jupiter's 50-token limit", async () => {
-    const mints = Array.from({ length: 55 }, () => Keypair.generate().publicKey.toBase58());
+    const mints = await Promise.all(
+      Array.from({ length: 55 }, async () => (await Keypair.generate()).publicKey.toBase58()),
+    );
     const requestSizes: number[] = [];
     const fetchImpl = (async (url: string) => {
       const ids = (new URL(url).searchParams.get("ids") ?? "").split(",").filter(Boolean);

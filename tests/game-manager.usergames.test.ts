@@ -12,7 +12,7 @@ describe("GameManager.getUserGames categorization and sections", () => {
     resetGM();
     // Stub program not used (we will stub getGameInfo)
     const program = { account: { game: { fetch: async () => ({}) } } } as any;
-    const player = Keypair.generate();
+    const player = await Keypair.generate();
     const wallet = {
       getKeyPair: (_: bigint) => player,
       getTokenMetadata: async () => ({ decimals: 9 }),

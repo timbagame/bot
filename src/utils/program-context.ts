@@ -63,13 +63,13 @@ export const createProgramContext = (
   return { provider, program };
 };
 
-export const loadProgramContext = (
+export const loadProgramContext = async (
   options: ProgramContextLoadOptions = {},
-): LoadedProgramContext => {
+): Promise<LoadedProgramContext> => {
   const { mnemonic, wallet: walletOverride, ...programOverrides } = options;
   const resolvedMnemonic = mnemonic?.trim() || loadWalletMnemonic();
   const wallet = walletOverride ?? WalletManager.getInstance(resolvedMnemonic);
-  const operatorKeypair = wallet.getOperatorKeypair();
+  const operatorKeypair = await wallet.getOperatorKeypair();
   const context = createProgramContext({
     ...programOverrides,
     connection: programOverrides.connection ?? wallet.getConnection(),

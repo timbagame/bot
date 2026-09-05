@@ -28,13 +28,13 @@ describe("WalletManager.transferToken", () => {
     (wm as any).sendAndConfirmWithResubmits = async () => "SIG_SPL";
 
     const fromId = 1n;
-    const to = Keypair.generate().publicKey;
+    const to = (await Keypair.generate()).publicKey;
     const sig = await wm.transferToken(fromId, to, 1000, usdcMint.toBase58());
     expect(sig).toBe("SIG_SPL");
   });
 
   test("sends Token-2022 transfer when mint owned by 2022 program", async () => {
-    const mint2022 = Keypair.generate().publicKey;
+    const mint2022 = (await Keypair.generate()).publicKey;
     const conn: any = {
       // Return owner for the mint (Token-2022)
       getAccountInfo: async (pk: PublicKey) => {
@@ -57,7 +57,7 @@ describe("WalletManager.transferToken", () => {
     (wm as any).sendAndConfirmWithResubmits = async () => "SIG_2022";
 
     const fromId = 2n;
-    const to = Keypair.generate().publicKey;
+    const to = (await Keypair.generate()).publicKey;
     const sig = await wm.transferToken(fromId, to, 12345, mint2022.toBase58());
     expect(sig).toBe("SIG_2022");
   });

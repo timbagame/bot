@@ -1,4 +1,4 @@
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "#token";
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "#token";
 import { Connection, PublicKey } from "#solana";
 
 import { PDAManager } from "../utils/pda";
@@ -62,7 +62,7 @@ export async function getContractCapitalLamports(
   for (const mint of configuredMints.values()) {
     const vault = await PDAManager.getGameVaultPDA(mint, program.programId);
     add(
-      getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID),
+      await getAssociatedTokenAddress(mint, vault, true, TOKEN_PROGRAM_ID),
       TOKEN_PROGRAM_ID,
       includeGameTokenAccounts,
     );

@@ -12,8 +12,8 @@ function baseProgram(gameAccount: any) {
   return { account: { game: { fetch: async () => gameAccount } } } as any;
 }
 
-function baseWallet(overrides: Partial<any> = {}) {
-  const player = Keypair.generate();
+async function baseWallet(overrides: Partial<any> = {}) {
+  const player = await Keypair.generate();
   return {
     getKeyPair: (_: bigint) => player,
     getTokenBalance: async () => 0,
@@ -42,7 +42,7 @@ describe("GameManager.joinGame guards", () => {
     resetGM();
     const gm = GameManager.getInstance(
       baseProgram({}),
-      baseWallet(),
+      await baseWallet(),
       baseDb({ getGame: () => null }),
     );
     const res = await gm.joinGame(
@@ -56,9 +56,9 @@ describe("GameManager.joinGame guards", () => {
   test("hydrates missing public game from chain", async () => {
     resetGM();
     const now = Math.floor(Date.now() / 1000);
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const creator = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const creator = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
 
     const gameAccount = {
       creator,
@@ -112,7 +112,7 @@ describe("GameManager.joinGame guards", () => {
 
     const gm = GameManager.getInstance(
       baseProgram(gameAccount),
-      baseWallet({
+      await baseWallet({
         getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
       }),
       gameDb,
@@ -127,9 +127,9 @@ describe("GameManager.joinGame guards", () => {
   test("hydrates giveaway amount from totalAmount when ticketAmount is zero", async () => {
     resetGM();
     const now = Math.floor(Date.now() / 1000);
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const creator = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const creator = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
 
     const gameAccount = {
       creator,
@@ -184,7 +184,7 @@ describe("GameManager.joinGame guards", () => {
 
     const gm = GameManager.getInstance(
       baseProgram(gameAccount),
-      baseWallet({
+      await baseWallet({
         getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
       }),
       gameDb,
@@ -198,9 +198,9 @@ describe("GameManager.joinGame guards", () => {
   test("ensureGameDataFromChain returns null for expired chain game", async () => {
     resetGM();
     const now = Math.floor(Date.now() / 1000);
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const creator = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const creator = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
 
     const expiredAccount = {
       creator,
@@ -223,7 +223,7 @@ describe("GameManager.joinGame guards", () => {
       getPlayerTelegramId: () => null,
     } as any;
 
-    const gm = GameManager.getInstance(baseProgram(expiredAccount), baseWallet(), gameDb);
+    const gm = GameManager.getInstance(baseProgram(expiredAccount), await baseWallet(), gameDb);
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
@@ -233,10 +233,10 @@ describe("GameManager.joinGame guards", () => {
   test("ensureGameDataFromChain returns null when token mint missing", async () => {
     resetGM();
     const now = Math.floor(Date.now() / 1000);
-    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
 
     const badAccount = {
-      creator: Keypair.generate().publicKey,
+      creator: (await Keypair.generate()).publicKey,
       tokenMint: null,
       gameType: { coinflip: {} },
       ticketAmount: 1_000_000_000,
@@ -256,7 +256,7 @@ describe("GameManager.joinGame guards", () => {
       getPlayerTelegramId: () => null,
     } as any;
 
-    const gm = GameManager.getInstance(baseProgram(badAccount), baseWallet(), gameDb);
+    const gm = GameManager.getInstance(baseProgram(badAccount), await baseWallet(), gameDb);
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
@@ -265,7 +265,7 @@ describe("GameManager.joinGame guards", () => {
 
   test("ensureGameDataFromChain returns null when chain account missing", async () => {
     resetGM();
-    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
 
     const program = {
       account: {
@@ -283,7 +283,7 @@ describe("GameManager.joinGame guards", () => {
       getPlayerTelegramId: () => null,
     } as any;
 
-    const gm = GameManager.getInstance(program, baseWallet(), gameDb);
+    const gm = GameManager.getInstance(program, await baseWallet(), gameDb);
 
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
@@ -292,9 +292,9 @@ describe("GameManager.joinGame guards", () => {
 
   test("getGameInfo uses totalAmount for giveaway display", async () => {
     resetGM();
-    const gamePda = Keypair.generate().publicKey;
-    const creator = Keypair.generate().publicKey;
-    const tokenMint = Keypair.generate().publicKey;
+    const gamePda = (await Keypair.generate()).publicKey;
+    const creator = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
     const gameAccount = {
       creator,
       tokenMint,
@@ -318,7 +318,7 @@ describe("GameManager.joinGame guards", () => {
 
     const gm = GameManager.getInstance(
       program,
-      baseWallet(),
+      await baseWallet(),
       baseDb({
         getGame: () => ({
           status: "active",
@@ -344,7 +344,7 @@ describe("GameManager.joinGame guards", () => {
     resetGM();
     const gm = GameManager.getInstance(
       baseProgram({}),
-      baseWallet(),
+      await baseWallet(),
       baseDb({ getGame: () => ({ status: "completed" }) }),
     );
     const res = await gm.joinGame(
@@ -359,7 +359,7 @@ describe("GameManager.joinGame guards", () => {
     resetGM();
     const gm = GameManager.getInstance(
       baseProgram({}),
-      baseWallet(),
+      await baseWallet(),
       baseDb({
         getGame: () => ({ status: "active", token_mint: undefined, token_ticker: undefined }),
       }),
@@ -380,7 +380,7 @@ describe("GameManager.joinGame guards", () => {
       gameType: { coinflip: {} },
       ticketAmount: 1_000_000_000,
     });
-    const gm = GameManager.getInstance(program, baseWallet(), baseDb());
+    const gm = GameManager.getInstance(program, await baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => true;
     const res = await gm.joinGame(
       new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(),
@@ -398,7 +398,7 @@ describe("GameManager.joinGame guards", () => {
       gameType: { coinflip: {} },
       ticketAmount: 1_000_000_000,
     });
-    const gm = GameManager.getInstance(program, baseWallet(), baseDb());
+    const gm = GameManager.getInstance(program, await baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => false;
     const res = await gm.joinGame(
       new PublicKey("BPFLoader5111111111111111111111111111111111").toBase58(),
@@ -418,7 +418,7 @@ describe("GameManager.joinGame guards", () => {
     });
     const gm = GameManager.getInstance(
       program,
-      baseWallet({ getTokenBalance: async () => 100 }),
+      await baseWallet({ getTokenBalance: async () => 100 }),
       baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
@@ -438,7 +438,7 @@ describe("GameManager.joinGame guards", () => {
       gameType: { coinflip: {} },
       ticketAmount: 1_000_000_000,
     });
-    const wallet = baseWallet({
+    const wallet = await baseWallet({
       getTokenBalance: async () => 1_000_000_000,
       getBalance: async () => 0,
     });
@@ -474,7 +474,7 @@ describe("GameManager.joinGame guards", () => {
     });
     const gm = GameManager.getInstance(
       program,
-      baseWallet({ getTokenBalance: async () => 0 }),
+      await baseWallet({ getTokenBalance: async () => 0 }),
       baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
@@ -498,7 +498,7 @@ describe("GameManager.joinGame guards", () => {
     });
     const gm = GameManager.getInstance(
       program,
-      baseWallet({ getTokenBalance: async () => 100_000_000 }),
+      await baseWallet({ getTokenBalance: async () => 100_000_000 }),
       baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT" }) }),
     );
     (gm as any).isPlayerInGame = async () => false;
@@ -520,7 +520,7 @@ describe("GameManager.joinGame guards", () => {
       ticketAmount: 0,
       totalAmount: 1_000_000_000,
     });
-    const wallet = baseWallet({
+    const wallet = await baseWallet({
       getTokenBalance: async () => 0, // No tokens to swap
       getBalance: async () => 0, // No SOL for tx fees
     });
@@ -563,7 +563,7 @@ describe("GameManager.joinGame guards", () => {
     });
 
     let jitSwapCalled = false;
-    const wallet = baseWallet({
+    const wallet = await baseWallet({
       getTokenBalance: async () => 500_000_000, // Has tokens to swap
       getBalance: async () => 0, // No SOL for tx fees
     });
@@ -610,7 +610,7 @@ describe("GameManager.joinGame guards", () => {
     });
 
     let swapAllowance = 0;
-    const wallet = baseWallet({
+    const wallet = await baseWallet({
       getTokenBalance: async () => 1_000_000_000, // 1B tokens
       getBalance: async () => 0, // No SOL
     });
@@ -649,7 +649,7 @@ describe("GameManager.joinGame guards", () => {
     });
 
     let swapAllowance = 0;
-    const wallet = baseWallet({
+    const wallet = await baseWallet({
       getTokenBalance: async () => 1_000_000_000, // 1B tokens (400M spare)
       getBalance: async () => 0, // No SOL
     });

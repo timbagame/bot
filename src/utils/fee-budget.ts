@@ -1,6 +1,5 @@
 import {
   Connection,
-  Keypair,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
@@ -132,7 +131,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     );
     this.config = { ...mergedConfig, cacheTtlMs: normalizedCacheTtl };
     this.cache = createExpiringCache<number>(normalizedCacheTtl);
-    this.stubPayer = Keypair.generate().publicKey;
+    this.stubPayer = new PublicKey("11111111111111111111111111111112");
   }
 
   public static getInstance(

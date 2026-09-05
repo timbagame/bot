@@ -51,9 +51,9 @@ describe("SwapManager.executeJupiterSwap", () => {
       { connection, timeNow: () => Date.now() },
     );
     const sm = new SwapManager(connection, wallet);
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
-    const inputMint = Keypair.generate().publicKey.toBase58();
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
+    const inputMint = (await Keypair.generate()).publicKey.toBase58();
     const fallbackQuote = {
       inputMint,
       outputMint: "So11111111111111111111111111111111111111112",
@@ -88,7 +88,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       inputTicker: "TIMBA",
       outputTicker: "SOL",
       integrator: {
-        referralAccount: Keypair.generate().publicKey.toBase58(),
+        referralAccount: (await Keypair.generate()).publicKey.toBase58(),
         referralFee: 100,
         payer: admin.publicKey.toBase58(),
         closeAuthority: admin.publicKey.toBase58(),
@@ -110,7 +110,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const base64Tx = buildBase64Tx(user);
 
     // Avoid network and account creation
@@ -196,7 +196,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const base64Tx = buildBase64Tx(user);
 
     Object.assign(connection, { getBalance: async () => 1_000_000_000 });
@@ -276,7 +276,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const base64Tx = buildBase64Tx(user);
 
     Object.assign(connection, { getBalance: async () => 0 });
@@ -362,10 +362,10 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
-    const swapProgram = Keypair.generate().publicKey;
-    const cleanupProgram = Keypair.generate().publicKey;
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
+    const swapProgram = (await Keypair.generate()).publicKey;
+    const cleanupProgram = (await Keypair.generate()).publicKey;
     const quote = {
       inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       outputMint: "So11111111111111111111111111111111111111112",
@@ -547,8 +547,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
     const quote = {
       inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       outputMint: "So11111111111111111111111111111111111111112",
@@ -615,7 +615,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       setupInstructions: [],
       swapInstruction: apiInstruction(
         new TransactionInstruction({
-          programId: Keypair.generate().publicKey,
+          programId: (await Keypair.generate()).publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
         }),
@@ -661,8 +661,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
     const quote = {
       inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       outputMint: "So11111111111111111111111111111111111111112",
@@ -728,7 +728,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       setupInstructions: [],
       swapInstruction: apiInstruction(
         new TransactionInstruction({
-          programId: Keypair.generate().publicKey,
+          programId: (await Keypair.generate()).publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
         }),
@@ -774,8 +774,8 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
     const quote = {
       inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       outputMint: "So11111111111111111111111111111111111111112",
@@ -843,7 +843,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       setupInstructions: [],
       swapInstruction: apiInstruction(
         new TransactionInstruction({
-          programId: Keypair.generate().publicKey,
+          programId: (await Keypair.generate()).publicKey,
           keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
           data: Buffer.from([1]),
         }),

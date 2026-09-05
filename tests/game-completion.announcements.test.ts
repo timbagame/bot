@@ -32,6 +32,7 @@ describe("Game completion announcements", () => {
   });
 
   test("winner announcement escapes display name", async () => {
+    const tokenMint = (await Keypair.generate()).publicKey.toBase58();
     botModule.__test_setGameDatabase({
       getGame: () => ({
         chat_id: 99,
@@ -39,7 +40,7 @@ describe("Game completion announcements", () => {
         game_type: "coinflip",
         amount: 1_000,
         token_ticker: "sol",
-        token_mint: Keypair.generate().publicKey.toBase58(),
+        token_mint: tokenMint,
       }),
       completeGame: () => {},
       getGameParticipantsCount: () => 2,
@@ -60,7 +61,7 @@ describe("Game completion announcements", () => {
     (botModule.wallet as any).getBlockchainTime = async () => 123;
     await botModule.__test_processGameCompletion(
       "GAME_COMPLETED",
-      Keypair.generate().publicKey.toBase58(),
+      (await Keypair.generate()).publicKey.toBase58(),
       1_000,
       "SIG_WINNER",
     );
@@ -96,14 +97,14 @@ describe("Game completion announcements", () => {
     (botModule.wallet as any).getBlockchainTime = async () => 321;
     await botModule.__test_processGameCompletion(
       "GIVEAWAY_COMPLETE",
-      Keypair.generate().publicKey.toBase58(),
+      (await Keypair.generate()).publicKey.toBase58(),
     );
 
     expect(sendCalls[0]?.text).toContain("won the giveaway!");
   });
 
   test("winner does NOT receive DM notification (deprecated)", async () => {
-    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+    const winnerPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({
@@ -142,7 +143,7 @@ describe("Game completion announcements", () => {
   });
 
   test("creator does NOT receive winner DM", async () => {
-    const creatorPubkey = Keypair.generate().publicKey.toBase58();
+    const creatorPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({
@@ -173,7 +174,7 @@ describe("Game completion announcements", () => {
   });
 
   test("prize calculation uses winner amount instead of the pre-fee pot", async () => {
-    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+    const winnerPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({
@@ -216,7 +217,7 @@ describe("Game completion announcements", () => {
   });
 
   test("prize calculation falls back to total_amount when totalPot not provided", async () => {
-    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+    const winnerPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({
@@ -254,7 +255,7 @@ describe("Game completion announcements", () => {
   });
 
   test("prize calculation falls back to amount * participants when total_amount missing", async () => {
-    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+    const winnerPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({
@@ -291,7 +292,7 @@ describe("Game completion announcements", () => {
   });
 
   test("giveaway prize calculation uses amount directly when total_amount missing", async () => {
-    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+    const winnerPubkey = (await Keypair.generate()).publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
       getGame: () => ({

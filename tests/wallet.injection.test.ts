@@ -223,7 +223,7 @@ describe("WalletManager dependency injection", () => {
       timeNow: () => 0,
     });
 
-    (conn as any).setOwner(wm.getPublicKey(1n));
+    (conn as any).setOwner(await wm.getPublicKey(1n));
 
     const known = [
       { token_mint: MINT_A, token_ticker: "AAA", decimals: 6 },
@@ -240,7 +240,9 @@ describe("WalletManager dependency injection", () => {
 
   test("getWalletTokenBalancePage enriches only the requested page", async () => {
     const conn = makeMockConnection();
-    const mints = Array.from({ length: 12 }, () => Keypair.generate().publicKey.toBase58());
+    const mints = await Promise.all(
+      Array.from({ length: 12 }, async () => (await Keypair.generate()).publicKey.toBase58()),
+    );
     (conn as any).setTokenAccounts(
       mints.map((mint) => ({
         account: {

@@ -11,8 +11,8 @@ describe("GameManager join initializes missing ATAs", () => {
   test("joinGame creates an associated token account before joining", async () => {
     GameManager.resetForTest();
 
-    const playerKp = Keypair.generate();
-    const tokenMint = Keypair.generate().publicKey;
+    const playerKp = await Keypair.generate();
+    const tokenMint = (await Keypair.generate()).publicKey;
     const gamePda = new PublicKey("BPFLoader2111111111111111111111111111111111");
 
     let recordedInstructions: TransactionInstruction[] | undefined;
@@ -85,9 +85,9 @@ describe("GameManager join initializes missing ATAs", () => {
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => true;
 
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const playerTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -121,8 +121,8 @@ describe("GameManager join initializes missing ATAs", () => {
   test("joinGame resubmits with idempotent ATA creation", async () => {
     GameManager.resetForTest();
 
-    const playerKp = Keypair.generate();
-    const tokenMint = Keypair.generate().publicKey;
+    const playerKp = await Keypair.generate();
+    const tokenMint = (await Keypair.generate()).publicKey;
     const gamePda = new PublicKey("BPFLoader2111111111111111111111111111111111");
 
     const expectedAtaInstruction = createAssociatedTokenAccountIdempotentInstruction(
@@ -228,8 +228,8 @@ describe("GameManager join initializes missing ATAs", () => {
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => true;
 
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
     const playerTokenAccount = expectedAtaInstruction.keys[1]?.pubkey as PublicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,

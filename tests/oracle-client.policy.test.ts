@@ -133,8 +133,8 @@ describe("Oracle token policy", () => {
         { status: 422 },
       )) as any;
 
-    const payer = Keypair.generate();
-    const recipient = Keypair.generate().publicKey;
+    const payer = await Keypair.generate();
+    const recipient = (await Keypair.generate()).publicKey;
     const transaction = new Transaction({
       feePayer: payer.publicKey,
       recentBlockhash: PublicKey.default.toBase58(),

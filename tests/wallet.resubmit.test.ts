@@ -10,7 +10,7 @@ class ResubmitConnection implements Partial<Connection> {
 
   async getLatestBlockhash() {
     return {
-      blockhash: Keypair.generate().publicKey.toBase58(),
+      blockhash: (await Keypair.generate()).publicKey.toBase58(),
       lastValidBlockHeight: 100 + this.sendCalls,
     } as any;
   }
@@ -45,14 +45,18 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
     };
 
     const ix = new TransactionInstruction({
-      programId: Keypair.generate().publicKey,
+      programId: (await Keypair.generate()).publicKey,
       keys: [],
       data: Buffer.alloc(0),
     });
 
-    const finalSignature = await wallet.sendAndConfirmWithResubmits([ix], [Keypair.generate()], {
-      operationLabel: "Test transaction",
-    });
+    const finalSignature = await wallet.sendAndConfirmWithResubmits(
+      [ix],
+      [await Keypair.generate()],
+      {
+        operationLabel: "Test transaction",
+      },
+    );
 
     expect(finalSignature).toBe("SIG2");
     expect(confirmCalls).toBe(2);
@@ -73,13 +77,13 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
     };
 
     const ix = new TransactionInstruction({
-      programId: Keypair.generate().publicKey,
+      programId: (await Keypair.generate()).publicKey,
       keys: [],
       data: Buffer.alloc(0),
     });
 
     await expect(
-      wallet.sendAndConfirmWithResubmits([ix], [Keypair.generate()], {
+      wallet.sendAndConfirmWithResubmits([ix], [await Keypair.generate()], {
         operationLabel: "Failing transaction",
         maxResubmits: 1,
       }),

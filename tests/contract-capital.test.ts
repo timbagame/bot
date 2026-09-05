@@ -7,9 +7,9 @@ import { getContractCapitalLamports } from "../src/services/contract-capital";
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 
 test("contract capital sums only verified permanent accounts", async () => {
-  const programId = Keypair.generate().publicKey;
-  const programData = Keypair.generate().publicKey;
-  const tokenMint = Keypair.generate().publicKey;
+  const programId = (await Keypair.generate()).publicKey;
+  const programData = (await Keypair.generate()).publicKey;
+  const tokenMint = (await Keypair.generate()).publicKey;
   const programDataBytes = Buffer.alloc(36);
   programDataBytes.writeUInt32LE(2, 0);
   programData.toBuffer().copy(programDataBytes, 4);
@@ -30,9 +30,9 @@ test("contract capital sums only verified permanent accounts", async () => {
 });
 
 test("v0.3 contract capital skips policy vaults that have not been created", async () => {
-  const programId = Keypair.generate().publicKey;
-  const programData = Keypair.generate().publicKey;
-  const tokenMint = Keypair.generate().publicKey;
+  const programId = (await Keypair.generate()).publicKey;
+  const programData = (await Keypair.generate()).publicKey;
+  const tokenMint = (await Keypair.generate()).publicKey;
   const programDataBytes = Buffer.alloc(36);
   programDataBytes.writeUInt32LE(2, 0);
   programData.toBuffer().copy(programDataBytes, 4);
@@ -56,10 +56,10 @@ test("v0.3 contract capital skips policy vaults that have not been created", asy
 });
 
 test("v0.2 contract capital discovers GameToken accounts", async () => {
-  const programId = Keypair.generate().publicKey;
-  const programData = Keypair.generate().publicKey;
-  const tokenMint = Keypair.generate().publicKey;
-  const gameToken = Keypair.generate().publicKey;
+  const programId = (await Keypair.generate()).publicKey;
+  const programData = (await Keypair.generate()).publicKey;
+  const tokenMint = (await Keypair.generate()).publicKey;
+  const gameToken = (await Keypair.generate()).publicKey;
   const programDataBytes = Buffer.alloc(36);
   programDataBytes.writeUInt32LE(2, 0);
   programData.toBuffer().copy(programDataBytes, 4);

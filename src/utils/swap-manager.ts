@@ -327,7 +327,7 @@ export class SwapManager {
       if (!this.canUseAtomicBuildFallback(request, quote)) {
         throw new Error("Jupiter could not prepare the required sponsored route.");
       }
-      const operatorKeypair = this.wallet.getOperatorKeypair();
+      const operatorKeypair = await this.wallet.getOperatorKeypair();
       const preparedBuild = await this.prepareAtomicBuildFallback({
         request,
         quote,
@@ -525,7 +525,7 @@ export class SwapManager {
       return null;
     }
 
-    const operatorKeypair = this.wallet.getOperatorKeypair();
+    const operatorKeypair = await this.wallet.getOperatorKeypair();
     if (!operatorKeypair) {
       return null;
     }
@@ -767,7 +767,8 @@ export class SwapManager {
 
     try {
       const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-      const operatorKeypair = lendingLamports > 0 ? this.wallet.getOperatorKeypair() : undefined;
+      const operatorKeypair =
+        lendingLamports > 0 ? await this.wallet.getOperatorKeypair() : undefined;
 
       const { signature, lamportsReceived } = await this.unwrapWsolPortion({
         userKeypair,
@@ -974,7 +975,7 @@ export class SwapManager {
     const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
     const operatorKeypair =
       loanLamports > 0 && quote.integrator?.payerKind === "admin"
-        ? this.wallet.getOperatorKeypair()
+        ? await this.wallet.getOperatorKeypair()
         : undefined;
     const payer = userKeypair;
 
@@ -1053,7 +1054,7 @@ export class SwapManager {
     const integrator = cachedIntegrator;
 
     if (quote.preparedBuild) {
-      const operatorKeypair = this.wallet.getOperatorKeypair();
+      const operatorKeypair = await this.wallet.getOperatorKeypair();
       return this.executeAtomicBuildFallback({
         request,
         quote,
@@ -1077,7 +1078,7 @@ export class SwapManager {
         error instanceof JupiterReferralUnavailableError &&
         this.canUseAtomicBuildFallback(request, quote)
       ) {
-        const operatorKeypair = this.wallet.getOperatorKeypair();
+        const operatorKeypair = await this.wallet.getOperatorKeypair();
         if (integrator?.payer === operatorKeypair.publicKey.toBase58()) {
           throw new Error("The sponsored route changed. Request a new quote before confirming.", {
             cause: error,
@@ -1124,7 +1125,7 @@ export class SwapManager {
       if (this.canUseAtomicBuildFallback(request, quote)) {
         const payerPublicKey = this.tryParsePublicKey(integrator.payer);
         if (payerPublicKey) {
-          const operatorKeypair = this.wallet.getOperatorKeypair();
+          const operatorKeypair = await this.wallet.getOperatorKeypair();
           if (payerPublicKey.equals(operatorKeypair.publicKey)) {
             throw new Error("The sponsored route changed. Request a new quote before confirming.");
           }
@@ -1143,7 +1144,7 @@ export class SwapManager {
     // Determine payer and required signer for admin-funded routes
     let signers = [userKeypair];
     if (adminPayerApplied) {
-      const operatorKeypair = this.wallet.getOperatorKeypair();
+      const operatorKeypair = await this.wallet.getOperatorKeypair();
       const payerMissing = !integrator.payer;
       const payerMismatch =
         integrator.payer && operatorKeypair.publicKey.toBase58() !== integrator.payer;

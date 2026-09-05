@@ -11,8 +11,8 @@ function baseProgram(gameAccount: any) {
   return { account: { game: { fetch: async () => gameAccount } } } as any;
 }
 
-function baseWallet() {
-  const kp = Keypair.generate();
+async function baseWallet() {
+  const kp = await Keypair.generate();
   return { getKeyPair: (_: bigint) => kp } as any;
 }
 
@@ -29,7 +29,7 @@ function baseDb(overrides: Partial<any> = {}) {
 describe("GameManager unjoin errors", () => {
   test("unjoinGame returns error when not in game", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram({}), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram({}), await baseWallet(), baseDb());
     (gm as any).isPlayerInGame = async () => false;
     const res = await gm.unjoinGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
@@ -41,11 +41,11 @@ describe("GameManager unjoin errors", () => {
 
   test("unjoinPlayerFromGame throws when no participants", async () => {
     resetGM();
-    const gm = GameManager.getInstance(baseProgram({}), baseWallet(), baseDb());
+    const gm = GameManager.getInstance(baseProgram({}), await baseWallet(), baseDb());
     await expect(
       (gm as any).unjoinPlayerFromGame(
         new PublicKey("BPFLoader2111111111111111111111111111111111"),
-        Keypair.generate(),
+        await Keypair.generate(),
         new PublicKey("BPFLoader3111111111111111111111111111111111"),
       ),
     ).rejects.toThrow(/No participants/);
@@ -58,11 +58,11 @@ describe("GameManager unjoin errors", () => {
       getPlayerPublicKey: (_: string) =>
         new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58(),
     });
-    const gm = GameManager.getInstance(baseProgram({}), baseWallet(), db);
+    const gm = GameManager.getInstance(baseProgram({}), await baseWallet(), db);
     await expect(
       (gm as any).unjoinPlayerFromGame(
         new PublicKey("BPFLoader5111111111111111111111111111111111"),
-        Keypair.generate(),
+        await Keypair.generate(),
         new PublicKey("BPFLoader6111111111111111111111111111111111"),
       ),
     ).rejects.toThrow(/Player not found/);
@@ -70,15 +70,15 @@ describe("GameManager unjoin errors", () => {
 
   test("unjoinPlayerFromGame rejects skipDbCheck for unauthorized authority", async () => {
     resetGM();
-    const creator = Keypair.generate();
-    const player = Keypair.generate();
-    const impostor = Keypair.generate();
+    const creator = await Keypair.generate();
+    const player = await Keypair.generate();
+    const impostor = await Keypair.generate();
     const gameAccount = { creator: creator.publicKey };
     const db = baseDb({
       getGameParticipants: (_: string) => ["123"],
       getPlayerPublicKey: (_: string) => player.publicKey.toBase58(),
     });
-    const gm = GameManager.getInstance(baseProgram(gameAccount), baseWallet(), db);
+    const gm = GameManager.getInstance(baseProgram(gameAccount), await baseWallet(), db);
 
     await expect(
       (gm as any).unjoinPlayerFromGame(

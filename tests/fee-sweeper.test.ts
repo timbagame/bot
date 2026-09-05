@@ -80,8 +80,8 @@ describe("token to SOL sweep helpers", () => {
 
 describe("dynamic fee sweep tokens", () => {
   test("includes Oracle policies and uses resolved display metadata", async () => {
-    const mint = Keypair.generate().publicKey.toBase58();
-    const invalidMint = Keypair.generate().publicKey.toBase58();
+    const mint = (await Keypair.generate()).publicKey.toBase58();
+    const invalidMint = (await Keypair.generate()).publicKey.toBase58();
     const tokens = await __test_resolveFeeSweepTokens(
       {
         getTokenMetadata: async (candidate: string) => {
@@ -114,9 +114,9 @@ describe("dynamic fee sweep tokens", () => {
   });
 });
 
-describe("WSOL unwrap helper", () => {
-  const owner = Keypair.generate();
-  const payer = Keypair.generate();
+describe("WSOL unwrap helper", async () => {
+  const owner = await Keypair.generate();
+  const payer = await Keypair.generate();
   const priceResolver = buildPriceResolver(1, "WSOL/USD");
 
   const buildWallet = (onUnwrap?: (lamports: number) => void) => ({
@@ -201,10 +201,10 @@ describe("WSOL unwrap helper", () => {
 
 describe("sweeping tokens to SOL", () => {
   test("sends swaps for balances above $5", async () => {
-    const admin = Keypair.generate();
+    const admin = await Keypair.generate();
     const tokens = [
-      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
-      { mint: Keypair.generate().publicKey.toBase58(), ticker: "BBB" },
+      { mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "AAA" },
+      { mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "BBB" },
     ];
     const tokenA = tokens[0]!;
     const tokenB = tokens[1]!;
@@ -240,8 +240,8 @@ describe("sweeping tokens to SOL", () => {
   });
 
   test("skips swaps when SOL price is unavailable", async () => {
-    const admin = Keypair.generate();
-    const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
+    const admin = await Keypair.generate();
+    const tokens = [{ mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
       getOperatorKeypair: () => admin,
@@ -272,8 +272,8 @@ describe("sweeping tokens to SOL", () => {
   });
 
   test("skips swaps when SOL balance meets USD threshold", async () => {
-    const admin = Keypair.generate();
-    const tokens = [{ mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" }];
+    const admin = await Keypair.generate();
+    const tokens = [{ mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "AAA" }];
 
     const wallet = {
       getOperatorKeypair: () => admin,
@@ -304,8 +304,8 @@ describe("sweeping tokens to SOL", () => {
   });
 });
 
-describe("Jupiter referral sweep threshold", () => {
-  const operatorKeypair = Keypair.generate();
+describe("Jupiter referral sweep threshold", async () => {
+  const operatorKeypair = await Keypair.generate();
 
   test("returns 0 when referral account is not configured", async () => {
     const result = await __test_runReferralSweep(
@@ -327,7 +327,7 @@ describe("Jupiter referral sweep threshold", () => {
     const result = await __test_runReferralSweep(
       buildConnection(),
       operatorKeypair,
-      Keypair.generate().publicKey.toBase58(),
+      (await Keypair.generate()).publicKey.toBase58(),
       buildPriceResolver(1),
       () =>
         ({
@@ -336,8 +336,8 @@ describe("Jupiter referral sweep threshold", () => {
             return {
               tokenAccounts: [
                 {
-                  pubkey: Keypair.generate().publicKey,
-                  account: { mint: Keypair.generate().publicKey, amount: 0n },
+                  pubkey: (await Keypair.generate()).publicKey,
+                  account: { mint: (await Keypair.generate()).publicKey, amount: 0n },
                 },
               ],
               token2022Accounts: [],
@@ -511,16 +511,16 @@ describe("ENABLE_FEE_SWEEPER config", () => {
   });
 });
 
-describe("sweepFees integration hooks", () => {
-  const admin = Keypair.generate();
+describe("sweepFees integration hooks", async () => {
+  const admin = await Keypair.generate();
   const wallet = {
     getOperatorKeypair: () => admin,
     formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
   } as any;
 
   const tokens = [
-    { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
-    { mint: Keypair.generate().publicKey.toBase58(), ticker: "BBB" },
+    { mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "AAA" },
+    { mint: (await Keypair.generate()).publicKey.toBase58(), ticker: "BBB" },
   ];
 
   const fakeContext = () => ({

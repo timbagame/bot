@@ -18,7 +18,7 @@ export async function closeOrphanedGames(): Promise<void> {
   const mnemonic = loadWalletMnemonic();
   const rpcEndpoint = resolvePrimaryRpcEndpoint(requireEnvVar("SOLANA_NETWORK"));
 
-  const { wallet, program } = loadProgramContext({
+  const { wallet, program } = await loadProgramContext({
     mnemonic,
     rpcUrl: rpcEndpoint,
   });

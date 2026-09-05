@@ -3462,7 +3462,7 @@ export class GameManager {
       const requestedSol = parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
-      const playerKp = this.wallet.getKeyPair(telegramId);
+      const playerKp = await this.wallet.getKeyPair(telegramId);
       const [minSolBuffer, gameRentLamports, nativeWalletReserveLamports] = await Promise.all([
         this.feeBudget.getGameSafetyBufferLamports(),
         this.getGameCreationRentLamports(maxTickets),
@@ -4018,7 +4018,7 @@ export class GameManager {
   ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
       const gamePda = new PublicKey(gameAddress);
-      const playerKp = this.wallet.getKeyPair(telegramId);
+      const playerKp = await this.wallet.getKeyPair(telegramId);
 
       // Get game data and validate
       let gameData = this.gameDb.getGame(gameAddress);
@@ -4430,7 +4430,7 @@ export class GameManager {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const gamePda = new PublicKey(gameAddress);
-      const playerKp = this.wallet.getKeyPair(telegramId);
+      const playerKp = await this.wallet.getKeyPair(telegramId);
 
       // Get game data for validation
       const gameData = this.gameDb.getGame(gameAddress);
@@ -4488,7 +4488,7 @@ export class GameManager {
     }
 
     try {
-      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
+      const creatorKp = await this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
       const closeAccounts = await this.buildCloseGameAccounts(gamePda, gameAccount);
       const closeInstruction = await this.program.methods
@@ -4895,7 +4895,7 @@ export class GameManager {
     recentGames: string | null;
   }> {
     const telegramIdStr = telegramId.toString();
-    const playerKp = this.wallet.getKeyPair(telegramId);
+    const playerKp = await this.wallet.getKeyPair(telegramId);
     const playerPublicKey = playerKp.publicKey.toString();
 
     const [activeGamesData, recentGamesData] = await Promise.all([
@@ -4949,7 +4949,7 @@ export class GameManager {
    */
   public async getUserGamesHistory(ctx: Context, telegramId: bigint): Promise<GameHistoryResult> {
     const telegramIdStr = telegramId.toString();
-    const playerKp = this.wallet.getKeyPair(telegramId);
+    const playerKp = await this.wallet.getKeyPair(telegramId);
     const playerPublicKey = playerKp.publicKey.toString();
 
     const recentGamesData = await this.gameDb.getRecentGames(telegramIdStr, GAMES_HISTORY_LIMIT);
@@ -6465,22 +6465,22 @@ export class GameManager {
         : DEFAULT_TOKEN_TICKER);
     const tokenTicker = resolvedTickerRaw.toUpperCase();
 
-    const tryGetKeyPair = (telegramId?: string): Keypair | null => {
+    const tryGetKeyPair = async (telegramId?: string): Promise<Keypair | null> => {
       if (!telegramId) {
         return null;
       }
 
       try {
-        return this.wallet.getKeyPair(BigInt(telegramId));
+        return await this.wallet.getKeyPair(BigInt(telegramId));
       } catch (_) {
         return null;
       }
     };
 
-    const creatorAuthority = tryGetKeyPair(creatorTelegramId);
+    const creatorAuthority = await tryGetKeyPair(creatorTelegramId);
 
     for (const player of players) {
-      const playerKeypair = tryGetKeyPair(player.telegramId);
+      const playerKeypair = await tryGetKeyPair(player.telegramId);
       let playerSucceeded = false;
 
       if (playerKeypair) {

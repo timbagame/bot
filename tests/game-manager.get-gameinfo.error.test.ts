@@ -16,9 +16,9 @@ const createConnectionStub = () => ({
   getRecentPrioritizationFees: async () => [],
 });
 
-const createWalletStub = () => {
+const createWalletStub = async () => {
   const connection = createConnectionStub();
-  const admin = Keypair.generate();
+  const admin = await Keypair.generate();
   return {
     connection,
     getConnection: () => connection,
@@ -56,7 +56,7 @@ test("getGameInfo returns friendly message on fetch failure", async () => {
       },
     },
   } as any;
-  const wallet = createWalletStub();
+  const wallet = await createWalletStub();
   const db = {} as any;
   const gm = GameManager.getInstance(program, wallet, db);
   const out = await gm.getGameInfo(
@@ -75,14 +75,14 @@ test("getGameInfo returns friendly error when token metadata missing", async () 
       game: {
         fetch: async () => ({
           ticketAmount: 1,
-          creator: Keypair.generate().publicKey,
+          creator: (await Keypair.generate()).publicKey,
           totalAmount: 1,
         }),
       },
     },
   } as any;
 
-  const wallet = createWalletStub();
+  const wallet = await createWalletStub();
 
   const gameDb = {
     getGame: () => ({ token_mint: null, token_ticker: null }),
@@ -95,7 +95,7 @@ test("getGameInfo returns friendly error when token metadata missing", async () 
     api: { getChatMember: async () => ({ user: { username: "user" } }) },
   } as any;
 
-  const gameAddress = Keypair.generate().publicKey;
+  const gameAddress = (await Keypair.generate()).publicKey;
 
   const message = await gm.getGameInfo(ctx, gameAddress);
 

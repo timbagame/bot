@@ -91,7 +91,7 @@ describe("Game Join Message Recreation", () => {
     ctx.chat = { id: 999, type: "supergroup" } as any;
 
     const gameAddress = "game-addr-1";
-    const gamePda = new PublicKey(Keypair.generate().publicKey);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
 
     // Mock getActiveGameMessages to return empty map (no message in chat 999)
     (gameManager.getActiveGameMessages as any).mockReturnValue(new Map());
@@ -124,7 +124,7 @@ describe("Game Join Message Recreation", () => {
     ctx.chat = { id: 999, type: "supergroup" } as any;
 
     const gameAddress = "game-addr-2";
-    const gamePda = new PublicKey(Keypair.generate().publicKey);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
 
     // Mock getActiveGameMessages to return map containing chat 999
     const activeMap = new Map();
@@ -151,7 +151,7 @@ describe("Game Join Message Recreation", () => {
     ctx.api.answerCallbackQuery = vi.fn();
 
     const gameAddress = "game-addr-3";
-    const gamePda = new PublicKey(Keypair.generate().publicKey);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
 
     const activeMap = new Map();
     activeMap.set(999, { messageId: 77, chatId: 999 });
@@ -182,7 +182,7 @@ describe("Game Join Message Recreation", () => {
     const { module, gameManager } = makeDeps();
     const ctx = makeCtx("@joiner");
     const gameAddress = "game-addr-opaque";
-    const gamePda = new PublicKey(Keypair.generate().publicKey);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
 
     (gameManager.joinGame as any).mockResolvedValue({ success: false, error: opaque });
 

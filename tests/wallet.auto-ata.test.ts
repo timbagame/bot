@@ -31,7 +31,7 @@ test("getTokenBalance creates ATA with user as payer when missing", async () => 
   });
 
   const telegramId = 5n;
-  const userKeypair = wm.getKeyPair(telegramId);
+  const userKeypair = await wm.getKeyPair(telegramId);
   const creationCalls: Array<{
     owner: PublicKey;
     payer: Keypair;
@@ -45,7 +45,7 @@ test("getTokenBalance creates ATA with user as payer when missing", async () => 
     payer: Keypair,
   ) => {
     creationCalls.push({ owner, payer, mint: mintPk });
-    return { address: Keypair.generate().publicKey, instructions: ["ix"] };
+    return { address: (await Keypair.generate()).publicKey, instructions: ["ix"] };
   };
 
   (wm as any).sendTransaction = async (_ixs: any[], signers: Keypair[]) => {
@@ -95,7 +95,7 @@ test("getTokenBalance waits for confirmation before returning new ATA balance", 
   });
 
   const telegramId = 77n;
-  const userKeypair = wm.getKeyPair(telegramId);
+  const userKeypair = await wm.getKeyPair(telegramId);
   AccountLayout.encode(
     {
       mint,
@@ -150,9 +150,9 @@ test("getTokenBalance without createIfMissing does not attempt ATA creation", as
 
   const telegramId = 42n;
   let creationAttempted = false;
-  (wm as any).findOrCreateAssociatedTokenAccount = () => {
+  (wm as any).findOrCreateAssociatedTokenAccount = async () => {
     creationAttempted = true;
-    return { address: Keypair.generate().publicKey, instructions: [] };
+    return { address: (await Keypair.generate()).publicKey, instructions: [] };
   };
 
   const balance = await wm.getTokenBalance(telegramId, mint.toBase58());

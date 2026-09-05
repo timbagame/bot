@@ -13,7 +13,7 @@ process.env["BOT_DB_DIR"] ??= mkdtempSync(join(tmpdir(), "timba-bot-tests-"));
 
 const botModulePromise = import("../src/bot");
 
-const createTestGameAddress = () => Keypair.generate().publicKey.toBase58();
+const createTestGameAddress = async () => (await Keypair.generate()).publicKey.toBase58();
 
 const createCompletionEvent = (
   gameAddress: string,
@@ -60,8 +60,8 @@ describe("Game completion recovery", () => {
     botModule.__test_resetProgram();
   });
 
-  test("parses completion data from logs", () => {
-    const gameAddress = createTestGameAddress();
+  test("parses completion data from logs", async () => {
+    const gameAddress = await createTestGameAddress();
     const fakeParser = {
       *parseLogs(_logs: string[]) {
         yield createCompletionEvent(gameAddress);
@@ -83,7 +83,7 @@ describe("Game completion recovery", () => {
   });
 
   test("fetches completion details from transaction history", async () => {
-    const gameAddress = createTestGameAddress();
+    const gameAddress = await createTestGameAddress();
     const connectionStub = {
       getSignaturesForAddress: async () => [
         {
@@ -128,7 +128,7 @@ describe("Game completion recovery", () => {
   });
 
   test("fetch completion history continues after empty batches", async () => {
-    const gameAddress = createTestGameAddress();
+    const gameAddress = await createTestGameAddress();
     const signatures = Array.from({ length: 6 }, (_, index) => ({
       signature: `completion-${index}`,
     }));
@@ -188,7 +188,7 @@ describe("Game completion recovery", () => {
   });
 
   test("cleanup uses reconstructed completion details", async () => {
-    const gameAddress = createTestGameAddress();
+    const gameAddress = await createTestGameAddress();
     const gameDb = botModule.__test_getGameDatabase();
     const completionCalls: Array<[string, string, number | undefined, string | undefined]> = [];
     const historyCalls: string[] = [];
@@ -266,7 +266,7 @@ describe("Game completion recovery", () => {
   });
 
   test("cleanup skips when completion is already running", async () => {
-    const gameAddress = createTestGameAddress();
+    const gameAddress = await createTestGameAddress();
     const gameDb = botModule.__test_getGameDatabase();
     const gameDbAny = gameDb as unknown as {
       getGame: typeof gameDb.getGame;

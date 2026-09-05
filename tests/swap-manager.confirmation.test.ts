@@ -35,7 +35,7 @@ describe("SwapManager Jupiter execution", () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;
     const manager = new SwapManager(connectionStub as any, walletStub, feeBudgetStub);
-    const payer = Keypair.generate();
+    const payer = await Keypair.generate();
     const base64Tx = createBase64Transaction(payer);
 
     let captured: { requestId: string; signedTransaction: string } | null = null;
@@ -58,8 +58,8 @@ describe("SwapManager Jupiter execution", () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;
     const manager = new SwapManager(connectionStub as any, walletStub, feeBudgetStub);
-    const payer = Keypair.generate();
-    const extraSigner = Keypair.generate();
+    const payer = await Keypair.generate();
+    const extraSigner = await Keypair.generate();
     const base64Tx = createBase64Transaction(payer);
 
     let captured: { requestId: string; signedTransaction: string } | null = null;
@@ -93,7 +93,7 @@ describe("SwapManager Jupiter execution", () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;
     const manager = new SwapManager(connectionStub as any, walletStub, feeBudgetStub);
-    const payer = Keypair.generate();
+    const payer = await Keypair.generate();
     const base64Tx = createBase64Transaction(payer);
 
     (manager as any).jupiterClient.executeOrder = async () => ({

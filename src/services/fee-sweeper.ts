@@ -1,9 +1,5 @@
 import { PDAManager } from "../utils/pda";
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-} from "#token";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "#token";
 import {
   PublicKey,
   Keypair,
@@ -389,7 +385,7 @@ async function processTokenFee(
   if (!tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
     throw new Error("Timba only supports legacy SPL Token mints");
   }
-  const gameVaultAta = getAssociatedTokenAddressSync(
+  const gameVaultAta = await getAssociatedTokenAddress(
     mint,
     gameVaultPda,
     true,
@@ -578,7 +574,7 @@ async function sweepTokensToSol(
   priceResolver: PriceResolver = getUsdPrice,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports,
 ) {
-  const operator = wallet.getOperatorKeypair();
+  const operator = await wallet.getOperatorKeypair();
   const swapManager = swapManagerFactory(connection, wallet);
   const sweepableTokens = tokens.filter(
     (token) => token.mint !== WSOL_MINT && token.ticker !== "SOL",
@@ -654,8 +650,8 @@ export const sweepFees = async (options: FeeSweepOptions = {}): Promise<FeeSweep
   console.log("💸 Collecting referral fees and sweeping operator balances...\n");
 
   const wallet = options.walletManager ?? WalletManager.getInstance(loadWalletMnemonic());
-  const payer = wallet.getOperatorKeypair();
-  const operator = resolveOracleOperatorKeypair(payer);
+  const payer = await wallet.getOperatorKeypair();
+  const operator = await resolveOracleOperatorKeypair(payer);
 
   const tokens = await resolveFeeSweepTokens(
     wallet,

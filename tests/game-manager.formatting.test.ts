@@ -39,7 +39,7 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-    const gamePda = randomGamePublicKey();
+    const gamePda = await randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -86,7 +86,7 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-    const gamePda = randomGamePublicKey();
+    const gamePda = await randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -143,7 +143,7 @@ describe("GameManager.formatGameMessage", () => {
       },
     } as any;
     const gm = GameManager.getInstance(program, wallet, db);
-    const gamePda = randomGamePublicKey();
+    const gamePda = await randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -202,7 +202,7 @@ describe("GameManager.formatGameMessage", () => {
       },
     } as any;
     const gm = GameManager.getInstance(program, wallet, db);
-    const gamePda = randomGamePublicKey();
+    const gamePda = await randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -244,7 +244,7 @@ describe("GameManager.formatGameMessage", () => {
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-    const gamePda = randomGamePublicKey();
+    const gamePda = await randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,

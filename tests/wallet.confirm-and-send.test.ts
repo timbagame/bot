@@ -67,7 +67,11 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       timeNow: () => Date.now(),
     });
     (wm as any).sendAndConfirmWithResubmits = async () => "ABCDEF12";
-    const sig = await wm.transferSol(1n, Keypair.generate().publicKey, LAMPORTS_PER_SOL / 2);
+    const sig = await wm.transferSol(
+      1n,
+      (await Keypair.generate()).publicKey,
+      LAMPORTS_PER_SOL / 2,
+    );
     expect(sig).toBe("ABCDEF12");
   });
 

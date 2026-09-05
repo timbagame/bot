@@ -87,7 +87,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     return;
   }
 
-  const keypair = wallet.getKeyPair(telegramId);
+  const keypair = await wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
   const requestedPageMatch = String(ctx?.callbackQuery?.data ?? "").match(/^wallet_page_(\d+)$/);
@@ -262,7 +262,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
 export type WalletHandlersDeps = {
   showWalletUI: (ctx: any) => Promise<void>;
-  clearWalletCache: (telegramId: bigint | string | number) => void;
+  clearWalletCache: (telegramId: bigint | string | number) => void | Promise<void>;
   createSettingsKeyboard: () => InlineKeyboard;
 };
 
@@ -279,7 +279,7 @@ export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
 export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
   try {
     const id = getTelegramId(ctx);
-    deps.clearWalletCache(id);
+    await deps.clearWalletCache(id);
     await deps.showWalletUI(ctx);
     await safeAnswerCallbackQuery(ctx);
   } catch (error) {
@@ -310,7 +310,7 @@ export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
 
 export type BalanceDeps = {
   isPrivateChat: (ctx: any) => boolean;
-  clearWalletCache: (telegramId: bigint) => void;
+  clearWalletCache: (telegramId: bigint) => void | Promise<void>;
   showWalletUI: (ctx: any) => Promise<void>;
   handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
 };
@@ -327,7 +327,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   if (isPrivateChat(ctx)) {
     try {
       try {
-        clearWalletCache(telegramId);
+        await clearWalletCache(telegramId);
       } catch {}
       await showWalletUI(ctx);
     } catch (error) {
@@ -339,7 +339,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   // If it's not a private chat, send the same wallet UI privately to the user
   try {
     try {
-      clearWalletCache(telegramId);
+      await clearWalletCache(telegramId);
     } catch {}
 
     const dmTargetBigInt = telegramId;

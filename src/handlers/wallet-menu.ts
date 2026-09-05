@@ -105,10 +105,10 @@ type WalletMenuModule = {
     heldMints: string[];
     complete: boolean;
   }>;
-  clearWalletCache: (telegramId: bigint) => void;
+  clearWalletCache: (telegramId: bigint) => void | Promise<void>;
   defaultWalletActionMenuDeps: {
     requireTelegramId: typeof requireTelegramId;
-    getWalletAddress: (telegramId: bigint) => string;
+    getWalletAddress: (telegramId: bigint) => string | Promise<string>;
     getWalletBalances: (telegramId: bigint) => Promise<WalletMenuBalances>;
     formatSolBalance: (lamports: number) => string;
     formatTokenBalance: (balance: number, decimals: number) => string;
@@ -142,9 +142,9 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   const testKnownTokenOverrides = new Map<string, WalletBalancesSnapshot["knownTokens"]>();
   const holdMarks = options.holdMarks ?? createHoldMarksDatabaseStore();
 
-  const pruneSoldHoldMarks = (telegramId: bigint, census: WalletTokenCensus) => {
+  const pruneSoldHoldMarks = async (telegramId: bigint, census: WalletTokenCensus) => {
     try {
-      const walletAddress = wallet.getKeyPair(telegramId).publicKey.toBase58();
+      const walletAddress = (await wallet.getKeyPair(telegramId)).publicKey.toBase58();
       pruneHoldMarks(walletAddress, census.heldMints, holdMarks, {
         complete: census.complete,
         scannedMints: census.scannedMints,
@@ -265,7 +265,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
           tokenBalances,
           knownTokens,
         };
-        pruneSoldHoldMarks(telegramId, tokenCensus);
+        await pruneSoldHoldMarks(telegramId, tokenCensus);
         const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
         if (invalidatedAt < fetchStart) {
           walletSnapshotCache.set(cacheKey, {
@@ -334,14 +334,14 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       rawBalance: token.rawBalance,
     }));
 
-  const clearWalletCache = (telegramId: bigint) => {
+  const clearWalletCache = async (telegramId: bigint) => {
+    wallet.clearCachedWalletData(telegramId);
+    invalidateWalletSnapshot(telegramId);
     try {
-      clearPositionSnapshot(wallet.getKeyPair(telegramId).publicKey.toBase58());
+      clearPositionSnapshot((await wallet.getKeyPair(telegramId)).publicKey.toBase58());
     } catch {
       // Wallet may not exist yet; the snapshot is keyed by address when it does.
     }
-    wallet.clearCachedWalletData(telegramId);
-    invalidateWalletSnapshot(telegramId);
     console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
   };
 
@@ -363,7 +363,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       wallet.getBalance(telegramId, { allowStaleOnError: true }),
       wallet.getWalletTokenBalancePage(telegramId, knownTokens, page, pageSize),
     ]);
-    pruneSoldHoldMarks(telegramId, {
+    await pruneSoldHoldMarks(telegramId, {
       complete: tokenPage.complete === true,
       heldMints: tokenPage.heldMints ?? [],
       scannedMints: tokenPage.heldMints ?? [],
@@ -387,8 +387,8 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   const createWalletHandlerDeps = (): WalletHandlersDeps =>
     Object.freeze({
       showWalletUI: (c: any) => showWalletUI(c),
-      clearWalletCache: (id: bigint | string | number) => {
-        clearWalletCache(normalizeTelegramId(id));
+      clearWalletCache: async (id: bigint | string | number) => {
+        await clearWalletCache(normalizeTelegramId(id));
       },
       createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     });
@@ -413,7 +413,8 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     });
 
     const positionDeps = {
-      getWalletAddress: (telegramId: bigint) => wallet.getKeyPair(telegramId).publicKey.toBase58(),
+      getWalletAddress: async (telegramId: bigint) =>
+        (await wallet.getKeyPair(telegramId)).publicKey.toBase58(),
       getHoldings: async (telegramId: bigint) => {
         const { tokenBalances } = await getCachedWalletData(telegramId);
         return holdingsFromTokenBalances(tokenBalances);
@@ -426,8 +427,8 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
         return tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
       },
       createKeyboard: createPositionsKeyboard,
-      refreshCaches: (telegramId: bigint) => {
-        clearWalletCache(telegramId);
+      refreshCaches: async (telegramId: bigint) => {
+        await clearWalletCache(telegramId);
       },
     };
 
@@ -447,7 +448,8 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
 
   const defaultWalletActionMenuDeps = {
     requireTelegramId,
-    getWalletAddress: (telegramId: bigint) => wallet.getKeyPair(telegramId).publicKey.toBase58(),
+    getWalletAddress: async (telegramId: bigint) =>
+      (await wallet.getKeyPair(telegramId)).publicKey.toBase58(),
     getWalletBalances: async (telegramId: bigint): Promise<WalletMenuBalances> => {
       const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
       return { solBalance, tokenBalances };

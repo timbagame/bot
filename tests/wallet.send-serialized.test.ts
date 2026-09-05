@@ -33,7 +33,7 @@ describe("WalletManager.signAndSendSerializedTransaction", () => {
   });
 
   test("returns signature on success", async () => {
-    const kp = Keypair.generate();
+    const kp = await Keypair.generate();
     const sig = await wm.signAndSendSerializedTransaction("ZmFrZQ==", kp); // base64("fake")
     expect(sig).toBe("FAKESIG");
   });
@@ -42,7 +42,7 @@ describe("WalletManager.signAndSendSerializedTransaction", () => {
     connection.sendTransaction = async () => {
       throw new Error("address table account missing");
     };
-    const kp = Keypair.generate();
+    const kp = await Keypair.generate();
     await expect(wm.signAndSendSerializedTransaction("ZmFrZQ==", kp)).rejects.toThrow(
       /Address lookup table issue/i,
     );
