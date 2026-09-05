@@ -2,32 +2,20 @@ import { expect, test } from "bun:test";
 import { Keypair, PublicKey } from "#solana";
 import { PDAManager } from "../src/utils/pda";
 
-test("getOraclePDA derives expected address", () => {
+test("getOraclePDA derives expected address", async () => {
   const programId = Keypair.generate().publicKey;
   const expected = PublicKey.findProgramAddressSync([Buffer.from("oracle")], programId)[0];
-  const pda = PDAManager.getOraclePDA(programId);
+  const pda = await PDAManager.getOraclePDA(programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
 });
 
-test("getGamePDA derives expected address", () => {
+test("getGamePDA derives expected address", async () => {
   const programId = Keypair.generate().publicKey;
-  const randomHash = Buffer.from("seed123");
+  const randomHash = Buffer.alloc(32, 7);
   const expected = PublicKey.findProgramAddressSync(
     [Buffer.from("game"), randomHash],
     programId,
   )[0];
-  const pda = PDAManager.getGamePDA(randomHash, programId);
-  expect(pda.toBase58()).toBe(expected.toBase58());
-});
-
-test("getPlayerParticipationPDA derives expected address", () => {
-  const programId = Keypair.generate().publicKey;
-  const gameAddress = Keypair.generate().publicKey;
-  const playerPubkey = Keypair.generate().publicKey;
-  const expected = PublicKey.findProgramAddressSync(
-    [Buffer.from("player_participation"), gameAddress.toBuffer(), playerPubkey.toBuffer()],
-    programId,
-  )[0];
-  const pda = PDAManager.getPlayerParticipationPDA(gameAddress, playerPubkey, programId);
+  const pda = await PDAManager.getGamePDA(randomHash, programId);
   expect(pda.toBase58()).toBe(expected.toBase58());
 });

@@ -866,16 +866,8 @@ export class GameManager {
     }
   }
 
-  private getOraclePda(): PublicKey {
+  private getOraclePda(): Promise<PublicKey> {
     return PDAManager.getOraclePDA(this.program.programId);
-  }
-
-  private getGameVaultPda(tokenMint: PublicKey): PublicKey {
-    const [gameVaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_vault"), tokenMint.toBuffer()],
-      this.program.programId,
-    );
-    return gameVaultPda;
   }
 
   private async resolveTokenProgramId(tokenMint: PublicKey): Promise<PublicKey> {
@@ -902,8 +894,8 @@ export class GameManager {
     tokenMint: PublicKey,
   ): Promise<ResolvedContractTokenAccounts> {
     const tokenProgram = await this.resolveTokenProgramId(tokenMint);
-    const gameToken = PDAManager.getGameTokenPDA(tokenMint, this.program.programId);
-    const gameVault = this.getGameVaultPda(tokenMint);
+    const gameToken = await PDAManager.getGameTokenPDA(tokenMint, this.program.programId);
+    const gameVault = await PDAManager.getGameVaultPDA(tokenMint, this.program.programId);
     const gameVaultTokenAccount = await this.deriveAta(tokenMint, gameVault, tokenProgram, true);
 
     return {
@@ -962,7 +954,7 @@ export class GameManager {
       player,
       ...gameFundsContext,
       playerTokenAccount,
-      oracle: this.getOraclePda(),
+      oracle: await this.getOraclePda(),
     };
 
     if (oracleOperator) {
@@ -1000,7 +992,7 @@ export class GameManager {
     return {
       game: gamePda,
       creator: creatorPubkey,
-      oracle: this.getOraclePda(),
+      oracle: await this.getOraclePda(),
       ...gameFundsContext,
       creatorTokenAccount,
       ...(contractCapabilities.gameTokenAccount ? { systemProgram: SystemProgram.programId } : {}),
@@ -3649,7 +3641,7 @@ export class GameManager {
       };
 
       const tokenMintPubkey = new PublicKey(tokenMint);
-      const gamePda = PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
+      const gamePda = await PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
       const tokenAccounts = await this.resolveGameVaultAccounts(tokenMintPubkey);
       const gameFundsContext = buildGameFundsContext(
         contractVersion,
@@ -3661,7 +3653,7 @@ export class GameManager {
         playerKp.publicKey,
         tokenAccounts.tokenProgram,
       );
-      const oraclePda = this.getOraclePda();
+      const oraclePda = await this.getOraclePda();
       const usesAtomicCreatorJoin = gameType === "coinflip";
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))

@@ -3322,7 +3322,7 @@ const initializeTokensList = async () => {
 
 const checkOracleStatus = async () => {
   try {
-    const oraclePda = PDAManager.getOraclePDA(program.programId);
+    const oraclePda = await PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
     console.log(`Oracle found, operator: ${oracleAccount.operator.toString()}`);
 
@@ -3378,7 +3378,10 @@ export const getTokenPolicyMinimumAmount = async (
   }
 
   if (contractCapabilities.gameTokenAccount) {
-    const gameTokenPda = PDAManager.getGameTokenPDA(new PublicKey(resolvedMint), program.programId);
+    const gameTokenPda = await PDAManager.getGameTokenPDA(
+      new PublicKey(resolvedMint),
+      program.programId,
+    );
     const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
     const minAmountRaw = Number(gameTokenAccount.minAmount);
     return {
@@ -4723,7 +4726,7 @@ registerCaseInsensitiveCommand(
   "Show oracle configuration",
 )(async (ctx: Context) => {
   try {
-    const oraclePda = PDAManager.getOraclePDA(program.programId);
+    const oraclePda = await PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
 
     const response = [
