@@ -1,3 +1,4 @@
+import { PDAManager } from "../utils/pda";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -355,15 +356,11 @@ async function processTokenFee(
   priceResolver: PriceResolver,
 ): Promise<boolean> {
   const mint = new PublicKey(config.mint);
-  const [oraclePda] = PublicKey.findProgramAddressSync([Buffer.from("oracle")], program.programId);
-  const [gameTokenPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_token"), mint.toBuffer()],
-    program.programId,
-  );
-  const [gameVaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_vault"), mint.toBuffer()],
-    program.programId,
-  );
+  const [oraclePda, gameTokenPda, gameVaultPda] = await Promise.all([
+    PDAManager.getOraclePDA(program.programId),
+    PDAManager.getGameTokenPDA(mint, program.programId),
+    PDAManager.getGameVaultPDA(mint, program.programId),
+  ]);
 
   if (!(await connection.getAccountInfo(gameTokenPda))) {
     console.warn(`⚠️  No game token configuration found for ${config.ticker}; skipping.`);

@@ -1,64 +1,40 @@
 import { PublicKey } from "#solana";
+import { getContractClient } from "@timbagame/protocol/contracts/client";
+import { findGameTokenPda } from "@timbagame/protocol/contracts/v0.2.0/kit";
+import { contractVersion } from "./contract-idl";
 
-/**
- * Simplified PDA (Program Derived Address) management utility
- * Centralizes all PDA generation logic for the gaming program
- */
+const client = getContractClient(contractVersion);
+
+/** Converts generated Kit addresses at the bot's PublicKey boundary. */
 export class PDAManager {
-  private static readonly SEEDS = {
-    GAME: "game",
-    GAME_TOKEN: "game_token",
-    PLAYER_PARTICIPATION: "player_participation",
-    ORACLE: "oracle",
-  } as const;
-
-  /**
-   * Internal helper to find PDA from seeds and program ID
-   */
-  private static findPDA(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): PublicKey {
-    const bufferSeeds = seeds.map((s) => {
-      if (s instanceof PublicKey) return s.toBuffer();
-      if (s instanceof Buffer) return s;
-      return Buffer.from(s as string, "utf8");
-    });
-
-    const [pda] = PublicKey.findProgramAddressSync(bufferSeeds, programId);
-    return pda;
+  static async getOraclePDA(programId: PublicKey): Promise<PublicKey> {
+    const [pda] = await client.findOraclePda({ programAddress: programId.toBase58() });
+    return new PublicKey(pda);
   }
 
-  /**
-   * Get Oracle PDA - Used for oracle configuration
-   */
-  static getOraclePDA(programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.ORACLE], programId);
+  static async getGamePDA(randomHash: Buffer, programId: PublicKey): Promise<PublicKey> {
+    if (randomHash.length !== 32) throw new Error("Game random hash must be 32 bytes");
+    const [pda] = await client.findGamePda(
+      { randomHash },
+      { programAddress: programId.toBase58() },
+    );
+    return new PublicKey(pda);
   }
 
-  /**
-   * Get Game PDA - Derived from random hash only (no nonce)
-   */
-  static getGamePDA(randomHash: Buffer, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.GAME, randomHash], programId);
+  static async getGameVaultPDA(tokenMint: PublicKey, programId: PublicKey): Promise<PublicKey> {
+    const [pda] = await client.findGameVaultPda(
+      { tokenMint: tokenMint.toBase58() },
+      { programAddress: programId.toBase58() },
+    );
+    return new PublicKey(pda);
   }
 
-  /**
-   * Get Player Balance PDA - Used for player's token balance in games
-   */
-
-  // PlayerGames PDA not used in current participation tracking model
-
-  /** Get the v0.2.0 GameToken configuration PDA for a mint. */
-  static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
-  }
-
-  /**
-   * Get Player Participation PDA - Used to track player participation in specific games
-   */
-  static getPlayerParticipationPDA(
-    gameAddress: PublicKey,
-    playerPubkey: PublicKey,
-    programId: PublicKey,
-  ): PublicKey {
-    return this.findPDA([this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey], programId);
+  /** Legacy v0.2 account address, also used when inspecting historical accounts. */
+  static async getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): Promise<PublicKey> {
+    const [pda] = await findGameTokenPda(
+      { tokenMint: tokenMint.toBase58() },
+      { programAddress: programId.toBase58() },
+    );
+    return new PublicKey(pda);
   }
 }

@@ -1,6 +1,6 @@
 import { formatAmount } from "./format-amount";
 
-const decimalAmountPattern = /^(?:\d+\.?\d*|\.\d+)$/;
+import { parseTokenAmount } from "@timbagame/protocol/amounts";
 
 export interface ParseDecimalAmountNumberOptions {
   returnType?: "number";
@@ -13,12 +13,6 @@ export interface ParseDecimalAmountBigIntOptions {
 }
 
 type ParseDecimalAmountOptions = ParseDecimalAmountNumberOptions | ParseDecimalAmountBigIntOptions;
-
-function assertDecimals(decimals: number): asserts decimals is number {
-  if (!Number.isInteger(decimals) || decimals < 0) {
-    throw new Error("Decimals must be a non-negative integer");
-  }
-}
 
 export function parseDecimalAmount(value: string, decimals: number): number;
 export function parseDecimalAmount(
@@ -36,21 +30,7 @@ export function parseDecimalAmount(
   decimals: number,
   options: ParseDecimalAmountOptions = {},
 ): number | bigint {
-  assertDecimals(decimals);
-
-  const normalized = value.trim();
-  if (!decimalAmountPattern.test(normalized)) {
-    throw new Error("Invalid amount format");
-  }
-
-  const [intPartRaw = "0", fracPartRaw = ""] = normalized.split(".");
-  const intPart = intPartRaw === "" ? "0" : intPartRaw;
-  const fraction = decimals > 0 ? (fracPartRaw + "0".repeat(decimals)).slice(0, decimals) : "";
-
-  const base = 10n ** BigInt(decimals);
-  const intComponent = BigInt(intPart) * base;
-  const fractionComponent = fraction.length > 0 ? BigInt(fraction) : 0n;
-  const rawAmount = intComponent + fractionComponent;
+  const rawAmount = parseTokenAmount(value, decimals);
 
   const allowZero = options.allowZero ?? false;
   if (!allowZero && rawAmount === 0n) {

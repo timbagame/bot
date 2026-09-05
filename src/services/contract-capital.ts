@@ -43,7 +43,7 @@ export async function getContractCapitalLamports(
 
   add(program.programId, UPGRADEABLE_LOADER);
   add(getProgramDataAddress(Buffer.from(programInfo.data)), UPGRADEABLE_LOADER);
-  add(PDAManager.getOraclePDA(program.programId), program.programId);
+  add(await PDAManager.getOraclePDA(program.programId), program.programId);
 
   const configuredMints = new Map<string, PublicKey>();
   if (includeGameTokenAccounts) {
@@ -60,10 +60,7 @@ export async function getContractCapitalLamports(
   }
 
   for (const mint of configuredMints.values()) {
-    const [vault] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_vault"), mint.toBuffer()],
-      program.programId,
-    );
+    const vault = await PDAManager.getGameVaultPDA(mint, program.programId);
     add(
       getAssociatedTokenAddressSync(mint, vault, true, TOKEN_PROGRAM_ID),
       TOKEN_PROGRAM_ID,
