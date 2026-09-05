@@ -170,7 +170,9 @@ export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 // ================================
 
 // Module-level exports for use by utility modules
-export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
+export const bot = new Bot(process.env.TELEGRAM_TOKEN!, {
+  client: { apiRoot: process.env["TELEGRAM_API_ROOT"] || "https://api.telegram.org" },
+});
 
 // Last-resort boundary protection: never expose exception, validator, HTTP, or
 // RPC diagnostics through any Telegram API method that carries text/captions.

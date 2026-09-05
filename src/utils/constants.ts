@@ -250,7 +250,7 @@ export const USER_SOL_MAX_BUFFER_LAMPORTS = parsePositiveInteger(
 // ================================
 
 // Jupiter Price API base
-export const JUPITER_PRICE_URL = "https://api.jup.ag/price/v3";
+export const JUPITER_PRICE_URL = process.env["JUPITER_PRICE_URL"] || "https://api.jup.ag/price/v3";
 function parsePositiveDuration(key: string, fallback: number): number {
   const raw = process.env[key];
   if (raw === undefined) {

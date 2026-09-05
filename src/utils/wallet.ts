@@ -472,7 +472,13 @@ export class WalletManager {
       this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
         commitment: "confirmed",
         connectionFactory: (endpoint, commitment) =>
-          new Connection(endpoint, { commitment, fetch: rebateAwareFetch }),
+          new Connection(endpoint, {
+            commitment,
+            fetch: rebateAwareFetch,
+            ...(process.env["SOLANA_WS_ENDPOINT"]
+              ? { wsEndpoint: process.env["SOLANA_WS_ENDPOINT"] }
+              : {}),
+          }),
         logger: console,
       });
       this.connection = this.rpcEndpointManager.getConnection();
