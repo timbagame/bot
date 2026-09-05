@@ -22,7 +22,7 @@ type MockCtxOptions = {
 const TELEGRAM_NUMERIC_ID = 9_876_543;
 const TELEGRAM_ID = BigInt(TELEGRAM_NUMERIC_ID);
 const DEFAULT_CHAT_ID = 777_001;
-const USER_WALLET_ADDRESS = wallet.getKeyPair(TELEGRAM_ID).publicKey.toBase58();
+const USER_WALLET_ADDRESS = (await wallet.getKeyPair(TELEGRAM_ID)).publicKey.toBase58();
 
 const baseWalletCache = {
   solBalance: 5_000_000_000, // 5 SOL

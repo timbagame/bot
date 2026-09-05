@@ -1,3 +1,4 @@
+import { getProgramDerivedAddress } from "@solana/kit";
 import { createHash } from "node:crypto";
 import {
   PublicKey,
@@ -13,7 +14,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
-  getAssociatedTokenAddressSync,
+  getAssociatedTokenAddress,
   unpackAccount,
 } from "#token";
 
@@ -161,7 +162,7 @@ export class ReferralProvider {
     if (!tokenProgram.equals(TOKEN_PROGRAM_ID) && !tokenProgram.equals(TOKEN_2022_PROGRAM_ID)) {
       throw new Error("Invalid mint owner");
     }
-    const tokenAccount = getAssociatedTokenAddressSync(
+    const tokenAccount = await getAssociatedTokenAddress(
       input.mint,
       input.referralAccountPubKey,
       true,
@@ -198,10 +199,14 @@ export class ReferralProvider {
       throw new Error("Invalid Jupiter referral project");
     }
     const project = decodeProject(projectInfo.data);
-    const projectAuthority = PublicKey.findProgramAddressSync(
-      [Buffer.from("project_authority"), project.base.toBuffer()],
-      REFERRAL_PROGRAM_ID,
-    )[0];
+    const projectAuthority = new PublicKey(
+      (
+        await getProgramDerivedAddress({
+          seeds: [Buffer.from("project_authority"), project.base.toBuffer()],
+          programAddress: REFERRAL_PROGRAM_ID.toBase58(),
+        })
+      )[0],
+    );
     const { tokenAccounts, token2022Accounts } = await this.getReferralTokenAccountsV2(
       input.referralAccountPubKey.toBase58(),
     );
@@ -236,13 +241,13 @@ export class ReferralProvider {
       for (const token of accounts) {
         if (token.account.amount <= 0n || token.account.state !== 1) continue;
         const mint = token.account.mint;
-        const partnerTokenAccount = getAssociatedTokenAddressSync(
+        const partnerTokenAccount = await getAssociatedTokenAddress(
           mint,
           referral.partner,
           true,
           tokenProgram,
         );
-        const projectAdminTokenAccount = getAssociatedTokenAddressSync(
+        const projectAdminTokenAccount = await getAssociatedTokenAddress(
           mint,
           project.admin,
           true,

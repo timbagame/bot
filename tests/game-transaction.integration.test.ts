@@ -18,8 +18,8 @@ import { WalletManager } from "../src/utils/wallet";
 const MNEMONIC = "test test test test test test test test test test test junk";
 describe("Kit game transaction boundary", () => {
   test("preserves both signatures and submits the exact verified wire transaction", async () => {
-    const creator = Keypair.generate();
-    const oracle = Keypair.generate();
+    const creator = await Keypair.generate();
+    const oracle = await Keypair.generate();
     const programAddress = address("BPFLoader1111111111111111111111111111111111");
     const prepared = await buildOracleSignableGameTransaction({
       instructions: [
@@ -81,8 +81,8 @@ describe("Kit game transaction boundary", () => {
   });
 
   test("rejects an Oracle response that changes the transaction message", async () => {
-    const creator = Keypair.generate();
-    const oracle = Keypair.generate();
+    const creator = await Keypair.generate();
+    const oracle = await Keypair.generate();
     const prepared = await buildOracleSignableGameTransaction({
       instructions: [
         new TransactionInstruction({

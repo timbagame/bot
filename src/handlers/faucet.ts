@@ -33,7 +33,7 @@ export interface FaucetModuleDeps {
   ) => InferPlayersResult;
   getRequiredTelegramId: (ctx: Context, label: string) => Promise<bigint | null>;
   getBalance: (telegramId: bigint, parsed: ParsedAmount) => Promise<number>;
-  getRecipientPublicKey: (telegramId: bigint) => PublicKey;
+  getRecipientPublicKey: (telegramId: bigint) => PublicKey | Promise<PublicKey>;
   transfer: (
     creatorId: bigint,
     recipient: PublicKey,
@@ -451,7 +451,7 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     try {
       const signature = await deps.transfer(
         BigInt(faucet.creator_id),
-        deps.getRecipientPublicKey(claimantId),
+        await deps.getRecipientPublicKey(claimantId),
         {
           amount: claimAmount,
           isSol: faucet.is_sol === 1,

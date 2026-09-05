@@ -17,8 +17,8 @@ test("findOrCreateAssociatedTokenAccount adds create instruction on RPC error", 
       timeNow: () => Date.now(),
     },
   );
-  const owner = Keypair.generate();
-  const payer = Keypair.generate();
+  const owner = await Keypair.generate();
+  const payer = await Keypair.generate();
   const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   const res = await wm.findOrCreateAssociatedTokenAccount(owner.publicKey, mint, payer);
   expect(res.instructions.length).toBe(1);

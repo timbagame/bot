@@ -42,8 +42,8 @@ test("findOrCreateAssociatedTokenAccount returns create instruction when missing
       timeNow: () => Date.now(),
     },
   );
-  const owner = Keypair.generate();
-  const payer = Keypair.generate();
+  const owner = await Keypair.generate();
+  const payer = await Keypair.generate();
   const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   const res = await wm.findOrCreateAssociatedTokenAccount(owner.publicKey, mint, payer);
   expect(res.instructions.length).toBe(1);
@@ -54,7 +54,7 @@ test("wrapSol builds instructions and forwards to sendTransaction", async () => 
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
-  const ata = Keypair.generate().publicKey;
+  const ata = (await Keypair.generate()).publicKey;
   const sendCalls: any[] = [];
   (wm as any).findOrCreateAssociatedTokenAccount = async () => ({
     address: ata,
@@ -81,7 +81,7 @@ test("wrapSol retries without ATA creation when account already exists", async (
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
-  const ata = Keypair.generate().publicKey;
+  const ata = (await Keypair.generate()).publicKey;
   let planCalls = 0;
   (wm as any).findOrCreateAssociatedTokenAccount = async () => {
     planCalls += 1;
@@ -131,8 +131,8 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   const unwrapPlan = {
     instructions: ["UNWRAP"] as any,
     unwrapLamports: 1_000,
@@ -168,8 +168,8 @@ test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   const unwrapPlan = {
     instructions: ["UNWRAP"] as any,
     unwrapLamports: 1_000,
@@ -204,8 +204,8 @@ test("unwrapSolWithKeypair rejects a non-owner user signer", async () => {
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const user = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const user = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
 
   await expect(
     wm.unwrapSolWithKeypair({
@@ -224,8 +224,8 @@ test("unwrapSolWithKeypair makes the operator fee payer for sponsored unwraps", 
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   const unwrapPlan = {
     instructions: [
       new TransactionInstruction({
@@ -284,8 +284,8 @@ test("unwrapSolWithKeypair unwraps and reimburses estimated sponsor costs atomic
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   const unwrapInstruction = new TransactionInstruction({
     keys: [
       { pubkey: payer.publicKey, isSigner: false, isWritable: true },
@@ -340,8 +340,8 @@ test("unwrapSolWithKeypair aborts when the sponsored fee cannot be estimated", a
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   vi.spyOn(wm as any, "buildUnwrapWsolPlan").mockResolvedValue({
     instructions: [],
     unwrapLamports: 1_000,
@@ -374,8 +374,8 @@ test("buildUnwrapWsolPlan throws when no WSOL account found", async () => {
     { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const owner = Keypair.generate().publicKey;
-  const payer = Keypair.generate();
+  const owner = (await Keypair.generate()).publicKey;
+  const payer = await Keypair.generate();
 
   await expect(wm.buildUnwrapWsolPlan({ owner, payer })).rejects.toThrow(
     "No WSOL account found to unwrap.",
@@ -398,8 +398,8 @@ test("buildUnwrapWsolPlan throws when WSOL account is empty", async () => {
     { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const owner = Keypair.generate().publicKey;
-  const payer = Keypair.generate();
+  const owner = (await Keypair.generate()).publicKey;
+  const payer = await Keypair.generate();
 
   await expect(wm.buildUnwrapWsolPlan({ owner, payer })).rejects.toThrow(
     "Your WSOL account is already empty.",
@@ -421,8 +421,8 @@ test("buildUnwrapWsolPlan throws when unwrap amount exceeds balance", async () =
     { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const owner = Keypair.generate().publicKey;
-  const payer = Keypair.generate();
+  const owner = (await Keypair.generate()).publicKey;
+  const payer = await Keypair.generate();
 
   await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 2000 })).rejects.toThrow(
     /exceeds current balance/,
@@ -445,8 +445,8 @@ test("buildUnwrapWsolPlan rejects a partial unwrap without a known rent reserve"
 
   await expect(
     wm.buildUnwrapWsolPlan({
-      owner: Keypair.generate().publicKey,
-      payer: Keypair.generate(),
+      owner: (await Keypair.generate()).publicKey,
+      payer: await Keypair.generate(),
       amountLamports: 500,
     }),
   ).rejects.toThrow(/rent reserve is unavailable/);
@@ -467,8 +467,8 @@ test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
     { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const owner = Keypair.generate().publicKey;
-  const payer = Keypair.generate();
+  const owner = (await Keypair.generate()).publicKey;
+  const payer = await Keypair.generate();
 
   await expect(wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: -100 })).rejects.toThrow(
     "Unwrap amount must be greater than zero.",
@@ -485,8 +485,8 @@ test("unwrapSolWithKeypair throws if sponsorship is requested without operator k
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const owner = Keypair.generate().publicKey;
-  const payer = Keypair.generate();
+  const owner = (await Keypair.generate()).publicKey;
+  const payer = await Keypair.generate();
 
   await expect(
     wm.unwrapSolWithKeypair({
@@ -504,8 +504,8 @@ test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
 
-  const payer = Keypair.generate();
-  const operatorKeypair = Keypair.generate();
+  const payer = await Keypair.generate();
+  const operatorKeypair = await Keypair.generate();
   const unwrapPlan = {
     instructions: [],
     unwrapLamports: 1000,
@@ -548,7 +548,7 @@ test("transferSol preserves lamports for dust transfers", async () => {
     return "SIG_DUST";
   };
 
-  const destination = Keypair.generate().publicKey;
+  const destination = (await Keypair.generate()).publicKey;
   const sig = await wm.transferSol(1n, destination, 1);
 
   expect(sig).toBe("SIG_DUST");
@@ -578,7 +578,7 @@ test("withdrawAllSol aborts when fees exceed balance", async () => {
     return "UNREACHABLE";
   };
 
-  await expect(wm.withdrawAllSol(1n, Keypair.generate().publicKey)).rejects.toThrow(
+  await expect(wm.withdrawAllSol(1n, (await Keypair.generate()).publicKey)).rejects.toThrow(
     /Not enough SOL to cover the transaction fee/,
   );
 
@@ -613,7 +613,7 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
     return "WITHDRAW_SIG";
   };
 
-  const destination = Keypair.generate().publicKey;
+  const destination = (await Keypair.generate()).publicKey;
   const result = await wm.withdrawAllSol(telegramId, destination);
 
   expect(balanceCalls).toBe(1);

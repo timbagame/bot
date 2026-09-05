@@ -8,26 +8,26 @@ const mnemonic =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
 
-test("getKeyPair returns same instance for same index", () => {
+test("getKeyPair returns same instance for same index", async () => {
   WalletManager.resetForTest();
   const manager = WalletManager.getInstance(mnemonic);
-  const kp1 = manager.getKeyPair(1n);
-  const kp2 = manager.getKeyPair(1n);
+  const kp1 = await manager.getKeyPair(1n);
+  const kp2 = await manager.getKeyPair(1n);
   expect(kp1).toBe(kp2);
 });
 
-test("getKeyPair derives different keys for different index", () => {
+test("getKeyPair derives different keys for different index", async () => {
   WalletManager.resetForTest();
   const manager = WalletManager.getInstance(mnemonic);
-  const kp1 = manager.getKeyPair(1n);
-  const kp2 = manager.getKeyPair(2n);
+  const kp1 = await manager.getKeyPair(1n);
+  const kp2 = await manager.getKeyPair(2n);
   expect(kp1.publicKey.toBase58()).not.toBe(kp2.publicKey.toBase58());
 });
 
-test("getKeyPair throws when given fallback index", () => {
+test("getKeyPair throws when given fallback index", async () => {
   WalletManager.resetForTest();
   const manager = WalletManager.getInstance(mnemonic);
-  expect(() => manager.getKeyPair(0n)).toThrow(/Missing Telegram id/);
+  await expect(manager.getKeyPair(0n)).rejects.toThrow(/Missing Telegram id/);
 });
 
 test("formatSolBalance formats lamports with precision", () => {
@@ -58,34 +58,34 @@ test("getKeyPair remains consistent under concurrent cache evictions", async () 
     timeNow: () => clock.now,
   });
 
-  manager.getKeyPair(7n);
+  await manager.getKeyPair(7n);
   clock.now += 10;
 
   const concurrent = await Promise.all([
     (async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       clock.now += 1;
-      return manager.getKeyPair(7n);
+      return await manager.getKeyPair(7n);
     })(),
     (async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       clock.now += 1;
-      return manager.getKeyPair(8n);
+      return await manager.getKeyPair(8n);
     })(),
     (async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       clock.now += 1;
-      return manager.getKeyPair(7n);
+      return await manager.getKeyPair(7n);
     })(),
   ]);
 
-  const expected = manager.getKeyPair(7n);
+  const expected = await manager.getKeyPair(7n);
   expect(concurrent[0].publicKey.toBase58()).toBe(expected.publicKey.toBase58());
   expect(concurrent[2].publicKey.toBase58()).toBe(expected.publicKey.toBase58());
   expect(concurrent[1].publicKey.toBase58()).not.toBe(expected.publicKey.toBase58());
 });
 
-test("getOperatorKeypair throws when file missing", () => {
+test("getOperatorKeypair throws when file missing", async () => {
   WalletManager.resetForTest();
   const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
@@ -96,14 +96,14 @@ test("getOperatorKeypair throws when file missing", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    expect(() => manager.getOperatorKeypair()).toThrow(/Operator keypair file not found/);
+    await expect(manager.getOperatorKeypair()).rejects.toThrow(/Operator keypair file not found/);
   } finally {
     process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("getOperatorKeypair surfaces parse failures", () => {
+test("getOperatorKeypair surfaces parse failures", async () => {
   WalletManager.resetForTest();
   const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
@@ -115,7 +115,7 @@ test("getOperatorKeypair surfaces parse failures", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    expect(() => manager.getOperatorKeypair()).toThrow(/Failed to load operator keypair/);
+    await expect(manager.getOperatorKeypair()).rejects.toThrow(/Failed to load operator keypair/);
   } finally {
     process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
@@ -131,4 +131,21 @@ test("getConnection returns injected connection", () => {
     timeNow: () => Date.now(),
   });
   expect(manager.getConnection()).toBe(conn);
+});
+
+test("concurrent key derivation shares the cached signer", async () => {
+  WalletManager.resetForTest();
+  const manager = WalletManager.getInstance(mnemonic);
+  const [first, second] = await Promise.all([manager.getKeyPair(42n), manager.getKeyPair(42n)]);
+  expect(first).toBe(second);
+  const message = new TextEncoder().encode("Timba signer migration");
+  const signature = await first.signBytes(message);
+  expect(
+    await crypto.subtle.verify(
+      "Ed25519",
+      first.keyPair.publicKey,
+      new Uint8Array(signature),
+      message,
+    ),
+  ).toBe(true);
 });

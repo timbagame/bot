@@ -381,7 +381,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
     }
 
     try {
-      const playerPubkey = deps.wallet.getKeyPair(telegramId).publicKey.toBase58();
+      const playerPubkey = (await deps.wallet.getKeyPair(telegramId)).publicKey.toBase58();
       deps.gameDb.savePlayerMapping(playerPubkey, telegramIdStr, displayNameFromContext ?? null);
     } catch (error) {
       console.warn("Failed to persist player mapping when joining game:", error);

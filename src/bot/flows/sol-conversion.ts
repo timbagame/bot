@@ -97,7 +97,7 @@ export type PendingSwapTransaction = {
 
 export type CreateSolConversionUtilitiesOptions = {
   wallet: WalletManager;
-  clearWalletCache: (telegramId: bigint) => void;
+  clearWalletCache: (telegramId: bigint) => void | Promise<void>;
   buildTransactionLinkMessage: typeof buildTransactionLinkMessage;
   getPendingTransaction: typeof getPendingTransaction;
   getSolFeeBufferLamports: () => number;
@@ -171,7 +171,7 @@ export const createSolConversionUtilities = ({
       formattedAmountForError = formattedAmount;
 
       await wallet.confirmTransaction(signature);
-      clearWalletCache(telegramId);
+      await clearWalletCache(telegramId);
 
       const { solscanUrl } = buildTransactionLinkMessage({
         signature,

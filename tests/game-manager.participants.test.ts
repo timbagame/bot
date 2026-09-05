@@ -40,8 +40,8 @@ function makeCtx() {
 describe("GameManager participants rendering", () => {
   test("keeps web wallet participants in completed games", async () => {
     reset();
-    const webWallet = Keypair.generate().publicKey.toBase58();
-    const telegramWallet = Keypair.generate().publicKey.toBase58();
+    const webWallet = (await Keypair.generate()).publicKey.toBase58();
+    const telegramWallet = (await Keypair.generate()).publicKey.toBase58();
     const gm = GameManager.getInstance(makeProgram({}), makeWallet(), {
       getGameParticipants: () => ["222"],
       getGameParticipantsPreview: () => ["222"],
@@ -60,7 +60,7 @@ describe("GameManager participants rendering", () => {
 
     const res = await gm.formatGameMessage(
       ctx,
-      Keypair.generate().publicKey,
+      (await Keypair.generate()).publicKey,
       "coinflip",
       1_000_000_000,
       "Wallet creator",
@@ -171,7 +171,7 @@ describe("GameManager participants rendering", () => {
       chat: { id: 1, type: "group" },
       api: {},
     } as any;
-    const gamePda = Keypair.generate().publicKey;
+    const gamePda = (await Keypair.generate()).publicKey;
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -215,7 +215,7 @@ describe("GameManager participants rendering", () => {
       chat: { id: 1, type: "group" },
       api: {},
     } as any;
-    const gamePda = Keypair.generate().publicKey;
+    const gamePda = (await Keypair.generate()).publicKey;
 
     const res = await gm.formatGameMessage(
       ctx,

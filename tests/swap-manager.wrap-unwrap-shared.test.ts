@@ -30,7 +30,7 @@ const createWalletStub = () => {
 };
 
 const baseRequest = {
-  userKeypair: Keypair.generate(),
+  userKeypair: await Keypair.generate(),
   inputMint: "SOL",
   outputMint: "WSOL",
   amount: "1000",
@@ -45,7 +45,7 @@ const createManager = (wallet: WalletManager) =>
 
 describe("SwapManager wrap/unwrap helpers", () => {
   test("executeWrapSwap delegates to wallet helper", async () => {
-    const wallet = createWalletStub();
+    const wallet = await createWalletStub();
     const manager = createManager(wallet);
 
     const signature = await manager.executeWrapSwap(
@@ -67,8 +67,8 @@ describe("SwapManager wrap/unwrap helpers", () => {
   });
 
   test("executeUnwrapSwap carries admin top-up through wallet helper", async () => {
-    const wallet = createWalletStub();
-    const operatorKeypair = Keypair.generate();
+    const wallet = await createWalletStub();
+    const operatorKeypair = await Keypair.generate();
     wallet.getOperatorKeypair = vi.fn().mockReturnValue(operatorKeypair);
     const manager = createManager(wallet);
 
@@ -95,7 +95,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
   });
 
   test("executeUnwrapSwap uses user payer when no loan is required", async () => {
-    const wallet = createWalletStub();
+    const wallet = await createWalletStub();
     wallet.getOperatorKeypair = vi.fn();
     const manager = createManager(wallet);
 
@@ -119,8 +119,8 @@ describe("SwapManager wrap/unwrap helpers", () => {
   });
 
   test("jit unwrap helper reuses wallet unwrap implementation", async () => {
-    const wallet = createWalletStub();
-    const operatorKeypair = Keypair.generate();
+    const wallet = await createWalletStub();
+    const operatorKeypair = await Keypair.generate();
     const manager = createManager(wallet);
 
     const result = await (manager as any).unwrapWsolPortion({

@@ -91,9 +91,9 @@ const makeCtx = (username?: string) => ({
   },
 });
 
-const makeEvent = (): any => {
-  const gameKey = new PublicKey(Keypair.generate().publicKey);
-  const player = new PublicKey(Keypair.generate().publicKey);
+const makeEvent = async (): Promise<any> => {
+  const gameKey = new PublicKey((await Keypair.generate()).publicKey);
+  const player = new PublicKey((await Keypair.generate()).publicKey);
   return {
     gameKey,
     player,
@@ -137,7 +137,7 @@ describe("Game callback helpers", () => {
     const ctx = makeCtx();
     await module.__test_handleJoinGame(
       ctx as unknown as Context,
-      new PublicKey(Keypair.generate().publicKey),
+      new PublicKey((await Keypair.generate()).publicKey),
       123n,
       { game_address: "game1", status: "active" },
     );
@@ -155,7 +155,7 @@ describe("Game callback helpers", () => {
 
     await module.__test_handleJoinGame(
       ctx as unknown as Context,
-      new PublicKey(Keypair.generate().publicKey),
+      new PublicKey((await Keypair.generate()).publicKey),
       124n,
       { game_address: "game2", status: "active" },
     );
@@ -165,7 +165,7 @@ describe("Game callback helpers", () => {
 
   test("generic join callback hydrates missing game then joins", async () => {
     const { module, gameManager, gameDb } = makeDeps();
-    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
 
     (gameDb.getGame as any) = vi.fn(() => null);
     (gameManager.ensureGameDataFromChain as any) = vi.fn(async () => ({
@@ -210,7 +210,7 @@ describe("Game callback helpers", () => {
       timestamp: Number(Date.now()) + 1_000,
     });
     __test_setGameDatabase(gameDb as any);
-    const event = makeEvent();
+    const event = await makeEvent();
     event.timestamp = new BN(0);
     const target = { chatId: 1, messageId: 5 };
 
@@ -234,7 +234,7 @@ describe("Game callback helpers", () => {
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       getGame: () => ({ game_type: "coinflip", chat_id: 2 }),
     } as any);
-    const event = makeEvent();
+    const event = await makeEvent();
     const target = { chatId: 2, messageId: 6 };
 
     await __test_processPlayerEvent(event, "PlayerJoined", [target]);
@@ -251,7 +251,7 @@ describe("Game callback helpers", () => {
     const { module, gameDb, gameManager } = makeDeps();
     const ctxA = makeCtx("@alice");
     const ctxB = makeCtx("@bob");
-    const gamePda = new PublicKey(Keypair.generate().publicKey);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
 
     await Promise.all([
       module.__test_handleJoinGame(ctxA as unknown as Context, gamePda, 10n, {
@@ -278,7 +278,7 @@ describe("Game callback helpers", () => {
 
     await module.__test_handleJoinGame(
       ctx as unknown as Context,
-      new PublicKey(Keypair.generate().publicKey),
+      new PublicKey((await Keypair.generate()).publicKey),
       456n,
       {
         game_address: "game-cross",
@@ -307,7 +307,7 @@ describe("Game callback helpers", () => {
 
     await module.__test_handleJoinGame(
       ctx as unknown as Context,
-      new PublicKey(Keypair.generate().publicKey),
+      new PublicKey((await Keypair.generate()).publicKey),
       789n,
       {
         game_address: "game-same",

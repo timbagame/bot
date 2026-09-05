@@ -72,7 +72,7 @@ describe("SwapManager quote expiration", () => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount,
-          userKeypair: Keypair.generate(),
+          userKeypair: await Keypair.generate(),
           inputDecimals: 9,
           outputDecimals: 6,
           inputTicker: "SOL",

@@ -14,7 +14,7 @@ const programStub = { provider: { connection: {} } } as any;
 
 const createWalletStub = (overrides: Record<string, any> = {}) => ({
   getConnection: () => ({}),
-  getKeyPair: (_: bigint) => Keypair.generate(),
+  getKeyPair: async (_: bigint) => await Keypair.generate(),
   getTokenMetadata: async () => ({ decimals: 6 }),
   getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   getTokenBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
@@ -32,7 +32,7 @@ const createGameDbStub = (overrides: Record<string, any> = {}) => ({
 describe("GameManager cleanup flows", () => {
   test("unjoinPlayers returns count and calls unjoin per player", async () => {
     resetGM();
-    const wallet = createWalletStub();
+    const wallet = await createWalletStub();
     const gameDb = createGameDbStub();
     const gm = GameManager.getInstance(programStub, wallet as any, gameDb as any);
     (gm as any).swapManager = { performJustInTimeSolSwap: async () => ({ swapped: true }) };
@@ -62,7 +62,7 @@ describe("GameManager cleanup flows", () => {
     resetGM();
     const gm = GameManager.getInstance(
       programStub,
-      createWalletStub() as any,
+      (await createWalletStub()) as any,
       createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async (_p: any, _ga: any, list: any[]) => list.length;
@@ -80,7 +80,7 @@ describe("GameManager cleanup flows", () => {
     resetGM();
     const gm = GameManager.getInstance(
       programStub,
-      createWalletStub() as any,
+      (await createWalletStub()) as any,
       createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async () => 1;
@@ -97,7 +97,7 @@ describe("GameManager cleanup flows", () => {
     resetGM();
     const gm = GameManager.getInstance(
       programStub,
-      createWalletStub() as any,
+      (await createWalletStub()) as any,
       createGameDbStub() as any,
     );
     (gm as any).unjoinPlayers = async () => 0;
@@ -120,11 +120,11 @@ describe("GameManager cleanup flows", () => {
 
   test("unjoinPlayers falls back to creator authority when player cannot cover fees", async () => {
     resetGM();
-    const creatorKp = Keypair.generate();
-    const playerKp = Keypair.generate();
+    const creatorKp = await Keypair.generate();
+    const playerKp = await Keypair.generate();
     const playerPubkey = new PublicKey("BPFLoader4111111111111111111111111111111111");
 
-    const walletStub = createWalletStub({
+    const walletStub = await createWalletStub({
       getKeyPair: (id: bigint) => {
         if (id === BigInt(1)) return creatorKp;
         if (id === BigInt(404)) return playerKp;
@@ -172,7 +172,7 @@ describe("GameManager cleanup flows", () => {
 
   test("ensureUnjoinFeePayerBalance succeeds when SOL balance already sufficient", async () => {
     resetGM();
-    const wallet = createWalletStub({
+    const wallet = await createWalletStub({
       getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
       getTokenBalance: async () => 0,
     });
@@ -190,7 +190,7 @@ describe("GameManager cleanup flows", () => {
       tokenMint: WSOL_MINT,
       tokenDecimals: 6,
       tokenTicker: "SOL",
-      userKeypair: Keypair.generate(),
+      userKeypair: await Keypair.generate(),
       logContext: "unit-test",
     });
 
@@ -200,7 +200,7 @@ describe("GameManager cleanup flows", () => {
 
   test("ensureUnjoinFeePayerBalance fails when no spare tokens are available", async () => {
     resetGM();
-    const wallet = createWalletStub({
+    const wallet = await createWalletStub({
       getBalance: async () => 0,
       getTokenBalance: async () => 0,
     });
@@ -218,7 +218,7 @@ describe("GameManager cleanup flows", () => {
       tokenMint: WSOL_MINT,
       tokenDecimals: 6,
       tokenTicker: "ABC",
-      userKeypair: Keypair.generate(),
+      userKeypair: await Keypair.generate(),
       logContext: "unit-test",
     });
 
@@ -230,7 +230,7 @@ describe("GameManager cleanup flows", () => {
   test("ensureUnjoinFeePayerBalance swaps tokens and succeeds when top-up completes", async () => {
     resetGM();
     let balanceCalls = 0;
-    const wallet = createWalletStub({
+    const wallet = await createWalletStub({
       getBalance: async () => {
         balanceCalls++;
         return balanceCalls === 1 ? 0 : MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS;
@@ -251,7 +251,7 @@ describe("GameManager cleanup flows", () => {
       tokenMint: WSOL_MINT,
       tokenDecimals: 6,
       tokenTicker: "ABC",
-      userKeypair: Keypair.generate(),
+      userKeypair: await Keypair.generate(),
       logContext: "unit-test",
     });
 
@@ -262,7 +262,7 @@ describe("GameManager cleanup flows", () => {
   test("ensureUnjoinFeePayerBalance reports failure when post-swap SOL is still low", async () => {
     resetGM();
     let balanceCalls = 0;
-    const wallet = createWalletStub({
+    const wallet = await createWalletStub({
       getBalance: async () => {
         balanceCalls++;
         return balanceCalls === 1 ? 0 : MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS - 1;
@@ -283,7 +283,7 @@ describe("GameManager cleanup flows", () => {
       tokenMint: WSOL_MINT,
       tokenDecimals: 6,
       tokenTicker: "ABC",
-      userKeypair: Keypair.generate(),
+      userKeypair: await Keypair.generate(),
       logContext: "unit-test",
     });
 

@@ -5,7 +5,7 @@ import type { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager JIT floor", () => {
   test("Tiny SOL top-ups are floored to 0.01 SOL", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
 
     // Keep buffers small so the natural target stays below the 0.01 SOL floor
     const feeBudget = {

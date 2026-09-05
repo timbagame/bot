@@ -1071,7 +1071,7 @@ const prepareTokenTradeQuote = async ({
     solFeeBufferLamports = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
   }
 
-  const userKeypair = wallet.getKeyPair(telegramId);
+  const userKeypair = await wallet.getKeyPair(telegramId);
 
   const shouldProbeGasless = shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
 
@@ -3113,7 +3113,7 @@ export const __test_handleGameSetupTextInput = handleGameSetupTextInputTest;
 export const __test_shouldSkipGenericGameCallback = shouldSkipGenericGameCallbackTest;
 
 const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<PlayerData> => {
-  const keypair = wallet.getKeyPair(telegramId);
+  const keypair = await wallet.getKeyPair(telegramId);
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
 
   const balancePromises: Array<Promise<number>> = [
@@ -3518,7 +3518,7 @@ const faucetModule = createFaucetModule({
           createIfMissing: false,
           throwOnError: true,
         }),
-  getRecipientPublicKey: (telegramId) => wallet.getPublicKey(telegramId),
+  getRecipientPublicKey: async (telegramId) => await wallet.getPublicKey(telegramId),
   transfer: (creatorId, recipient, parsed, onPrepared) =>
     parsed.isSol
       ? wallet.transferSol(creatorId, recipient, parsed.amount, onPrepared)
@@ -3923,7 +3923,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   const tipDescription = `Tip of ${parsedAmount.formattedAmount}${usdSuffix} to ${recipientName}`;
 
   try {
-    const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
+    const recipientPubKey = await wallet.getPublicKey(recipientTelegramId);
     await validateAndProcessTransaction(
       ctx,
       telegramId,
@@ -4651,14 +4651,16 @@ const getFinanceReadContext = () => {
   return financeReadContext;
 };
 
-const getFinanceLedgerService = () => {
+const getFinanceLedgerService = async () => {
   if (financeLedgerService) return financeLedgerService;
   const finance = getFinanceReadContext();
+  const operator = await wallet.getOperatorKeypair();
+  if (financeLedgerService) return financeLedgerService;
   financeLedgerService = new FinanceLedgerService(
     finance.connection,
     finance.program,
     TransactionHistory.getInstance(),
-    wallet.getOperatorKeypair().publicKey,
+    operator.publicKey,
     undefined,
     {
       resolveGameMint: (gameAddress) => gameDb.getGame(gameAddress)?.token_mint,
@@ -4668,13 +4670,13 @@ const getFinanceLedgerService = () => {
 };
 
 const financeBackfillStartTimeMs = Date.now() - 90 * 86_400_000;
-const financeBackfillWorker = new FinanceBackfillWorker(() =>
-  getFinanceLedgerService().backfillNextBatch(financeBackfillStartTimeMs),
+const financeBackfillWorker = new FinanceBackfillWorker(async () =>
+  (await getFinanceLedgerService()).backfillNextBatch(financeBackfillStartTimeMs),
 );
 
 const financeHandlers = createFinanceHandlers({
   financeLedger: {
-    getSnapshot: () => getFinanceLedgerService().getSnapshot(),
+    getSnapshot: async () => (await getFinanceLedgerService()).getSnapshot(),
   },
   transactionHistory: TransactionHistory.getInstance(),
   resolveTokenMetadata: async (mint) => {
@@ -4862,7 +4864,7 @@ bot.callbackQuery(
         await safeAnswerCallbackQuery(ctx, "❌ Too many exports. Try again later.");
         return;
       }
-      const keypair = wallet.getKeyPair(telegramId);
+      const keypair = await wallet.getKeyPair(telegramId);
       const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
       const response = [
@@ -5086,7 +5088,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         throw new Error("Quote not found for this transaction");
       }
 
-      const keypair = wallet.getKeyPair(BigInt(transaction.userId));
+      const keypair = await wallet.getKeyPair(BigInt(transaction.userId));
 
       const rawOutputDecimals = quote.outputDecimals ?? (transaction as any).outputDecimals;
       const inferredOutputDecimals = Number(rawOutputDecimals);
@@ -5291,7 +5293,7 @@ const buildAdminIntegratorConfig = async ({
   tradeDecimals: number;
   solFeeBufferLamports?: number;
 }): Promise<IntegratorSwapParams> => {
-  const operatorKeypair = wallet.getOperatorKeypair();
+  const operatorKeypair = await wallet.getOperatorKeypair();
   let rentReserveLamports: number;
   try {
     rentReserveLamports = await getSolWrapRentReserveLamports();
@@ -5440,7 +5442,7 @@ registerCallbackPrefixHandler(
       if (telegramId == null) {
         return;
       }
-      const keypair = wallet.getKeyPair(telegramId);
+      const keypair = await wallet.getKeyPair(telegramId);
       const walletAddress = keypair.publicKey.toBase58();
       const walletAddressHtml = escapeHtml(walletAddress);
 

@@ -511,7 +511,7 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { giveaway: {} },
     };
-    const addr = Keypair.generate().publicKey.toBase58();
+    const addr = (await Keypair.generate()).publicKey.toBase58();
     const database = makeDbStub({ gameOverride: { game_type: "giveaway" } });
 
     const calls: any[] = [];

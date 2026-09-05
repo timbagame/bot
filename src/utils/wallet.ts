@@ -499,7 +499,6 @@ export class WalletManager {
             })
             .send(),
         ));
-    this.loadOperatorKeypair();
   }
 
   public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
@@ -535,27 +534,6 @@ export class WalletManager {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private loadOperatorKeypair(): void {
-    try {
-      const keypairPath = this.resolveOperatorKeypairPath();
-      if (fs.existsSync(keypairPath)) {
-        const stats = fs.lstatSync(keypairPath);
-        const mode = stats.mode & 0o777;
-        if (!stats.isFile() || stats.isSymbolicLink())
-          throw new Error("Operator keypair must be a regular file, not a symlink");
-        if ((mode & 0o077) !== 0)
-          throw new Error(
-            `Operator keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
-          );
-        const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
-        this.operatorKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-        console.log(`Loaded operator keypair: ${this.operatorKeypair.publicKey.toBase58()}`);
-      }
-    } catch (error) {
-      console.error("Failed to load operator keypair:", error);
-    }
   }
 
   private resolveOperatorKeypairPath(): string {
@@ -681,7 +659,7 @@ export class WalletManager {
   // PUBLIC METHODS
   // ================================
 
-  public getKeyPair(index: bigint): Keypair {
+  public async getKeyPair(index: bigint): Promise<Keypair> {
     if (index === 0n) {
       throw new Error(
         "Missing Telegram id while deriving wallet – refusing to use fallback index 0",
@@ -694,12 +672,14 @@ export class WalletManager {
     }
 
     const seed = mnemonicToSeedSync(this.mnemonic, cacheKey);
-    const keypair = Keypair.fromSeed(seed.subarray(0, 32));
+    const keypair = await Keypair.fromSeed(seed.subarray(0, 32));
+    const concurrent = this.keypairCache.get(cacheKey);
+    if (concurrent) return concurrent;
     this.keypairCache.set(cacheKey, keypair);
     return keypair;
   }
 
-  public getOperatorKeypair(): Keypair {
+  public async getOperatorKeypair(): Promise<Keypair> {
     if (this.operatorKeypair) return this.operatorKeypair;
 
     const keypairPath = this.resolveOperatorKeypairPath();
@@ -717,7 +697,8 @@ export class WalletManager {
           `Operator keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
         );
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
-      this.operatorKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
+      const keypair = await Keypair.fromSecretKey(new Uint8Array(keypairData));
+      this.operatorKeypair ??= keypair;
       return this.operatorKeypair;
     } catch (error) {
       throw new Error(
@@ -727,8 +708,8 @@ export class WalletManager {
     }
   }
 
-  public getPublicKey(telegramId: bigint): PublicKey {
-    return this.getKeyPair(telegramId).publicKey;
+  public async getPublicKey(telegramId: bigint): Promise<PublicKey> {
+    return (await this.getKeyPair(telegramId)).publicKey;
   }
 
   public getConnection(): Connection {
@@ -762,7 +743,7 @@ export class WalletManager {
     }
 
     await this.throttle();
-    const pubkey = this.getPublicKey(telegramId);
+    const pubkey = await this.getPublicKey(telegramId);
 
     try {
       const lamports = Number(await this.connection.getBalance(pubkey));
@@ -790,7 +771,7 @@ export class WalletManager {
     options: { createIfMissing?: boolean; throwOnError?: boolean } = {},
   ): Promise<number> {
     await this.throttle();
-    const pubkey = this.getPublicKey(telegramId);
+    const pubkey = await this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
     const programDetection = await this.resolveTokenProgram(mintPubkey);
     if (!programDetection) {
@@ -809,7 +790,7 @@ export class WalletManager {
         if (options.createIfMissing) {
           console.log(`Attempting to create token account ${ata.toBase58()} automatically...`);
 
-          const payer = this.getKeyPair(telegramId);
+          const payer = await this.getKeyPair(telegramId);
 
           try {
             const refreshedDetection = await this.resolveTokenProgram(mintPubkey);
@@ -880,7 +861,7 @@ export class WalletManager {
     }
 
     await this.throttle();
-    const pubkey = this.getPublicKey(telegramId);
+    const pubkey = await this.getPublicKey(telegramId);
 
     const reportCensus = (census: WalletTokenCensus) => {
       options.onCensus?.(census);
@@ -1010,7 +991,7 @@ export class WalletManager {
     pageSize: number,
   ): Promise<WalletTokenBalancePage> {
     await this.throttle();
-    const owner = this.getPublicKey(telegramId);
+    const owner = await this.getPublicKey(telegramId);
     const [splAccounts, token2022Accounts] = await Promise.all([
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
@@ -2044,7 +2025,7 @@ export class WalletManager {
     tokenMint: string,
     onPrepared?: PreparedTransactionCallback,
   ): Promise<string> {
-    const fromKeypair = this.getKeyPair(fromTelegramId);
+    const fromKeypair = await this.getKeyPair(fromTelegramId);
     const tokenMintPubkey = new PublicKey(tokenMint);
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
@@ -2103,7 +2084,7 @@ export class WalletManager {
       throw new Error("Transfer amount must be a positive integer number of lamports");
     }
 
-    const fromKeypair = this.getKeyPair(fromTelegramId);
+    const fromKeypair = await this.getKeyPair(fromTelegramId);
     const transferInstruction = SystemProgram.transfer({
       fromPubkey: fromKeypair.publicKey,
       toPubkey: toAddress,
@@ -2140,7 +2121,7 @@ export class WalletManager {
     wsolLamportsSent: number;
     totalLamportsSent: number;
   }> {
-    const userKeypair = this.getKeyPair(telegramId);
+    const userKeypair = await this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId, {
       forceFresh: true,
@@ -2793,7 +2774,7 @@ export class WalletManager {
   }
 
   public async wrapSol(telegramId: bigint, amountLamports: number): Promise<string> {
-    const userKeypair = this.getKeyPair(telegramId);
+    const userKeypair = await this.getKeyPair(telegramId);
 
     return this.wrapSolWithKeypair({
       owner: userKeypair.publicKey,
@@ -2806,7 +2787,7 @@ export class WalletManager {
     telegramId: bigint,
     amountLamports?: number,
   ): Promise<{ signature: string; amountLamports: number }> {
-    const userKeypair = this.getKeyPair(telegramId);
+    const userKeypair = await this.getKeyPair(telegramId);
 
     const result = await this.unwrapSolWithKeypair({
       owner: userKeypair.publicKey,

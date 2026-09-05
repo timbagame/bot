@@ -199,6 +199,6 @@ export function makeCtxStub(options: CtxStubOptions = {}): any {
   return ctx;
 }
 
-export function randomGamePublicKey(): PublicKey {
-  return Keypair.generate().publicKey;
+export async function randomGamePublicKey(): Promise<PublicKey> {
+  return (await Keypair.generate()).publicKey;
 }

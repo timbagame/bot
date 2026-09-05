@@ -14,9 +14,9 @@ const createConnectionStub = () => ({
   getRecentPrioritizationFees: async () => [],
 });
 
-const createWalletStub = () => {
+const createWalletStub = async () => {
   const connection = createConnectionStub();
-  const admin = Keypair.generate();
+  const admin = await Keypair.generate();
   return {
     connection,
     getConnection: () => connection,
@@ -47,14 +47,14 @@ test("getUsernameFromTelegramId shares in-flight lookups", async () => {
       game: {
         fetch: async () => ({
           ticketAmount: 1,
-          creator: Keypair.generate().publicKey,
+          creator: (await Keypair.generate()).publicKey,
           totalAmount: 1,
         }),
       },
     },
   } as any;
 
-  const wallet = createWalletStub();
+  const wallet = await createWalletStub();
 
   const gameDb = {
     getGameParticipants: () => [] as string[],

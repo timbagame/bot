@@ -18,11 +18,11 @@ const readSecretKey = (resolvedPath: string): Uint8Array => {
   return Uint8Array.from(raw);
 };
 
-export const loadKeypairFromPath = (filePath: string): Keypair => {
+export const loadKeypairFromPath = async (filePath: string): Promise<Keypair> => {
   const resolvedPath = resolvePath(filePath);
   try {
     const secret = readSecretKey(resolvedPath);
-    return Keypair.fromSecretKey(secret);
+    return await Keypair.fromSecretKey(secret);
   } catch (error) {
     throw new Error(`Failed to load keypair from ${resolvedPath}: ${error}`, { cause: error });
   }
@@ -33,11 +33,11 @@ type OracleOperatorOptions = {
   description?: string;
 };
 
-export const resolveKeypairFromEnv = (
+export const resolveKeypairFromEnv = async (
   envVarName: string,
   fallback: Keypair,
   roleDescription: string,
-): Keypair => {
+): Promise<Keypair> => {
   const configuredPath = process.env[envVarName]?.trim();
   if (!configuredPath) {
     console.log(
@@ -47,7 +47,7 @@ export const resolveKeypairFromEnv = (
   }
 
   try {
-    const keypair = loadKeypairFromPath(configuredPath);
+    const keypair = await loadKeypairFromPath(configuredPath);
     console.log(
       `${roleDescription}: loaded ${keypair.publicKey.toBase58()} from ${configuredPath}`,
     );
@@ -59,13 +59,13 @@ export const resolveKeypairFromEnv = (
   }
 };
 
-export const resolveOracleOperatorKeypair = (
+export const resolveOracleOperatorKeypair = async (
   fallback: Keypair,
   options: OracleOperatorOptions = {},
-): Keypair => {
+): Promise<Keypair> => {
   const envVar = options.envVar ?? ORACLE_OPERATOR_KEYPAIR_ENV;
   const description = options.description ?? "Oracle operator keypair";
-  return resolveKeypairFromEnv(envVar, fallback, description);
+  return await resolveKeypairFromEnv(envVar, fallback, description);
 };
 
 export const uniqueSigners = <T extends SignerLike>(...signers: (T | null | undefined)[]): T[] => {

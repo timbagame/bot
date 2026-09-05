@@ -10,7 +10,7 @@ process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK ?? "http://localhost:889
 
 const botModulePromise = import("../src/bot");
 
-describe("Pending player events", () => {
+describe("Pending player events", async () => {
   let botModule: Awaited<typeof botModulePromise>;
   let originalSendMessage: any;
   let sendCalls: Array<{ chatId: number; text: string; options: any }>;
@@ -51,7 +51,7 @@ describe("Pending player events", () => {
     module.__test_resetGameDatabase?.();
   });
 
-  const baseGameKey = Keypair.generate().publicKey;
+  const baseGameKey = (await Keypair.generate()).publicKey;
 
   const makePlayerEvent = (player: PublicKey, slot: number, timestamp: number) =>
     ({
@@ -66,7 +66,7 @@ describe("Pending player events", () => {
 
   test("player join announcements escape display names", async () => {
     const target = { chatId: 77, messageId: 301 };
-    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+    const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
@@ -83,7 +83,7 @@ describe("Pending player events", () => {
 
   test("player join announcements show game type (coinflip)", async () => {
     const target = { chatId: 77, messageId: 301 };
-    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+    const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -110,7 +110,7 @@ describe("Pending player events", () => {
 
   test("player join announcements show game type (giveaway)", async () => {
     const target = { chatId: 77, messageId: 301 };
-    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+    const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -137,7 +137,7 @@ describe("Pending player events", () => {
 
   test("player join announcements are disabled above ticket threshold", async () => {
     const target = { chatId: 77, messageId: 301 };
-    const player = Keypair.generate().publicKey;
+    const player = (await Keypair.generate()).publicKey;
 
     botModule.__test_setJoinAnnouncementMaxTickets(1);
 
@@ -171,7 +171,7 @@ describe("Pending player events", () => {
     const isolatedModule = await import(`../src/bot?debounce-test=${Date.now()}`);
 
     const target = { chatId: 77, messageId: 301 };
-    const player = Keypair.generate().publicKey;
+    const player = (await Keypair.generate()).publicKey;
 
     isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
     isolatedModule.__test_setGameMessageUpdateDebounceMs(10);
@@ -222,7 +222,7 @@ describe("Pending player events", () => {
     const isolatedModule = await import(`../src/bot?rate-limit-test=${Date.now()}`);
 
     const target = { chatId: 77, messageId: 301 };
-    const player = Keypair.generate().publicKey;
+    const player = (await Keypair.generate()).publicKey;
 
     isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
     isolatedModule.__test_setGameMessageUpdateDebounceMs(1);
@@ -265,7 +265,7 @@ describe("Pending player events", () => {
 
   test("auto-join for game creator is not announced", async () => {
     const target = { chatId: 77, messageId: 301 };
-    const creatorKeypair = Keypair.generate();
+    const creatorKeypair = await Keypair.generate();
     const event = makePlayerEvent(creatorKeypair.publicKey, 5, 10);
 
     botModule.__test_setGameDatabase({
@@ -283,8 +283,8 @@ describe("Pending player events", () => {
 
   test("flushPendingPlayerEvents processes events enqueued mid-flush", async () => {
     const gameAddress = "GAME123";
-    const firstPlayer = Keypair.generate().publicKey;
-    const secondPlayer = Keypair.generate().publicKey;
+    const firstPlayer = (await Keypair.generate()).publicKey;
+    const secondPlayer = (await Keypair.generate()).publicKey;
 
     const names = new Map<string, string>([
       [firstPlayer.toBase58(), "First"],
@@ -344,7 +344,7 @@ describe("Pending player events", () => {
 
   test("pending events near age limit flush once target becomes available", async () => {
     const gameAddress = "BOUNDARY_GAME";
-    const player = Keypair.generate().publicKey;
+    const player = (await Keypair.generate()).publicKey;
     const names = new Map<string, string>([[player.toBase58(), "Boundary"]]);
 
     let targetReady = false;
@@ -421,7 +421,7 @@ describe("Pending player events", () => {
       } as any);
 
       botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
-        event: makePlayerEvent(Keypair.generate().publicKey, 3, 5),
+        event: makePlayerEvent((await Keypair.generate()).publicKey, 3, 5),
         eventName: "PlayerJoined",
         receivedAt: Date.now() - 20_000,
       });

@@ -11,7 +11,7 @@ import {
 import type { SwapStatRecord } from "../utils/transaction-history";
 
 export type WalletPositionsDeps = {
-  getWalletAddress: (telegramId: bigint) => string;
+  getWalletAddress: (telegramId: bigint) => string | Promise<string>;
   getHoldings: (telegramId: bigint) => Promise<TokenHolding[]>;
   getSwapsByWallet: (wallet: string) => SwapStatRecord[];
   fetchPricesUSD: (mints: string[]) => Promise<Record<string, number>>;
@@ -46,7 +46,7 @@ export async function loadWalletPositions(
   telegramId: bigint,
   deps: WalletPositionsDeps,
 ): Promise<TokenPosition[]> {
-  const walletAddress = deps.getWalletAddress(telegramId);
+  const walletAddress = await deps.getWalletAddress(telegramId);
   return loadTokenPositionsForWallet({
     walletAddress,
     getHoldings: () => deps.getHoldings(telegramId),

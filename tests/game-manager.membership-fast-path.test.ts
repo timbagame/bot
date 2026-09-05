@@ -10,8 +10,8 @@ describe("GameManager membership checks", () => {
   test("uses DB membership fast-path without fetching the on-chain game account", async () => {
     reset();
 
-    const gamePda = Keypair.generate().publicKey;
-    const playerPubkey = Keypair.generate().publicKey;
+    const gamePda = (await Keypair.generate()).publicKey;
+    const playerPubkey = (await Keypair.generate()).publicKey;
     const telegramId = "123";
 
     const program = {

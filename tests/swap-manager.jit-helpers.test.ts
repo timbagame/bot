@@ -45,7 +45,7 @@ const createSwapManager = (
 
 describe("SwapManager JIT helpers", () => {
   test("performJustInTimeSolSwap keeps provider errors out of user messages", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, null);
     const manager = createSwapManager(connection, wallet);
@@ -79,7 +79,7 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("computeTargets fails when no tokens are available", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, null);
     const manager = createSwapManager(connection, wallet);
@@ -96,7 +96,7 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("probePriceAndSizeInput surfaces zero-liquidity probes", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, null);
     const manager = createSwapManager(connection, wallet);
@@ -137,7 +137,7 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("attemptWsolUnwrap unwraps without admin lending", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, null);
     const manager = createSwapManager(connection, wallet);
@@ -164,8 +164,8 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("attemptWsolUnwrap requests admin lending when needed", async () => {
-    const user = Keypair.generate();
-    const admin = Keypair.generate();
+    const user = await Keypair.generate();
+    const admin = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, admin);
     const manager = createSwapManager(connection, wallet);
@@ -191,7 +191,7 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("attemptJupiterSwap executes when probe succeeds", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, null);
     const manager = createSwapManager(connection, wallet);
@@ -241,9 +241,9 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("probePriceAndSizeInput recalculates fee using sized swap input", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const connection = createConnection(0);
-    const wallet = createWallet(connection, Keypair.generate());
+    const wallet = createWallet(connection, await Keypair.generate());
     const manager = createSwapManager(connection, wallet);
 
     const integrator = {
@@ -303,7 +303,7 @@ describe("SwapManager JIT helpers", () => {
   });
 
   test("buildJitIntegrator calculates dynamic fee based on shortfall vs trade value", async () => {
-    const admin = Keypair.generate();
+    const admin = await Keypair.generate();
     const connection = createConnection(0);
     const wallet = createWallet(connection, admin);
     const manager = createSwapManager(connection, wallet);

@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { Keypair } from "#solana";
 import { buildGameFundsContext } from "../src/utils/contract-adapter";
 
-describe("contract account adapter", () => {
-  const tokenMint = Keypair.generate().publicKey;
+describe("contract account adapter", async () => {
+  const tokenMint = (await Keypair.generate()).publicKey;
   const accounts = {
-    tokenProgram: Keypair.generate().publicKey,
-    gameToken: Keypair.generate().publicKey,
-    gameVault: Keypair.generate().publicKey,
-    gameVaultTokenAccount: Keypair.generate().publicKey,
+    tokenProgram: (await Keypair.generate()).publicKey,
+    gameToken: (await Keypair.generate()).publicKey,
+    gameVault: (await Keypair.generate()).publicKey,
+    gameVaultTokenAccount: (await Keypair.generate()).publicKey,
   };
 
   test("builds the v0.2.0 GameToken context", () => {

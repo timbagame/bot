@@ -5,13 +5,13 @@ import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { WSOL_MINT } from "../src/utils/token-registry";
 
-describe("SwapManager.getQuote SOL/WSOL handling", () => {
+describe("SwapManager.getQuote SOL/WSOL handling", async () => {
   const connection = new Connection("http://localhost:8899", "confirmed");
   const wallet = WalletManager.createForTest(
     "test walk nut penalty hip pave soap entry language right filter choice",
     { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
   );
-  const user = Keypair.generate();
+  const user = await Keypair.generate();
   const baseRequest = {
     amount: "123000000",
     inputDecimals: 9,

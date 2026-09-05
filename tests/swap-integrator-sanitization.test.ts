@@ -110,7 +110,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   const service = new SwapService(wallet as any, stubBackend);
 
   test("throws clear error when swap amount exceeds balance (avoid BigInt underflow)", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
     const quote = buildQuote("So11111111111111111111111111111111111111112", 1000, 2);
@@ -123,7 +123,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("requires fee buffer even when wrap quotes omit provider details", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const amountLamports = 1_000_000;
     const restoreConn = stubWalletConnection(amountLamports + USER_SOL_MAX_BUFFER_LAMPORTS - 1);
 
@@ -142,7 +142,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("skips wrap rent reserve when WSOL ATA already exists", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const amountLamports = 1_000_000;
     const restoreConn = stubWalletConnection(amountLamports + USER_SOL_MAX_BUFFER_LAMPORTS);
 
@@ -162,7 +162,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("adds wrap rent reserve to buffer when provider quote is missing", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const wrapRentLamports = 2_000_000;
     const amountLamports = 500_000;
 
@@ -201,7 +201,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("supplements wrap provider quote without rent using fee budget reserve", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const wrapRentLamports = 2_200_000;
     const amountLamports = 500_000;
 
@@ -241,7 +241,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("allows unwrap providers when SOL balance is below WSOL input amount", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const amountLamports = 2_000_000;
     const restoreConn = stubWalletConnection(USER_SOL_MAX_BUFFER_LAMPORTS + 50_000);
 
@@ -258,7 +258,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("includes ATA rent when partial unwrap would recreate WSOL account", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const unwrapLamports = 1_000_000;
     const existingWsolLamports = 3_000_000;
     const wrapRentLamports = 2_039_280;
@@ -303,7 +303,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("uses WSOL rent rebate to satisfy partial unwrap buffer when SOL is short", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const unwrapLamports = 1_000_000;
     const existingWsolLamports = 3_000_000;
     const wrapRentLamports = 2_039_280;
@@ -349,7 +349,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("applies rent rebate when fully unwrapping WSOL with no SOL on hand", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const unwrapLamports = 3_000_000;
     const wrapRentLamports = 2_039_280;
 
@@ -373,7 +373,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("skips buffer enforcement for admin payer routes", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
     const quote = {
@@ -388,7 +388,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("enforces buffer for wrap providers even when integrator payer is admin", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
     const quote = {
@@ -407,7 +407,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("returns required buffer shortfall for admin unwrap providers", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
     const quote = {
@@ -426,7 +426,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("enforces USER_SOL_MAX_BUFFER when provider quote lacks rent details", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(USER_SOL_MAX_BUFFER_LAMPORTS);
 
     const quote = {
@@ -445,7 +445,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 
   test("aligns rent-heavy enforcement with route cost helper", async () => {
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const routeLamports = 2_400_000;
     const amountLamports = 500_000;
     const quote = buildQuote(
@@ -472,8 +472,8 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   });
 });
 
-describe("SwapService.execute", () => {
-  const user = Keypair.generate();
+describe("SwapService.execute", async () => {
+  const user = await Keypair.generate();
   const backend: SwapBackend = {
     getQuote: vi.fn(),
     executeJupiterSwap: vi.fn().mockResolvedValue("jupiter-tx"),
@@ -664,7 +664,7 @@ describe("buildAdminIntegratorConfig", () => {
     const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockResolvedValue(0);
     const defaultSpy = vi.spyOn(feeBudget, "getDefaultWrapFeeBufferLamports").mockReturnValue(0);
     const restoreConn = stubWalletConnection(1_000_000_000);
-    const restoreAdmin = stubOperatorKeypair();
+    const restoreAdmin = await stubOperatorKeypair();
 
     const configPromise = buildAdminIntegratorConfig({
       referralConfig: {
@@ -689,7 +689,7 @@ describe("buildAdminIntegratorConfig", () => {
   test("builds admin config when wrap buffer refresh fails but fallback exists", async () => {
     __test_setSolWrapRentReserveLamports(0);
     const restoreConn = stubWalletConnection(1_000_000_000);
-    const restoreAdmin = stubOperatorKeypair();
+    const restoreAdmin = await stubOperatorKeypair();
     const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
     const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockResolvedValue(0);
     const defaultSpy = vi

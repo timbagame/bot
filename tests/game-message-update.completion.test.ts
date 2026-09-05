@@ -39,8 +39,8 @@ describe("Game message updates during completion", () => {
   });
 
   test("queued active updates cannot override completed message", async () => {
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const winnerAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const winnerAddress = (await Keypair.generate()).publicKey.toBase58();
     const target = { chatId: 707, messageId: 808 };
     const gameRecord = {
       game_address: gameAddress,
@@ -49,7 +49,7 @@ describe("Game message updates during completion", () => {
       status: "active",
       amount: 42_000,
       token_ticker: "WIN",
-      token_mint: Keypair.generate().publicKey.toBase58(),
+      token_mint: (await Keypair.generate()).publicKey.toBase58(),
     } as any;
 
     const gameDbStub = {
@@ -104,7 +104,7 @@ describe("Game message updates during completion", () => {
 
     const joinEvent = {
       gameKey: new PublicKey(gameAddress),
-      player: Keypair.generate().publicKey,
+      player: (await Keypair.generate()).publicKey,
       totalAmount: new BN(gameRecord.amount),
       ticketsCount: 1,
       ticketIndex: 0,
@@ -133,8 +133,8 @@ describe("Game message updates during completion", () => {
   });
 
   test("a later completion signature enriches an already-completed message", async () => {
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const winnerAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const winnerAddress = (await Keypair.generate()).publicKey.toBase58();
     const gameRecord = {
       game_address: gameAddress,
       chat_id: 707,
@@ -143,7 +143,7 @@ describe("Game message updates during completion", () => {
       winner_address: winnerAddress,
       amount: 42_000,
       token_ticker: "WIN",
-      token_mint: Keypair.generate().publicKey.toBase58(),
+      token_mint: (await Keypair.generate()).publicKey.toBase58(),
     } as any;
     let completeGameCalls = 0;
 
@@ -193,8 +193,8 @@ describe("Game message updates during completion", () => {
   });
 
   test("completion updates a web-created game through its stored message target", async () => {
-    const gameAddress = Keypair.generate().publicKey.toBase58();
-    const winnerAddress = Keypair.generate().publicKey.toBase58();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const winnerAddress = (await Keypair.generate()).publicKey.toBase58();
     const target = { chatId: 707, messageId: 808 };
     const gameRecord = {
       game_address: gameAddress,

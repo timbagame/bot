@@ -14,9 +14,9 @@ const createConnectionStub = () => ({
   getRecentPrioritizationFees: async () => [],
 });
 
-const createWalletStub = () => {
+const createWalletStub = async () => {
   const connection = createConnectionStub();
-  const admin = Keypair.generate();
+  const admin = await Keypair.generate();
   return {
     connection,
     getConnection: () => connection,
@@ -47,14 +47,14 @@ test("getCompletedGameInfo escapes token ticker to prevent HTML injection", asyn
       game: {
         fetch: async () => ({
           ticketAmount: 100,
-          creator: Keypair.generate().publicKey,
+          creator: (await Keypair.generate()).publicKey,
           totalAmount: 100,
         }),
       },
     },
   } as any;
 
-  const wallet = createWalletStub();
+  const wallet = await createWalletStub();
 
   const gameDb = {
     getGameParticipants: () => [] as string[],
@@ -78,7 +78,7 @@ test("getCompletedGameInfo escapes token ticker to prevent HTML injection", asyn
   } as any;
 
   const maliciousTicker = "<script>alert(1)</script>";
-  const gameAddress = Keypair.generate().publicKey.toBase58();
+  const gameAddress = (await Keypair.generate()).publicKey.toBase58();
 
   const output = await gm.getCompletedGameInfo(ctx, {
     creator_telegram_id: "123",

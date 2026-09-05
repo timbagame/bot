@@ -6,8 +6,10 @@ import { REFERRAL_PROGRAM_ID, ReferralProvider } from "../src/utils/referral-cli
 const REFERRAL_ACCOUNT_DISCRIMINATOR = Buffer.from([237, 162, 80, 78, 196, 233, 91, 2]);
 const PROJECT_DISCRIMINATOR = Buffer.from([205, 168, 189, 202, 181, 247, 142, 19]);
 
-const accountInfo = (owner: ReturnType<typeof Keypair.generate>["publicKey"], data: Uint8Array) =>
-  ({ data, executable: false, lamports: 1n, owner, rentEpoch: 0n }) as any;
+const accountInfo = (
+  owner: Awaited<ReturnType<typeof Keypair.generate>>["publicKey"],
+  data: Uint8Array,
+) => ({ data, executable: false, lamports: 1n, owner, rentEpoch: 0n }) as any;
 
 const referralAccountData = (partner: PublicKey, project: PublicKey): Buffer => {
   const data = Buffer.alloc(72);
@@ -27,14 +29,14 @@ const projectData = (base: PublicKey, admin: PublicKey): Buffer => {
 
 describe("Kit Jupiter referral client", () => {
   test("builds the create-admin-account and claim-v2 instructions", async () => {
-    const payer = Keypair.generate().publicKey;
-    const referralAddress = Keypair.generate().publicKey;
-    const partner = Keypair.generate().publicKey;
-    const projectAddress = Keypair.generate().publicKey;
-    const projectBase = Keypair.generate().publicKey;
-    const projectAdmin = Keypair.generate().publicKey;
-    const referralTokenAddress = Keypair.generate().publicKey;
-    const mint = Keypair.generate().publicKey;
+    const payer = (await Keypair.generate()).publicKey;
+    const referralAddress = (await Keypair.generate()).publicKey;
+    const partner = (await Keypair.generate()).publicKey;
+    const projectAddress = (await Keypair.generate()).publicKey;
+    const projectBase = (await Keypair.generate()).publicKey;
+    const projectAdmin = (await Keypair.generate()).publicKey;
+    const referralTokenAddress = (await Keypair.generate()).publicKey;
+    const mint = (await Keypair.generate()).publicKey;
 
     const referralData = referralAccountData(partner, projectAddress);
     const projectAccountData = projectData(projectBase, projectAdmin);
@@ -70,7 +72,7 @@ describe("Kit Jupiter referral client", () => {
           : [],
       }),
       getLatestBlockhash: async () => ({
-        blockhash: Keypair.generate().publicKey.toBase58(),
+        blockhash: (await Keypair.generate()).publicKey.toBase58(),
         lastValidBlockHeight: 1n,
       }),
       getAddressLookupTable: async () => ({ value: null }),
@@ -99,24 +101,26 @@ describe("Kit Jupiter referral client", () => {
   });
 
   test("batches four token claims within the transaction size limit", async () => {
-    const payer = Keypair.generate().publicKey;
-    const referralAddress = Keypair.generate().publicKey;
-    const partner = Keypair.generate().publicKey;
-    const projectAddress = Keypair.generate().publicKey;
-    const projectBase = Keypair.generate().publicKey;
-    const projectAdmin = Keypair.generate().publicKey;
+    const payer = (await Keypair.generate()).publicKey;
+    const referralAddress = (await Keypair.generate()).publicKey;
+    const partner = (await Keypair.generate()).publicKey;
+    const projectAddress = (await Keypair.generate()).publicKey;
+    const projectBase = (await Keypair.generate()).publicKey;
+    const projectAdmin = (await Keypair.generate()).publicKey;
     const referralData = referralAccountData(partner, projectAddress);
     const projectAccountData = projectData(projectBase, projectAdmin);
-    const tokenAccounts = Array.from({ length: 5 }, () => {
-      const pubkey = Keypair.generate().publicKey;
-      const mint = Keypair.generate().publicKey;
-      const data = Buffer.alloc(AccountLayout.span);
-      AccountLayout.encode(
-        { mint, owner: referralAddress, amount: 10n, state: AccountState.Initialized },
-        data,
-      );
-      return { pubkey, account: accountInfo(TOKEN_PROGRAM_ID, data) };
-    });
+    const tokenAccounts = await Promise.all(
+      Array.from({ length: 5 }, async () => {
+        const pubkey = (await Keypair.generate()).publicKey;
+        const mint = (await Keypair.generate()).publicKey;
+        const data = Buffer.alloc(AccountLayout.span);
+        AccountLayout.encode(
+          { mint, owner: referralAddress, amount: 10n, state: AccountState.Initialized },
+          data,
+        );
+        return { pubkey, account: accountInfo(TOKEN_PROGRAM_ID, data) };
+      }),
+    );
     const connection = {
       getAccountInfo: async (address: typeof referralAddress) => {
         if (address.equals(referralAddress)) return accountInfo(REFERRAL_PROGRAM_ID, referralData);
@@ -129,7 +133,7 @@ describe("Kit Jupiter referral client", () => {
         filter: { programId: typeof TOKEN_PROGRAM_ID },
       ) => ({ value: filter.programId.equals(TOKEN_PROGRAM_ID) ? tokenAccounts : [] }),
       getLatestBlockhash: async () => ({
-        blockhash: Keypair.generate().publicKey.toBase58(),
+        blockhash: (await Keypair.generate()).publicKey.toBase58(),
         lastValidBlockHeight: 1n,
       }),
       getAddressLookupTable: async () => ({ value: null }),
@@ -146,23 +150,23 @@ describe("Kit Jupiter referral client", () => {
   });
 
   test("rejects a referral account with the wrong discriminator", async () => {
-    const referralAddress = Keypair.generate().publicKey;
+    const referralAddress = (await Keypair.generate()).publicKey;
     const connection = {
       getAccountInfo: async () => accountInfo(REFERRAL_PROGRAM_ID, Buffer.alloc(72)),
     } as unknown as Connection;
 
     await expect(
       new ReferralProvider(connection).claimAllV2({
-        payerPubKey: Keypair.generate().publicKey,
+        payerPubKey: (await Keypair.generate()).publicKey,
         referralAccountPubKey: referralAddress,
       }),
     ).rejects.toThrow("Invalid Jupiter referral account");
   });
 
   test("rejects a project account with the wrong discriminator", async () => {
-    const referralAddress = Keypair.generate().publicKey;
-    const projectAddress = Keypair.generate().publicKey;
-    const referralData = referralAccountData(Keypair.generate().publicKey, projectAddress);
+    const referralAddress = (await Keypair.generate()).publicKey;
+    const projectAddress = (await Keypair.generate()).publicKey;
+    const referralData = referralAccountData((await Keypair.generate()).publicKey, projectAddress);
     const connection = {
       getAccountInfo: async (address: typeof referralAddress) =>
         accountInfo(
@@ -173,7 +177,7 @@ describe("Kit Jupiter referral client", () => {
 
     await expect(
       new ReferralProvider(connection).claimAllV2({
-        payerPubKey: Keypair.generate().publicKey,
+        payerPubKey: (await Keypair.generate()).publicKey,
         referralAccountPubKey: referralAddress,
       }),
     ).rejects.toThrow("Invalid Jupiter referral project");

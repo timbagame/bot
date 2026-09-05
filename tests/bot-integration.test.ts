@@ -120,8 +120,8 @@ describe("Bot Integration Tests", () => {
 
   describe("Wallet Integration", () => {
     test("should generate consistent keypairs from mnemonic", async () => {
-      const keypair1 = wallet.getKeyPair(123456789n);
-      const keypair2 = wallet.getKeyPair(123456789n);
+      const keypair1 = await wallet.getKeyPair(123456789n);
+      const keypair2 = await wallet.getKeyPair(123456789n);
 
       // Same seed should generate same keypair
       expect(keypair1.publicKey.toBase58()).toBe(keypair2.publicKey.toBase58());
@@ -226,7 +226,7 @@ describe("Bot Integration Tests", () => {
 
       // Test concurrent keypair generation
       const keypairs = await Promise.all(
-        userIds.map((userId) => Promise.resolve(wallet.getKeyPair(userId))),
+        userIds.map(async (userId) => Promise.resolve(await wallet.getKeyPair(userId))),
       );
 
       const duration = Date.now() - startTime;

@@ -16,7 +16,7 @@ const MNEMONIC =
 
 test("cancelGameWithCreator returns true on successful close", async () => {
   resetGM();
-  const creator = Keypair.generate();
+  const creator = await Keypair.generate();
   const connection = {
     getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
     getAccountInfoAndContext: async () => ({ value: null }),
@@ -42,10 +42,10 @@ test("cancelGameWithCreator returns true on successful close", async () => {
     getConnection: () => connection,
   } as any;
   const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
-  const tokenMint = Keypair.generate().publicKey;
-  const gameVault = Keypair.generate().publicKey;
-  const gameVaultTokenAccount = Keypair.generate().publicKey;
-  const creatorTokenAccount = Keypair.generate().publicKey;
+  const tokenMint = (await Keypair.generate()).publicKey;
+  const gameVault = (await Keypair.generate()).publicKey;
+  const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+  const creatorTokenAccount = (await Keypair.generate()).publicKey;
   (gm as any).resolveGameVaultAccounts = async (mint: PublicKey) => {
     expect(mint.toBase58()).toBe(tokenMint.toBase58());
     return {
@@ -160,19 +160,19 @@ test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on 
   );
 
   const creatorTelegramId = "777";
-  const creatorKeypair = wallet.getKeyPair(BigInt(creatorTelegramId));
+  const creatorKeypair = await wallet.getKeyPair(BigInt(creatorTelegramId));
 
   (gm as any).resolveGameVaultAccounts = async () => ({
     tokenProgram: TOKEN_PROGRAM_ID,
-    gameVault: Keypair.generate().publicKey,
-    gameVaultTokenAccount: Keypair.generate().publicKey,
+    gameVault: (await Keypair.generate()).publicKey,
+    gameVaultTokenAccount: (await Keypair.generate()).publicKey,
   });
-  (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+  (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
 
   const result = await (gm as any).closeGameWithCreatorAuthority({
     gamePda: new PublicKey("BPFLoader2111111111111111111111111111111111"),
     gameAccount: {
-      tokenMint: Keypair.generate().publicKey.toBase58(),
+      tokenMint: (await Keypair.generate()).publicKey.toBase58(),
       creator: creatorKeypair.publicKey.toBase58(),
     },
     creatorTelegramId,
@@ -188,7 +188,7 @@ test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on 
 test("closeGameWithCreatorAuthority resubmits when helper is unavailable", async () => {
   resetGM();
 
-  const creator = Keypair.generate();
+  const creator = await Keypair.generate();
   const connectionStub = {
     getSignatureStatuses: async () => ({ value: [null] }),
     getSignatureStatus: async () => ({ value: null }),
@@ -233,15 +233,15 @@ test("closeGameWithCreatorAuthority resubmits when helper is unavailable", async
 
   (gm as any).resolveGameVaultAccounts = async () => ({
     tokenProgram: TOKEN_PROGRAM_ID,
-    gameVault: Keypair.generate().publicKey,
-    gameVaultTokenAccount: Keypair.generate().publicKey,
+    gameVault: (await Keypair.generate()).publicKey,
+    gameVaultTokenAccount: (await Keypair.generate()).publicKey,
   });
-  (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+  (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
 
   const result = await (gm as any).closeGameWithCreatorAuthority({
     gamePda: new PublicKey("BPFLoader3211111111111111111111111111111111"),
     gameAccount: {
-      tokenMint: Keypair.generate().publicKey.toBase58(),
+      tokenMint: (await Keypair.generate()).publicKey.toBase58(),
       creator: creator.publicKey.toBase58(),
     },
     creatorTelegramId: "123",

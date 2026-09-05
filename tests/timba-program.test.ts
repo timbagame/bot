@@ -14,21 +14,21 @@ import { contractVersion } from "../src/utils/contract-idl";
 import { createTimbaProgram } from "../src/utils/timba-program";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from "#token";
 
-const publicKey = () => Keypair.generate().publicKey;
+const publicKey = async () => (await Keypair.generate()).publicKey;
 
 describe(`Timba ${contractVersion} generated client adapter`, () => {
   test("builds join_game with the selected generated client and account layout", async () => {
     const version030 = contractVersion === "0.3.0";
-    const game = publicKey();
-    const player = publicKey();
-    const oracleOperator = publicKey();
-    const tokenMint = publicKey();
-    const gameVault = publicKey();
-    const gameVaultTokenAccount = publicKey();
-    const gameToken = publicKey();
-    const gameTokenAccount = publicKey();
-    const playerTokenAccount = publicKey();
-    const oracle = publicKey();
+    const game = await publicKey();
+    const player = await publicKey();
+    const oracleOperator = await publicKey();
+    const tokenMint = await publicKey();
+    const gameVault = await publicKey();
+    const gameVaultTokenAccount = await publicKey();
+    const gameToken = await publicKey();
+    const gameTokenAccount = await publicKey();
+    const playerTokenAccount = await publicKey();
+    const oracle = await publicKey();
     const program = createTimbaProgram({} as Connection);
 
     const instruction = await program.methods
@@ -106,8 +106,8 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
     const programId = new PublicKey(
       version030 ? TIMBA_PROGRAM_ADDRESS_V030 : TIMBA_PROGRAM_ADDRESS_V020,
     );
-    const address = publicKey();
-    const operator = publicKey();
+    const address = await publicKey();
+    const operator = await publicKey();
     const encoded = (version030 ? getOracleEncoderV030() : getOracleEncoderV020()).encode({
       operator: operator.toBase58(),
       feePercentage: 1,
@@ -133,7 +133,7 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
     expect(oracle.operator.toBase58()).toBe(operator.toBase58());
     expect(oracle.minTimeout).toBe(60n);
 
-    owner = publicKey();
+    owner = await publicKey();
     await expect(program.account.oracle.fetch(address)).rejects.toThrow("is not owned");
 
     owner = programId;

@@ -9,12 +9,12 @@ function resetGM() {
 
 describe("GameManager.getUserGamesHistory", () => {
   let gm: GameManager;
-  let player: ReturnType<typeof Keypair.generate>;
+  let player: Awaited<ReturnType<typeof Keypair.generate>>;
   let playerPkStr: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetGM();
-    player = Keypair.generate();
+    player = await Keypair.generate();
     playerPkStr = player.publicKey.toBase58();
 
     const program = { account: { game: { fetch: async () => ({}) } } } as any;
@@ -49,7 +49,7 @@ describe("GameManager.getUserGamesHistory", () => {
         },
         {
           game_address: "lostGame",
-          winner_address: Keypair.generate().publicKey.toBase58(),
+          winner_address: (await Keypair.generate()).publicKey.toBase58(),
           creator_telegram_id: "888",
           completed_at: Date.now() - 3000,
           amount: 154_000_000,

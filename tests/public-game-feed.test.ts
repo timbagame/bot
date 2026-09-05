@@ -11,9 +11,9 @@ import {
   __test_setSleepImplementation,
 } from "../src/bot";
 
-describe("global public game feed", () => {
-  const gameAddress = Keypair.generate().publicKey;
-  const creator = Keypair.generate().publicKey;
+describe("global public game feed", async () => {
+  const gameAddress = (await Keypair.generate()).publicKey;
+  const creator = (await Keypair.generate()).publicKey;
   let publishedChatIds: number[];
 
   beforeEach(() => {

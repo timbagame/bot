@@ -115,7 +115,7 @@ describe("wallet menu cache guards", () => {
     module.__test_resetWalletRpcCacheTtlMs();
 
     await module.getCachedWalletData(1n);
-    module.clearWalletCache(1n);
+    await module.clearWalletCache(1n);
     await module.getCachedWalletData(1n);
 
     ensureBalanceCalled(state, 2);
@@ -176,7 +176,7 @@ describe("wallet menu cache guards", () => {
     let moduleRef: ReturnType<typeof createModule> | null = null;
     const { wallet } = createStubWallet({
       delayMs: 100,
-      beforeBalance: () => moduleRef?.clearWalletCache(11n),
+      beforeBalance: async () => await moduleRef?.clearWalletCache(11n),
     });
     const module = createModule(wallet);
     moduleRef = module;

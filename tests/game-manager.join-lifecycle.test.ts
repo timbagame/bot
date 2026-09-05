@@ -13,7 +13,7 @@ describe("GameManager join lifecycle", () => {
   test("joinGame records pending before confirming participant on-chain", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     let capturedJoinAccounts: any;
 
@@ -76,9 +76,9 @@ describe("GameManager join lifecycle", () => {
       probeCount += 1;
       return probeCount > 1;
     };
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const playerTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -127,7 +127,7 @@ describe("GameManager join lifecycle", () => {
   test("joinGame surfaces syncing error when on-chain confirmation is delayed", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     let capturedJoinAccounts: any;
 
@@ -186,9 +186,9 @@ describe("GameManager join lifecycle", () => {
     (gm as any).confirmTransactionWithRecovery = async () => "SIG321";
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => false;
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const playerTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -227,7 +227,7 @@ describe("GameManager join lifecycle", () => {
   test("joinGame asks oracle to complete when verified join fills the game", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
     const gameAccounts = [
       {
@@ -302,9 +302,9 @@ describe("GameManager join lifecycle", () => {
       },
     };
 
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const playerTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,
       gameVault,
@@ -323,7 +323,7 @@ describe("GameManager join lifecycle", () => {
   test("verifyParticipantJoin promotes pending entry when player appears on-chain", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const program = { account: { game: { fetch: async () => ({}) } } } as any;
     const wallet = {} as any;
 
@@ -354,8 +354,8 @@ describe("GameManager join lifecycle", () => {
     const wallet = {} as any;
 
     const now = Date.now();
-    const confirmedPubkey = Keypair.generate().publicKey.toBase58();
-    const stalePubkey = Keypair.generate().publicKey.toBase58();
+    const confirmedPubkey = (await Keypair.generate()).publicKey.toBase58();
+    const stalePubkey = (await Keypair.generate()).publicKey.toBase58();
     const saveCalls: any[] = [];
     const removed: any[] = [];
 
@@ -415,7 +415,7 @@ describe("GameManager join lifecycle", () => {
   test("joinGame returns completion message when on-chain account is missing", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const sendSignatures: string[] = [];
 
     const program = {
@@ -479,7 +479,7 @@ describe("GameManager join lifecycle", () => {
   test("joinGame retries the transaction once after a confirmation timeout", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
     const tokenMint = new PublicKey("So11111111111111111111111111111111111111112");
 
     const program = {
@@ -546,9 +546,9 @@ describe("GameManager join lifecycle", () => {
       performJustInTimeSolSwap: async () => ({ swapped: false }),
     };
 
-    const gameVault = Keypair.generate().publicKey;
-    const gameVaultTokenAccount = Keypair.generate().publicKey;
-    const playerTokenAccount = Keypair.generate().publicKey;
+    const gameVault = (await Keypair.generate()).publicKey;
+    const gameVaultTokenAccount = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
 
     (gm as any).resolveGameVaultAccounts = async () => ({
       tokenProgram: TOKEN_PROGRAM_ID,

@@ -411,7 +411,7 @@ describe("GameManager confirm/reload helpers", () => {
   });
 
   test("isPlayerInGame falls back to on-chain participant public keys", async () => {
-    const player = Keypair.generate();
+    const player = await Keypair.generate();
     const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
 
     const gameAccount: any = { participants: [] };

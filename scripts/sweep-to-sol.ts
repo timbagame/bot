@@ -26,7 +26,7 @@ async function getTotalTokenBalanceLamports(
 
 export async function sweepToSol(): Promise<void> {
   const wallet = WalletManager.getInstance(loadWalletMnemonic());
-  const operator = wallet.getOperatorKeypair();
+  const operator = await wallet.getOperatorKeypair();
   const connection = wallet.getConnection();
   const swapManager = new SwapManager(connection, wallet);
 

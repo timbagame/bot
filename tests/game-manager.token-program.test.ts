@@ -26,8 +26,8 @@ function createConnectionStub(owner: PublicKey) {
 describe("GameManager token program resolution", () => {
   test("resolveGameVaultAccounts rejects Token-2022 mints", async () => {
     resetGM();
-    const mint = Keypair.generate().publicKey;
-    const programId = Keypair.generate().publicKey;
+    const mint = (await Keypair.generate()).publicKey;
+    const programId = (await Keypair.generate()).publicKey;
     const connection = createConnectionStub(TOKEN_2022_PROGRAM_ID);
 
     const program = {
@@ -40,7 +40,7 @@ describe("GameManager token program resolution", () => {
     const wallet = {
       connection,
       getConnection: () => connection,
-      getKeyPair: (_: bigint) => Keypair.generate(),
+      getKeyPair: async (_: bigint) => await Keypair.generate(),
     } as any;
 
     const gm = GameManager.getInstance(program, wallet, {

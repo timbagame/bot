@@ -11,8 +11,8 @@ describe("GameManager joinPrivateGame resilience", () => {
   test("returns completion message when the on-chain game account is missing", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
-    const adminKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
+    const adminKp = await Keypair.generate();
     let sendCount = 0;
 
     const program = {
@@ -67,15 +67,17 @@ describe("GameManager joinPrivateGame resilience", () => {
   test("retries once after a confirmation timeout before succeeding", async () => {
     resetGM();
 
-    const playerKp = Keypair.generate();
-    const adminKp = Keypair.generate();
+    const playerKp = await Keypair.generate();
+    const adminKp = await Keypair.generate();
     const sendHistory: string[] = [];
 
     const program = {
       account: {
         game: {
-          fetch: async () => ({ tokenMint: Keypair.generate().publicKey.toBase58() }),
-          fetchNullable: async () => ({ tokenMint: Keypair.generate().publicKey.toBase58() }),
+          fetch: async () => ({ tokenMint: (await Keypair.generate()).publicKey.toBase58() }),
+          fetchNullable: async () => ({
+            tokenMint: (await Keypair.generate()).publicKey.toBase58(),
+          }),
         },
       },
       methods: {

@@ -16,9 +16,9 @@ describe("test stubs helpers", () => {
     expect(wallet.getConnection).toBe(original);
   });
 
-  test("stubOperatorKeypair restores original keypair", () => {
+  test("stubOperatorKeypair restores original keypair", async () => {
     const original = (wallet as any).getOperatorKeypair;
-    const restore = stubOperatorKeypair();
+    const restore = await stubOperatorKeypair();
     restore();
     expect((wallet as any).getOperatorKeypair).toBe(original);
   });

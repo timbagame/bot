@@ -146,7 +146,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
 
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     connection.setOwner(owner);
 
     await connection.seedTokenAccount({
@@ -247,7 +247,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       },
     );
 
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     expectedAta = (
       await getAssociatedTokenAddress(mint, owner, false, TOKEN_2022_PROGRAM_ID)
     ).toBase58();
@@ -283,7 +283,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() },
     );
 
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     connection.setOwner(owner);
 
     const mint = new PublicKey("4Nd1mFatW4Kfo7oyi7T5C5x64K8jKe3SWP7WRHnS8svB");
@@ -336,7 +336,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       },
     );
 
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     connection.setOwner(owner);
 
     const splMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
@@ -383,7 +383,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
         timeNow: () => now,
       },
     );
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     connection.setOwner(owner);
 
     const heldAtaMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
@@ -451,7 +451,7 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       },
     );
 
-    const owner = wm.getPublicKey(1n);
+    const owner = await wm.getPublicKey(1n);
     const seenAccounts = new Set<string>();
     const discoveryFn = (wm as any).discoverAdditionalTokenAccounts.bind(wm);
     const discoveryMap = (wm as any).lastTokenDiscoveryByUser as Map<string, number>;

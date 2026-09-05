@@ -24,7 +24,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     const wallet = {} as any;
     const connection = {} as any;
     const sm = new SwapManager(connection, wallet);
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     (sm as any).jupiterClient.executeOrder = async () => {
       throw new Error("execute should not be called");
     };
@@ -38,7 +38,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     const wallet = {} as any;
     const connection = {} as any;
     const sm = new SwapManager(connection, wallet);
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const base64Tx = buildBase64Tx(user);
 
     (sm as any).jupiterClient.executeOrder = async () => ({
@@ -63,7 +63,7 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
     (sm as any).createTokenAccountsIfNeeded = async () => [];
     (sm as any).executeJupiterTransaction = async () => "SIG";
 
-    const user = Keypair.generate();
+    const user = await Keypair.generate();
     const message = new TransactionMessage({
       payerKey: user.publicKey,
       recentBlockhash: "11111111111111111111111111111111",
@@ -167,7 +167,7 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey,
+        (await Keypair.generate()).publicKey,
       ),
     ).resolves.toBeUndefined();
 
@@ -203,7 +203,7 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey,
+        (await Keypair.generate()).publicKey,
       ),
     ).rejects.toThrow(new RegExp(`${helperCosts.requiredLamports} lamports`));
   });
@@ -231,7 +231,7 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       (swapManager as any).ensureAdminCanCoverRoute(
         integrator,
         order,
-        Keypair.generate().publicKey,
+        (await Keypair.generate()).publicKey,
       ),
     ).rejects.toThrow(new RegExp(`${helperCosts.requiredLamports} lamports`));
   });
@@ -297,8 +297,8 @@ describe("SwapManager build fee account validation", () => {
   };
 
   test("accepts only a WSOL account owned by the configured referral account", async () => {
-    const feeAccount = Keypair.generate().publicKey;
-    const referralAccount = Keypair.generate().publicKey;
+    const feeAccount = (await Keypair.generate()).publicKey;
+    const referralAccount = (await Keypair.generate()).publicKey;
     const validInfo = makeTokenAccountInfo(
       new PublicKey("So11111111111111111111111111111111111111112"),
       referralAccount,
@@ -314,7 +314,10 @@ describe("SwapManager build fee account validation", () => {
 
     const invalidManager = new SwapManager(connection, {} as WalletManager);
     await expect(
-      (invalidManager as any).validateBuildFeeAccount(feeAccount, Keypair.generate().publicKey),
+      (invalidManager as any).validateBuildFeeAccount(
+        feeAccount,
+        (await Keypair.generate()).publicKey,
+      ),
     ).rejects.toThrow(/not owned by the configured referral account/);
   });
 });
