@@ -163,3 +163,9 @@ The bot includes comprehensive logging and monitoring:
 - Rate limiting on wallet operations
 - Input validation on all user commands
 - Secure oracle authority management
+
+## Cross-repository integration
+
+The shared local-validator suite lives in the sibling `operations/integration` directory. Run `bun run test:integration --web` from `operations`; see its README for pinned toolchains, candidate protocol packages and optional manual GitHub runs. Normal CI does not run the combined system suite or require a cross-repository credential.
+
+For alternate API endpoints, `TELEGRAM_API_ROOT` selects the Telegram API server, `JUPITER_PRICE_URL` selects the price endpoint, and `SOLANA_WS_ENDPOINT` optionally sets the WebSocket URL separately from the HTTP RPC endpoint. The integration runner supplies local values.

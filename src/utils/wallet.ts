@@ -472,7 +472,13 @@ export class WalletManager {
       this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
         commitment: "confirmed",
         connectionFactory: (endpoint, commitment) =>
-          new Connection(endpoint, { commitment, fetch: rebateAwareFetch }),
+          new Connection(endpoint, {
+            commitment,
+            fetch: rebateAwareFetch,
+            ...(process.env["SOLANA_WS_ENDPOINT"]
+              ? { wsEndpoint: process.env["SOLANA_WS_ENDPOINT"] }
+              : {}),
+          }),
         logger: console,
       });
       this.connection = this.rpcEndpointManager.getConnection();
@@ -2719,7 +2725,23 @@ export class WalletManager {
     const attempts = retryAttempts ?? MAX_RETRIES;
 
     return await retryWithBackoff(async () => {
-      return await this.connection.sendTransaction(tx, sendOptions);
+      try {
+        return await this.connection.sendTransaction(tx, sendOptions);
+      } catch (error) {
+        // Submission can succeed before its response is lost. Recover only when
+        // the exact signed transaction is confirmed successfully on-chain.
+        const bytes = tx.signatures?.[0];
+        if (bytes?.some((byte) => byte !== 0)) {
+          const preparedSignature = bs58.encode(bytes);
+          try {
+            if ((await this.getTransactionOutcome(preparedSignature)) === "confirmed")
+              return preparedSignature;
+          } catch {
+            /* Preserve the submission error if the status lookup also fails. */
+          }
+        }
+        throw error;
+      }
     }, attempts);
   }
 

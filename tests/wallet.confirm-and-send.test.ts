@@ -292,3 +292,52 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     expect(val).toBe(0);
   });
 });
+
+test("recovers a lost submission response only for the exact confirmed transaction", async () => {
+  let prepared = "";
+  let submitted = 0;
+  const wm = WalletManager.createForTest(MNEMONIC, {
+    connection: {
+      getLatestBlockhash: async () => ({
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 100,
+      }),
+      sendTransaction: async () => {
+        submitted++;
+        throw new Error("response lost");
+      },
+      getSignatureStatus: async (signature: string) => {
+        expect(signature).toBe(prepared);
+        return { value: { confirmationStatus: "confirmed", err: null } };
+      },
+    } as any,
+  });
+  const signature = await wm.sendTransaction([], [await Keypair.generate()], {
+    onPrepared: (s) => {
+      prepared = s;
+    },
+  });
+  expect(signature).toBe(prepared);
+  expect(submitted).toBe(1);
+});
+
+test.each([null, { confirmationStatus: "confirmed", err: { Custom: 1 } }])(
+  "does not turn an unknown or failed transaction into submission success: %j",
+  async (status) => {
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: {
+        getLatestBlockhash: async () => ({
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 100,
+        }),
+        sendTransaction: async () => {
+          throw new Error("response lost");
+        },
+        getSignatureStatus: async () => ({ value: status }),
+      } as any,
+    });
+    await expect(wm.sendTransaction([], [await Keypair.generate()])).rejects.toThrow(
+      "submission outcome is unknown",
+    );
+  },
+);
