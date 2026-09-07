@@ -9,6 +9,22 @@ beforeEach(() => {
   GameDatabase.resetForTesting();
 });
 
+test("saveGame is idempotent and preserves terminal state during hydration races", () => {
+  const db = GameDatabase.getInstance();
+
+  db.saveGame("race-game", "creator-wallet", 100, "coinflip", "mint", "TOK", 2, 2);
+  db.completeGame("race-game", "winner-wallet", 1234, 200);
+
+  db.saveGame("race-game", "creator-telegram", 100, "coinflip", "mint", "TOK", 2, 2, 999);
+
+  const game = db.getGame("race-game")!;
+  expect(game.creator_telegram_id).toBe("creator-telegram");
+  expect(game.chat_id).toBe(999);
+  expect(game.status).toBe("completed");
+  expect(game.winner_address).toBe("winner-wallet");
+  expect(game.completed_at).toBe(1234);
+});
+
 test("GameDatabase: CRUD for games, mappings, participants, and slot updates", () => {
   const db = GameDatabase.getInstance();
 

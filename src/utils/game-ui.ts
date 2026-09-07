@@ -11,6 +11,23 @@ export function buildConfirmedGameRecoveryMessage(gameAddress: string, signature
   );
 }
 
+export function buildGameStateUnavailableMessage(gameAddress: string, gameType: string): string {
+  const normalizedType = gameType.trim().toLowerCase();
+  const label =
+    normalizedType === "coinflip"
+      ? "Coinflip"
+      : normalizedType === "giveaway"
+        ? "Giveaway"
+        : "Game";
+
+  return (
+    `⏳ <b>${label} pending</b>\n` +
+    `Game: <code>${escapeHtml(gameAddress)}</code>\n` +
+    "The game was created, but its live on-chain state is temporarily unavailable. " +
+    "The bot will refresh this message automatically. Use Refresh to check again."
+  );
+}
+
 export function formatPlayerAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }

@@ -16,6 +16,7 @@ import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
+import { isMissingAccountError } from "./utils/account-errors";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
@@ -6456,10 +6457,10 @@ if (process.env.NODE_ENV !== "test") {
                   await processExpiredGame(game);
                 }
               } catch (error: any) {
-                const msg = (error as Error).message || "";
                 if (
-                  msg.includes("Account does not exist") ||
-                  msg.includes("Invalid account discriminator")
+                  isMissingAccountError(error) ||
+                  (error instanceof Error &&
+                    error.message.includes("Invalid account discriminator"))
                 ) {
                   await cleanupOrphanedGame(game.game_address);
                 } else {

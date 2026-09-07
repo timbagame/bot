@@ -61,6 +61,7 @@ import {
   TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
+import { isMissingAccountError } from "./account-errors";
 import { WSOL_MINT } from "./token-registry";
 import { resolveTokenMetadata } from "./token-metadata";
 import { detectTokenProgram, type TokenProgramDetection } from "./token-programs";
@@ -2824,7 +2825,7 @@ export class WalletManager {
   }
   public getFriendlyErrorMessage(error: any): string {
     const message = error?.message || String(error);
-    if (message.includes("Account does not exist")) {
+    if (isMissingAccountError(error)) {
       return "Game account not found or has expired.";
     }
     if (message.includes("insufficient funds")) {
