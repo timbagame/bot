@@ -153,6 +153,20 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   ): Promise<void> => {
     console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
 
+    let creationMessageInfo: { chatId: number; messageId: number } | null = null;
+
+    const deleteCreationMessage = async (): Promise<void> => {
+      if (!creationMessageInfo || !ctx.api?.deleteMessage) {
+        return;
+      }
+
+      try {
+        await ctx.api.deleteMessage(creationMessageInfo.chatId, creationMessageInfo.messageId);
+      } catch (deleteError) {
+        console.warn("Failed to delete game creation acknowledgement:", deleteError);
+      }
+    };
+
     try {
       const parsed = await createDeps.parseAmount(args, 1, ctx.chat?.id);
       if (!parsed.success) {
@@ -252,6 +266,14 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       const isFromDM = ctx.chat?.type === "private";
       const isPrivate = isFromDM ? false : resolveGamePrivacy(options.gameType, chatSettings);
 
+      const creationMessage = await ctx.reply("⏳ Creating game…");
+      if (creationMessage?.chat?.id != null && creationMessage?.message_id != null) {
+        creationMessageInfo = {
+          chatId: creationMessage.chat.id,
+          messageId: creationMessage.message_id,
+        };
+      }
+
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
         {
@@ -346,6 +368,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     } catch (error) {
       console.error(`Error in command-based ${options.gameType}:`, error);
       await ctx.reply(options.errorMessage);
+    } finally {
+      await deleteCreationMessage();
     }
   };
 

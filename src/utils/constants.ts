@@ -157,16 +157,17 @@ export const GAME_MESSAGE_UPDATE_DEBOUNCE_MS = parsePositiveDuration(
   5_000,
 );
 
-// Disable per-join announcements once a game grows beyond this ticket count.
-// Set to 0 to disable join announcements entirely.
+// Standalone per-join announcements are disabled by default because the game
+// message itself is updated with the latest participant count.
+// Set this above 0 only when explicitly opting into join announcements.
 export const JOIN_ANNOUNCEMENT_MAX_TICKETS = parseNonNegativeInteger(
   "JOIN_ANNOUNCEMENT_MAX_TICKETS",
-  50,
+  0,
 );
 
 // Default settings for per-chat join notification controls
 export const DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL = false; // By default, only origin chat receives join notifications
-export const DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE = 5; // Default rate limit per minute
+export const DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE = 0; // Disabled unless explicitly configured
 export const MAX_JOIN_NOTIFICATIONS_PER_MINUTE = 30; // Maximum allowed rate limit
 // ================================
 // DEFAULTS

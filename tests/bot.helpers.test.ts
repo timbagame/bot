@@ -776,15 +776,27 @@ describe("createGameViaCommand helper", () => {
       from: { id: 1, username: "alice", first_name: "Alice" } as any,
     });
     const calls = baseCtx.__calls;
+    const progressCalls: string[] = [];
+    let nextMessageId = 100;
 
     return {
       ...baseCtx,
       chat: { id: 42, type: "group" },
       from: { id: 1, username: "alice", first_name: "Alice" },
       reply: async (text: string) => {
-        calls.push(text);
+        if (text === "⏳ Creating game…") {
+          progressCalls.push(text);
+        } else {
+          calls.push(text);
+        }
+        return { chat: { id: 42 }, message_id: nextMessageId++ };
+      },
+      api: {
+        ...(baseCtx as any).api,
+        deleteMessage: async () => ({ ok: true }),
       },
       __calls: calls,
+      __progressCalls: progressCalls,
     };
   };
 
@@ -833,6 +845,7 @@ describe("createGameViaCommand helper", () => {
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
     expect(ctx.__calls.length).toBe(0);
+    expect(ctx.__progressCalls).toEqual(["⏳ Creating game…"]);
     expect(createCalls.length).toBe(1);
 
     const [

@@ -1406,6 +1406,19 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                     confirmMessageMissing = true;
                   }
                 }
+
+                if (!confirmMessageMissing) {
+                  try {
+                    await ctx.api.editMessageText(chatId, messageId, "⏳ Creating game…", {
+                      parse_mode: "HTML",
+                    });
+                  } catch (textError) {
+                    console.warn("Failed to set progress text before game creation:", textError);
+                    if (isMessageMissing(textError)) {
+                      confirmMessageMissing = true;
+                    }
+                  }
+                }
               }
 
               await safeAnswerCallbackQuery(ctx);
