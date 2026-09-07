@@ -81,6 +81,22 @@ describe("Bot Main Entry Point Tests", () => {
             command: "rain",
             description: "Create a first-come token faucet",
           },
+          {
+            command: "default",
+            description: "Configure chat defaults",
+          },
+          {
+            command: "config",
+            description: "Configure chat defaults",
+          },
+          {
+            command: "configs",
+            description: "Configure chat defaults",
+          },
+          {
+            command: "settings",
+            description: "Configure chat defaults",
+          },
         ]),
       );
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);

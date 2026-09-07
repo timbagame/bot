@@ -4042,8 +4042,8 @@ export const __test_clearTransactionCache = (): void => {
 // ================================
 
 registerCaseInsensitiveCommand(
-  "default",
-  "Configure the chat default token",
+  ["default", "config", "configs", "settings"],
+  "Configure chat defaults",
 )(async (ctx: Context) => {
   if (!ctx.from || !ctx.chat) return;
 
@@ -4086,7 +4086,7 @@ registerCaseInsensitiveCommand(
     "/gb - Shorthand for globalboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
+    "/default, /config, /configs, /settings - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -4097,7 +4097,7 @@ registerCaseInsensitiveCommand(
     "• Use USD in the token slot to auto-convert: /cf 12 USD",
     "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
     "• Works for tips/withdrawals too: /tip @user $10 WBTC or /withdraw &lt;addr&gt; 10 USD",
-    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default",
+    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default, /config, /configs, or /settings",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
