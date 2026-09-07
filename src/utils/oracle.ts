@@ -287,7 +287,13 @@ export class OracleClient {
       );
       return true;
     } catch (error) {
-      console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
+      // Completion is also driven by the Oracle event listener and fallback
+      // scanner. A wake-up request is only a best-effort nudge, so a timeout
+      // must not look like a game failure in Bot logs.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/timeout|aborted|abort/i.test(message)) {
+        console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
+      }
       return false;
     }
   }

@@ -50,3 +50,13 @@ Do not use `sudo` for rootless Podman. If the checkout path changes, update the 
 For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.
 
 Bot-specific database and wallet maintenance runs inside the container with `podman exec bot bun run service-admin <command>`. Contract configuration does not belong to the Bot service.
+
+Keep `faucets.sqlite` alongside the other Bot databases on the host. It stores
+claim reservations and transaction signatures used to reconcile payments after
+an ambiguous RPC response. Before the first restart after installing this
+Quadlet, if the host file does not already exist, copy the existing in-container
+database out if it exists:
+
+```bash
+podman cp bot:/app/faucets.sqlite ~/timba/bot/faucets.sqlite
+```

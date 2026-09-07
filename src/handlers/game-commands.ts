@@ -14,7 +14,6 @@ import type { ChatGameSettings, ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
 import type { GameSetupCopy } from "./game-setup";
 import { containsBalanceInfo } from "../utils/context-helpers";
-import { buildConfirmedGameRecoveryMessage } from "../utils/game-ui";
 
 export type CreateGameViaCommandOptions = {
   gameType: "coinflip" | "giveaway";
@@ -58,6 +57,10 @@ type CreateGameViaCommandDeps = {
     createGameMessage: (
       ...args: Parameters<GameManager["createGameMessage"]>
     ) => ReturnType<GameManager["createGameMessage"]>;
+    recoverPendingGameCreationByAddress?: (
+      ...args: Parameters<GameManager["recoverPendingGameCreationByAddress"]>
+    ) => ReturnType<GameManager["recoverPendingGameCreationByAddress"]>;
+    clearPendingGameCreation?: (gameAddress: string) => void;
   };
 };
 
@@ -150,29 +153,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   ): Promise<void> => {
     console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
 
-    let creationMessageInfo: { chatId: number; messageId: number } | null = null;
-
-    const deleteCreationMessage = async () => {
-      if (!creationMessageInfo || !ctx.api?.deleteMessage) {
-        return;
-      }
-
-      try {
-        await ctx.api.deleteMessage(creationMessageInfo.chatId, creationMessageInfo.messageId);
-      } catch (deleteError) {
-        console.warn("Failed to delete game creation acknowledgement:", deleteError);
-      }
-    };
-
     try {
-      const creationMessage = await ctx.reply("⏳ Creating game...");
-      if (creationMessage?.chat?.id != null && creationMessage?.message_id != null) {
-        creationMessageInfo = {
-          chatId: creationMessage.chat.id,
-          messageId: creationMessage.message_id,
-        };
-      }
-
       const parsed = await createDeps.parseAmount(args, 1, ctx.chat?.id);
       if (!parsed.success) {
         await ctx.reply(formatParseAmountError(parsed, options.usageMessage), {
@@ -292,13 +273,19 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       if (!gameResult.success) {
         if (gameResult.confirmedSignature && gameResult.gameAddress) {
-          await ctx.reply(
-            buildConfirmedGameRecoveryMessage(
-              gameResult.gameAddress,
-              gameResult.confirmedSignature,
-            ),
-            { parse_mode: "HTML" },
-          );
+          if (deps.gameManager.recoverPendingGameCreationByAddress && ctx.chat?.id != null) {
+            try {
+              await deps.gameManager.recoverPendingGameCreationByAddress(
+                ctx,
+                gameResult.gameAddress,
+              );
+            } catch (recoveryError) {
+              console.warn(
+                `Confirmed game setup will be retried in the background:`,
+                recoveryError,
+              );
+            }
+          }
           return;
         }
         const finalError = gameResult.error ?? "❌ Failed to create game";
@@ -328,22 +315,37 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         ? `@${ctx.from.username}`
         : ctx.from?.first_name || "Unknown";
 
-      await createDeps.gameManager.createGameMessage(
-        ctx,
-        gameResult.gameAddress!,
-        options.gameLabel,
-        parsedAmount.amount,
-        creatorUsername,
-        tokenTickerForGame,
-        "Active",
-        undefined,
-        { priceHint: parsedAmount.priceLookup },
-      );
+      let messageId: number;
+      try {
+        messageId = await createDeps.gameManager.createGameMessage(
+          ctx,
+          gameResult.gameAddress!,
+          options.gameLabel,
+          parsedAmount.amount,
+          creatorUsername,
+          tokenTickerForGame,
+          "Active",
+          undefined,
+          { priceHint: parsedAmount.priceLookup, reserveDelivery: true },
+        );
+      } catch (deliveryError) {
+        console.error(`Failed to deliver ${options.gameType} game message:`, deliveryError);
+        try {
+          await createDeps.gameManager.recoverPendingGameCreationByAddress?.(
+            ctx,
+            gameResult.gameAddress!,
+          );
+        } catch (recoveryError) {
+          console.warn("Confirmed game delivery will be retried in the background:", recoveryError);
+        }
+        return;
+      }
+      if (messageId !== 0) {
+        createDeps.gameManager.clearPendingGameCreation?.(gameResult.gameAddress!);
+      }
     } catch (error) {
       console.error(`Error in command-based ${options.gameType}:`, error);
       await ctx.reply(options.errorMessage);
-    } finally {
-      await deleteCreationMessage();
     }
   };
 
