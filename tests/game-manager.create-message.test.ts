@@ -162,4 +162,42 @@ describe("GameManager.createGameMessage", () => {
     const active = gm.getActiveGameMessages(addr)?.get(4);
     expect(active?.usesVideo).toBe(false);
   });
+
+  test("never sends a blank message when initial on-chain state is unavailable", async () => {
+    resetGM();
+    const program = {
+      account: {
+        game: {
+          fetch: async () => {
+            throw new Error("RPC unavailable");
+          },
+        },
+      },
+    } as any;
+    const gm = GameManager.getInstance(
+      program,
+      { formatTokenBalance: (n: number) => String(n) } as any,
+      {
+        saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
+      } as any,
+    );
+    const ctx = ctxStub();
+    const addr = new PublicKey("BPFLoader4111111111111111111111111111111111").toBase58();
+
+    await gm.createGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK",
+    );
+
+    const firstCall = (ctx as any).__calls[0];
+    const sentText = firstCall[0] === "text" ? firstCall[1] : firstCall[1].caption;
+    expect(sentText.trim().length).toBeGreaterThan(0);
+    expect(sentText).toContain("temporarily unavailable");
+    expect(sentText).not.toContain("Submit");
+  });
 });

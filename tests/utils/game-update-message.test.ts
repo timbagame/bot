@@ -68,4 +68,35 @@ describe("GameManager.updateGameMessage", () => {
       expect.objectContaining({ chatId }),
     );
   });
+
+  test("keeps the existing message when active state is temporarily unavailable", async () => {
+    const { manager, managerAny } = makeGameManager();
+    const gameAddress = "7e3R1MnyZy7dumSrnSe8WxPEZbbVsx5TjFYYNrZhcnBW";
+    const chatId = 1010;
+    managerAny.activeGameMessages.set(
+      gameAddress,
+      new Map([[chatId, { messageId: 1, chatId, usesVideo: true }]]),
+    );
+    managerAny.formatGameMessage = vi.fn(async () => ({
+      messageText: "",
+      keyboard: [],
+      skipUpdate: true,
+      stateUnavailable: true,
+    })) as any;
+
+    const ctx = {
+      api: {
+        editMessageCaption: vi.fn(),
+        editMessageText: vi.fn(),
+        editMessageMedia: vi.fn(),
+      },
+    } as unknown as Context;
+
+    await manager.updateGameMessage(ctx, gameAddress, "Coinflip", 10, "@creator", "Active", "TOK");
+
+    expect(ctx.api.editMessageCaption).not.toHaveBeenCalled();
+    expect(ctx.api.editMessageText).not.toHaveBeenCalled();
+    expect(ctx.api.editMessageMedia).not.toHaveBeenCalled();
+    expect(managerAny.recreateMissingGameMessage).not.toHaveBeenCalled();
+  });
 });
