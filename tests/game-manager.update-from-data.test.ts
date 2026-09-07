@@ -138,3 +138,159 @@ test("updateGameMessageFromData renders terminal state when it is persisted duri
   expect(editMessageText).toHaveBeenCalledTimes(1);
   expect(editMessageText.mock.calls[0]?.[2]).toContain("status=Completed");
 });
+
+test("stale active work cannot erase a richer completion update", async () => {
+  resetGM();
+  const gameAddress = new PublicKey("BPFLoader6111111111111111111111111111111111").toBase58();
+  const gameData: any = {
+    game_type: "coinflip",
+    amount: 1,
+    token_ticker: "TOK",
+    status: "active",
+    total_amount: 1,
+  };
+  const db = {
+    getGame: () => ({ ...gameData }),
+  } as any;
+  const gm = GameManager.getInstance(
+    { account: { game: { fetch: async () => ({}) } } } as any,
+    {} as any,
+    db,
+  );
+
+  let releaseFirstLookup!: () => void;
+  let firstLookupStarted!: () => void;
+  const firstLookupReady = new Promise<void>((resolve) => {
+    firstLookupStarted = resolve;
+  });
+  const firstLookupRelease = new Promise<void>((resolve) => {
+    releaseFirstLookup = resolve;
+  });
+  let lookupCount = 0;
+  (gm as any).getGameCreatorUsername = async () => {
+    lookupCount += 1;
+    if (lookupCount === 1) {
+      firstLookupStarted();
+      await firstLookupRelease;
+    }
+    return "@creator";
+  };
+
+  (gm as any).formatGameMessage = vi.fn(async (...args: any[]) => ({
+    messageText: `status=${args[5]} total=${args[8]} signature=${args[9] ?? "none"}`,
+    keyboard: [],
+  }));
+  (gm as any).activeGameMessages.set(
+    gameAddress,
+    new Map([[707, { messageId: 808, chatId: 707, usesVideo: false }]]),
+  );
+  const editMessageText = vi.fn().mockResolvedValue(undefined);
+  const ctx = { chat: { id: 707 }, api: { editMessageText } } as any;
+
+  const staleActiveUpdate = gm.updateGameMessageFromData(ctx, gameAddress, "Active", undefined, 1);
+  await firstLookupReady;
+
+  gameData.status = "completed";
+  gameData.winner_address = "WinnerPubkey";
+  gameData.total_amount = 2;
+
+  const completionUpdate = gm.updateGameMessageFromData(
+    ctx,
+    gameAddress,
+    "Completed",
+    "WinnerPubkey",
+    2,
+    "CONFIRMED_SIGNATURE",
+  );
+  await completionUpdate;
+
+  releaseFirstLookup();
+  await staleActiveUpdate;
+
+  expect(editMessageText).toHaveBeenCalledTimes(1);
+  expect(editMessageText.mock.calls[0]?.[2]).toBe(
+    "status=Completed total=2 signature=CONFIRMED_SIGNATURE",
+  );
+});
+
+test("an older completion cannot erase a newer completion signature", async () => {
+  resetGM();
+  const gameAddress = new PublicKey("BPFLoader7111111111111111111111111111111111").toBase58();
+  const gameData: any = {
+    game_type: "coinflip",
+    amount: 1,
+    token_ticker: "TOK",
+    status: "completed",
+    winner_address: "WinnerPubkey",
+    total_amount: 2,
+  };
+  const db = {
+    getGame: () => ({ ...gameData }),
+    recordGameCompletionFinance: (_address: string, finance: { signature?: string }) => {
+      gameData.completion_signature = finance.signature;
+    },
+  } as any;
+  const gm = GameManager.getInstance(
+    { account: { game: { fetch: async () => ({}) } } } as any,
+    {} as any,
+    db,
+  );
+
+  let releaseFirstLookup!: () => void;
+  let firstLookupStarted!: () => void;
+  const firstLookupReady = new Promise<void>((resolve) => {
+    firstLookupStarted = resolve;
+  });
+  const firstLookupRelease = new Promise<void>((resolve) => {
+    releaseFirstLookup = resolve;
+  });
+  let lookupCount = 0;
+  (gm as any).getGameCreatorUsername = async () => {
+    lookupCount += 1;
+    if (lookupCount === 1) {
+      firstLookupStarted();
+      await firstLookupRelease;
+    }
+    return "@creator";
+  };
+
+  (gm as any).formatGameMessage = vi.fn(async (...args: any[]) => ({
+    messageText: `status=${args[5]} total=${args[8]} signature=${args[9] ?? "none"}`,
+    keyboard: [],
+  }));
+  (gm as any).activeGameMessages.set(
+    gameAddress,
+    new Map([[707, { messageId: 808, chatId: 707, usesVideo: false }]]),
+  );
+  const editMessageText = vi.fn().mockResolvedValue(undefined);
+  const ctx = { chat: { id: 707 }, api: { editMessageText } } as any;
+
+  const olderCompletion = gm.updateGameMessageFromData(
+    ctx,
+    gameAddress,
+    "Completed",
+    "WinnerPubkey",
+    2,
+    "STALE_SIGNATURE",
+  );
+  await firstLookupReady;
+
+  const newerCompletion = gm.updateGameMessageFromData(
+    ctx,
+    gameAddress,
+    "Completed",
+    "WinnerPubkey",
+    2,
+    "CONFIRMED_SIGNATURE",
+  );
+  await newerCompletion;
+
+  releaseFirstLookup();
+  await olderCompletion;
+
+  expect(editMessageText).toHaveBeenCalledTimes(1);
+  expect(editMessageText.mock.calls[0]?.[2]).toBe(
+    "status=Completed total=2 signature=CONFIRMED_SIGNATURE",
+  );
+  expect(gameData.completion_signature).toBe("CONFIRMED_SIGNATURE");
+});

@@ -150,6 +150,17 @@ const resolveGameMedia = (
 
 const GAME_STATE_RECOVERY_DELAYS_MS = [1_000, 5_000, 15_000] as const;
 
+type GameMessageUpdateRequest = {
+  status: string;
+  winnerAddress?: string;
+  totalPot?: number;
+  winnerSignature?: string;
+};
+
+type GameMessageCompletionMetadata = GameMessageUpdateRequest & {
+  generation: number;
+};
+
 const WRAP_BALANCE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000]; // Polling intervals to wait for WSOL balance propagation
 
 const getWrapBalanceRetryDelays = (): number[] => {
@@ -480,6 +491,11 @@ export class GameManager {
   private readonly messageRecreationLocks = new Set<string>();
   private readonly gameMessageUpdateQueues = new Map<string, Promise<void>>();
   private readonly gameMessageUpdateGenerations = new Map<string, number>();
+  private readonly latestGameMessageUpdateRequests = new Map<
+    string,
+    GameMessageUpdateRequest & { generation: number }
+  >();
+  private readonly gameMessageCompletionMetadata = new Map<string, GameMessageCompletionMetadata>();
   private readonly unavailableStateRecoveryTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -612,6 +628,8 @@ export class GameManager {
 
   public static resetForTest(): void {
     GameManager.instance?.clearUnavailableStateRecoveryTimers();
+    GameManager.instance?.latestGameMessageUpdateRequests.clear();
+    GameManager.instance?.gameMessageCompletionMetadata.clear();
     GameManager.instance = undefined as any;
     GameManager.instanceDeps = undefined;
   }
@@ -659,16 +677,153 @@ export class GameManager {
     return next;
   }
 
+  private rememberGameMessageUpdateRequest(
+    gameAddress: string,
+    generation: number,
+    request: GameMessageUpdateRequest,
+  ): void {
+    const current = this.latestGameMessageUpdateRequests.get(gameAddress);
+    if (!current || generation >= current.generation) {
+      this.latestGameMessageUpdateRequests.set(gameAddress, { ...request, generation });
+    }
+
+    if (request.status.toLowerCase() !== "completed") {
+      return;
+    }
+
+    const currentCompletion = this.gameMessageCompletionMetadata.get(gameAddress);
+    if (!currentCompletion || generation >= currentCompletion.generation) {
+      const merged: GameMessageCompletionMetadata = {
+        status: request.status,
+        generation,
+      };
+      if (currentCompletion?.winnerAddress !== undefined) {
+        merged.winnerAddress = currentCompletion.winnerAddress;
+      }
+      if (currentCompletion?.totalPot !== undefined) {
+        merged.totalPot = currentCompletion.totalPot;
+      }
+      if (currentCompletion?.winnerSignature !== undefined) {
+        merged.winnerSignature = currentCompletion.winnerSignature;
+      }
+      if (request.winnerAddress !== undefined) {
+        merged.winnerAddress = request.winnerAddress;
+      }
+      if (request.totalPot !== undefined) {
+        merged.totalPot = request.totalPot;
+      }
+      if (request.winnerSignature !== undefined) {
+        merged.winnerSignature = request.winnerSignature;
+      }
+      this.gameMessageCompletionMetadata.set(gameAddress, merged);
+      return;
+    }
+
+    // An older completion may still carry the only rich field (for example, a
+    // signature) when a newer refresh request was already registered. Preserve
+    // missing fields without allowing the older request to overwrite newer data.
+    const enriched = { ...currentCompletion };
+    if (enriched.winnerAddress === undefined && request.winnerAddress !== undefined) {
+      enriched.winnerAddress = request.winnerAddress;
+    }
+    if (enriched.totalPot === undefined && request.totalPot !== undefined) {
+      enriched.totalPot = request.totalPot;
+    }
+    if (enriched.winnerSignature === undefined && request.winnerSignature !== undefined) {
+      enriched.winnerSignature = request.winnerSignature;
+    }
+    this.gameMessageCompletionMetadata.set(gameAddress, enriched);
+  }
+
+  private persistCompletionSignature(
+    gameAddress: string,
+    generation: number,
+    request: GameMessageUpdateRequest,
+  ): void {
+    const winnerSignature = request.winnerSignature;
+    if (!winnerSignature) {
+      return;
+    }
+
+    const latestRequest = this.latestGameMessageUpdateRequests.get(gameAddress);
+    if (
+      latestRequest &&
+      latestRequest.generation > generation &&
+      latestRequest.winnerSignature !== undefined &&
+      latestRequest.winnerSignature !== winnerSignature
+    ) {
+      return;
+    }
+
+    const completionMetadata = this.gameMessageCompletionMetadata.get(gameAddress);
+    if (
+      completionMetadata &&
+      completionMetadata.generation > generation &&
+      completionMetadata.winnerSignature !== undefined &&
+      completionMetadata.winnerSignature !== winnerSignature
+    ) {
+      return;
+    }
+
+    const recordGameCompletionFinance = (this.gameDb as any)?.recordGameCompletionFinance;
+    if (typeof recordGameCompletionFinance !== "function") {
+      return;
+    }
+
+    try {
+      const currentGame = (this.gameDb as any)?.getGame?.(gameAddress);
+      if (
+        currentGame?.completion_signature &&
+        currentGame.completion_signature !== winnerSignature
+      ) {
+        return;
+      }
+      recordGameCompletionFinance.call(this.gameDb, gameAddress, { signature: winnerSignature });
+    } catch (error) {
+      console.warn(`Failed to persist completion signature for ${gameAddress}:`, error);
+    }
+  }
+
   private isSupersededActiveGameMessageUpdate(
     gameAddress: string,
-    status: string,
+    request: GameMessageUpdateRequest,
     updateGeneration?: number,
   ): boolean {
-    return (
-      updateGeneration !== undefined &&
-      status.toLowerCase() !== "completed" &&
-      updateGeneration < (this.gameMessageUpdateGenerations.get(gameAddress) ?? updateGeneration)
-    );
+    if (updateGeneration === undefined) {
+      return false;
+    }
+
+    const latestGeneration = this.gameMessageUpdateGenerations.get(gameAddress) ?? updateGeneration;
+    if (updateGeneration >= latestGeneration) {
+      return false;
+    }
+
+    // Request intent must survive DB terminal-state conversion. An older Active
+    // refresh is stale even if the database now says Completed.
+    if (request.status.toLowerCase() !== "completed") {
+      return true;
+    }
+
+    const latestRequest = this.latestGameMessageUpdateRequests.get(gameAddress);
+    if (!latestRequest || latestRequest.generation <= updateGeneration) {
+      return false;
+    }
+
+    // Do not let an older, less informative terminal update erase a newer
+    // completion's prize, winner, or verification signature. A richer older
+    // completion remains eligible to fill fields missing from a newer refresh.
+    if (
+      latestRequest.status.toLowerCase() === "completed" &&
+      ((latestRequest.winnerAddress !== undefined &&
+        request.winnerAddress !== latestRequest.winnerAddress) ||
+        (latestRequest.totalPot !== undefined && request.totalPot !== latestRequest.totalPot) ||
+        (latestRequest.winnerSignature !== undefined &&
+          request.winnerSignature !== latestRequest.winnerSignature))
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   private getPersistedTerminalUpdate(
@@ -676,10 +831,12 @@ export class GameManager {
     requestedStatus: string,
     winnerAddress?: string,
     totalPot?: number,
+    winnerSignature?: string,
   ): {
     status: "Completed";
     winnerAddress?: string;
     totalPot?: number;
+    winnerSignature?: string;
   } | null {
     let gameData: any;
     try {
@@ -694,12 +851,16 @@ export class GameManager {
       return null;
     }
 
+    const completionMetadata = this.gameMessageCompletionMetadata.get(gameAddress);
+    const persistedTotalPot =
+      isTerminal && typeof gameData?.total_amount === "number" ? gameData.total_amount : undefined;
+
     return {
       status: "Completed",
-      winnerAddress: gameData?.winner_address ?? winnerAddress,
-      totalPot:
-        totalPot ??
-        (typeof gameData?.total_amount === "number" ? gameData.total_amount : undefined),
+      winnerAddress: gameData?.winner_address ?? completionMetadata?.winnerAddress ?? winnerAddress,
+      totalPot: persistedTotalPot ?? completionMetadata?.totalPot ?? totalPot,
+      winnerSignature:
+        gameData?.completion_signature ?? completionMetadata?.winnerSignature ?? winnerSignature,
     };
   }
 
@@ -3069,11 +3230,23 @@ export class GameManager {
     totalPot?: number,
     winnerSignature?: string,
     updateGeneration?: number,
+    updateRequest?: GameMessageUpdateRequest,
   ): Promise<void> {
     const generation = updateGeneration ?? this.nextGameMessageUpdateGeneration(gameAddress);
     const latestGeneration = this.gameMessageUpdateGenerations.get(gameAddress) ?? 0;
     if (generation > latestGeneration) {
       this.gameMessageUpdateGenerations.set(gameAddress, generation);
+    }
+
+    const request = updateRequest ?? {
+      status,
+      winnerAddress,
+      totalPot,
+      winnerSignature,
+    };
+    this.rememberGameMessageUpdateRequest(gameAddress, generation, request);
+    if (request.status.toLowerCase() === "completed") {
+      this.persistCompletionSignature(gameAddress, generation, request);
     }
 
     await this.enqueueGameMessageUpdate(gameAddress, () =>
@@ -3089,6 +3262,7 @@ export class GameManager {
         totalPot,
         winnerSignature,
         generation,
+        request,
       ),
     );
   }
@@ -3105,8 +3279,15 @@ export class GameManager {
     totalPot?: number,
     winnerSignature?: string,
     updateGeneration?: number,
+    updateRequest?: GameMessageUpdateRequest,
   ): Promise<void> {
-    if (this.isSupersededActiveGameMessageUpdate(gameAddress, status, updateGeneration)) {
+    const request = updateRequest ?? {
+      status,
+      winnerAddress,
+      totalPot,
+      winnerSignature,
+    };
+    if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
       return;
     }
 
@@ -3115,11 +3296,13 @@ export class GameManager {
       status,
       winnerAddress,
       totalPot,
+      winnerSignature,
     );
     if (persistedTerminal) {
       status = persistedTerminal.status;
       winnerAddress = persistedTerminal.winnerAddress;
       totalPot = persistedTerminal.totalPot;
+      winnerSignature = persistedTerminal.winnerSignature;
     }
 
     let messageMap = this.activeGameMessages.get(gameAddress);
@@ -3172,6 +3355,7 @@ export class GameManager {
         status,
         winnerAddress,
         totalPot,
+        winnerSignature,
       );
       if (terminalBeforeDispatch && status.toLowerCase() !== "completed") {
         await this.updateGameMessageInternal(
@@ -3184,13 +3368,14 @@ export class GameManager {
           tokenTicker,
           terminalBeforeDispatch.winnerAddress,
           terminalBeforeDispatch.totalPot,
-          winnerSignature,
+          terminalBeforeDispatch.winnerSignature,
           updateGeneration,
+          request,
         );
         return;
       }
 
-      if (this.isSupersededActiveGameMessageUpdate(gameAddress, status, updateGeneration)) {
+      if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
         return;
       }
 
@@ -3210,6 +3395,7 @@ export class GameManager {
           status,
           winnerAddress,
           totalPot,
+          winnerSignature,
         );
         if (latestTerminal && status.toLowerCase() !== "completed") {
           await this.updateGameMessageInternal(
@@ -3222,12 +3408,14 @@ export class GameManager {
             tokenTicker,
             latestTerminal.winnerAddress,
             latestTerminal.totalPot,
-            winnerSignature,
+            latestTerminal.winnerSignature,
+            updateGeneration,
+            request,
           );
           return;
         }
 
-        if (this.isSupersededActiveGameMessageUpdate(gameAddress, status, updateGeneration)) {
+        if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
           return;
         }
 
@@ -3253,6 +3441,7 @@ export class GameManager {
           status,
           winnerAddress,
           totalPot,
+          winnerSignature,
         );
         if (terminalAfterPayload && status.toLowerCase() !== "completed") {
           await this.updateGameMessageInternal(
@@ -3265,12 +3454,14 @@ export class GameManager {
             tokenTicker,
             terminalAfterPayload.winnerAddress,
             terminalAfterPayload.totalPot,
-            winnerSignature,
+            terminalAfterPayload.winnerSignature,
+            updateGeneration,
+            request,
           );
           return;
         }
 
-        if (this.isSupersededActiveGameMessageUpdate(gameAddress, status, updateGeneration)) {
+        if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
           return;
         }
         const winnerMedia = payload.media;
@@ -3563,6 +3754,12 @@ export class GameManager {
     winnerSignature?: string,
   ): Promise<void> {
     const updateGeneration = this.nextGameMessageUpdateGeneration(gameAddress);
+    const request: GameMessageUpdateRequest = {
+      status,
+      winnerAddress,
+      totalPot,
+      winnerSignature,
+    };
     try {
       let gameData = this.gameDb.getGame(gameAddress);
       if (!gameData) {
@@ -3575,7 +3772,10 @@ export class GameManager {
       let effectiveStatus = terminalStatus ? "Completed" : status;
       let effectiveWinner = terminalStatus ? gameData.winner_address : winnerAddress;
       let effectiveTotalPot =
-        terminalStatus && totalPot === undefined ? gameData.total_amount : totalPot;
+        terminalStatus && typeof gameData.total_amount === "number"
+          ? gameData.total_amount
+          : totalPot;
+      let effectiveWinnerSignature = winnerSignature ?? gameData.completion_signature ?? undefined;
       const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
 
       // Username lookup can yield to completion persistence. Re-read all terminal fields
@@ -3586,7 +3786,11 @@ export class GameManager {
       effectiveStatus = terminalStatus ? "Completed" : status;
       effectiveWinner = terminalStatus ? gameData.winner_address : winnerAddress;
       effectiveTotalPot =
-        terminalStatus && totalPot === undefined ? gameData.total_amount : totalPot;
+        terminalStatus && typeof gameData.total_amount === "number"
+          ? gameData.total_amount
+          : totalPot;
+      effectiveWinnerSignature =
+        winnerSignature ?? gameData.completion_signature ?? effectiveWinnerSignature;
 
       const gameType = gameData.game_type
         ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1)
@@ -3602,8 +3806,9 @@ export class GameManager {
         gameData.token_ticker || "",
         effectiveWinner,
         effectiveTotalPot,
-        winnerSignature,
+        effectiveWinnerSignature,
         updateGeneration,
+        request,
       );
     } catch (error) {
       console.error(`Error updating game message for ${gameAddress}:`, error);
