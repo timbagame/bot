@@ -1,7 +1,12 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import type { PublicKey } from "#solana";
 import type { ParseAmountResult } from "../types";
-import type { FaucetDatabase, FaucetProgress, FaucetRecord } from "../utils/faucet-database";
+import {
+  FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS,
+  type FaucetDatabase,
+  type FaucetProgress,
+  type FaucetRecord,
+} from "../utils/faucet-database";
 import type { InferPlayersResult } from "../utils/arg-parsing";
 import { getTelegramUserDisplayName } from "../utils/telegram-display";
 import { isBotInitiationForbidden } from "../utils/telegram-errors";
@@ -168,7 +173,7 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
   const answer =
     deps.answerCallback ??
     ((ctx: Context, text?: string, showAlert?: boolean) =>
-      ctx.answerCallbackQuery({ text, show_alert: showAlert }));
+      text ? ctx.answerCallbackQuery({ text, show_alert: showAlert }) : ctx.answerCallbackQuery());
 
   const renderWithApi = async (
     api: Pick<Context["api"], "editMessageText">,
@@ -234,7 +239,13 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     const affected = new Set<number>();
     for (const claim of deps.database.getSubmittedClaims()) {
       const signature = claim.transaction_signature!;
-      const outcome = await deps.getTransactionOutcome(signature);
+      let outcome: "confirmed" | "failed" | "unknown";
+      try {
+        outcome = await deps.getTransactionOutcome(signature);
+      } catch (error) {
+        console.warn(`Failed to reconcile faucet claim ${claim.faucet_id}:`, error);
+        continue;
+      }
       if (outcome === "confirmed") {
         deps.database.completeClaim(
           claim.faucet_id,
@@ -253,8 +264,14 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         );
         affected.add(claim.faucet_id);
         changed += 1;
+      } else if (currentTime - claim.updated_at >= FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS) {
+        affected.add(claim.faucet_id);
       }
     }
+    changed += deps.database.releaseUnknownSubmittedClaims(
+      currentTime,
+      FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS,
+    );
     for (const id of affected) {
       try {
         await renderWithApi(deps.bot.api, id);
@@ -396,14 +413,20 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         full: "This faucet has already been fully collected.",
         creator: "You cannot collect your own faucet.",
         already_paid: "You already collected from this faucet.",
-        processing: "Your claim is already being processed.",
+        // The claim remains locked while reconciliation runs. A silent
+        // callback acknowledgement avoids adding another chat message.
+        processing: "",
       };
-      await answer(ctx, messages[reserved.reason], reserved.reason !== "processing");
+      if (reserved.reason === "processing") {
+        await answer(ctx);
+      } else {
+        await answer(ctx, messages[reserved.reason], true);
+      }
       if (reserved.reason === "expired") await render(ctx, faucetId);
       return;
     }
 
-    await answer(ctx, "Processing your claim…");
+    await answer(ctx);
     const faucet = reserved.faucet;
     const claimAmount = Number(faucet.amount_per_claim);
     const parsedClaim = {
@@ -464,9 +487,11 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       const message = error instanceof Error ? error.message : String(error);
       const claim = deps.database.getClaim(faucetId, claimantId);
       if (claim?.status === "submitted" && deps.isTransactionOutcomeUnknown(error)) {
-        await ctx.reply(
-          "⏳ Payment was submitted but confirmation is delayed. The bot will verify it automatically.",
-          { reply_to_message_id: faucet.message_id ?? undefined },
+        // Keep the claim locked and let the background reconciler decide
+        // whether the transaction confirms or safely expires. Technical
+        // recovery details stay in logs and the database, not the chat.
+        console.warn(
+          `Faucet payment confirmation pending for faucet ${faucetId}, claimant ${claimantId}`,
         );
       } else if (isInsufficientFundsError(error)) {
         deps.database.failClaim(faucetId, claimantId, message, now());

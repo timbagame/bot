@@ -340,6 +340,10 @@ describe("faucet handler", () => {
       status: "submitted",
       transaction_signature: "ambiguous-signature",
     });
+    expect(harness.replies.some(({ text }) => text.includes("confirmation is delayed"))).toBe(
+      false,
+    );
+    expect(harness.answers.at(-1)).toBe("");
     await harness.module.reconcile();
     expect(db.getClaim(1, 20n)?.status).toBe("paid");
     expect(harness.transferSenders).toEqual([10n]);

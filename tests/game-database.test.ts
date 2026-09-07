@@ -189,6 +189,58 @@ test("saveGameMessage preserves origin chat_id when message created in different
   expect(messages.some((m) => m.chatId === differentChatId && m.messageId === 999)).toBe(true);
 });
 
+test("reserves each game message destination exactly once", () => {
+  const db = GameDatabase.getInstance();
+  db.saveGame("delivery-game", "creator", 100, "coinflip", "mint", "TOK", 2, 2);
+
+  expect(db.reserveGameMessageDelivery("delivery-game", -1001, 1_000)).toEqual({
+    acquired: true,
+  });
+  expect(db.reserveGameMessageDelivery("delivery-game", -1001, 1_001)).toEqual({
+    acquired: false,
+    reason: "in-flight",
+  });
+
+  db.completeGameMessageDelivery("delivery-game", -1001, 42, 1_002);
+  expect(db.reserveGameMessageDelivery("delivery-game", -1001, 1_003)).toEqual({
+    acquired: false,
+    reason: "sent",
+    messageId: 42,
+  });
+  expect(db.getGameMessages("delivery-game")).toEqual([{ chatId: -1001, messageId: 42 }]);
+});
+
+test("persists and retries confirmed game setup records", () => {
+  const db = GameDatabase.getInstance();
+  db.savePendingGameCreation({
+    gameAddress: "pending-game",
+    creatorTelegramId: "7",
+    creatorDisplayName: "@creator",
+    amount: 100,
+    gameType: "coinflip",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 2,
+    chatId: -1001,
+    timeoutSeconds: 3600,
+    expiresAt: 3_601_000,
+    transactionSignature: "signature",
+    now: 1_000,
+  });
+
+  expect(db.getPendingGameCreations(1_000)).toHaveLength(1);
+  db.recordPendingGameCreationAttempt("pending-game", "RPC unavailable", 2_000, 1_100);
+  expect(db.getPendingGameCreations(1_100)).toHaveLength(0);
+  expect(db.getPendingGameCreation("pending-game")).toMatchObject({
+    attempts: 1,
+    last_error: "RPC unavailable",
+    next_attempt_at: 2_000,
+  });
+  db.clearPendingGameCreation("pending-game");
+  expect(db.getPendingGameCreation("pending-game")).toBeNull();
+});
+
 test("GameDatabase orders active game listings by earliest expiration first", () => {
   const db = GameDatabase.getInstance();
   const now = Date.now();

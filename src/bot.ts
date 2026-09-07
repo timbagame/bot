@@ -204,6 +204,26 @@ bot.catch((err) => {
   }
 });
 
+// Telegram changes a basic group's chat ID when it becomes a supergroup. Move
+// all local state together so the public feed does not treat the migrated chat
+// as a second destination for the same game.
+bot.on("message:migrate_to_chat_id", async (ctx) => {
+  const oldChatId = ctx.chat?.id;
+  const newChatId = Number((ctx.message as any)?.migrate_to_chat_id);
+  if (typeof oldChatId !== "number" || !Number.isFinite(newChatId) || newChatId === 0) {
+    return;
+  }
+
+  try {
+    chatDb.migrateChatId(oldChatId, newChatId);
+    gameDb.migrateChatId(oldChatId, newChatId);
+    FaucetDatabase.getInstance().migrateChatId(oldChatId, newChatId);
+    console.log(`🔁 Migrated Telegram chat state ${oldChatId} → ${newChatId}`);
+  } catch (error) {
+    console.error(`Failed to migrate Telegram chat state ${oldChatId} → ${newChatId}:`, error);
+  }
+});
+
 // Ensure all new messages are replies to the triggering message by default,
 // and gracefully fall back if the reply target no longer exists.
 bot.use(async (ctx, next) => {
@@ -2389,6 +2409,9 @@ const handleGameInitializedProgramEvent = async (event: GameInitializedEvent): P
           gameData.amount,
           creatorDisplay,
           gameData.token_ticker || DEFAULT_TOKEN_TICKER,
+          "Active",
+          undefined,
+          { reserveDelivery: true },
         );
       }),
     );
@@ -2986,6 +3009,9 @@ const gameCommandsModule = createGameCommandsModule({
   gameManager: {
     createGame: (...args) => gameManager.createGame(...args),
     createGameMessage: (...args) => gameManager.createGameMessage(...args),
+    recoverPendingGameCreationByAddress: (...args) =>
+      gameManager?.recoverPendingGameCreationByAddress?.(...args) ?? Promise.resolve(false),
+    clearPendingGameCreation: (gameAddress) => gameManager?.clearPendingGameCreation?.(gameAddress),
   },
   getOracleMaxPlayers,
   isGroupChat,
@@ -3296,6 +3322,25 @@ const setupProgram = async () => {
       "Set OPERATOR_KEYPAIR_PATH or provide operator-keypair.json in the project root directory.",
     );
     throw error;
+  }
+};
+
+const recoverPendingGameCreations = async (): Promise<void> => {
+  const pending = gameDb.getPendingGameCreations(Date.now(), 25);
+  for (const record of pending) {
+    try {
+      const ctx = createApiContext(record.chat_id, bot.api);
+      await gameManager.recoverPendingGameCreation(ctx, record);
+      console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
+    } catch (error) {
+      const delayMs = Math.min(
+        15 * 60_000,
+        Math.max(60_000, 60_000 * 2 ** Math.min(record.attempts, 4)),
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      gameDb.recordPendingGameCreationAttempt(record.game_address, message, Date.now() + delayMs);
+      console.warn(`Pending game setup will be retried for ${record.game_address}:`, message);
+    }
   }
 };
 
@@ -3997,8 +4042,8 @@ export const __test_clearTransactionCache = (): void => {
 // ================================
 
 registerCaseInsensitiveCommand(
-  "default",
-  "Configure the chat default token",
+  ["default", "config", "configs", "settings"],
+  "Configure chat defaults",
 )(async (ctx: Context) => {
   if (!ctx.from || !ctx.chat) return;
 
@@ -4041,7 +4086,7 @@ registerCaseInsensitiveCommand(
     "/gb - Shorthand for globalboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
+    "/default, /config, /configs, /settings - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -4052,7 +4097,7 @@ registerCaseInsensitiveCommand(
     "• Use USD in the token slot to auto-convert: /cf 12 USD",
     "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
     "• Works for tips/withdrawals too: /tip @user $10 WBTC or /withdraw &lt;addr&gt; 10 USD",
-    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default",
+    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default, /config, /configs, or /settings",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
@@ -6299,6 +6344,8 @@ if (process.env.NODE_ENV !== "test") {
       // Reload game message mappings from database
       await gameManager.reloadGameMessages();
       console.log(`Reloaded game message mappings from database`);
+      await recoverPendingGameCreations();
+      setInterval(recoverPendingGameCreations, 60_000);
 
       await registerProgramEventListeners();
       attachRpcEndpointFailoverHandler();

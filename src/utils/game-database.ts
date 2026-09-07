@@ -34,6 +34,30 @@ export interface GameCompletionFinance {
   networkFeeLamports?: number;
 }
 
+export interface PendingGameCreationRecord {
+  game_address: string;
+  creator_telegram_id: string;
+  creator_display_name: string | null;
+  amount: number;
+  game_type: string;
+  token_mint: string;
+  token_ticker: string;
+  max_players: number;
+  min_players: number;
+  chat_id: number;
+  timeout_seconds: number;
+  expires_at: number;
+  transaction_signature: string;
+  attempts: number;
+  last_error: string | null;
+  next_attempt_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export type GameMessageDeliveryReservation =
+  { acquired: true } | { acquired: false; reason: "sent" | "in-flight"; messageId?: number };
+
 /**
  * Database service for storing game-related data
  */
@@ -96,6 +120,40 @@ export class GameDatabase extends BaseDatabase {
           PRIMARY KEY (game_address, chat_id),
           FOREIGN KEY (game_address) REFERENCES games(game_address)
         )`,
+        `CREATE TABLE IF NOT EXISTS game_message_deliveries (
+          game_address TEXT NOT NULL,
+          chat_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'reserved',
+          message_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (game_address, chat_id),
+          FOREIGN KEY (game_address) REFERENCES games(game_address)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_game_message_deliveries_retry
+          ON game_message_deliveries(status, updated_at)`,
+        `CREATE TABLE IF NOT EXISTS pending_game_creations (
+          game_address TEXT PRIMARY KEY,
+          creator_telegram_id TEXT NOT NULL,
+          creator_display_name TEXT,
+          amount INTEGER NOT NULL,
+          game_type TEXT NOT NULL,
+          token_mint TEXT NOT NULL,
+          token_ticker TEXT NOT NULL,
+          max_players INTEGER NOT NULL,
+          min_players INTEGER NOT NULL,
+          chat_id INTEGER NOT NULL,
+          timeout_seconds INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          transaction_signature TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          next_attempt_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_pending_game_creations_retry
+          ON pending_game_creations(next_attempt_at)`,
       ],
       "Game",
     );
@@ -499,6 +557,231 @@ export class GameDatabase extends BaseDatabase {
       [gameAddress, chatId, messageId, Date.now()],
       "saving game message to new table",
     );
+  }
+
+  public reserveGameMessageDelivery(
+    gameAddress: string,
+    chatId: number,
+    now: number = Date.now(),
+    staleAfterMs: number = 5 * 60_000,
+  ): GameMessageDeliveryReservation {
+    const reserve = this.db.transaction((): GameMessageDeliveryReservation => {
+      const sent = this.get<{ message_id: number }>(
+        "SELECT message_id FROM game_messages WHERE game_address = ? AND chat_id = ?",
+        [gameAddress, chatId],
+        "checking existing game message delivery",
+      );
+      if (sent) {
+        return { acquired: false, reason: "sent", messageId: sent.message_id };
+      }
+
+      const existing = this.get<{ status: string; message_id: number | null; updated_at: number }>(
+        "SELECT status, message_id, updated_at FROM game_message_deliveries WHERE game_address = ? AND chat_id = ?",
+        [gameAddress, chatId],
+        "checking game message delivery reservation",
+      );
+      if (
+        existing?.status === "reserved" &&
+        existing.updated_at > now - Math.max(0, staleAfterMs)
+      ) {
+        return { acquired: false, reason: "in-flight" };
+      }
+
+      this.run(
+        `INSERT INTO game_message_deliveries (
+          game_address, chat_id, status, message_id, created_at, updated_at
+        ) VALUES (?, ?, 'reserved', NULL, ?, ?)
+        ON CONFLICT(game_address, chat_id) DO UPDATE SET
+          status = 'reserved', message_id = NULL, updated_at = excluded.updated_at`,
+        [gameAddress, chatId, now, now],
+        "reserving game message delivery",
+      );
+      return { acquired: true };
+    });
+    return reserve();
+  }
+
+  public completeGameMessageDelivery(
+    gameAddress: string,
+    chatId: number,
+    messageId: number,
+    now: number = Date.now(),
+  ): void {
+    const complete = this.db.transaction(() => {
+      this.run(
+        "UPDATE games SET message_id = ? WHERE game_address = ?",
+        [messageId, gameAddress],
+        "saving game message",
+      );
+      this.run(
+        "INSERT OR REPLACE INTO game_messages (game_address, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)",
+        [gameAddress, chatId, messageId, now],
+        "saving game message to new table",
+      );
+      this.run(
+        `INSERT INTO game_message_deliveries (
+          game_address, chat_id, status, message_id, created_at, updated_at
+        ) VALUES (?, ?, 'sent', ?, ?, ?)
+        ON CONFLICT(game_address, chat_id) DO UPDATE SET
+          status = 'sent', message_id = excluded.message_id, updated_at = excluded.updated_at`,
+        [gameAddress, chatId, messageId, now, now],
+        "committing game message delivery",
+      );
+    });
+    complete();
+  }
+
+  public releaseGameMessageDelivery(gameAddress: string, chatId: number): void {
+    this.run(
+      "DELETE FROM game_message_deliveries WHERE game_address = ? AND chat_id = ? AND status = 'reserved'",
+      [gameAddress, chatId],
+      "releasing game message delivery",
+    );
+  }
+
+  public savePendingGameCreation(input: {
+    gameAddress: string;
+    creatorTelegramId: string;
+    creatorDisplayName?: string | null;
+    amount: number;
+    gameType: string;
+    tokenMint: string;
+    tokenTicker: string;
+    maxPlayers: number;
+    minPlayers: number;
+    chatId: number;
+    timeoutSeconds: number;
+    expiresAt: number;
+    transactionSignature: string;
+    now?: number;
+  }): void {
+    const now = input.now ?? Date.now();
+    this.run(
+      `INSERT INTO pending_game_creations (
+        game_address, creator_telegram_id, creator_display_name, amount, game_type,
+        token_mint, token_ticker, max_players, min_players, chat_id, timeout_seconds,
+        expires_at, transaction_signature, attempts, last_error, next_attempt_at,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
+      ON CONFLICT(game_address) DO UPDATE SET
+        creator_display_name = COALESCE(excluded.creator_display_name, pending_game_creations.creator_display_name),
+        transaction_signature = excluded.transaction_signature,
+        next_attempt_at = excluded.next_attempt_at,
+        updated_at = excluded.updated_at`,
+      [
+        input.gameAddress,
+        input.creatorTelegramId,
+        input.creatorDisplayName ?? null,
+        input.amount,
+        input.gameType,
+        input.tokenMint,
+        input.tokenTicker,
+        input.maxPlayers,
+        input.minPlayers,
+        input.chatId,
+        input.timeoutSeconds,
+        input.expiresAt,
+        input.transactionSignature,
+        now,
+        now,
+        now,
+      ],
+      "saving pending game creation",
+    );
+  }
+
+  public getPendingGameCreations(
+    now: number = Date.now(),
+    limit = 25,
+  ): PendingGameCreationRecord[] {
+    return this.all<PendingGameCreationRecord>(
+      `SELECT * FROM pending_game_creations
+       WHERE next_attempt_at <= ?
+       ORDER BY next_attempt_at ASC, created_at ASC
+       LIMIT ?`,
+      [now, limit],
+      "loading pending game creations",
+    );
+  }
+
+  public getPendingGameCreation(gameAddress: string): PendingGameCreationRecord | null {
+    return this.get<PendingGameCreationRecord>(
+      "SELECT * FROM pending_game_creations WHERE game_address = ?",
+      [gameAddress],
+      "loading pending game creation",
+    );
+  }
+
+  public recordPendingGameCreationAttempt(
+    gameAddress: string,
+    error: string,
+    nextAttemptAt: number,
+    now: number = Date.now(),
+  ): void {
+    this.run(
+      `UPDATE pending_game_creations
+       SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ?`,
+      [error.slice(0, 500), nextAttemptAt, now, gameAddress],
+      "recording pending game creation attempt",
+    );
+  }
+
+  public clearPendingGameCreation(gameAddress: string): void {
+    this.run(
+      "DELETE FROM pending_game_creations WHERE game_address = ?",
+      [gameAddress],
+      "clearing pending game creation",
+    );
+  }
+
+  public setGameOriginChat(gameAddress: string, chatId: number): void {
+    this.run(
+      "UPDATE games SET chat_id = ? WHERE game_address = ?",
+      [chatId, gameAddress],
+      "saving game origin chat",
+    );
+  }
+
+  public migrateChatId(oldChatId: number, newChatId: number): void {
+    if (oldChatId === newChatId) return;
+    const migrate = this.db.transaction(() => {
+      this.run(
+        "UPDATE games SET chat_id = ? WHERE chat_id = ?",
+        [newChatId, oldChatId],
+        "migrating game origin chat",
+      );
+      this.run(
+        `INSERT OR REPLACE INTO game_messages (game_address, chat_id, message_id, created_at)
+         SELECT game_address, ?, message_id, created_at FROM game_messages WHERE chat_id = ?`,
+        [newChatId, oldChatId],
+        "migrating game message targets",
+      );
+      this.run(
+        "DELETE FROM game_messages WHERE chat_id = ?",
+        [oldChatId],
+        "removing legacy game message targets",
+      );
+      this.run(
+        `INSERT OR REPLACE INTO game_message_deliveries (
+          game_address, chat_id, status, message_id, created_at, updated_at
+        ) SELECT game_address, ?, status, message_id, created_at, updated_at
+        FROM game_message_deliveries WHERE chat_id = ?`,
+        [newChatId, oldChatId],
+        "migrating game message reservations",
+      );
+      this.run(
+        "DELETE FROM game_message_deliveries WHERE chat_id = ?",
+        [oldChatId],
+        "removing legacy game message reservations",
+      );
+      this.run(
+        "UPDATE pending_game_creations SET chat_id = ?, updated_at = ? WHERE chat_id = ?",
+        [newChatId, Date.now(), oldChatId],
+        "migrating pending game creations",
+      );
+    });
+    migrate();
   }
 
   public getGameMessages(gameAddress: string): Array<{ chatId: number; messageId: number }> {

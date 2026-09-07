@@ -134,4 +134,17 @@ describe("FaucetDatabase", () => {
     db.markNotificationSent(faucet.id, 1n);
     expect(db.getPendingNotifications(2_001)).toEqual([]);
   });
+
+  test("releases submitted claims whose signatures remain unknown past the safety window", () => {
+    const faucet = createFaucet({ maxClaims: 1, expiresAt: 1_000_000 });
+    db.reserveClaim(faucet.id, 1n, 1_000);
+    db.recordClaimSignature(faucet.id, 1n, "missing-signature", 2_000);
+
+    expect(db.releaseUnknownSubmittedClaims(302_001, 300_000)).toBe(1);
+    expect(db.getClaim(faucet.id, 1n)).toMatchObject({
+      status: "failed",
+      last_error: "transaction was not found after the confirmation window",
+    });
+    expect(db.reserveClaim(faucet.id, 2n, 302_002)).toMatchObject({ ok: true });
+  });
 });

@@ -151,8 +151,8 @@ describe("Join notification settings", () => {
       expect(DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL).toBe(false);
     });
 
-    test("DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE is 5", () => {
-      expect(DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE).toBe(5);
+    test("DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE is disabled", () => {
+      expect(DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE).toBe(0);
     });
 
     test("MAX_JOIN_NOTIFICATIONS_PER_MINUTE is 30", () => {

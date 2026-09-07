@@ -6,10 +6,15 @@ import type { GameManager } from "../../src/utils/game";
 import {
   bot,
   __test_processPlayerEvent,
+  __test_resetChatDatabase,
   __test_resetGameDatabase,
+  __test_resetJoinAnnouncementMaxTickets,
+  __test_setChatDatabase,
   __test_setGameDatabase,
   __test_setGameManager,
+  __test_setJoinAnnouncementMaxTickets,
 } from "../../src/bot";
+import { ChatDatabase } from "../../src/utils/chat-database";
 import { createGameCallbacksModule } from "../../src/handlers/game-callbacks";
 import { GAME_SETUP_COPY } from "../../src/handlers/game-setup";
 import type { GameCallbacksModuleDeps } from "../../src/handlers/game-callbacks";
@@ -109,6 +114,8 @@ describe("Game callback helpers", () => {
   let sendMessageSpy: any;
 
   beforeEach(() => {
+    ChatDatabase.resetForTesting();
+    __test_setChatDatabase(ChatDatabase.getInstance());
     sendMessageSpy = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 1 } as any);
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -128,6 +135,8 @@ describe("Game callback helpers", () => {
 
   afterEach(() => {
     sendMessageSpy.mockRestore();
+    __test_resetChatDatabase();
+    __test_resetJoinAnnouncementMaxTickets();
     __test_setGameManager(undefined as any);
     __test_resetGameDatabase();
   });
@@ -220,6 +229,10 @@ describe("Game callback helpers", () => {
   });
 
   test("announcements escape HTML-sensitive usernames", async () => {
+    __test_setJoinAnnouncementMaxTickets(50);
+    ChatDatabase.getInstance().upsertChatGameSettings(2, {
+      join_notifications_per_minute: 50,
+    });
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "<script>alert(1)</script>",

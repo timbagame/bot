@@ -776,25 +776,27 @@ describe("createGameViaCommand helper", () => {
       from: { id: 1, username: "alice", first_name: "Alice" } as any,
     });
     const calls = baseCtx.__calls;
-    const deletedMessages: { chatId: number; messageId: number }[] = [];
-    let nextMessageId = 1;
+    const progressCalls: string[] = [];
+    let nextMessageId = 100;
 
     return {
       ...baseCtx,
       chat: { id: 42, type: "group" },
       from: { id: 1, username: "alice", first_name: "Alice" },
       reply: async (text: string) => {
-        calls.push(text);
-        return { ok: true, chat: { id: 42 }, message_id: nextMessageId++ };
+        if (text === "⏳ Creating game…") {
+          progressCalls.push(text);
+        } else {
+          calls.push(text);
+        }
+        return { chat: { id: 42 }, message_id: nextMessageId++ };
       },
       api: {
-        deleteMessage: async (chatId: number, messageId: number) => {
-          deletedMessages.push({ chatId, messageId });
-          return true;
-        },
+        ...(baseCtx as any).api,
+        deleteMessage: async () => ({ ok: true }),
       },
       __calls: calls,
-      __deleted: deletedMessages,
+      __progressCalls: progressCalls,
     };
   };
 
@@ -806,10 +808,8 @@ describe("createGameViaCommand helper", () => {
 
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "oops"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    expect(String(ctx.__calls[1])).toContain("Usage");
-    expect(ctx.__deleted?.length).toBe(1);
+    expect(ctx.__calls.length).toBe(1);
+    expect(String(ctx.__calls[0])).toContain("Usage");
   });
 
   test("surfaces player count validation failures", async () => {
@@ -820,10 +820,8 @@ describe("createGameViaCommand helper", () => {
 
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    expect(String(ctx.__calls[1])).toContain("Coinflip players must be between 2-100");
-    expect(ctx.__deleted?.length).toBe(1);
+    expect(ctx.__calls.length).toBe(1);
+    expect(String(ctx.__calls[0])).toContain("Coinflip players must be between 2-100");
   });
 
   test("creates a game and message when inputs are valid", async () => {
@@ -846,8 +844,8 @@ describe("createGameViaCommand helper", () => {
 
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
+    expect(ctx.__calls.length).toBe(0);
+    expect(ctx.__progressCalls).toEqual(["⏳ Creating game…"]);
     expect(createCalls.length).toBe(1);
 
     const [
@@ -883,7 +881,25 @@ describe("createGameViaCommand helper", () => {
     expect(messageArgs[2]).toBe(coinflipOptions.gameLabel);
     expect(messageArgs[3]).toBe(baseParsedAmount.amount);
     expect(messageArgs[5]).toBe(baseParsedAmount.tokenTicker);
-    expect(ctx.__deleted?.length).toBe(1);
+  });
+
+  test("silently retries when confirmed game message delivery fails", async () => {
+    const ctx: any = makeCtx();
+    const recovery = vi.fn(async () => true);
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: true, gameAddress: "ADDR" }),
+        createGameMessage: async () => {
+          throw new Error("Telegram unavailable");
+        },
+        recoverPendingGameCreationByAddress: recovery,
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
+
+    expect(ctx.__calls).toHaveLength(0);
+    expect(recovery).toHaveBeenCalledWith(ctx, "ADDR");
   });
 
   test("handles USD token hints while inferring max players", async () => {
@@ -1061,16 +1077,14 @@ describe("createGameViaCommand helper", () => {
 
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    const response = String(ctx.__calls[1]);
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
     expect(response).toBe("❌ Failed to create game. Please try again.");
     expect(response).not.toContain(limitMessage);
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test.each([false, true])(
-    "does not emit opaque game creation diagnostics (confirmed=%s)",
+    "does not expose confirmed setup recovery details (confirmed=%s)",
     async (confirmed) => {
       const opaque = "database credential xyz exploded";
       const ctx: any = makeCtx();
@@ -1090,13 +1104,9 @@ describe("createGameViaCommand helper", () => {
       await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
       if (confirmed) {
-        expect(ctx.__calls[1]).toContain("transaction was confirmed");
-        expect(ctx.__calls[1]).toContain("Do not create the game again");
-        expect(ctx.__calls[1]).toContain("GAME&lt;123&gt;");
-        expect(ctx.__calls[1]).toContain("CONFIRMED_SIG");
-        expect(ctx.__calls[1]).not.toContain("Please try again");
+        expect(ctx.__calls).toHaveLength(0);
       } else {
-        expect(ctx.__calls[1]).toBe("❌ Failed to create game. Please try again.");
+        expect(ctx.__calls[0]).toBe("❌ Failed to create game. Please try again.");
       }
       expect(ctx.__calls.join(" ")).not.toContain(opaque);
     },
@@ -1118,12 +1128,10 @@ describe("createGameViaCommand helper", () => {
 
     await botModule.__test_createGameViaCommand(ctx, ["/cf", "5"], 1n, coinflipOptions, deps);
 
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    const response = String(ctx.__calls[1]);
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
     expect(response).toBe("❌ Too many games are being created. Please try again shortly.");
     expect(response).not.toContain(rateLimitMessage);
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test("sends only one rate limit notice per window", async () => {
@@ -1150,8 +1158,8 @@ describe("createGameViaCommand helper", () => {
       deps,
     );
 
-    expect(firstCtx.__calls.length).toBe(2);
-    expect(String(firstCtx.__calls[1])).toContain("Too many games");
+    expect(firstCtx.__calls.length).toBe(1);
+    expect(String(firstCtx.__calls[0])).toContain("Too many games");
 
     const secondCtx: any = makeCtx();
     await botModule.__test_createGameViaCommand(
@@ -1162,8 +1170,7 @@ describe("createGameViaCommand helper", () => {
       deps,
     );
 
-    expect(secondCtx.__calls.length).toBe(1);
-    expect(secondCtx.__deleted?.length).toBe(1);
+    expect(secondCtx.__calls.length).toBe(0);
   });
 
   test("allows SOL games when native balance covers deficit", async () => {
@@ -1212,8 +1219,7 @@ describe("createGameViaCommand helper", () => {
       deps,
     );
 
-    expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
+    expect(ctx.__calls.length).toBe(0);
     expect(createCalls.length).toBe(1);
     expect(messageCalls.length).toBe(1);
 
@@ -1222,7 +1228,6 @@ describe("createGameViaCommand helper", () => {
 
     const [, , , , , messageTokenTicker] = messageCalls[0];
     expect(messageTokenTicker).toBe("WSOL");
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test("allows WSOL games when user specifies token explicitly", async () => {
@@ -1276,8 +1281,7 @@ describe("createGameViaCommand helper", () => {
       deps,
     );
 
-    expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
+    expect(ctx.__calls.length).toBe(0);
     expect(createCalls.length).toBe(1);
     expect(messageCalls.length).toBe(1);
     expect(balanceChecks).toBeGreaterThan(0);
@@ -1286,7 +1290,6 @@ describe("createGameViaCommand helper", () => {
     expect(gameData.tokenTicker).toBe("WSOL");
     const [, , , , , messageTokenTicker] = messageCalls[0];
     expect(messageTokenTicker).toBe("WSOL");
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test("reports combined SOL balance when insufficient for native SOL games", async () => {
@@ -1332,14 +1335,12 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(createCalls.length).toBe(0);
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    const response = String(ctx.__calls[1]);
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
     expect(response).not.toContain("You have");
     expect(response).not.toContain("but the game needs");
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test("reports combined SOL balance when WSOL specified but insufficient", async () => {
@@ -1377,13 +1378,11 @@ describe("createGameViaCommand helper", () => {
       deps,
     );
 
-    expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
-    const response = String(ctx.__calls[1]);
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
     expect(response).not.toContain("You have");
-    expect(ctx.__deleted?.length).toBe(1);
   });
 
   test("creates a private game when chat setting is private", async () => {

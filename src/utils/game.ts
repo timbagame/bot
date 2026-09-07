@@ -8,7 +8,7 @@ import {
 import { Context } from "grammy";
 
 import { WalletManager } from "./wallet";
-import { GameDatabase } from "./game-database";
+import { GameDatabase, type PendingGameCreationRecord } from "./game-database";
 import { OracleClient, formatOraclePolicyError } from "./oracle";
 import { PDAManager } from "./pda";
 import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
@@ -69,7 +69,6 @@ import {
   buildPrizeLine,
   buildParticipantsList,
   buildExpirationText,
-  buildConfirmedGameRecoveryMessage,
   buildGameStateUnavailableMessage,
 } from "./game-ui";
 import {
@@ -3141,81 +3140,104 @@ export class GameManager {
     tokenTicker: string,
     status: string = "Active",
     replyToMessageId?: number,
-    options?: { priceHint?: CachedPriceLookup | null },
+    options?: { priceHint?: CachedPriceLookup | null; reserveDelivery?: boolean },
   ): Promise<number> {
-    const cachedPrice = options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
-    const payload = await this.buildGameMessagePayload(ctx, {
-      gameAddress,
-      gameType,
-      amount,
-      creatorUsername,
-      status,
-      tokenTicker,
-      chatId: ctx.chat?.id,
-      options: { priceHint: cachedPrice },
-    });
+    const deliveryChatId = ctx.chat?.id;
+    let deliveryReserved = false;
+    let messageSent = false;
+    try {
+      if (options?.reserveDelivery && typeof deliveryChatId === "number") {
+        const reservation = this.gameDb.reserveGameMessageDelivery(gameAddress, deliveryChatId);
+        if (!reservation.acquired) {
+          return reservation.messageId ?? 0;
+        }
+        deliveryReserved = true;
+      }
 
-    const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const replyMarkup =
-      payload.keyboard.length > 0 ? { inline_keyboard: payload.keyboard } : undefined;
-    const media = payload.media;
-    const sendResult = await sendMediaWithFallback<any, any>({
-      videoFileId: media?.fileId ?? null,
-      logLabel: "game video",
-      sendText: () =>
-        ctx.reply(payload.text, {
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          reply_to_message_id: replyTo,
-        }),
-      sendVideo:
-        media && typeof (ctx as any).replyWithVideo === "function"
-          ? () => {
-              if (media.mediaType === "photo") {
-                return ctx.replyWithPhoto(media.fileId, {
-                  caption: payload.text,
-                  parse_mode: "HTML",
-                  reply_markup: replyMarkup,
-                  reply_to_message_id: replyTo,
-                }) as any;
-              } else if (media.mediaType === "animation") {
-                return ctx.replyWithAnimation(media.fileId, {
-                  caption: payload.text,
-                  parse_mode: "HTML",
-                  reply_markup: replyMarkup,
-                  reply_to_message_id: replyTo,
-                }) as any;
-              } else {
-                return ctx.replyWithVideo(media.fileId, {
-                  caption: payload.text,
-                  parse_mode: "HTML",
-                  reply_markup: replyMarkup,
-                  reply_to_message_id: replyTo,
-                }) as any;
+      const cachedPrice = options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
+      const payload = await this.buildGameMessagePayload(ctx, {
+        gameAddress,
+        gameType,
+        amount,
+        creatorUsername,
+        status,
+        tokenTicker,
+        chatId: ctx.chat?.id,
+        options: { priceHint: cachedPrice },
+      });
+
+      const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
+      const replyMarkup =
+        payload.keyboard.length > 0 ? { inline_keyboard: payload.keyboard } : undefined;
+      const media = payload.media;
+      const sendResult = await sendMediaWithFallback<any, any>({
+        videoFileId: media?.fileId ?? null,
+        logLabel: "game video",
+        sendText: () =>
+          ctx.reply(payload.text, {
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            reply_to_message_id: replyTo,
+          }),
+        sendVideo:
+          media && typeof (ctx as any).replyWithVideo === "function"
+            ? () => {
+                if (media.mediaType === "photo") {
+                  return ctx.replyWithPhoto(media.fileId, {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyTo,
+                  }) as any;
+                } else if (media.mediaType === "animation") {
+                  return ctx.replyWithAnimation(media.fileId, {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyTo,
+                  }) as any;
+                } else {
+                  return ctx.replyWithVideo(media.fileId, {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyTo,
+                  }) as any;
+                }
               }
-            }
-          : undefined,
-    });
+            : undefined,
+      });
+      messageSent = true;
 
-    const message: any = sendResult.result;
-    const usesVideo = sendResult.usedVideo;
+      const message: any = sendResult.result;
+      const usesVideo = sendResult.usedVideo;
 
-    this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
+      if (deliveryReserved && typeof deliveryChatId === "number") {
+        this.gameDb.completeGameMessageDelivery(gameAddress, deliveryChatId, message.message_id);
+      } else {
+        this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
+      }
 
-    const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
-    existing.set(message.chat.id, {
-      messageId: message.message_id,
-      chatId: message.chat.id,
-      usesVideo,
-    });
-    this.activeGameMessages.set(gameAddress, existing);
+      const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
+      existing.set(message.chat.id, {
+        messageId: message.message_id,
+        chatId: message.chat.id,
+        usesVideo,
+      });
+      this.activeGameMessages.set(gameAddress, existing);
 
-    this.gameMessageReadyListener?.(gameAddress);
-    if (payload.stateUnavailable === true || payload.skipUpdate === true) {
-      this.scheduleUnavailableStateRecovery(ctx, gameAddress, gameType);
+      this.gameMessageReadyListener?.(gameAddress);
+      if (payload.stateUnavailable === true || payload.skipUpdate === true) {
+        this.scheduleUnavailableStateRecovery(ctx, gameAddress, gameType);
+      }
+
+      return message.message_id;
+    } catch (error) {
+      if (deliveryReserved && !messageSent && typeof deliveryChatId === "number") {
+        this.gameDb.releaseGameMessageDelivery(gameAddress, deliveryChatId);
+      }
+      throw error;
     }
-
-    return message.message_id;
   }
 
   public async updateGameMessage(
@@ -4044,6 +4066,32 @@ export class GameManager {
     this.incrementInFlightCreations(telegramIdStr);
 
     let confirmedCreation: { gameAddress: string; confirmedSignature: string } | undefined;
+    const persistPendingCreation = () => {
+      if (!confirmedCreation || typeof chatId !== "number" || chatId === 0) return;
+      try {
+        this.gameDb.savePendingGameCreation?.({
+          gameAddress: confirmedCreation.gameAddress,
+          creatorTelegramId: telegramIdStr,
+          creatorDisplayName: null,
+          amount: parsedAmount.amount,
+          gameType,
+          tokenMint: parsedAmount.tokenMint,
+          tokenTicker: parsedAmount.tokenTicker,
+          maxPlayers: maxTickets,
+          minPlayers: minTickets,
+          chatId,
+          timeoutSeconds: timeout,
+          expiresAt: expiresAtMs,
+          transactionSignature: confirmedCreation.confirmedSignature,
+        });
+      } catch (recoveryError) {
+        console.error(
+          `Failed to persist confirmed game recovery for ${confirmedCreation.gameAddress}`,
+          recoveryError,
+        );
+      }
+    };
+
     try {
       const { tokenMint, tokenTicker, amount } = parsedAmount;
       if (contractCapabilities.oracleTokenPolicy) {
@@ -4338,6 +4386,10 @@ export class GameManager {
         gameAddress: gamePda.toBase58(),
         confirmedSignature: confirmedCreationTx,
       };
+      // Persist the recovery record before local hydration or Telegram
+      // delivery. A confirmed transaction must remain recoverable even if
+      // either of those follow-up steps fails.
+      persistPendingCreation();
       const createdGameAccount = await this.fetchConfirmedGame(gamePda);
       if (!createdGameAccount.creator.equals(playerKp.publicKey)) {
         throw new Error("Confirmed game creator does not match the requesting wallet");
@@ -4401,14 +4453,11 @@ export class GameManager {
       };
     } catch (error: any) {
       if (confirmedCreation) {
+        persistPendingCreation();
         console.error("Failed to finish confirmed game creation", confirmedCreation, error);
         return {
           success: false,
           ...confirmedCreation,
-          error: buildConfirmedGameRecoveryMessage(
-            confirmedCreation.gameAddress,
-            confirmedCreation.confirmedSignature,
-          ),
         };
       }
       const policyMessage = formatOraclePolicyError(error);
@@ -6339,6 +6388,73 @@ export class GameManager {
     }
 
     return this.gameDb.getGame(gameAddress);
+  }
+
+  /**
+   * Finish a confirmed creation after the transaction path returned before
+   * local setup completed. This is deliberately idempotent: the delivery
+   * reservation prevents a second Telegram message for the same game/chat.
+   */
+  public async recoverPendingGameCreation(
+    ctx: Context,
+    pending: PendingGameCreationRecord,
+  ): Promise<boolean> {
+    const gameData = await this.ensureGameDataFromChain(pending.game_address);
+    if (!gameData) {
+      throw new Error("confirmed game account is not available yet");
+    }
+
+    this.gameDb.setGameOriginChat(pending.game_address, pending.chat_id);
+    const hasOriginMessage = this.gameDb
+      .getGameMessages(pending.game_address)
+      .some(({ chatId }) => chatId === pending.chat_id);
+
+    if (!hasOriginMessage) {
+      let creatorDisplayName = pending.creator_display_name || "Unknown";
+      if (!pending.creator_display_name) {
+        try {
+          const creatorInfo = this.gameDb.getCreatorInfo(pending.game_address);
+          if (creatorInfo?.publicKey) {
+            creatorDisplayName = await this.getPlayerUsername(ctx, creatorInfo.publicKey);
+          }
+        } catch (error) {
+          console.warn(
+            `Failed to resolve creator for recovered game ${pending.game_address}:`,
+            error,
+          );
+        }
+      }
+      const messageId = await this.createGameMessage(
+        ctx,
+        pending.game_address,
+        gameData.game_type || pending.game_type,
+        gameData.amount || pending.amount,
+        creatorDisplayName,
+        gameData.token_ticker || pending.token_ticker,
+        gameData.status || "Active",
+        undefined,
+        { reserveDelivery: true },
+      );
+      if (messageId === 0) {
+        throw new Error("game message delivery is already in flight");
+      }
+    }
+
+    this.gameDb.clearPendingGameCreation(pending.game_address);
+    return true;
+  }
+
+  public async recoverPendingGameCreationByAddress(
+    ctx: Context,
+    gameAddress: string,
+  ): Promise<boolean> {
+    const pending = this.gameDb.getPendingGameCreation(gameAddress);
+    if (!pending) return false;
+    return this.recoverPendingGameCreation(ctx, pending);
+  }
+
+  public clearPendingGameCreation(gameAddress: string): void {
+    this.gameDb.clearPendingGameCreation(gameAddress);
   }
 
   private async processActiveGames(ctx: Context, activeGamesData: any[]): Promise<string[]> {

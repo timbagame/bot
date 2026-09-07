@@ -304,6 +304,25 @@ export class ChatDatabase extends BaseDatabase {
     );
   }
 
+  public migrateChatId(oldChatId: number, newChatId: number): void {
+    if (oldChatId === newChatId) return;
+    const migrate = this.db.transaction(() => {
+      for (const table of [
+        "chat_token_configs",
+        "chat_settings",
+        "chat_game_settings",
+        "chat_buy_alerts",
+      ]) {
+        this.run(
+          `UPDATE OR REPLACE ${table} SET chat_id = ? WHERE chat_id = ?`,
+          [newChatId, oldChatId],
+          `migrating ${table} chat id`,
+        );
+      }
+    });
+    migrate();
+  }
+
   // ================================
   // CHAT SETTINGS METHODS (for future use)
   // ================================

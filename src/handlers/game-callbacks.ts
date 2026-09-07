@@ -1,7 +1,6 @@
 import { InlineKeyboard, type Bot, type Context, type MiddlewareFn } from "grammy";
 import type { NextFunction } from "grammy";
 import { PublicKey } from "#solana";
-import { buildConfirmedGameRecoveryMessage } from "../utils/game-ui";
 import { isMissingAccountError } from "../utils/account-errors";
 
 import {
@@ -1354,6 +1353,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
           failureText: "❌ Only the game creator can confirm this setup!",
         },
         async (ctx, { tokenContext, clearSession, creatorId }) => {
+          const gameManager = getGameManager();
+          let createdGameAddress: string | undefined;
           try {
             const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
             if (!payload) {
@@ -1361,7 +1362,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               return;
             }
 
-            const gameManager = getGameManager();
             const gameType = payload.gameType;
             const amount = Number.parseFloat(payload.amount);
             const players = payload.players;
@@ -1394,7 +1394,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             let confirmMessageMissing = false;
             const confirmationFallbackReplyTo =
               ctx.callbackQuery?.message?.reply_to_message?.message_id;
-
             deps.pendingGameCreations.add(creationKey);
 
             try {
@@ -1422,7 +1421,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 }
               }
 
-              await safeAnswerCallbackQuery(ctx, "Creating game...");
+              await safeAnswerCallbackQuery(ctx);
 
               const decimals = tokenContext.tokenDecimals;
               const amountFixed = amount.toFixed(decimals);
@@ -1471,17 +1470,26 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 } as const;
 
                 if (result.confirmedSignature && result.gameAddress) {
-                  await respondWithMenu(
-                    ctx,
-                    {
-                      text: buildConfirmedGameRecoveryMessage(
-                        result.gameAddress,
-                        result.confirmedSignature,
-                      ),
-                      parseMode: "HTML",
-                    },
-                    options,
-                  );
+                  try {
+                    await gameManager.recoverPendingGameCreationByAddress?.(
+                      ctx,
+                      result.gameAddress,
+                    );
+                  } catch (recoveryError) {
+                    console.warn(
+                      "Confirmed game delivery will be retried in the background:",
+                      recoveryError,
+                    );
+                  }
+                  if (chatId && messageId && !confirmMessageMissing) {
+                    try {
+                      await ctx.api.deleteMessage(chatId, messageId);
+                    } catch (deleteError) {
+                      if (!isMessageMissing(deleteError)) {
+                        console.warn("Could not delete failed game confirmation:", deleteError);
+                      }
+                    }
+                  }
                   return;
                 }
                 const rawError = result.error || "❌ Failed to create game";
@@ -1525,6 +1533,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 );
                 return;
               }
+              createdGameAddress = result.gameAddress;
 
               const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
 
@@ -1554,7 +1563,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 }
               }
 
-              await gameManager.createGameMessage(
+              const deliveredMessageId = await gameManager.createGameMessage(
                 ctx,
                 result.gameAddress,
                 gameType.charAt(0).toUpperCase() + gameType.slice(1),
@@ -1563,7 +1572,11 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 gameData.tokenTicker,
                 "Active",
                 replyToUserMessageId,
+                { reserveDelivery: true },
               );
+              if (deliveredMessageId !== 0) {
+                gameManager.clearPendingGameCreation?.(result.gameAddress);
+              }
 
               clearSession();
 
@@ -1588,6 +1601,22 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             }
           } catch (error) {
             console.error("Error in confirm_game callback:", error);
+            if (createdGameAddress) {
+              try {
+                await gameManager.recoverPendingGameCreationByAddress?.(ctx, createdGameAddress);
+              } catch (recoveryError) {
+                console.warn(
+                  "Confirmed game delivery will be retried in the background:",
+                  recoveryError,
+                );
+              }
+              try {
+                await safeAnswerCallbackQuery(ctx);
+              } catch (answerError) {
+                console.error("Failed to answer callback after confirmed game error:", answerError);
+              }
+              return;
+            }
             try {
               await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
             } catch (answerError) {

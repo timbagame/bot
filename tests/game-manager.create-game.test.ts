@@ -960,10 +960,12 @@ describe("GameManager.createGame", () => {
       });
       const saveGame = vi.fn();
       const saveGameParticipant = vi.fn();
+      const savePendingGameCreation = vi.fn();
       const db = {
         savePlayerMapping: () => {},
         saveGame,
         saveGameParticipant,
+        savePendingGameCreation,
         countActiveGamesByCreator: () => 0,
         countRecentGamesByCreator: () => 0,
       } as any;
@@ -1009,6 +1011,8 @@ describe("GameManager.createGame", () => {
         2,
         60,
         1n,
+        undefined,
+        8200,
       );
 
       expect(wallet.sendTransaction).toHaveBeenCalledTimes(1);
@@ -1019,6 +1023,13 @@ describe("GameManager.createGame", () => {
         expect(saveGameParticipant).not.toHaveBeenCalled();
         expect(result.gameAddress).toBe(program.__captures.initializeGameAccounts.game.toBase58());
         expect(result.confirmedSignature).toBe("CONFIRMED_SIG");
+        expect(savePendingGameCreation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            gameAddress: result.gameAddress,
+            chatId: 8200,
+            transactionSignature: "CONFIRMED_SIG",
+          }),
+        );
         expect(reads).toBe(failure === "unavailable" ? 7 : 1);
       } else {
         expect(result.success).toBe(true);

@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "#solana";
 import BN from "bn.js";
+import { ChatDatabase } from "../src/utils/chat-database";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
 process.env.MNEMONIC =
@@ -17,6 +18,8 @@ describe("Pending player events", async () => {
 
   beforeEach(async () => {
     botModule = await botModulePromise;
+    ChatDatabase.resetForTesting();
+    botModule.__test_setChatDatabase(ChatDatabase.getInstance());
     sendCalls = [];
 
     originalSendMessage = botModule.bot.api.sendMessage.bind(botModule.bot.api);
@@ -48,6 +51,7 @@ describe("Pending player events", async () => {
     module.__test_clearPendingPlayerEvents();
     module.__test_resetGameMessageUpdateDebounceMs?.();
     module.__test_resetJoinAnnouncementMaxTickets?.();
+    module.__test_resetChatDatabase?.();
     module.__test_resetGameDatabase?.();
   });
 
@@ -64,9 +68,18 @@ describe("Pending player events", async () => {
       timestamp: new BN(timestamp),
     }) as any;
 
+  const enableJoinAnnouncementsForTest = (chatId = 77): void => {
+    ChatDatabase.getInstance().upsertChatGameSettings(chatId, {
+      join_notifications_per_minute: 50,
+    });
+  };
+
   test("player join announcements escape display names", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
+
+    botModule.__test_setJoinAnnouncementMaxTickets(50);
+    enableJoinAnnouncementsForTest();
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
@@ -84,6 +97,9 @@ describe("Pending player events", async () => {
   test("player join announcements show game type (coinflip)", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
+
+    botModule.__test_setJoinAnnouncementMaxTickets(50);
+    enableJoinAnnouncementsForTest();
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -112,6 +128,8 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
+    botModule.__test_setJoinAnnouncementMaxTickets(50);
+    enableJoinAnnouncementsForTest();
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "TestPlayer",
@@ -133,6 +151,15 @@ describe("Pending player events", async () => {
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("joined the giveaway!");
+  });
+
+  test("join announcements are disabled by default", async () => {
+    const target = { chatId: 77, messageId: 301 };
+    const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
+
+    await botModule.__test_processPlayerEvent(event, "PlayerJoined", [target]);
+
+    expect(sendCalls).toHaveLength(0);
   });
 
   test("player join announcements are disabled above ticket threshold", async () => {
@@ -285,6 +312,8 @@ describe("Pending player events", async () => {
     const gameAddress = "GAME123";
     const firstPlayer = (await Keypair.generate()).publicKey;
     const secondPlayer = (await Keypair.generate()).publicKey;
+    botModule.__test_setJoinAnnouncementMaxTickets(50);
+    enableJoinAnnouncementsForTest();
 
     const names = new Map<string, string>([
       [firstPlayer.toBase58(), "First"],
@@ -345,6 +374,8 @@ describe("Pending player events", async () => {
   test("pending events near age limit flush once target becomes available", async () => {
     const gameAddress = "BOUNDARY_GAME";
     const player = (await Keypair.generate()).publicKey;
+    botModule.__test_setJoinAnnouncementMaxTickets(50);
+    enableJoinAnnouncementsForTest(88);
     const names = new Map<string, string>([[player.toBase58(), "Boundary"]]);
 
     let targetReady = false;

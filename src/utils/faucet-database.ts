@@ -3,6 +3,12 @@ import { createDatabaseSingleton, BaseDatabase } from "./base-database";
 export type FaucetStatus = "active" | "cancelled" | "completed" | "expired" | "empty";
 export type FaucetClaimStatus = "processing" | "submitted" | "paid" | "failed";
 
+// A submitted transaction cannot remain valid indefinitely: once its recent
+// blockhash has expired, an unknown signature cannot land later. Keep this
+// window longer than the normal confirmation timeout so transient RPC lag is
+// given time to resolve before the claim is released for retry.
+export const FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS = 5 * 60_000;
+
 export interface FaucetRecord {
   id: number;
   creator_id: string;
@@ -367,6 +373,18 @@ export class FaucetDatabase extends BaseDatabase {
     );
   }
 
+  releaseUnknownSubmittedClaims(now: number, maxAgeMs: number): number {
+    const cutoff = now - Math.max(0, maxAgeMs);
+    return this.run(
+      `UPDATE faucet_claims
+       SET status = 'failed', last_error = 'transaction was not found after the confirmation window',
+           updated_at = ?
+       WHERE status = 'submitted' AND transaction_signature IS NOT NULL AND updated_at <= ?`,
+      [now, cutoff],
+      "releasing unknown submitted faucet claims",
+    ).changes;
+  }
+
   releaseStaleProcessing(cutoff: number, now: number): number {
     return this.run(
       `UPDATE faucet_claims SET status = 'failed', last_error = 'interrupted before submission',
@@ -465,6 +483,15 @@ export class FaucetDatabase extends BaseDatabase {
       "UPDATE faucets SET status = 'empty' WHERE id = ? AND status = 'active'",
       [faucetId],
       "marking faucet empty",
+    );
+  }
+
+  migrateChatId(oldChatId: number, newChatId: number): void {
+    if (oldChatId === newChatId) return;
+    this.run(
+      "UPDATE faucets SET chat_id = ? WHERE chat_id = ?",
+      [String(newChatId), String(oldChatId)],
+      "migrating faucet chat id",
     );
   }
 

@@ -784,7 +784,7 @@ describe("chat defaults module", () => {
     await mockBot.dispatch("chat_defaults_join_notifications", ctx);
     expect(lastMenu.text).toContain("Join Notification Settings");
     expect(lastMenu.text).toContain("External: Off"); // Default
-    expect(lastMenu.text).toContain("5/min"); // Default
+    expect(lastMenu.text).toContain("Disabled"); // Default
 
     // 2. Enable External Notifications
     ctx.callbackQuery.data = "chat_defaults_set_join_external_on";
@@ -833,7 +833,7 @@ describe("chat defaults module", () => {
     expect(settingsClear?.join_notifications_external).toBeNull();
     expect(settingsClear?.join_notifications_per_minute).toBeNull();
     expect(lastMenu.text).toContain("External Off"); // back to default
-    expect(lastMenu.text).toContain("5/min"); // back to default
+    expect(lastMenu.text).toContain("Disabled"); // back to default
   });
 
   test("video settings flow updates database and UI", async () => {

@@ -32,8 +32,8 @@ describe("Join notification rate limiting", () => {
       expect(__test_getJoinNotificationBucket(chatId)).toBeUndefined();
     });
 
-    test("default rate limit constant is 5", () => {
-      expect(DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE).toBe(5);
+    test("default rate limit is disabled", () => {
+      expect(DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE).toBe(0);
     });
 
     test("default external notifications constant is false", () => {

@@ -155,6 +155,7 @@ test("confirm_game skips fallback edit when confirmation message is missing", as
   } as any);
 
   expect(editCalls.length).toBe(1);
+  expect(editCalls[0].text).toBe("⏳ Creating game…");
   expect(deleteCalls.length).toBe(1);
   expect(sendCalls.length).toBe(0);
 }, 15000);
@@ -237,16 +238,14 @@ test.each([false, true])(
       },
     } as any);
 
-    expect(editCalls.length).toBe(1);
-    expect(deleteCalls.length).toBe(0);
-    expect(sendCalls.length).toBe(1);
     if (confirmed) {
-      expect(sendCalls[0].text).toContain("transaction was confirmed");
-      expect(sendCalls[0].text).toContain("Do not create the game again");
-      expect(sendCalls[0].text).toContain("GAME&lt;123&gt;");
-      expect(sendCalls[0].text).toContain("CONFIRMED_SIG");
-      expect(sendCalls[0].text).not.toContain("Please try again");
+      expect(editCalls.length).toBe(1);
+      expect(deleteCalls.length).toBe(0);
+      expect(sendCalls.length).toBe(0);
     } else {
+      expect(editCalls.length).toBe(1);
+      expect(deleteCalls.length).toBe(0);
+      expect(sendCalls.length).toBe(1);
       expect(sendCalls[0].text).toBe("❌ Failed to create game. Please try again.");
     }
     expect(JSON.stringify(sendCalls)).not.toContain(opaque);
@@ -330,7 +329,7 @@ test("confirm_game clears pending state and surfaces limit errors", async () => 
   } as any);
 
   expect(replyMarkupCalls.length).toBe(1);
-  expect(editCalls.length).toBeGreaterThanOrEqual(2);
+  expect(editCalls.length).toBe(2);
   expect(sendCalls.length).toBe(0);
 
   const errorEdit = editCalls[editCalls.length - 1];
