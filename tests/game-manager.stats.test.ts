@@ -80,6 +80,25 @@ describe("GameManager Stats", () => {
       expect(s.currentTickets).toBe(0);
       expect(s.totalPot).toBe(1_000_000_000n);
       expect(s.expirationInfo).toBe("");
+      expect(s.stateUnavailable).toBe(true);
+    });
+
+    test("marks a closed account as unavailable instead of a full zero-ticket game", async () => {
+      resetGM();
+      const program = {
+        account: {
+          game: {
+            fetchNullable: async () => null,
+          },
+        },
+      } as any;
+      const gm = GameManager.getInstance(program, {} as any, {} as any);
+      const stats = await (gm as any).getActiveGameStats(
+        new PublicKey("BPFLoader1111111111111111111111111111111111"),
+        1_000_000_000,
+      );
+      expect(stats.stateUnavailable).toBe(true);
+      expect(stats.maxTickets).toBe(0);
     });
   });
 

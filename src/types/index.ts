@@ -148,6 +148,8 @@ export type GameCancellationResult =
 export interface GameMessageFormat {
   messageText: string;
   keyboard: any[];
+  /** True when an update could not obtain current on-chain state safely. */
+  skipUpdate?: boolean;
 }
 
 export interface GameCategory {

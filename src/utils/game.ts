@@ -47,6 +47,7 @@ import {
   sendMediaWithFallback,
 } from "./media";
 import { isMessageMissing } from "./telegram-errors";
+import { isMissingAccountError } from "./account-errors";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import type {
@@ -2175,7 +2176,23 @@ export class GameManager {
       providedTotalPotInput !== undefined ? coerceLamportValue(providedTotalPotInput) : null;
 
     try {
-      const gameAccount = providedGameAccount ?? (await this.program.account.game.fetch(gamePda));
+      const gameAccount =
+        providedGameAccount ??
+        (this.program.account.game.fetchNullable
+          ? await this.program.account.game.fetchNullable(gamePda)
+          : await this.program.account.game.fetch(gamePda));
+      if (!gameAccount) {
+        return {
+          currentTickets: 0,
+          maxTickets: 0,
+          minTickets: 0,
+          totalPot: baseAmountLamports,
+          expirationInfo: "",
+          tokenMint: undefined,
+          participantAddresses: [],
+          stateUnavailable: true,
+        };
+      }
       const currentTickets = Number(gameAccount.ticketsCount ?? 0);
       const maxTickets = Number(gameAccount.maxTickets ?? 0);
       const minTickets = Number(gameAccount.minTickets ?? 0);
@@ -2237,6 +2254,7 @@ export class GameManager {
         expirationInfo: "",
         tokenMint: undefined,
         participantAddresses: [],
+        stateUnavailable: true,
       };
     }
   }
@@ -2474,7 +2492,15 @@ export class GameManager {
           options?.gameAccount,
         );
 
-    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats as any;
+    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo, stateUnavailable } =
+      gameStats as any;
+    if (!isCompleted && stateUnavailable) {
+      return {
+        messageText: "",
+        keyboard: [],
+        skipUpdate: true,
+      };
+    }
     const tokenMintHint = (gameStats as { tokenMint?: string | null }).tokenMint;
     const participantAddresses = (gameStats as { participantAddresses?: string[] })
       .participantAddresses;
@@ -2884,6 +2910,9 @@ export class GameManager {
         winnerSignature,
         { priceHint },
       );
+      if (formatted.skipUpdate) {
+        return;
+      }
       messageTextValue = formatted.messageText;
 
       const inlineKeyboard =
@@ -3205,6 +3234,12 @@ export class GameManager {
         return;
       }
 
+      const persistedStatus = String(gameData.status ?? "active").toLowerCase();
+      const terminalStatus = persistedStatus === "completed" || !!gameData.winner_address;
+      const effectiveStatus = terminalStatus ? "Completed" : status;
+      const effectiveWinner = terminalStatus ? gameData.winner_address : winnerAddress;
+      const effectiveTotalPot =
+        terminalStatus && totalPot === undefined ? gameData.total_amount : totalPot;
       const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
       const gameType = gameData.game_type
         ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1)
@@ -3216,10 +3251,10 @@ export class GameManager {
         gameType,
         gameData.amount,
         creatorUsername,
-        status,
+        effectiveStatus,
         gameData.token_ticker || "",
-        winnerAddress,
-        totalPot,
+        effectiveWinner,
+        effectiveTotalPot,
         winnerSignature,
       );
     } catch (error) {
@@ -3953,7 +3988,7 @@ export class GameManager {
         }
       } catch (error: any) {
         // If account doesn't exist, the game was already successfully closed
-        if (error.message?.includes("Account does not exist")) {
+        if (isMissingAccountError(error)) {
           debugLog("✅ Game account already closed successfully");
         } else {
           console.error("Post-cleanup close attempt failed:", error);
@@ -3991,7 +4026,7 @@ export class GameManager {
           }
         }
       } catch (error: any) {
-        if (error.message?.includes("Account does not exist")) {
+        if (isMissingAccountError(error)) {
           debugLog("✅ Game account already closed successfully after buffer cleanup");
         } else {
           console.error("Post-buffer cleanup close attempt failed:", error);
@@ -4060,7 +4095,7 @@ export class GameManager {
           };
         }
       } catch (fetchError: any) {
-        if (fetchError?.message?.includes("Account does not exist")) {
+        if (isMissingAccountError(fetchError)) {
           return {
             success: false,
             error: this.completedGameErrorMessage,
@@ -4752,7 +4787,7 @@ export class GameManager {
       try {
         gameAccount = await loadGameAccount();
       } catch (fetchError: any) {
-        if (fetchError?.message?.includes("Account does not exist")) {
+        if (isMissingAccountError(fetchError)) {
           return { success: false, error: this.completedGameErrorMessage };
         }
         throw fetchError;
@@ -4818,7 +4853,7 @@ export class GameManager {
         } catch (joinError: any) {
           const message = joinError?.message ?? "";
 
-          if (message.includes("Account does not exist")) {
+          if (isMissingAccountError(joinError)) {
             return {
               success: false,
               error: this.completedGameErrorMessage,
@@ -4872,7 +4907,7 @@ export class GameManager {
       };
     } catch (error: any) {
       console.error("Error joining private game:", error);
-      if (error?.message?.includes("Account does not exist")) {
+      if (isMissingAccountError(error)) {
         return {
           success: false,
           error: "Game not found or has expired.",
@@ -5661,8 +5696,7 @@ export class GameManager {
       const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
       gameAccount = fetchNullable ? await fetchNullable(gamePda) : await accountApi.fetch(gamePda);
     } catch (error: any) {
-      const message = error?.message ?? "";
-      if (message.includes("Account does not exist")) {
+      if (isMissingAccountError(error)) {
         return null;
       }
       throw error;
@@ -6019,7 +6053,7 @@ export class GameManager {
   }
 
   private handleGameProcessingError(error: any, address: string): boolean {
-    if (error.message?.includes("Account does not exist")) {
+    if (isMissingAccountError(error)) {
       debugLog("ℹ️ Orphaned game " + address + " was already closed");
       return true;
     } else {

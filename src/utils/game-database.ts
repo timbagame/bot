@@ -148,7 +148,24 @@ export class GameDatabase extends BaseDatabase {
           chat_id,
           timeout_seconds,
           expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(game_address) DO UPDATE SET
+          creator_telegram_id = CASE
+            WHEN excluded.creator_telegram_id IS NOT NULL
+              AND excluded.creator_telegram_id != ''
+              AND excluded.creator_telegram_id != 'unknown'
+            THEN excluded.creator_telegram_id
+            ELSE games.creator_telegram_id
+          END,
+          amount = excluded.amount,
+          game_type = excluded.game_type,
+          token_mint = COALESCE(excluded.token_mint, games.token_mint),
+          token_ticker = COALESCE(excluded.token_ticker, games.token_ticker),
+          max_players = COALESCE(excluded.max_players, games.max_players),
+          min_players = COALESCE(excluded.min_players, games.min_players),
+          chat_id = COALESCE(excluded.chat_id, games.chat_id),
+          timeout_seconds = COALESCE(excluded.timeout_seconds, games.timeout_seconds),
+          expires_at = COALESCE(excluded.expires_at, games.expires_at)`,
       [
         gameAddress,
         creatorTelegramId,

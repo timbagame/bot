@@ -2,6 +2,7 @@ import { InlineKeyboard, type Bot, type Context, type MiddlewareFn } from "gramm
 import type { NextFunction } from "grammy";
 import { PublicKey } from "#solana";
 import { buildConfirmedGameRecoveryMessage } from "../utils/game-ui";
+import { isMissingAccountError } from "../utils/account-errors";
 
 import {
   DEFAULT_GAME_TIMEOUT,
@@ -446,7 +447,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         `✅ Joined! (${ticketCount}/${maxTickets})`,
       );
     } catch (error) {
-      if (error instanceof Error && error.message.includes("Account does not exist")) {
+      if (isMissingAccountError(error)) {
         await answerJoinCallbackOnce(
           ctx,
           game.game_address,
@@ -486,7 +487,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
       await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
     } catch (error) {
-      if (error instanceof Error && error.message.includes("Account does not exist")) {
+      if (isMissingAccountError(error)) {
         await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
       } else {
         console.error(`Error refreshing game ${gameAddress}:`, error);

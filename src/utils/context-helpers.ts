@@ -1,6 +1,7 @@
 import type { Context } from "grammy";
 import type { CallbackError, ErrorHandlingOptions } from "../types";
 import { formatUserFriendlyError, truncateMessage } from "./errors";
+import { isMissingAccountError } from "./account-errors";
 import {
   getCallbackQueue,
   getRateLimiter,
@@ -223,8 +224,7 @@ export const categorizeError = (error: any): CallbackError => {
     message: errorMessage,
     code: error?.code,
     isAccountNotFound:
-      errorMessage.includes("Account does not exist") ||
-      errorMessage.includes("could not find account"),
+      isMissingAccountError(error) || errorMessage.includes("could not find account"),
   };
 };
 

@@ -18,6 +18,15 @@ import { parseProgramEventLogs } from "./program-event-parser";
 
 type AccountRecord = Record<string, unknown>;
 
+export class TimbaAccountNotFoundError extends Error {
+  public readonly code = "ACCOUNT_NOT_FOUND" as const;
+
+  public constructor(address: PublicKey) {
+    super(`Account ${address.toBase58()} does not exist`);
+    this.name = "TimbaAccountNotFoundError";
+  }
+}
+
 export interface TimbaAccountClient<T = any> {
   fetch(address: PublicKey): Promise<T>;
   fetchNullable(address: PublicKey): Promise<T | null>;
@@ -121,7 +130,7 @@ function accountClient<T>(options: {
   return {
     fetch: async (address) => {
       const account = await fetchNullable(address);
-      if (!account) throw new Error(`Account ${address.toBase58()} does not exist`);
+      if (!account) throw new TimbaAccountNotFoundError(address);
       return account;
     },
     fetchNullable,

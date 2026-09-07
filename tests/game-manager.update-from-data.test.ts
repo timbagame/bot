@@ -59,3 +59,29 @@ test("updateGameMessageFromData forwards fields to updateGameMessage", async () 
   expect(pWinner).toBe("WinnerPubkey");
   expect(pTotal).toBe(42);
 });
+
+test("updateGameMessageFromData does not let a stale active update overwrite a terminal game", async () => {
+  resetGM();
+  const program = { account: { game: { fetch: async () => ({}) } } } as any;
+  const db = {
+    getGame: (_: string) => ({
+      game_type: "coinflip",
+      amount: 1_000_000_000,
+      token_ticker: "TOK",
+      status: "completed",
+      winner_address: "cancelled",
+      total_amount: 2_000_000_000,
+    }),
+  } as any;
+  const gm = GameManager.getInstance(program, {} as any, db);
+  (gm as any).getGameCreatorUsername = async () => "@creator";
+  const captured: any[] = [];
+  (gm as any).updateGameMessage = async (...args: any[]) => captured.push(args);
+
+  await gm.updateGameMessageFromData({} as any, "terminal-game", "Active");
+
+  expect(captured).toHaveLength(1);
+  expect(captured[0][5]).toBe("Completed");
+  expect(captured[0][7]).toBe("cancelled");
+  expect(captured[0][8]).toBe(2_000_000_000);
+});
