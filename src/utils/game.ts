@@ -1,4 +1,5 @@
 import { PublicKey, Keypair, Connection, SystemProgram, TransactionInstruction } from "#solana";
+import { randomUUID } from "node:crypto";
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -240,6 +241,7 @@ const formatRateLimitWindow = (windowMs: number): string => {
 // ================================
 
 const DEFAULT_FRIENDLY_ERROR_MESSAGE = "❌ Something went wrong. Please try again in a moment.";
+const PENDING_GAME_CREATION_SUBMISSION_LEASE_MS = 120_000;
 
 const isDefinitiveGameCreationFailure = (error: unknown): boolean => {
   const parts: string[] = [];
@@ -4146,36 +4148,69 @@ export class GameManager {
     let pendingCreationPersisted = false;
     let pendingCreationState: PendingGameCreationState = "prepared";
     let creationConfirmed = false;
+    let activeSubmissionLeaseId: string | null = null;
+    const buildPendingCreationInput = (state: PendingGameCreationState) => ({
+      gameAddress: pendingCreation!.gameAddress,
+      creatorTelegramId: telegramIdStr,
+      creatorDisplayName: null,
+      amount: parsedAmount.amount,
+      gameType,
+      tokenMint: parsedAmount.tokenMint,
+      tokenTicker: parsedAmount.tokenTicker,
+      maxPlayers: maxTickets,
+      minPlayers: minTickets,
+      chatId,
+      timeoutSeconds: timeout,
+      expiresAt: requestedExpiresAtMs,
+      transactionSignature: pendingCreation!.transactionSignature,
+      state,
+      isPrivate,
+      transactionBlockhash: pendingCreation!.blockhash,
+      lastValidBlockHeight: pendingCreation!.lastValidBlockHeight,
+      signedTransactionBase64: pendingCreation!.signedTransactionBase64,
+      replyToMessageId: options?.replyToMessageId ?? null,
+    });
+
     const persistPendingCreation = (state: PendingGameCreationState, error?: unknown): void => {
       if (!pendingCreation || typeof chatId !== "number" || chatId === 0) return;
       const database = this.gameDb as any;
       const savePending = database.savePendingGameCreation;
       const setState = database.setPendingGameCreationState;
+      const setStateIfCurrent = database.setPendingGameCreationStateIfCurrent;
       const errorMessage = error instanceof Error ? error.message : error ? String(error) : null;
 
       if (state === "prepared" && typeof savePending === "function" && !pendingCreationPersisted) {
-        savePending.call(this.gameDb, {
-          gameAddress: pendingCreation.gameAddress,
-          creatorTelegramId: telegramIdStr,
-          creatorDisplayName: null,
-          amount: parsedAmount.amount,
-          gameType,
-          tokenMint: parsedAmount.tokenMint,
-          tokenTicker: parsedAmount.tokenTicker,
-          maxPlayers: maxTickets,
-          minPlayers: minTickets,
-          chatId,
-          timeoutSeconds: timeout,
-          expiresAt: requestedExpiresAtMs,
-          transactionSignature: pendingCreation.transactionSignature,
-          state,
-          isPrivate,
-          transactionBlockhash: pendingCreation.blockhash,
-          lastValidBlockHeight: pendingCreation.lastValidBlockHeight,
-          signedTransactionBase64: pendingCreation.signedTransactionBase64,
-          replyToMessageId: options?.replyToMessageId ?? null,
-        });
+        savePending.call(this.gameDb, buildPendingCreationInput(state));
         pendingCreationPersisted = true;
+        return;
+      }
+
+      // A prepared record is the proof that no send path has started. Once it
+      // exists, no later error handler may write prepared back over a durable
+      // submission admission.
+      if (state === "prepared") return;
+
+      const expectedStates: PendingGameCreationState[] =
+        state === "confirmed"
+          ? ["submitted", "unknown", "confirmed"]
+          : state === "delivered"
+            ? ["confirmed", "delivered"]
+            : ["submitted", "unknown"];
+
+      if (typeof setStateIfCurrent === "function" && pendingCreationPersisted) {
+        try {
+          setStateIfCurrent.call(this.gameDb, pendingCreation.gameAddress, expectedStates, state, {
+            error: errorMessage,
+            now: Date.now(),
+            clearSubmissionLease: state === "confirmed" || state === "failed",
+            submissionLeaseId: activeSubmissionLeaseId,
+          });
+        } catch (stateError) {
+          console.error(
+            `Failed to update pending game creation state for ${pendingCreation.gameAddress}`,
+            stateError,
+          );
+        }
         return;
       }
 
@@ -4198,33 +4233,81 @@ export class GameManager {
       // that have the record writer but not the state-update helper.
       if (typeof savePending === "function" && pendingCreationPersisted) {
         try {
-          savePending.call(this.gameDb, {
-            gameAddress: pendingCreation.gameAddress,
-            creatorTelegramId: telegramIdStr,
-            creatorDisplayName: null,
-            amount: parsedAmount.amount,
-            gameType,
-            tokenMint: parsedAmount.tokenMint,
-            tokenTicker: parsedAmount.tokenTicker,
-            maxPlayers: maxTickets,
-            minPlayers: minTickets,
-            chatId,
-            timeoutSeconds: timeout,
-            expiresAt: requestedExpiresAtMs,
-            transactionSignature: pendingCreation.transactionSignature,
-            state,
-            isPrivate,
-            transactionBlockhash: pendingCreation.blockhash,
-            lastValidBlockHeight: pendingCreation.lastValidBlockHeight,
-            signedTransactionBase64: pendingCreation.signedTransactionBase64,
-            replyToMessageId: options?.replyToMessageId ?? null,
-          });
+          savePending.call(this.gameDb, buildPendingCreationInput(state));
         } catch (stateError) {
           console.error(
             `Failed to update pending game creation for ${pendingCreation.gameAddress}`,
             stateError,
           );
         }
+      }
+    };
+
+    const admitPendingCreationSubmission = (): string | null => {
+      const database = this.gameDb as any;
+      if (!pendingCreationPersisted) {
+        if (typeof database.savePendingGameCreation !== "function") return null;
+        throw new Error("Game creation intent was not durably prepared before broadcast");
+      }
+
+      const claimSubmission = database.claimPendingGameCreationSubmission;
+      if (typeof claimSubmission !== "function") {
+        // A real GameDatabase always has the admission primitive. A test
+        // double without pending persistence has no durable send obligation;
+        // any double that does persist must fail closed here.
+        if (typeof database.savePendingGameCreation === "function") {
+          throw new Error("Durable game submission admission is unavailable");
+        }
+        return null;
+      }
+
+      const leaseId = randomUUID();
+      const result = claimSubmission.call(
+        this.gameDb,
+        pendingCreation!.gameAddress,
+        leaseId,
+        Date.now() + PENDING_GAME_CREATION_SUBMISSION_LEASE_MS,
+        Date.now(),
+      );
+      if (!result || result.acquired !== true) {
+        const reason = result?.reason ?? "unavailable";
+        throw new Error(`Game creation submission was not admitted (${reason})`);
+      }
+      activeSubmissionLeaseId = leaseId;
+      return leaseId;
+    };
+
+    const finishPendingCreationSubmission = (
+      leaseId: string | null,
+      state: "submitted" | "unknown" | "failed",
+      error?: unknown,
+    ): boolean => {
+      if (!leaseId) {
+        persistPendingCreation(state, error);
+        return true;
+      }
+
+      const finishSubmission = (this.gameDb as any).finishPendingGameCreationSubmission;
+      if (typeof finishSubmission !== "function") {
+        // Admission already durably changed prepared -> submitted. Never fall
+        // back to an unconditional state write after a network call.
+        return false;
+      }
+
+      try {
+        const completed =
+          finishSubmission.call(this.gameDb, pendingCreation!.gameAddress, leaseId, state, {
+            error: error instanceof Error ? error.message : error ? String(error) : null,
+            now: Date.now(),
+          }) === true;
+        if (completed) activeSubmissionLeaseId = null;
+        return completed;
+      } catch (stateError) {
+        console.error(
+          `Failed to finish pending game creation submission for ${pendingCreation!.gameAddress}`,
+          stateError,
+        );
+        return false;
       }
     };
 
@@ -4534,20 +4617,30 @@ export class GameManager {
         }
 
         const initialAttempt = !submissionAttempted;
+        const submissionLeaseId = admitPendingCreationSubmission();
         submissionAttempted = true;
         pendingCreationState = "submitted";
-        persistPendingCreation("submitted");
         try {
           const prepared = preparedCreation;
           if (!prepared) throw new Error("Game creation transaction was not prepared");
-          return await this.wallet.sendFullySignedGameTransaction(
+          const signature = await this.wallet.sendFullySignedGameTransaction(
             prepared.transaction,
             prepared.blockhash,
           );
+          finishPendingCreationSubmission(submissionLeaseId, "submitted");
+          return signature;
         } catch (error) {
-          pendingCreationState =
+          const nextState =
             initialAttempt && isDefinitiveGameCreationFailure(error) ? "failed" : "unknown";
-          persistPendingCreation(pendingCreationState, error);
+          const durableTransitionCompleted = finishPendingCreationSubmission(
+            submissionLeaseId,
+            nextState,
+            error,
+          );
+          // If the post-send state write failed, the durable admission remains
+          // submitted (or its lease remains recoverable). Never report a
+          // failed state locally in a way that could invite a second creation.
+          pendingCreationState = durableTransitionCompleted ? nextState : "submitted";
           throw error;
         }
       };
@@ -6776,6 +6869,48 @@ export class GameManager {
       throw new Error("pending game creation has no reusable signed transaction lifetime");
     }
 
+    const claimSubmission = (this.gameDb as any)?.claimPendingGameCreationSubmission;
+    if (typeof claimSubmission !== "function") {
+      throw new Error("Durable game submission admission is unavailable");
+    }
+
+    const leaseId = randomUUID();
+    const now = Date.now();
+    const claim = claimSubmission.call(
+      this.gameDb,
+      pending.game_address,
+      leaseId,
+      now + PENDING_GAME_CREATION_SUBMISSION_LEASE_MS,
+      now,
+    );
+    if (!claim || claim.acquired !== true) {
+      const reason = claim?.reason ?? "unavailable";
+      if (reason === "in-flight") {
+        throw new Error(
+          `Pending game creation submission is already in flight; keeping ${pending.game_address} reserved`,
+        );
+      }
+      throw new Error(`Pending game creation submission was not admitted (${reason})`);
+    }
+
+    const finishSubmission = (state: "submitted" | "unknown", error?: unknown): void => {
+      const finish = (this.gameDb as any)?.finishPendingGameCreationSubmission;
+      if (typeof finish !== "function") return;
+      try {
+        finish.call(this.gameDb, pending.game_address, leaseId, state, {
+          error: error instanceof Error ? error.message : error ? String(error) : null,
+          now: Date.now(),
+        });
+      } catch (stateError) {
+        // The admission itself is already durable. If this write fails, leave
+        // submitted/leased state in place so expiry cannot unlock the intent.
+        console.error(
+          `Failed to finish pending game creation submission for ${pending.game_address}`,
+          stateError,
+        );
+      }
+    };
+
     try {
       const transaction = decodeGameTransaction(signedTransactionBase64);
       assertIsFullySignedTransaction(transaction);
@@ -6788,21 +6923,9 @@ export class GameManager {
           `Pending game rebroadcast returned an unexpected signature for ${pending.game_address}`,
         );
       }
-
-      const setPendingState = (this.gameDb as any)?.setPendingGameCreationState;
-      if (typeof setPendingState === "function") {
-        setPendingState.call(this.gameDb, pending.game_address, "submitted", {
-          now: Date.now(),
-        });
-      }
+      finishSubmission("submitted");
     } catch (error) {
-      const setPendingState = (this.gameDb as any)?.setPendingGameCreationState;
-      if (typeof setPendingState === "function") {
-        setPendingState.call(this.gameDb, pending.game_address, "unknown", {
-          error: error instanceof Error ? error.message : String(error),
-          now: Date.now(),
-        });
-      }
+      finishSubmission("unknown", error);
       throw error;
     }
   }
@@ -6818,23 +6941,54 @@ export class GameManager {
   ): Promise<boolean> {
     const getGame = (this.gameDb as any)?.getGame;
     const clearPending = (this.gameDb as any)?.clearPendingGameCreation;
+    const clearPendingIfState = (this.gameDb as any)?.clearPendingGameCreationIfState;
     const setPendingState = (this.gameDb as any)?.setPendingGameCreationState;
+    const setPendingStateIfCurrent = (this.gameDb as any)?.setPendingGameCreationStateIfCurrent;
+    const failPreparedIfCurrent = (this.gameDb as any)?.failPreparedGameCreationIfCurrent;
+    const getPending = (this.gameDb as any)?.getPendingGameCreation;
+    const currentPending =
+      typeof getPending === "function"
+        ? getPending.call(this.gameDb, pending.game_address)
+        : pending;
+    if (currentPending) {
+      // Recovery callers receive a retry snapshot. Replace it with the
+      // authoritative row before making any expiry or lifecycle decision.
+      pending = currentPending;
+    }
+    if (pending.state === "failed") return true;
+
     const setGameOriginChat = (this.gameDb as any)?.setGameOriginChat;
     const persistOriginChat = (): void => {
       if (typeof setGameOriginChat === "function") {
         setGameOriginChat.call(this.gameDb, pending.game_address, pending.chat_id);
       }
     };
-    const clearAsFailed = (error: string): void => {
-      if (typeof setPendingState === "function") {
-        setPendingState.call(this.gameDb, pending.game_address, "failed", {
-          error,
-          now: Date.now(),
-        });
+    const clearAsFailed = (error: string): boolean => {
+      const now = Date.now();
+      let transitioned = false;
+      if (typeof setPendingStateIfCurrent === "function") {
+        transitioned =
+          setPendingStateIfCurrent.call(
+            this.gameDb,
+            pending.game_address,
+            ["prepared", "submitted", "unknown"],
+            "failed",
+            { error, now, clearSubmissionLease: true },
+          ) === true;
+      } else if (typeof setPendingState === "function") {
+        // Compatibility for focused test doubles; production uses the
+        // compare-and-set method above.
+        setPendingState.call(this.gameDb, pending.game_address, "failed", { error, now });
+        transitioned = true;
       }
-      if (typeof clearPending === "function") {
+      if (!transitioned) return false;
+
+      if (typeof clearPendingIfState === "function") {
+        clearPendingIfState.call(this.gameDb, pending.game_address, ["failed"]);
+      } else if (typeof clearPending === "function") {
         clearPending.call(this.gameDb, pending.game_address);
       }
+      return true;
     };
     const localGame =
       typeof getGame === "function" ? getGame.call(this.gameDb, pending.game_address) : null;
@@ -6849,13 +7003,31 @@ export class GameManager {
       // that delivery before deleting the durable creation intent.
       persistOriginChat();
       await this.deliverPendingGameCreation(ctx, pending, localGame as GameData);
-      if (typeof setPendingState === "function") {
+      let markedDelivered = false;
+      if (typeof setPendingStateIfCurrent === "function") {
+        markedDelivered =
+          setPendingStateIfCurrent.call(
+            this.gameDb,
+            pending.game_address,
+            ["submitted", "unknown", "confirmed", "delivered"],
+            "delivered",
+            { now: Date.now(), clearSubmissionLease: true },
+          ) === true;
+      } else if (typeof setPendingState === "function") {
         setPendingState.call(this.gameDb, pending.game_address, "delivered", {
           now: Date.now(),
         });
+        markedDelivered = true;
       }
-      if (typeof clearPending === "function") {
+      if (markedDelivered && typeof clearPendingIfState === "function") {
+        clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+      } else if (markedDelivered && typeof clearPending === "function") {
         clearPending.call(this.gameDb, pending.game_address);
+      }
+      if (!markedDelivered) {
+        throw new Error(
+          "Pending game creation state changed while finalizing local delivery; keeping the current record",
+        );
       }
       return true;
     }
@@ -6878,8 +7050,13 @@ export class GameManager {
       }
 
       if (transactionOutcome === "failed") {
-        clearAsFailed("Game creation transaction failed before the game account was created");
-        return true;
+        const resolved = clearAsFailed(
+          "Game creation transaction failed before the game account was created",
+        );
+        if (resolved) return true;
+        throw new Error(
+          "Pending game creation state changed while resolving the failed transaction; keeping the current record",
+        );
       }
 
       // A confirmed signature is evidence that the transaction landed, not
@@ -6895,9 +7072,41 @@ export class GameManager {
       if (pending.state === "prepared" && lifetimeExpired) {
         // Prepared means the process recorded the exact transaction before it
         // entered the send path. Once its lifetime expires it is safe to
-        // resolve as never broadcast.
-        clearAsFailed("Prepared game creation transaction expired before broadcast");
-        return true;
+        // resolve as never broadcast, but only if the authoritative row is
+        // still prepared at the conditional database write.
+        const error = "Prepared game creation transaction expired before broadcast";
+        if (typeof failPreparedIfCurrent === "function") {
+          const resolved =
+            failPreparedIfCurrent.call(this.gameDb, pending.game_address, error, Date.now()) ===
+            true;
+          if (resolved) {
+            if (typeof clearPendingIfState === "function") {
+              clearPendingIfState.call(this.gameDb, pending.game_address, ["failed"]);
+            } else if (typeof clearPending === "function") {
+              clearPending.call(this.gameDb, pending.game_address);
+            }
+            return true;
+          }
+
+          const latest =
+            typeof getPending === "function"
+              ? getPending.call(this.gameDb, pending.game_address)
+              : null;
+          if (latest) pending = latest;
+        } else if (clearAsFailed(error)) {
+          return true;
+        }
+
+        // Another worker may have admitted the submission between the read
+        // and the expiry check. Retain that authoritative state.
+        if (pending.state !== "prepared") {
+          throw new Error(
+            "Pending game creation submission was admitted while expiry was being resolved; keeping it reserved",
+          );
+        }
+        throw new Error(
+          "Prepared game creation expiry could not be resolved atomically; keeping the pending creation reserved",
+        );
       }
 
       if (
@@ -7002,6 +7211,30 @@ export class GameManager {
     const authoritativeCreatedAtMs = createdAtSeconds * 1_000;
     const authoritativeExpiresAtMs = (createdAtSeconds + timeoutSeconds) * 1_000;
 
+    // Account existence plus the identity/configuration checks above are the
+    // evidence-bearing transition. Persist it before local hydration or
+    // Telegram work so either of those failures leaves a confirmed intent for
+    // the next sweep.
+    let markedConfirmed = false;
+    if (typeof setPendingStateIfCurrent === "function") {
+      markedConfirmed =
+        setPendingStateIfCurrent.call(
+          this.gameDb,
+          pending.game_address,
+          ["prepared", "submitted", "unknown", "confirmed"],
+          "confirmed",
+          { now: Date.now(), clearSubmissionLease: true },
+        ) === true;
+    } else if (typeof setPendingState === "function") {
+      setPendingState.call(this.gameDb, pending.game_address, "confirmed", { now: Date.now() });
+      markedConfirmed = true;
+    }
+    if (!markedConfirmed) {
+      throw new Error(
+        "Confirmed game could not be durably marked confirmed; retaining the pending creation",
+      );
+    }
+
     const setPendingChainTiming = (this.gameDb as any)?.setPendingGameCreationChainTiming;
     if (typeof setPendingChainTiming === "function") {
       setPendingChainTiming.call(
@@ -7076,13 +7309,32 @@ export class GameManager {
           total_amount: Number(cancellation.amount) || gameData.total_amount,
         };
         await this.deliverPendingGameCreation(ctx, pending, terminalGameData);
-        if (typeof setPendingState === "function") {
+        let markedDelivered = false;
+        if (typeof setPendingStateIfCurrent === "function") {
+          markedDelivered =
+            setPendingStateIfCurrent.call(
+              this.gameDb,
+              pending.game_address,
+              ["prepared", "submitted", "unknown", "confirmed", "delivered"],
+              "delivered",
+              { now: Date.now(), clearSubmissionLease: true },
+            ) === true;
+        } else if (typeof setPendingState === "function") {
           setPendingState.call(this.gameDb, pending.game_address, "delivered", {
             now: Date.now(),
           });
+          markedDelivered = true;
         }
-        if (typeof clearPending === "function")
+        if (markedDelivered && typeof clearPendingIfState === "function") {
+          clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+        } else if (markedDelivered && typeof clearPending === "function") {
           clearPending.call(this.gameDb, pending.game_address);
+        }
+        if (!markedDelivered) {
+          throw new Error(
+            "Pending game creation state changed while finalizing expired-game delivery; keeping the current record",
+          );
+        }
         return true;
       }
 
@@ -7093,17 +7345,33 @@ export class GameManager {
       throw new Error("expired confirmed game still requires cleanup");
     }
 
-    if (typeof setPendingState === "function") {
-      setPendingState.call(this.gameDb, pending.game_address, "confirmed", { now: Date.now() });
-    }
-
     persistOriginChat();
     await this.deliverPendingGameCreation(ctx, pending, gameData);
 
-    if (typeof setPendingState === "function") {
+    let markedDelivered = false;
+    if (typeof setPendingStateIfCurrent === "function") {
+      markedDelivered =
+        setPendingStateIfCurrent.call(
+          this.gameDb,
+          pending.game_address,
+          ["confirmed", "delivered"],
+          "delivered",
+          { now: Date.now(), clearSubmissionLease: true },
+        ) === true;
+    } else if (typeof setPendingState === "function") {
       setPendingState.call(this.gameDb, pending.game_address, "delivered", { now: Date.now() });
+      markedDelivered = true;
     }
-    if (typeof clearPending === "function") clearPending.call(this.gameDb, pending.game_address);
+    if (markedDelivered && typeof clearPendingIfState === "function") {
+      clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+    } else if (markedDelivered && typeof clearPending === "function") {
+      clearPending.call(this.gameDb, pending.game_address);
+    }
+    if (!markedDelivered) {
+      throw new Error(
+        "Pending game creation state changed while finalizing delivery; keeping the current record",
+      );
+    }
     return true;
   }
 

@@ -1,6 +1,8 @@
 const COMMANDS = [
   "close-orphaned-games",
   "initialize-referral-token-accounts",
+  "list-pending-game-creations",
+  "resolve-pending-game-creation",
   "show-swap-stats",
   "sweep-to-sol",
 ] as const;
@@ -18,6 +20,8 @@ export function usage(): string {
     "Commands:",
     "  close-orphaned-games",
     "  initialize-referral-token-accounts <mint> [mint...]",
+    "  list-pending-game-creations [game_address]",
+    "  resolve-pending-game-creation <game_address> --state <prepared|submitted|unknown|confirmed> --confirm --reason <evidence> [--actor <operator>]",
     "  show-swap-stats",
     "  sweep-to-sol",
   ].join("\n");
@@ -37,6 +41,16 @@ export async function runServiceAdmin(
       const { initializeReferralTokenAccounts } =
         await import("./initialize-referral-token-accounts");
       await initializeReferralTokenAccounts(args);
+      return;
+    }
+    case "list-pending-game-creations": {
+      const { listPendingGameCreations } = await import("./pending-game-creations");
+      listPendingGameCreations(args[0]);
+      return;
+    }
+    case "resolve-pending-game-creation": {
+      const { resolvePendingGameCreationCommand } = await import("./pending-game-creations");
+      resolvePendingGameCreationCommand(args);
       return;
     }
     case "show-swap-stats": {

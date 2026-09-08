@@ -233,6 +233,7 @@ test("persists and retries confirmed game setup records", () => {
   db.recordPendingGameCreationAttempt("pending-game", "RPC unavailable", 2_000, 1_100);
   expect(db.getPendingGameCreations(1_100)).toHaveLength(0);
   expect(db.getPendingGameCreation("pending-game")).toMatchObject({
+    state: "confirmed",
     attempts: 1,
     last_error: "RPC unavailable",
     next_attempt_at: 2_000,
@@ -311,6 +312,169 @@ test("persists game creation intent before broadcast and keeps its signature imm
   db.setPendingGameCreationState("durable-game", "failed", { now: 3_000 });
   expect(db.getPendingGameCreations(3_000)).toEqual([]);
   expect(db.getPendingGameCreationForCreator("7")).toBeNull();
+});
+
+test("submission admission is durable, serialized, and preserves transaction identity", () => {
+  const db = GameDatabase.getInstance();
+  db.savePendingGameCreation({
+    gameAddress: "submission-race",
+    creatorTelegramId: "7",
+    amount: 100,
+    gameType: "coinflip",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 2,
+    chatId: -1001,
+    timeoutSeconds: 60,
+    expiresAt: 61_000,
+    transactionSignature: "stable-signature",
+    state: "prepared",
+    transactionBlockhash: "stable-blockhash",
+    lastValidBlockHeight: 100,
+    signedTransactionBase64: "stable-wire",
+    now: 1_000,
+  });
+
+  expect(
+    db.claimPendingGameCreationSubmission("submission-race", "worker-a", 5_000, 1_001),
+  ).toEqual({ acquired: true });
+  expect(db.getPendingGameCreation("submission-race")).toMatchObject({
+    state: "submitted",
+    submission_lease_id: "worker-a",
+    transaction_signature: "stable-signature",
+    signed_transaction_base64: "stable-wire",
+  });
+  expect(
+    db.claimPendingGameCreationSubmission("submission-race", "worker-b", 6_000, 1_002),
+  ).toMatchObject({ acquired: false, reason: "in-flight" });
+  expect(
+    db.setPendingGameCreationStateIfCurrent("submission-race", ["submitted"], "failed", {
+      now: 1_002,
+      clearSubmissionLease: true,
+    }),
+  ).toBe(false);
+
+  // A crash after admission/broadcast cannot be mistaken for a never-sent
+  // prepared record, even if the blockhash lifetime is being resolved.
+  expect(db.failPreparedGameCreationIfCurrent("submission-race", "expired", 2_000)).toBe(false);
+  expect(db.getPendingGameCreation("submission-race")).toMatchObject({
+    state: "submitted",
+    transaction_signature: "stable-signature",
+    signed_transaction_base64: "stable-wire",
+  });
+
+  expect(
+    db.finishPendingGameCreationSubmission("submission-race", "worker-a", "unknown", {
+      error: "response lost",
+      now: 2_001,
+    }),
+  ).toBe(true);
+  expect(db.getPendingGameCreation("submission-race")).toMatchObject({
+    state: "unknown",
+    submission_lease_id: null,
+    transaction_signature: "stable-signature",
+    signed_transaction_base64: "stable-wire",
+  });
+});
+
+test("retry metadata preserves prepared proof and resolves safely after expiry", () => {
+  const db = GameDatabase.getInstance();
+  db.savePendingGameCreation({
+    gameAddress: "prepared-retry",
+    creatorTelegramId: "8",
+    amount: 100,
+    gameType: "giveaway",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 1,
+    chatId: -1002,
+    timeoutSeconds: 60,
+    expiresAt: 61_000,
+    transactionSignature: "prepared-retry-signature",
+    state: "prepared",
+    transactionBlockhash: "prepared-retry-blockhash",
+    lastValidBlockHeight: 100,
+    signedTransactionBase64: "prepared-retry-wire",
+    now: 1_000,
+  });
+
+  db.recordPendingGameCreationAttempt("prepared-retry", "temporary RPC read failure", 2_000, 1_100);
+  expect(db.getPendingGameCreation("prepared-retry")).toMatchObject({
+    state: "prepared",
+    attempts: 1,
+    last_error: "temporary RPC read failure",
+    next_attempt_at: 2_000,
+  });
+  expect(
+    db.failPreparedGameCreationIfCurrent("prepared-retry", "prepared lifetime expired", 3_000),
+  ).toBe(true);
+  expect(db.getPendingGameCreationForCreator("8")).toBeNull();
+  expect(db.getPendingGameCreationAuditRecords("prepared-retry")[0]).toMatchObject({
+    state: "failed",
+    last_error: "prepared lifetime expired",
+  });
+});
+
+test("operator resolution is explicit, conditional, and auditable", () => {
+  const db = GameDatabase.getInstance();
+  db.savePendingGameCreation({
+    gameAddress: "operator-resolution",
+    creatorTelegramId: "9",
+    amount: 100,
+    gameType: "coinflip",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 2,
+    chatId: -1003,
+    timeoutSeconds: 60,
+    expiresAt: 61_000,
+    transactionSignature: "operator-signature",
+    state: "unknown",
+    now: 1_000,
+  });
+
+  expect(
+    db.claimPendingGameCreationSubmission("operator-resolution", "worker-a", 5_000, 1_001),
+  ).toEqual({ acquired: true });
+  expect(
+    db.resolvePendingGameCreation(
+      "operator-resolution",
+      "submitted",
+      "operator must not race an admitted network submission",
+      "operator@example",
+      1_002,
+    ),
+  ).toBe(false);
+  expect(db.getPendingGameCreation("operator-resolution")?.state).toBe("submitted");
+  expect(
+    db.finishPendingGameCreationSubmission("operator-resolution", "worker-a", "unknown", {
+      error: "response lost",
+      now: 1_003,
+    }),
+  ).toBe(true);
+
+  expect(
+    db.resolvePendingGameCreation(
+      "operator-resolution",
+      "unknown",
+      "verified signature has no confirmed transaction and no game account",
+      "operator@example",
+      2_000,
+    ),
+  ).toBe(true);
+  expect(db.getPendingGameCreationForCreator("9")).toBeNull();
+  expect(db.getPendingGameCreation("operator-resolution")).toMatchObject({
+    state: "failed",
+    resolution_reason: "verified signature has no confirmed transaction and no game account",
+    resolved_by: "operator@example",
+    resolved_at: 2_000,
+  });
+  expect(
+    db.resolvePendingGameCreation("operator-resolution", "unknown", "stale retry", "another"),
+  ).toBe(false);
 });
 
 test("GameDatabase orders active game listings by earliest expiration first", () => {
