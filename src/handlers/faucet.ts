@@ -2,7 +2,6 @@ import { InlineKeyboard, type Bot, type Context } from "grammy";
 import type { PublicKey } from "#solana";
 import type { ParseAmountResult } from "../types";
 import {
-  FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS,
   type FaucetDatabase,
   type FaucetProgress,
   type FaucetRecord,
@@ -170,6 +169,8 @@ export const buildFaucetMessage = (progress: FaucetProgress): string => {
 
 export const createFaucetModule = (deps: FaucetModuleDeps) => {
   const now = deps.now ?? Date.now;
+  const activeClaimOperations = new Set<string>();
+  let reconciliationPromise: Promise<number> | undefined;
   const answer =
     deps.answerCallback ??
     ((ctx: Context, text?: string, showAlert?: boolean) =>
@@ -233,11 +234,18 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     }
   };
 
-  const reconcile = async (): Promise<number> => {
+  const runReconciliation = async (): Promise<number> => {
     const currentTime = now();
-    let changed = deps.database.releaseStaleProcessing(currentTime - 5 * 60_000, currentTime);
+    const protectedClaimKeys = new Set(activeClaimOperations);
+    let changed = deps.database.releaseStaleProcessing(
+      currentTime - 5 * 60_000,
+      currentTime,
+      protectedClaimKeys,
+    );
     const affected = new Set<number>();
     for (const claim of deps.database.getSubmittedClaims()) {
+      const claimKey = `${claim.faucet_id}:${claim.telegram_id}`;
+      if (activeClaimOperations.has(claimKey)) continue;
       const signature = claim.transaction_signature!;
       let outcome: "confirmed" | "failed" | "unknown";
       try {
@@ -264,14 +272,8 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
         );
         affected.add(claim.faucet_id);
         changed += 1;
-      } else if (currentTime - claim.updated_at >= FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS) {
-        affected.add(claim.faucet_id);
       }
     }
-    changed += deps.database.releaseUnknownSubmittedClaims(
-      currentTime,
-      FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS,
-    );
     for (const id of affected) {
       try {
         await renderWithApi(deps.bot.api, id);
@@ -281,6 +283,17 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
     }
     await deliverPendingClaimNotifications();
     return changed;
+  };
+
+  const reconcile = async (): Promise<number> => {
+    if (reconciliationPromise) return reconciliationPromise;
+    const currentRun = runReconciliation();
+    reconciliationPromise = currentRun;
+    try {
+      return await currentRun;
+    } finally {
+      if (reconciliationPromise === currentRun) reconciliationPromise = undefined;
+    }
   };
 
   const expireDue = async (): Promise<number> => {
@@ -426,75 +439,42 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
       return;
     }
 
-    await answer(ctx);
     const faucet = reserved.faucet;
-    const claimAmount = Number(faucet.amount_per_claim);
-    const parsedClaim = {
-      amount: claimAmount,
-      isSol: faucet.is_sol === 1,
-      formattedAmount: faucet.display_amount,
-      tokenMint: faucet.token_mint,
-      tokenTicker: faucet.token_ticker,
-      decimals: faucet.decimals,
-      tokenWasSpecified: true,
-      requestedNativeSol: faucet.is_sol === 1,
-    };
-    let balance: number;
+    const claimKey = `${faucetId}:${claimantId}`;
+    activeClaimOperations.add(claimKey);
     try {
-      balance = await deps.getBalance(BigInt(faucet.creator_id), parsedClaim);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      deps.database.failClaim(faucetId, claimantId, message, now());
-      await ctx.reply("❌ Could not verify the faucet balance. Please try again.", {
-        reply_to_message_id: faucet.message_id ?? undefined,
-      });
-      await render(ctx, faucetId);
-      return;
-    }
-
-    if (balance < claimAmount) {
-      deps.database.failClaim(
-        faucetId,
-        claimantId,
-        "faucet creator balance is insufficient",
-        now(),
-      );
-      deps.database.markFaucetEmpty(faucetId);
-      await ctx.reply(
-        `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: faucet.message_id ?? undefined,
-        },
-      );
-      await render(ctx, faucetId);
-      return;
-    }
-
-    try {
-      const signature = await deps.transfer(
-        BigInt(faucet.creator_id),
-        await deps.getRecipientPublicKey(claimantId),
-        {
-          amount: claimAmount,
-          isSol: faucet.is_sol === 1,
-          tokenMint: faucet.token_mint,
-        },
-        (prepared) => deps.database.recordClaimSignature(faucetId, claimantId, prepared, now()),
-      );
-      deps.database.completeClaim(faucetId, claimantId, signature, now());
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const claim = deps.database.getClaim(faucetId, claimantId);
-      if (claim?.status === "submitted" && deps.isTransactionOutcomeUnknown(error)) {
-        // Keep the claim locked and let the background reconciler decide
-        // whether the transaction confirms or safely expires. Technical
-        // recovery details stay in logs and the database, not the chat.
-        console.warn(
-          `Faucet payment confirmation pending for faucet ${faucetId}, claimant ${claimantId}`,
-        );
-      } else if (isInsufficientFundsError(error)) {
+      await answer(ctx);
+      const claimAmount = Number(faucet.amount_per_claim);
+      const parsedClaim = {
+        amount: claimAmount,
+        isSol: faucet.is_sol === 1,
+        formattedAmount: faucet.display_amount,
+        tokenMint: faucet.token_mint,
+        tokenTicker: faucet.token_ticker,
+        decimals: faucet.decimals,
+        tokenWasSpecified: true,
+        requestedNativeSol: faucet.is_sol === 1,
+      };
+      let balance: number;
+      try {
+        balance = await deps.getBalance(BigInt(faucet.creator_id), parsedClaim);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         deps.database.failClaim(faucetId, claimantId, message, now());
+        await ctx.reply("❌ Could not verify the faucet balance. Please try again.", {
+          reply_to_message_id: faucet.message_id ?? undefined,
+        });
+        await render(ctx, faucetId);
+        return;
+      }
+
+      if (balance < claimAmount) {
+        deps.database.failClaim(
+          faucetId,
+          claimantId,
+          "faucet creator balance is insufficient",
+          now(),
+        );
         deps.database.markFaucetEmpty(faucetId);
         await ctx.reply(
           `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
@@ -503,17 +483,56 @@ export const createFaucetModule = (deps: FaucetModuleDeps) => {
             reply_to_message_id: faucet.message_id ?? undefined,
           },
         );
-      } else {
-        deps.database.failClaim(faucetId, claimantId, message, now());
-        await ctx.reply("❌ Payment failed. Your faucet slot was released; please try again.", {
-          reply_to_message_id: faucet.message_id ?? undefined,
-        });
+        await render(ctx, faucetId);
+        return;
+      }
+
+      try {
+        const signature = await deps.transfer(
+          BigInt(faucet.creator_id),
+          await deps.getRecipientPublicKey(claimantId),
+          {
+            amount: claimAmount,
+            isSol: faucet.is_sol === 1,
+            tokenMint: faucet.token_mint,
+          },
+          (prepared) => deps.database.recordClaimSignature(faucetId, claimantId, prepared, now()),
+        );
+        deps.database.completeClaim(faucetId, claimantId, signature, now());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const claim = deps.database.getClaim(faucetId, claimantId);
+        if (claim?.status === "submitted" && deps.isTransactionOutcomeUnknown(error)) {
+          // Keep the claim locked until the chain gives an authoritative
+          // confirmed or failed outcome. Timeouts and RPC errors are not
+          // evidence that a prepared transfer did not land.
+          console.warn(
+            `Faucet payment confirmation pending for faucet ${faucetId}, claimant ${claimantId}`,
+          );
+        } else if (isInsufficientFundsError(error)) {
+          deps.database.failClaim(faucetId, claimantId, message, now());
+          deps.database.markFaucetEmpty(faucetId);
+          await ctx.reply(
+            `🚰 This faucet is empty. The creator no longer has enough ${escapeHtml(faucet.token_ticker)}.`,
+            {
+              parse_mode: "HTML",
+              reply_to_message_id: faucet.message_id ?? undefined,
+            },
+          );
+        } else {
+          deps.database.failClaim(faucetId, claimantId, message, now());
+          await ctx.reply("❌ Payment failed. Your faucet slot was released; please try again.", {
+            reply_to_message_id: faucet.message_id ?? undefined,
+          });
+        }
+        await render(ctx, faucetId);
+        return;
       }
       await render(ctx, faucetId);
-      return;
+      await deliverClaimNotification(faucetId, claimantId);
+    } finally {
+      activeClaimOperations.delete(claimKey);
     }
-    await render(ctx, faucetId);
-    await deliverClaimNotification(faucetId, claimantId);
   };
 
   const handleCancel = async (ctx: Context, faucetId: number): Promise<void> => {

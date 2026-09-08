@@ -351,6 +351,88 @@ describe("faucet handler", () => {
     expect(harness.privateMessages[0]?.chatId).toBe(20);
   });
 
+  test("keeps an unknown submitted claim locked beyond the old timeout", async () => {
+    let currentTime = 1_000;
+    let outcome: "confirmed" | "failed" | "unknown" = "unknown";
+    const harness = createHarness({
+      now: () => currentTime,
+      transfer: async (onPrepared) => {
+        onPrepared("ambiguous-signature");
+        throw new Error("confirmation timeout");
+      },
+      outcome: async () => outcome,
+    });
+
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+    currentTime += 10 * 60_000;
+    await harness.module.reconcile();
+
+    expect(db.getClaim(1, 20n)).toMatchObject({
+      status: "submitted",
+      transaction_signature: "ambiguous-signature",
+    });
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+    expect(harness.transferSenders).toEqual([10n]);
+
+    outcome = "confirmed";
+    await harness.module.reconcile();
+    expect(db.getClaim(1, 20n)?.status).toBe("paid");
+  });
+
+  test("does not let reconciliation release a claim while its transfer is in flight", async () => {
+    let currentTime = 1_000;
+    let releaseBalance!: () => void;
+    let claimBalance = false;
+    const harness = createHarness({
+      now: () => currentTime,
+      getBalance: () =>
+        claimBalance
+          ? new Promise<number>((resolve) => {
+              releaseBalance = () => resolve(10_000);
+            })
+          : Promise.resolve(10_000),
+    });
+
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    claimBalance = true;
+    const claimPromise = harness.module.handleClaim(harness.callbackContext(20), 1);
+    await Promise.resolve();
+    currentTime += 10 * 60_000;
+    await harness.module.reconcile();
+    expect(db.getClaim(1, 20n)?.status).toBe("processing");
+
+    releaseBalance();
+    await claimPromise;
+    expect(db.getClaim(1, 20n)?.status).toBe("paid");
+    expect(harness.transferSenders).toEqual([10n]);
+  });
+
+  test("coalesces overlapping reconciliation runs", async () => {
+    let resolveOutcome!: () => void;
+    const outcome = new Promise<"unknown">((resolve) => {
+      resolveOutcome = () => resolve("unknown");
+    });
+    let outcomeCalls = 0;
+    const harness = createHarness({
+      outcome: async () => {
+        outcomeCalls += 1;
+        return outcome;
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+
+    // Seed a submitted claim without going through the direct transfer path.
+    db.reserveClaim(1, 20n, 1_000);
+    db.recordClaimSignature(1, 20n, "submitted-signature", 1_001);
+    const first = harness.module.reconcile();
+    const second = harness.module.reconcile();
+    resolveOutcome();
+    await Promise.all([first, second]);
+
+    expect(outcomeCalls).toBe(1);
+  });
+
   test("keeps a confirmed faucet payment successful when private messaging is forbidden", async () => {
     const harness = createHarness({
       notify: async () => {

@@ -1045,6 +1045,238 @@ describe("GameManager.createGame", () => {
     },
   );
 
+  test("persists the signed creation intent before the first broadcast", async () => {
+    resetGM();
+    const events: string[] = [];
+    const wallet = makeWallet({
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
+      sendFullySignedGameTransaction: vi.fn(async () => {
+        events.push("broadcast");
+        return "SIG";
+      }),
+    });
+    const savePendingGameCreation = vi.fn((input: { state?: string }) => {
+      events.push(`persist:${input.state ?? "legacy"}`);
+    });
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: vi.fn(),
+      saveGameParticipant: vi.fn(),
+      savePendingGameCreation,
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(wallet.connection);
+    const gm = getGameManager(program, wallet, db);
+    (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({
+        randomHash: "f".repeat(64),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
+      }),
+      signGameTransaction: vi.fn(signGameTransactionAsOracle),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    (gm as any).resolveGameVaultAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameVault: (await Keypair.generate()).publicKey,
+      gameVaultTokenAccount: (await Keypair.generate()).publicKey,
+    });
+    (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
+    (gm as any).confirmTransactionWithRecovery = async () => "SIG";
+
+    try {
+      const result = await gm.createGame(
+        "coinflip",
+        {
+          amount: 1_000_000,
+          tokenMint: PublicKey.default.toBase58(),
+          tokenTicker: "TIMBA",
+          isSol: false,
+        },
+        2,
+        2,
+        60,
+        1n,
+        { isPrivate: false },
+        8200,
+      );
+
+      expect(result.success).toBe(true);
+      expect(savePendingGameCreation).toHaveBeenCalledWith(
+        expect.objectContaining({ state: "submitted", isPrivate: false }),
+      );
+      expect(events.indexOf("persist:submitted")).toBeGreaterThanOrEqual(0);
+      expect(events.indexOf("persist:submitted")).toBeLessThan(events.indexOf("broadcast"));
+    } finally {
+      resetGM();
+    }
+  });
+
+  test("keeps an unknown broadcast recoverable instead of starting a second creation", async () => {
+    resetGM();
+    const wallet = makeWallet({
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
+      sendFullySignedGameTransaction: vi.fn(async () => {
+        throw new Error("RPC response lost");
+      }),
+    });
+    const savePendingGameCreation = vi.fn();
+    const setPendingGameCreationState = vi.fn();
+    const db = {
+      savePlayerMapping: () => {},
+      savePendingGameCreation,
+      setPendingGameCreationState,
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(wallet.connection);
+    const gm = getGameManager(program, wallet, db);
+    (gm as any).oracleClient = {
+      requireTokenPolicy: async () => ({}),
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({
+        randomHash: "f".repeat(64),
+        oracleOperator: TEST_ORACLE.publicKey.toBase58(),
+      }),
+      signGameTransaction: vi.fn(signGameTransactionAsOracle),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    (gm as any).resolveGameVaultAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameVault: (await Keypair.generate()).publicKey,
+      gameVaultTokenAccount: (await Keypair.generate()).publicKey,
+    });
+    (gm as any).deriveAta = async () => (await Keypair.generate()).publicKey;
+    const confirmSpy = vi.fn();
+    (gm as any).confirmTransactionWithRecovery = confirmSpy;
+
+    try {
+      const result = await gm.createGame(
+        "coinflip",
+        {
+          amount: 1_000_000,
+          tokenMint: PublicKey.default.toBase58(),
+          tokenTicker: "TIMBA",
+          isSol: false,
+        },
+        2,
+        2,
+        60,
+        1n,
+        { isPrivate: false },
+        8200,
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        gameAddress: expect.any(String),
+        confirmedSignature: expect.any(String),
+      });
+      expect(savePendingGameCreation).toHaveBeenCalledWith(
+        expect.objectContaining({ state: "submitted" }),
+      );
+      expect(setPendingGameCreationState).toHaveBeenCalledWith(
+        result.gameAddress,
+        "unknown",
+        expect.objectContaining({ error: "RPC response lost" }),
+      );
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(wallet.sendFullySignedGameTransaction).toHaveBeenCalledTimes(1);
+    } finally {
+      resetGM();
+    }
+  });
+
+  test("routes an expired confirmed creation through expiration cleanup", async () => {
+    resetGM();
+    const creator = await Keypair.generate();
+    const tokenMint = await Keypair.generate();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const createdAt = Math.floor(Date.now() / 1_000) - 120;
+    const timeoutSeconds = 60;
+    const gameAccount = {
+      creator: creator.publicKey,
+      tokenMint: tokenMint.publicKey,
+      gameType: { coinflip: {} },
+      ticketAmount: 100,
+      totalAmount: 100,
+      maxTickets: 2,
+      minTickets: 2,
+      ticketsCount: 0,
+      timeout: timeoutSeconds,
+      createdAt,
+      isPrivate: false,
+    };
+    const wallet = makeWallet({
+      getKeyPair: async () => creator,
+      getTokenMetadata: async () => ({ symbol: "TOK", decimals: 6 }),
+    });
+    const program = makeProgram(wallet.connection);
+    program.account.game.fetch = vi.fn(async () => gameAccount);
+    const clearPendingGameCreation = vi.fn();
+    const completeGame = vi.fn();
+    const db = {
+      getGame: () => null,
+      saveGame: vi.fn(),
+      savePlayerMapping: vi.fn(),
+      getPlayerTelegramId: () => null,
+      clearPendingGameCreation,
+      completeGame,
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const gm = getGameManager(program, wallet, db);
+    const handleExpiredGame = vi.fn().mockResolvedValue({
+      cancelled: true,
+      amount: 100,
+      creator: creator.publicKey.toBase58(),
+      tx: "CANCEL",
+    });
+    (gm as any).handleExpiredGame = handleExpiredGame;
+
+    const pending = {
+      game_address: gameAddress,
+      creator_telegram_id: "1",
+      creator_display_name: "@creator",
+      amount: 100,
+      game_type: "coinflip",
+      token_mint: tokenMint.publicKey.toBase58(),
+      token_ticker: "TOK",
+      max_players: 2,
+      min_players: 2,
+      chat_id: 8200,
+      timeout_seconds: timeoutSeconds,
+      expires_at: (createdAt + timeoutSeconds) * 1_000,
+      transaction_signature: "CREATE",
+      state: "confirmed" as const,
+      is_private: 0,
+      transaction_blockhash: null,
+      last_valid_block_height: null,
+      attempts: 0,
+      last_error: null,
+      next_attempt_at: Date.now(),
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+
+    try {
+      await expect(
+        gm.recoverPendingGameCreation({ chat: { id: 8200 } } as any, pending),
+      ).resolves.toBe(true);
+      expect(handleExpiredGame).toHaveBeenCalledWith(expect.any(PublicKey), gameAccount);
+      expect(completeGame).toHaveBeenCalledWith(gameAddress, "cancelled", expect.any(Number), 100);
+      expect(clearPendingGameCreation).toHaveBeenCalledWith(gameAddress);
+    } finally {
+      resetGM();
+    }
+  });
+
   test("creates game after SOL swap refreshes cached balance", async () => {
     resetGM();
     const playerKp = await Keypair.generate();

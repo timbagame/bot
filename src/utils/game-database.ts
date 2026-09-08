@@ -48,12 +48,19 @@ export interface PendingGameCreationRecord {
   timeout_seconds: number;
   expires_at: number;
   transaction_signature: string;
+  state: PendingGameCreationState;
+  is_private: number | null;
+  transaction_blockhash: string | null;
+  last_valid_block_height: number | null;
   attempts: number;
   last_error: string | null;
   next_attempt_at: number;
   created_at: number;
   updated_at: number;
 }
+
+export type PendingGameCreationState =
+  "submitted" | "unknown" | "confirmed" | "delivered" | "failed";
 
 export type GameMessageDeliveryReservation =
   { acquired: true } | { acquired: false; reason: "sent" | "in-flight"; messageId?: number };
@@ -146,6 +153,10 @@ export class GameDatabase extends BaseDatabase {
           timeout_seconds INTEGER NOT NULL,
           expires_at INTEGER NOT NULL,
           transaction_signature TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'confirmed',
+          is_private INTEGER,
+          transaction_blockhash TEXT,
+          last_valid_block_height INTEGER,
           attempts INTEGER NOT NULL DEFAULT 0,
           last_error TEXT,
           next_attempt_at INTEGER NOT NULL,
@@ -164,6 +175,30 @@ export class GameDatabase extends BaseDatabase {
     this.ensureGameSchema();
     this.ensureGameMessagesSchema();
     this.ensureMembershipCacheSchema();
+    this.ensurePendingGameCreationSchema();
+  }
+
+  private ensurePendingGameCreationSchema(): void {
+    const columns = new Set(
+      this.all<{ name: string }>("PRAGMA table_info(pending_game_creations)").map(
+        ({ name }) => name,
+      ),
+    );
+    const additions = [
+      ["state", "TEXT NOT NULL DEFAULT 'confirmed'"],
+      ["is_private", "INTEGER"],
+      ["transaction_blockhash", "TEXT"],
+      ["last_valid_block_height", "INTEGER"],
+    ] as const;
+    for (const [column, type] of additions) {
+      if (!columns.has(column)) {
+        this.run(
+          `ALTER TABLE pending_game_creations ADD COLUMN ${column} ${type}`,
+          [],
+          `adding pending game creation ${column}`,
+        );
+      }
+    }
   }
 
   // Game methods
@@ -653,21 +688,48 @@ export class GameDatabase extends BaseDatabase {
     timeoutSeconds: number;
     expiresAt: number;
     transactionSignature: string;
+    state?: PendingGameCreationState;
+    isPrivate?: boolean;
+    transactionBlockhash?: string | null;
+    lastValidBlockHeight?: number | null;
     now?: number;
   }): void {
     const now = input.now ?? Date.now();
+    const state = input.state ?? "confirmed";
+    const existing = this.getPendingGameCreation(input.gameAddress);
+    if (existing) {
+      if (existing.transaction_signature !== input.transactionSignature) {
+        throw new Error("Pending game creation already exists with a different transaction");
+      }
+      this.run(
+        `UPDATE pending_game_creations
+         SET creator_display_name = COALESCE(?, creator_display_name),
+             state = ?, is_private = COALESCE(?, is_private), transaction_blockhash = COALESCE(?, transaction_blockhash),
+             last_valid_block_height = COALESCE(?, last_valid_block_height),
+             next_attempt_at = ?, updated_at = ?
+         WHERE game_address = ?`,
+        [
+          input.creatorDisplayName ?? null,
+          state,
+          input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
+          input.transactionBlockhash ?? null,
+          input.lastValidBlockHeight ?? null,
+          now,
+          now,
+          input.gameAddress,
+        ],
+        "updating pending game creation",
+      );
+      return;
+    }
+
     this.run(
       `INSERT INTO pending_game_creations (
         game_address, creator_telegram_id, creator_display_name, amount, game_type,
         token_mint, token_ticker, max_players, min_players, chat_id, timeout_seconds,
-        expires_at, transaction_signature, attempts, last_error, next_attempt_at,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
-      ON CONFLICT(game_address) DO UPDATE SET
-        creator_display_name = COALESCE(excluded.creator_display_name, pending_game_creations.creator_display_name),
-        transaction_signature = excluded.transaction_signature,
-        next_attempt_at = excluded.next_attempt_at,
-        updated_at = excluded.updated_at`,
+        expires_at, transaction_signature, state, is_private, transaction_blockhash,
+        last_valid_block_height, attempts, last_error, next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       [
         input.gameAddress,
         input.creatorTelegramId,
@@ -682,6 +744,10 @@ export class GameDatabase extends BaseDatabase {
         input.timeoutSeconds,
         input.expiresAt,
         input.transactionSignature,
+        state,
+        input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
+        input.transactionBlockhash ?? null,
+        input.lastValidBlockHeight ?? null,
         now,
         now,
         now,
@@ -696,7 +762,7 @@ export class GameDatabase extends BaseDatabase {
   ): PendingGameCreationRecord[] {
     return this.all<PendingGameCreationRecord>(
       `SELECT * FROM pending_game_creations
-       WHERE next_attempt_at <= ?
+       WHERE state != 'failed' AND next_attempt_at <= ?
        ORDER BY next_attempt_at ASC, created_at ASC
        LIMIT ?`,
       [now, limit],
@@ -712,6 +778,39 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  public getPendingGameCreationForCreator(
+    creatorTelegramId: string,
+  ): PendingGameCreationRecord | null {
+    return this.get<PendingGameCreationRecord>(
+      `SELECT * FROM pending_game_creations
+       WHERE creator_telegram_id = ? AND state IN ('submitted', 'unknown', 'confirmed', 'delivered')
+       ORDER BY updated_at ASC LIMIT 1`,
+      [creatorTelegramId],
+      "loading pending game creation for creator",
+    );
+  }
+
+  public setPendingGameCreationState(
+    gameAddress: string,
+    state: PendingGameCreationState,
+    options: { error?: string | null; nextAttemptAt?: number; now?: number } = {},
+  ): void {
+    const now = options.now ?? Date.now();
+    this.run(
+      `UPDATE pending_game_creations
+       SET state = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ?`,
+      [
+        state,
+        options.error == null ? null : options.error.slice(0, 500),
+        options.nextAttemptAt ?? now,
+        now,
+        gameAddress,
+      ],
+      "updating pending game creation state",
+    );
+  }
+
   public recordPendingGameCreationAttempt(
     gameAddress: string,
     error: string,
@@ -720,7 +819,8 @@ export class GameDatabase extends BaseDatabase {
   ): void {
     this.run(
       `UPDATE pending_game_creations
-       SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?, updated_at = ?
+       SET state = CASE WHEN state = 'failed' THEN state ELSE 'unknown' END,
+           attempts = attempts + 1, last_error = ?, next_attempt_at = ?, updated_at = ?
        WHERE game_address = ?`,
       [error.slice(0, 500), nextAttemptAt, now, gameAddress],
       "recording pending game creation attempt",

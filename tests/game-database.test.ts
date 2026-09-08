@@ -241,6 +241,59 @@ test("persists and retries confirmed game setup records", () => {
   expect(db.getPendingGameCreation("pending-game")).toBeNull();
 });
 
+test("persists game creation intent before broadcast and keeps its signature immutable", () => {
+  const db = GameDatabase.getInstance();
+  const input = {
+    gameAddress: "durable-game",
+    creatorTelegramId: "7",
+    amount: 100,
+    gameType: "coinflip",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 2,
+    chatId: -1001,
+    timeoutSeconds: 3600,
+    expiresAt: 3_601_000,
+    transactionSignature: "prepared-signature",
+    state: "submitted" as const,
+    isPrivate: true,
+    transactionBlockhash: "prepared-blockhash",
+    lastValidBlockHeight: 123,
+    now: 1_000,
+  };
+
+  db.savePendingGameCreation(input);
+  expect(db.getPendingGameCreationForCreator("7")).toMatchObject({
+    state: "submitted",
+    is_private: 1,
+    transaction_signature: "prepared-signature",
+    transaction_blockhash: "prepared-blockhash",
+    last_valid_block_height: 123,
+  });
+
+  db.setPendingGameCreationState("durable-game", "unknown", {
+    error: "confirmation timeout",
+    now: 2_000,
+  });
+  expect(db.getPendingGameCreation("durable-game")).toMatchObject({
+    state: "unknown",
+    last_error: "confirmation timeout",
+    transaction_signature: "prepared-signature",
+  });
+
+  expect(() =>
+    db.savePendingGameCreation({
+      ...input,
+      transactionSignature: "different-signature",
+    }),
+  ).toThrow("different transaction");
+
+  db.setPendingGameCreationState("durable-game", "failed", { now: 3_000 });
+  expect(db.getPendingGameCreations(3_000)).toEqual([]);
+  expect(db.getPendingGameCreationForCreator("7")).toBeNull();
+});
+
 test("GameDatabase orders active game listings by earliest expiration first", () => {
   const db = GameDatabase.getInstance();
   const now = Date.now();
