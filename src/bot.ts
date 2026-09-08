@@ -3325,22 +3325,40 @@ const setupProgram = async () => {
   }
 };
 
+let recoveringGameCreations = false;
 const recoverPendingGameCreations = async (): Promise<void> => {
-  const pending = gameDb.getPendingGameCreations(Date.now(), 25);
-  for (const record of pending) {
-    try {
-      const ctx = createApiContext(record.chat_id, bot.api);
-      await gameManager.recoverPendingGameCreation(ctx, record);
-      console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
-    } catch (error) {
-      const delayMs = Math.min(
-        15 * 60_000,
-        Math.max(60_000, 60_000 * 2 ** Math.min(record.attempts, 4)),
+  if (recoveringGameCreations) return;
+  recoveringGameCreations = true;
+  try {
+    const pending = gameDb.getPendingGameCreations(Date.now(), 25);
+    for (let offset = 0; offset < pending.length; offset += 4) {
+      await Promise.all(
+        pending.slice(offset, offset + 4).map(async (record) => {
+          try {
+            const ctx = createApiContext(record.chat_id, bot.api);
+            await gameManager.recoverPendingGameCreation(ctx, record);
+            console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
+          } catch (error) {
+            const age = Date.now() - record.created_at;
+            const delayMs =
+              age < 3 * 60_000
+                ? 3_000
+                : Math.min(15 * 60_000, 30_000 * 2 ** Math.min(record.attempts, 5));
+            const message = error instanceof Error ? error.message : String(error);
+            gameDb.recordPendingGameCreationAttempt(
+              record.game_address,
+              message,
+              Date.now() + delayMs,
+            );
+            console.warn(`Pending game setup will be retried for ${record.game_address}:`, message);
+          }
+        }),
       );
-      const message = error instanceof Error ? error.message : String(error);
-      gameDb.recordPendingGameCreationAttempt(record.game_address, message, Date.now() + delayMs);
-      console.warn(`Pending game setup will be retried for ${record.game_address}:`, message);
     }
+  } catch (error) {
+    console.error("Pending game creation sweep failed", error);
+  } finally {
+    recoveringGameCreations = false;
   }
 };
 
@@ -6344,8 +6362,8 @@ if (process.env.NODE_ENV !== "test") {
       // Reload game message mappings from database
       await gameManager.reloadGameMessages();
       console.log(`Reloaded game message mappings from database`);
-      await recoverPendingGameCreations();
-      setInterval(recoverPendingGameCreations, 60_000);
+      void recoverPendingGameCreations();
+      setInterval(recoverPendingGameCreations, 3_000);
 
       await registerProgramEventListeners();
       attachRpcEndpointFailoverHandler();

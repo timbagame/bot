@@ -125,3 +125,75 @@ describe("Kit game transaction boundary", () => {
     ).rejects.toThrow("Oracle changed the game transaction message");
   });
 });
+
+for (const sameCluster of [true, false]) {
+  test(`rebroadcast fallback verifies cluster identity (${sameCluster}) and preserves signed bytes`, async () => {
+    const creator = await Keypair.generate();
+    const blockhash = { blockhash: PublicKey.default.toBase58(), lastValidBlockHeight: 42 };
+    const prepared = await buildOracleSignableGameTransaction({
+      creator,
+      blockhash,
+      instructions: [
+        new TransactionInstruction({
+          programId: PublicKey.default,
+          keys: [{ pubkey: creator.publicKey, isSigner: true, isWritable: true }],
+          data: Uint8Array.of(1),
+        }),
+      ],
+    });
+    const tx = await finalizeOracleSignedGameTransaction({
+      creator,
+      oracleSignedBase64: prepared.txBase64,
+      expectedMessageBytes: prepared.messageBytes,
+    });
+    const signature = getSignatureFromTransaction(tx);
+    const savedFetch = globalThis.fetch;
+    const sends: string[] = [];
+    globalThis.fetch = (async (url: any, options: any) => {
+      const { method, params } = JSON.parse(options.body);
+      const isPrimary = String(url).includes("primary.test");
+      if (method === "getGenesisHash")
+        return Response.json({ result: isPrimary || sameCluster ? "mainnet" : "other" });
+      if (method === "sendTransaction") {
+        sends.push(String(url));
+        expect(params[0]).toBe(getBase64EncodedWireTransaction(tx));
+        if (isPrimary) return new Response("unavailable", { status: 503 });
+        return Response.json({ result: signature });
+      }
+      throw new Error(method);
+    }) as any;
+    try {
+      const wallet = WalletManager.createForTest(MNEMONIC, {
+        connection: { rpcEndpoint: "https://primary.test" } as any,
+        tokenDb: {} as any,
+      });
+      if (sameCluster) {
+        expect(await wallet.sendFullySignedGameTransaction(tx, blockhash, true)).toBe(signature);
+        expect(sends).toHaveLength(2);
+      } else {
+        await expect(wallet.sendFullySignedGameTransaction(tx, blockhash, true)).rejects.toThrow(
+          "unknown",
+        );
+        expect(sends).toEqual(["https://primary.test/"]);
+      }
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+}
+
+for (const confirmationStatus of ["processed", "confirmed", "finalized"]) {
+  test(`game recovery releases failed signatures only at finality (${confirmationStatus})`, async () => {
+    const wallet = WalletManager.createForTest(MNEMONIC, {
+      connection: {
+        getSignatureStatus: async () => ({
+          value: { err: { InstructionError: [0, "failed"] }, confirmationStatus },
+        }),
+      } as any,
+      tokenDb: {} as any,
+    });
+    expect(await wallet.getTransactionOutcome("signature", { requireFinalizedFailure: true })).toBe(
+      confirmationStatus === "finalized" ? "failed" : "unknown",
+    );
+  });
+}

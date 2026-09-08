@@ -10,6 +10,8 @@ import {
   getBase64Encoder,
   getPublicKeyFromAddress,
   getTransactionDecoder,
+  getCompiledTransactionMessageDecoder,
+  getCompiledTransactionMessageEncoder,
   partiallySignTransactionWithSigners,
   pipe,
   setTransactionMessageFeePayer,
@@ -112,4 +114,29 @@ export async function finalizeOracleSignedGameTransaction(options: {
   }
 
   return fullySigned;
+}
+
+/** Preserve every instruction/account byte; only replace the recent blockhash.
+ * Both signatures must be regenerated and Oracle must approve the new message.
+ */
+export async function refreshGameTransaction(
+  txBase64: string,
+  blockhash: GameTransactionBlockhash,
+  creator: TransactionPartialSigner,
+): Promise<{ txBase64: string; messageBytes: Uint8Array }> {
+  const original = decodeGameTransaction(txBase64);
+  const message = getCompiledTransactionMessageDecoder().decode(original.messageBytes);
+  const messageBytes = getCompiledTransactionMessageEncoder().encode({
+    ...message,
+    lifetimeToken: blockhash.blockhash as Blockhash,
+  });
+  const transaction = {
+    messageBytes,
+    signatures: Object.fromEntries(Object.keys(original.signatures).map((key) => [key, null])),
+  } as Transaction;
+  const signed = await partiallySignTransactionWithSigners([creator], transaction);
+  return {
+    txBase64: getBase64EncodedWireTransaction(signed),
+    messageBytes: Uint8Array.from(messageBytes),
+  };
 }

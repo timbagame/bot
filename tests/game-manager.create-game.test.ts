@@ -840,9 +840,9 @@ describe("GameManager.createGame", () => {
       _gamePda: PublicKey,
       _label: string,
       _player: PublicKey | undefined,
-      resubmit: (attempt: number, previousSignature: string) => Promise<string>,
+      resubmit: unknown,
     ) => {
-      await resubmit(0, "SIG");
+      expect(resubmit).toBeUndefined(); // Expired bytes are handled by durable recovery.
       return "CONFIRMED_SIG";
     };
 
@@ -863,7 +863,7 @@ describe("GameManager.createGame", () => {
     );
     expect(res.success).toBe(true);
     expect(signingCalls).toBe(1);
-    expect(sendCalls).toBe(2);
+    expect(sendCalls).toBe(1);
     const compiledMessage = getCompiledTransactionMessageDecoder().decode(
       wallet.__lastGameTransaction.messageBytes,
     );

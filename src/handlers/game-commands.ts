@@ -288,13 +288,18 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.minPlayers,
         gameTimeoutSeconds,
         telegramId,
-        { isPrivate, replyToMessageId: ctx.message?.message_id },
+        {
+          isPrivate,
+          replyToMessageId: ctx.message?.message_id,
+          creationMessageId: creationMessageInfo?.messageId,
+        },
         ctx.chat?.id || 0,
         messageTimestampMs,
       );
 
       if (!gameResult.success) {
         if (gameResult.confirmedSignature && gameResult.gameAddress) {
+          creationMessageInfo = null; // Durable recovery owns this placeholder now.
           if (deps.gameManager.recoverPendingGameCreationByAddress && ctx.chat?.id != null) {
             try {
               await deps.gameManager.recoverPendingGameCreationByAddress(
