@@ -1,3 +1,4 @@
+import { getCreationRecoveryDelay } from "./utils/game-creation-recovery";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
@@ -3339,16 +3340,17 @@ const recoverPendingGameCreations = async (): Promise<void> => {
             await gameManager.recoverPendingGameCreation(ctx, record);
             console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
           } catch (error) {
-            const age = Date.now() - record.created_at;
-            const delayMs =
-              age < 3 * 60_000
-                ? 3_000
-                : Math.min(15 * 60_000, 30_000 * 2 ** Math.min(record.attempts, 5));
+            const current = gameDb.getPendingGameCreation(record.game_address);
+            if (!current) return;
+            const now = Date.now();
+            const delayMs = getCreationRecoveryDelay(current, now);
             const message = error instanceof Error ? error.message : String(error);
             gameDb.recordPendingGameCreationAttempt(
               record.game_address,
               message,
-              Date.now() + delayMs,
+              now + delayMs,
+              now,
+              current.transaction_signature,
             );
             console.warn(`Pending game setup will be retried for ${record.game_address}:`, message);
           }

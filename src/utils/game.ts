@@ -4668,14 +4668,15 @@ export class GameManager {
               undefined,
               { retryDelays: [] },
             ),
-          async () => {
+          async (signal) => {
             const pending = this.gameDb.getPendingGameCreation?.(gamePda.toBase58());
             if (
               pending &&
               pending.transaction_signature === creationTx &&
               !(await this.isPendingGameCreationLifetimeExpired(pending))
             ) {
-              await this.rebroadcastPendingGameCreation(pending);
+              signal.throwIfAborted();
+              await this.rebroadcastPendingGameCreation(pending, signal);
             }
           },
         );
@@ -6910,7 +6911,10 @@ export class GameManager {
     return Number.isFinite(currentBlockHeight) && currentBlockHeight > lastValidBlockHeight;
   }
 
-  private async rebroadcastPendingGameCreation(pending: PendingGameCreationRecord): Promise<void> {
+  private async rebroadcastPendingGameCreation(
+    pending: PendingGameCreationRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const signedTransactionBase64 = pending.signed_transaction_base64;
     const blockhash = pending.transaction_blockhash;
     const lastValidBlockHeight = Number(pending.last_valid_block_height);
@@ -6930,6 +6934,10 @@ export class GameManager {
     ) {
       throw new Error("Game transaction is no longer broadcastable; awaiting finalized expiry");
     }
+
+    // A foreground confirmation may finish while the height read is pending.
+    // Do not admit a new send once its confirmation owner has stopped.
+    signal?.throwIfAborted();
 
     const claimSubmission = (this.gameDb as any)?.claimPendingGameCreationSubmission;
     if (typeof claimSubmission !== "function") {
@@ -7006,6 +7014,36 @@ export class GameManager {
     ctx: Context,
     pending: PendingGameCreationRecord,
   ): Promise<boolean> {
+    try {
+      return await this.recoverPendingGameCreationAttempt(ctx, pending);
+    } catch (error) {
+      // Resolve the chain outcome first. A definitive failure must retain its
+      // placeholder for the durable failure edit, even on an old request.
+      const current = this.gameDb.getPendingGameCreation?.(pending.game_address);
+      if (
+        current &&
+        current.state !== "failed" &&
+        current.creation_message_id &&
+        Date.now() - (current.transaction_prepared_at ?? current.created_at) >= 180_000
+      ) {
+        try {
+          await this.finishCreationPlaceholder(ctx, current);
+          this.gameDb.setPendingCreationMessage(current.game_address, null);
+          console.error(
+            `Game creation needs operator attention: ${current.game_address} (${current.transaction_signature}); recovery is still pending`,
+          );
+        } catch (cleanupError) {
+          console.warn("Unable to remove unresolved creation placeholder", cleanupError);
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async recoverPendingGameCreationAttempt(
+    ctx: Context,
+    pending: PendingGameCreationRecord,
+  ): Promise<boolean> {
     const getGame = (this.gameDb as any)?.getGame;
     const clearPending = (this.gameDb as any)?.clearPendingGameCreation;
     const clearPendingIfState = (this.gameDb as any)?.clearPendingGameCreationIfState;
@@ -7028,15 +7066,6 @@ export class GameManager {
       if (pending.creation_message_id)
         this.gameDb.clearPendingGameCreationIfState(pending.game_address, ["failed"]);
       return true;
-    }
-
-    if (pending.creation_message_id && Date.now() - pending.created_at >= 3 * 60_000) {
-      await this.finishCreationPlaceholder(ctx, pending);
-      this.gameDb.setPendingCreationMessage(pending.game_address, null);
-      console.error(
-        `Game creation needs operator attention: ${pending.game_address} (${pending.transaction_signature}); recovery is still pending`,
-      );
-      pending = { ...pending, creation_message_id: null };
     }
 
     const setGameOriginChat = (this.gameDb as any)?.setGameOriginChat;

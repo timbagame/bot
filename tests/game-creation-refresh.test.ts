@@ -1,3 +1,4 @@
+import { getCreationRecoveryDelay } from "../src/utils/game-creation-recovery";
 import { expect, test } from "bun:test";
 import { Keypair, PublicKey, TransactionInstruction } from "#solana";
 import {
@@ -209,4 +210,80 @@ test("an acknowledged failure edit remains idempotent after a lost Telegram resp
     ),
   ).toBe(true);
   expect(f.db.getPendingGameCreation(f.game)).toBeNull();
+});
+
+test("an old request proven failed edits its placeholder before any cleanup", async () => {
+  const f = await fixture();
+  (f.db as any).run(
+    "UPDATE pending_game_creations SET created_at = ?, expires_at = ?, creation_message_id = 88 WHERE game_address = ?",
+    [Date.now() - 181_000, Date.now() - 1_000, f.game],
+  );
+  const calls: string[] = [];
+  const ctx = {
+    api: {
+      deleteMessage: async () => calls.push("delete"),
+      editMessageText: async () => calls.push("failure"),
+    },
+  };
+  expect(
+    await f.manager.recoverPendingGameCreation(ctx as any, f.db.getPendingGameCreation(f.game)!),
+  ).toBe(true);
+  expect(calls).toEqual(["failure"]);
+  expect(f.db.getPendingGameCreation(f.game)).toBeNull();
+});
+
+test("a replacement of an old request resets durable retry timing and fences stale backoff", async () => {
+  const f = await fixture();
+  (f.db as any).run(
+    "UPDATE pending_game_creations SET created_at = ?, attempts = 10 WHERE game_address = ?",
+    [Date.now() - 181_000, f.game],
+  );
+  const snapshot = f.db.getPendingGameCreation(f.game)!;
+  await expect(f.manager.recoverPendingGameCreation({ api: {} } as any, snapshot)).rejects.toThrow(
+    "safely refreshed",
+  );
+  const current = f.db.getPendingGameCreation(f.game)!;
+  expect(current.replacement_count).toBe(1);
+  expect(current.attempts).toBe(0);
+  expect(current.created_at).toBe(snapshot.created_at);
+  expect(getCreationRecoveryDelay(current)).toBe(3_000);
+  f.db.recordPendingGameCreationAttempt(
+    f.game,
+    "stale",
+    Date.now() + 900_000,
+    Date.now(),
+    snapshot.transaction_signature,
+  );
+  expect(f.db.getPendingGameCreation(f.game)!.attempts).toBe(0);
+  const reopened = new (GameDatabase as any)();
+  expect(getCreationRecoveryDelay(reopened.getPendingGameCreation(f.game))).toBe(3_000);
+});
+
+test("a cancelled foreground rebroadcast cannot admit a send after a slow height read", async () => {
+  const f = await fixture();
+  let entered!: () => void;
+  let release!: (height: number) => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const height = new Promise<number>((resolve) => {
+    release = resolve;
+  });
+  f.wallet.getConnection = () => ({
+    getBlockHeight: async () => {
+      entered();
+      return height;
+    },
+  });
+  const controller = new AbortController();
+  const attempt = (f.manager as any).rebroadcastPendingGameCreation(
+    f.db.getPendingGameCreation(f.game),
+    controller.signal,
+  );
+  await started;
+  controller.abort();
+  release(1);
+  await expect(attempt).rejects.toThrow();
+  expect(f.sends()).toBe(0);
+  expect(f.db.getPendingGameCreation(f.game)!.state).toBe("unknown");
 });

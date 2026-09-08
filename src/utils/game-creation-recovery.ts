@@ -131,31 +131,49 @@ export async function proveExpiredCreationAbsent(
 /** No overlapping sends; stop scheduling immediately when confirmation finishes. */
 export async function withCreationRebroadcast<T>(
   confirm: () => Promise<T>,
-  rebroadcast: () => Promise<void>,
+  rebroadcast: (signal: AbortSignal) => Promise<void>,
   intervalMs = 3_000,
 ): Promise<T> {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let inFlight: Promise<void> | undefined;
+  const controller = new AbortController();
   const tick = async () => {
     try {
-      await rebroadcast();
+      await rebroadcast(controller.signal);
     } catch {
       /* Durable recovery owns ambiguous sends. */
     }
     if (!stopped)
       timer = setTimeout(() => {
-        inFlight = tick();
+        void tick();
       }, intervalMs);
   };
   timer = setTimeout(() => {
-    inFlight = tick();
+    void tick();
   }, intervalMs);
   try {
     return await confirm();
   } finally {
     stopped = true;
     clearTimeout(timer);
-    await inFlight;
+    controller.abort();
   }
+}
+
+/** Replacement lifetimes get their own fast retry window, including after restart. */
+export function getCreationRecoveryDelay(
+  record: {
+    state: string;
+    created_at: number;
+    transaction_prepared_at?: number | null;
+    attempts: number;
+  },
+  now = Date.now(),
+): number {
+  if (
+    record.state === "failed" ||
+    now - (record.transaction_prepared_at ?? record.created_at) < 180_000
+  )
+    return 3_000;
+  return Math.min(900_000, 30_000 * 2 ** Math.min(record.attempts, 5));
 }

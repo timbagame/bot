@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   proveExpiredCreationAbsent,
   withCreationRebroadcast,
+  getCreationRecoveryDelay,
   type RecoveryRpc,
 } from "../src/utils/game-creation-recovery";
 
@@ -120,7 +121,7 @@ test("rebroadcasts before confirmation timeout and stops after success", async (
   expect(sends).toBe(2);
 });
 
-test("rebroadcast failures do not cancel confirmation; in-flight sends finish before returning", async () => {
+test("rebroadcast failures do not cancel confirmation or delay its result", async () => {
   let sends = 0;
   let finished = false;
   let confirm!: () => void;
@@ -138,6 +139,8 @@ test("rebroadcast failures do not cancel confirmation; in-flight sends finish be
     1,
   );
   expect(sends).toBe(2);
+  expect(finished).toBe(false);
+  await Bun.sleep(10);
   expect(finished).toBe(true);
 });
 
@@ -160,4 +163,50 @@ test("restart recovery locates the expiry anchor instead of scanning all later b
   };
   expect(await proveExpiredCreationAbsent(input, restarted, restarted)).toBe(true);
   expect(reads).toBeLessThan(25);
+});
+
+test("confirmation returns while a rebroadcast read is stalled and cancels its later send", async () => {
+  let confirm!: () => void;
+  let release!: () => void;
+  let entered!: () => void;
+  const confirmation = new Promise<void>((resolve) => {
+    confirm = resolve;
+  });
+  const stalled = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let sends = 0;
+  const result = withCreationRebroadcast(
+    () => confirmation,
+    async (signal) => {
+      entered();
+      await stalled;
+      signal.throwIfAborted();
+      sends++;
+    },
+    1,
+  );
+  await started;
+  confirm();
+  try {
+    expect(
+      await Promise.race([result.then(() => "confirmed"), Bun.sleep(30).then(() => "blocked")]),
+    ).toBe("confirmed");
+  } finally {
+    release();
+  }
+  await Bun.sleep(5);
+  expect(sends).toBe(0);
+});
+
+test("retry timing follows the current transaction lifetime and keeps failed notifications prompt", () => {
+  const old = { state: "unknown", created_at: 1, attempts: 20 };
+  expect(getCreationRecoveryDelay(old, 1_000_000)).toBe(900_000);
+  expect(getCreationRecoveryDelay({ ...old, transaction_prepared_at: 999_000 }, 1_000_000)).toBe(
+    3_000,
+  );
+  expect(getCreationRecoveryDelay({ ...old, state: "failed" }, 1_000_000)).toBe(3_000);
 });

@@ -51,6 +51,7 @@ export interface PendingGameCreationRecord {
   state: PendingGameCreationState;
   is_private: number | null;
   transaction_blockhash: string | null;
+  transaction_prepared_at?: number | null;
   last_valid_block_height: number | null;
   signed_transaction_base64?: string | null;
   reply_to_message_id?: number | null;
@@ -219,6 +220,7 @@ export class GameDatabase extends BaseDatabase {
       ["state", "TEXT NOT NULL DEFAULT 'unknown'"],
       ["is_private", "INTEGER"],
       ["transaction_blockhash", "TEXT"],
+      ["transaction_prepared_at", "INTEGER"],
       ["last_valid_block_height", "INTEGER"],
       ["signed_transaction_base64", "TEXT"],
       ["reply_to_message_id", "INTEGER"],
@@ -887,7 +889,7 @@ export class GameDatabase extends BaseDatabase {
       SET transaction_signature = ?, transaction_blockhash = ?, last_valid_block_height = ?,
           signed_transaction_base64 = ?, state = 'prepared', replacement_count = replacement_count + 1,
           replacement_history = ?, submission_lease_id = NULL, submission_lease_expires_at = NULL,
-          next_attempt_at = ?, updated_at = ?, last_error = NULL
+          next_attempt_at = ?, updated_at = ?, last_error = NULL, transaction_prepared_at = ?, attempts = 0
       WHERE game_address = ? AND transaction_signature = ? AND state IN ('submitted', 'unknown')
         AND replacement_count < 1 AND expires_at > ?
         AND (submission_lease_id IS NULL OR submission_lease_expires_at <= ?)`,
@@ -897,6 +899,7 @@ export class GameDatabase extends BaseDatabase {
           replacement.lastValidBlockHeight,
           replacement.wire,
           JSON.stringify(history),
+          now,
           now,
           now,
           gameAddress,
@@ -1267,12 +1270,19 @@ export class GameDatabase extends BaseDatabase {
     error: string,
     nextAttemptAt: number,
     now: number = Date.now(),
+    expectedSignature?: string,
   ): void {
     this.run(
       `UPDATE pending_game_creations
        SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?, updated_at = ?
-       WHERE game_address = ?`,
-      [error.slice(0, 500), nextAttemptAt, now, gameAddress],
+       WHERE game_address = ? ${expectedSignature ? "AND transaction_signature = ?" : ""}`,
+      [
+        error.slice(0, 500),
+        nextAttemptAt,
+        now,
+        gameAddress,
+        ...(expectedSignature ? [expectedSignature] : []),
+      ],
       "recording pending game creation attempt",
     );
   }

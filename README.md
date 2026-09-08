@@ -188,7 +188,8 @@ For alternate API endpoints, `TELEGRAM_API_ROOT` selects the Telegram API server
 ### Dropped game creation recovery
 
 Creation rebroadcasts the **same signed bytes** every three seconds while waiting
-for confirmation. Rebroadcasts use the endpoints configured in `SOLANA_NETWORK`;
+for confirmation. Confirmation returns immediately without waiting for a stalled
+rebroadcast; cancelled foreground work cannot admit a later send. Rebroadcasts use the endpoints configured in `SOLANA_NETWORK`;
 configure at least two providers on the same cluster for fallback delivery and
 independent recovery checks. With a single private mainnet provider, the public
 mainnet RPC is also tried after verifying its genesis hash matches. No priority
@@ -219,11 +220,14 @@ blockhash replacement is disabled; identical-byte rebroadcast still works.
 
 Replacement bytes and prior-attempt evidence are persisted before broadcasting.
 Conditional signature checks and submission leases fence concurrent/stale
-workers, including after restarts. Once the second attempt is proven absent (or
+workers, including after restarts. Each replacement persists a new retry-window
+start and resets its attempts; the sweep schedules from the current transaction,
+so an old request cannot delay a fresh replacement by fifteen minutes. Once the second attempt is proven absent (or
 the request's expiry passes), recovery releases the request and updates the
 creation placeholder with a concise failure. Successful recovery removes the
 placeholder after delivering the game. Inconclusive expiry removes the spinner
-after three minutes and logs operator attention, without posting recovery or
+after three minutes of the current transaction's retry window, after checking
+the outcome, and logs operator attention without posting recovery or
 payment-processing messages to the group. Background checks continue with backoff.
 
 This follows Solana's [confirmation and expiration guidance](https://solana.com/developers/cookbook/transactions/confirmation),
