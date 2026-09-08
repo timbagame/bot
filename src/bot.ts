@@ -1,3 +1,4 @@
+import { registerEvmBot } from "./evm/bot";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
@@ -3512,13 +3513,25 @@ const registerCaseInsensitiveCommand =
     }
   };
 
-const getBotMenuCommands = () =>
-  caseInsensitiveCommands
+const getBotMenuCommands = () => [
+  ...caseInsensitiveCommands
     .toElementals("default")
     .filter(({ command }) => botMenuCommandNames.has(command))
-    .map(({ command, description }) => ({ command, description }));
+    .map(({ command, description }) => ({ command, description })),
+  ...(process.env["EVM_BOT_CONFIG_FILE"]
+    ? [
+        { command: "evm", description: "Open your EVM wallet" },
+        { command: "ecf", description: "Create an EVM coinflip" },
+        { command: "egiveaway", description: "Create an EVM giveaway" },
+      ]
+    : []),
+];
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
+
+const evmRuntime = process.env["EVM_BOT_CONFIG_FILE"]
+  ? registerEvmBot(bot, process.env["EVM_BOT_CONFIG_FILE"])
+  : undefined;
 
 registerCaseInsensitiveCommand(
   ["start", "balance"],
@@ -6595,6 +6608,7 @@ if (process.env.NODE_ENV !== "test") {
         try {
           rpcEndpointListenerCleanup?.();
           rpcEndpointListenerCleanup = null;
+          evmRuntime?.stop();
           financeBackfillWorker.stop();
           buyAlertService.stop();
           await unregisterProgramEventListeners();
