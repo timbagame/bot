@@ -2668,14 +2668,17 @@ export class WalletManager {
   private recoveryRpc(endpoint: string, signal?: AbortSignal, background = false): RecoveryRpc {
     return async (method, params) => {
       const request = async () => {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-          signal: signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000),
-        });
+        const response = await createRebateAwareFetch(fetch, process.env.HELIUS_REBATE_ADDRESS)(
+          endpoint,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+            signal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+              : AbortSignal.timeout(8_000),
+          },
+        );
         if (response.status === 429) {
           throw new RpcRetryLaterError(
             "Recovery RPC rate limited",

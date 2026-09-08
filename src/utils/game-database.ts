@@ -53,6 +53,7 @@ export interface PendingGameCreationRecord {
   transaction_blockhash: string | null;
   transaction_prepared_at?: number | null;
   recovery_checkpoint?: string | null;
+  delivery_recovery_started_at?: number | null;
   recovery_started_at?: number | null;
   recovery_retry_not_before?: number | null;
   recovery_paused_at?: number | null;
@@ -227,6 +228,7 @@ export class GameDatabase extends BaseDatabase {
       ["transaction_prepared_at", "INTEGER"],
       ["recovery_checkpoint", "TEXT"],
       ["recovery_started_at", "INTEGER"],
+      ["delivery_recovery_started_at", "INTEGER"],
       ["recovery_retry_not_before", "INTEGER"],
       ["recovery_paused_at", "INTEGER"],
       ["last_valid_block_height", "INTEGER"],
@@ -267,12 +269,17 @@ export class GameDatabase extends BaseDatabase {
   }
 
   public resumeGameCreationRecovery(now = Date.now()): void {
+    // One-time upgrade for delivery rows paused under the old shared cutoff.
+    this.run(`UPDATE pending_game_creations SET recovery_paused_at = NULL
+      WHERE state IN ('confirmed','delivered','failed') AND delivery_recovery_started_at IS NULL`);
+
     this.run(
       `UPDATE pending_game_creations SET
       recovery_started_at = COALESCE(recovery_started_at, ?),
+      delivery_recovery_started_at = CASE WHEN state IN ('confirmed','delivered','failed') THEN COALESCE(delivery_recovery_started_at, ?) ELSE delivery_recovery_started_at END,
       next_attempt_at = MAX(?, COALESCE(recovery_retry_not_before, 0))
       WHERE recovery_paused_at IS NULL`,
-      [now, now],
+      [now, now, now],
     );
   }
 
@@ -287,9 +294,26 @@ export class GameDatabase extends BaseDatabase {
     this.run(
       `UPDATE pending_game_creations SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?,
       recovery_started_at = COALESCE(recovery_started_at, ?), recovery_retry_not_before = ?,
-      recovery_paused_at = CASE WHEN ? - COALESCE(recovery_started_at, ?) >= 900000 THEN ? ELSE recovery_paused_at END,
+      delivery_recovery_started_at = CASE WHEN state IN ('confirmed','delivered','failed') THEN COALESCE(delivery_recovery_started_at, ?) ELSE delivery_recovery_started_at END,
+      recovery_paused_at = CASE WHEN (CASE WHEN state IN ('confirmed','delivered','failed')
+        THEN ? - COALESCE(delivery_recovery_started_at, ?) >= 3600000
+        ELSE ? - COALESCE(recovery_started_at, ?) >= 900000 END) THEN ? ELSE recovery_paused_at END,
       updated_at = ? WHERE game_address = ? AND transaction_signature = ?`,
-      [error.slice(0, 500), next, now, notBefore, now, now, now, now, gameAddress, signature],
+      [
+        error.slice(0, 500),
+        next,
+        now,
+        notBefore,
+        now,
+        now,
+        now,
+        now,
+        now,
+        now,
+        now,
+        gameAddress,
+        signature,
+      ],
     );
   }
 

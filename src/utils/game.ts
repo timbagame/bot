@@ -521,6 +521,8 @@ export class GameManager {
   };
   private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
+  private foregroundCreationGames = new Set<string>();
+  private recoveryFlights = new Map<string, Promise<boolean>>();
   private activeCreationRequestKeys = new Set<string>();
   private inFlightGameCreations = new Map<string, number>();
   private pendingCreationRequests = new Map<string, number[]>();
@@ -4149,6 +4151,7 @@ export class GameManager {
     this.trackPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
     this.incrementInFlightCreations(telegramIdStr);
 
+    let foregroundGameAddress: string | undefined;
     let confirmedCreation: { gameAddress: string; confirmedSignature: string } | undefined;
     let pendingCreation:
       | {
@@ -4519,6 +4522,8 @@ export class GameManager {
 
       const tokenMintPubkey = new PublicKey(tokenMint);
       const gamePda = await PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
+      foregroundGameAddress = gamePda.toBase58();
+      this.foregroundCreationGames.add(foregroundGameAddress);
       const tokenAccounts = await this.resolveGameVaultAccounts(tokenMintPubkey);
       const gameFundsContext = buildGameFundsContext(
         contractVersion,
@@ -4843,6 +4848,7 @@ export class GameManager {
         error: userFriendlyError,
       };
     } finally {
+      if (foregroundGameAddress) this.foregroundCreationGames.delete(foregroundGameAddress);
       if (requestKey) this.activeCreationRequestKeys.delete(requestKey);
       this.decrementInFlightCreations(telegramIdStr);
       this.clearPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
@@ -7027,16 +7033,36 @@ export class GameManager {
     ctx: Context,
     pending: PendingGameCreationRecord,
   ): Promise<boolean> {
+    if (this.foregroundCreationGames.has(pending.game_address)) return false;
+    const existing = this.recoveryFlights.get(pending.game_address);
+    if (existing) return existing;
+    const flight = this.runPendingGameCreationRecovery(ctx, pending);
+    this.recoveryFlights.set(pending.game_address, flight);
+    try {
+      return await flight;
+    } finally {
+      if (this.recoveryFlights.get(pending.game_address) === flight)
+        this.recoveryFlights.delete(pending.game_address);
+    }
+  }
+
+  private async runPendingGameCreationRecovery(
+    ctx: Context,
+    pending: PendingGameCreationRecord,
+  ): Promise<boolean> {
     const latest = this.gameDb.getPendingGameCreation?.(pending.game_address) ?? pending;
     if (latest.recovery_paused_at != null || (latest.recovery_retry_not_before ?? 0) > Date.now())
       return false;
     pending = latest;
     try {
-      if (
-        pending.recovery_started_at != null &&
-        Date.now() - pending.recovery_started_at >= 900_000
-      )
-        throw new Error("Automatic recovery window ended; evidence retained for reconciliation");
+      const delivery = ["confirmed", "delivered", "failed"].includes(pending.state);
+      const started = delivery ? pending.delivery_recovery_started_at : pending.recovery_started_at;
+      if (started != null && Date.now() - started >= (delivery ? 3_600_000 : 900_000))
+        throw new Error(
+          delivery
+            ? "Delivery recovery window ended; evidence retained for reconciliation"
+            : "Automatic recovery window ended; evidence retained for reconciliation",
+        );
       return await this.recoverPendingGameCreationAttempt(ctx, pending);
     } catch (error) {
       // Resolve the chain outcome first. A definitive failure must retain its
@@ -7050,7 +7076,11 @@ export class GameManager {
           current.game_address,
           current.transaction_signature,
           error instanceof Error ? error.message : String(error),
-          notBefore ?? now + getCreationRecoveryDelay(current, now),
+          notBefore ??
+            now +
+              (["confirmed", "delivered", "failed"].includes(current.state)
+                ? 15_000
+                : getCreationRecoveryDelay(current, now)),
           notBefore,
           now,
         );

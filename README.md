@@ -234,11 +234,16 @@ active-game and creation-rate limits still apply. Interactive confirmation check
 receipts before showing progress and associates its placeholder with recovery.
 
 Recovery scheduling belongs to GameManager, so command, menu, and sweep calls
-persist the same continuation time. Startup advances legacy backoffs while
+persist the same continuation time. Background recovery yields while foreground
+creation owns the game, and concurrent recovery callers share one attempt. Startup advances legacy backoffs while
 preserving persisted cooldowns and checkpoints. Automatic recovery has a
 15-minute window from its first scheduled recovery (or startup for legacy rows).
-At its end, retries pause; transaction bytes, signatures, checkpoints, and request
-receipts remain for operator reconciliation. Restarting does not renew the window
+This cutoff applies to unresolved transactions. Known confirmed games and
+definitive failure-message cleanup get a separate one-hour delivery window,
+retrying every 15 seconds unless an explicit cooldown applies. Legacy delivery
+rows paused by the old shared cutoff are resumed once on upgrade. At the end of
+each window, retries pause; transaction bytes, signatures, checkpoints, and
+request receipts remain for operator reconciliation. Restarting does not renew the window
 or unpause a record. Pausing is not proof of failure or authorization to resubmit
 the original transaction with a new blockhash.
 
@@ -259,3 +264,13 @@ payment-processing messages to the group. Background checks continue with backof
 
 This follows Solana's [confirmation and expiration guidance](https://solana.com/developers/cookbook/transactions/confirmation),
 with a stricter block-history check because game accounts can be closed.
+
+Helius rebate handling also covers raw fallback rebroadcasts, using
+`HELIUS_REBATE_ADDRESS` for every Helius `sendTransaction` endpoint. Reads and
+non-Helius endpoints are unaffected.
+
+Buy-alert polling retains its rate-limit backoff across brief successful
+responses. Five minutes of successful polling without another 429 resets the
+rate-limit history. Retry-After continues to take precedence over shorter local
+cooldowns; this reduces repeated throttling but cannot guarantee availability
+of the public GeckoTerminal service.

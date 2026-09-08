@@ -244,6 +244,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
   let poolQueue: Array<{ mint: string; pairAddress: string }> = [];
   let nextTradeFetchAt = 0;
   let consecutiveTradeFailures = 0;
+  let rateLimitFailures = 0;
+  let healthySince: number | null = null;
   let nextRateLimitReportAt = 0;
 
   const emit = (event: BuyEvent) => {
@@ -260,10 +262,7 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       }
       nextRateLimitReportAt =
         current +
-        Math.max(
-          GECKO_RATE_LIMIT_LOG_INTERVAL_MS,
-          rateLimitCooldownMs(error, consecutiveTradeFailures),
-        );
+        Math.max(GECKO_RATE_LIMIT_LOG_INTERVAL_MS, rateLimitCooldownMs(error, rateLimitFailures));
     }
     try {
       onError(error);
@@ -284,13 +283,15 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
 
   const deferAfterTradeFailure = (error: unknown) => {
     consecutiveTradeFailures += 1;
+    if (error instanceof GeckoRateLimitError) {
+      rateLimitFailures += 1;
+      healthySince = null;
+    }
     if (minRequestIntervalMs <= 0) return;
     const multiplier = 2 ** Math.min(consecutiveTradeFailures - 1, 4);
     const exponentialDelayMs = minRequestIntervalMs * multiplier;
     const serverDelayMs =
-      error instanceof GeckoRateLimitError
-        ? rateLimitCooldownMs(error, consecutiveTradeFailures)
-        : 0;
+      error instanceof GeckoRateLimitError ? rateLimitCooldownMs(error, rateLimitFailures) : 0;
     nextTradeFetchAt = Math.max(
       nextTradeFetchAt,
       now() + Math.max(exponentialDelayMs, serverDelayMs),
@@ -328,6 +329,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       return false;
     }
     consecutiveTradeFailures = 0;
+    healthySince ??= now();
+    if (now() - healthySince >= 5 * 60_000) rateLimitFailures = 0;
     const trades = parsed.data.data;
     const mintSeen = seen.get(mint) ?? new Map<string, Set<string>>();
     const known = mintSeen.get(pairAddress) ?? new Set<string>();
@@ -531,6 +534,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
       poolQueue = [];
       nextTradeFetchAt = 0;
       consecutiveTradeFailures = 0;
+      rateLimitFailures = 0;
+      healthySince = null;
       nextRateLimitReportAt = 0;
     },
     pollNow,
