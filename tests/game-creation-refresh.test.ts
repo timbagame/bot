@@ -392,3 +392,72 @@ test("an unrelated pending game does not block a new creation request", async ()
     f.db.countActiveGamesByCreator = originalCount;
   }
 });
+
+test("foreground ownership prevents recovery and concurrent recovery shares one attempt", async () => {
+  const f = await fixture();
+  const internal = f.manager as any;
+  let attempts = 0;
+  let release!: () => void;
+  const original = internal.recoverPendingGameCreationAttempt;
+  internal.recoverPendingGameCreationAttempt = async () => {
+    attempts++;
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return true;
+  };
+  try {
+    internal.foregroundCreationGames.add(f.game);
+    expect(await f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game)).toBe(
+      false,
+    );
+    expect(attempts).toBe(0);
+    internal.foregroundCreationGames.delete(f.game);
+    const first = f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game);
+    const second = f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game);
+    expect(attempts).toBe(1);
+    release();
+    expect(await Promise.all([first, second])).toEqual([true, true]);
+    expect(internal.recoveryFlights.size).toBe(0);
+  } finally {
+    internal.recoverPendingGameCreationAttempt = original;
+    internal.foregroundCreationGames.delete(f.game);
+  }
+});
+
+test("confirmed delivery gets a separate bounded window and upgrade resumes old delivery pauses", async () => {
+  const f = await fixture();
+  const now = Date.now();
+  (f.db as any).run(
+    "UPDATE pending_game_creations SET state = 'confirmed', recovery_started_at = ?, recovery_paused_at = ? WHERE game_address = ?",
+    [now - 1800000, now - 1000, f.game],
+  );
+  f.db.resumeGameCreationRecovery(now);
+  expect(f.db.getPendingGameCreation(f.game)?.recovery_paused_at).toBeNull();
+  const internal = f.manager as any;
+  const original = internal.recoverPendingGameCreationAttempt;
+  let attempts = 0;
+  internal.recoverPendingGameCreationAttempt = async () => {
+    attempts++;
+    throw new Error("Telegram unavailable");
+  };
+  try {
+    await expect(
+      f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game),
+    ).rejects.toThrow("Telegram unavailable");
+    expect(attempts).toBe(1);
+    expect(f.db.getPendingGameCreation(f.game)?.recovery_paused_at).toBeNull();
+    (f.db as any).run(
+      "UPDATE pending_game_creations SET delivery_recovery_started_at = ? WHERE game_address = ?",
+      [now - 3600001, f.game],
+    );
+    await expect(
+      f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game),
+    ).rejects.toThrow("Delivery recovery window ended");
+    expect(attempts).toBe(1);
+    f.db.resumeGameCreationRecovery();
+    expect(f.db.getPendingGameCreation(f.game)?.recovery_paused_at).toBeGreaterThan(0);
+  } finally {
+    internal.recoverPendingGameCreationAttempt = original;
+  }
+});

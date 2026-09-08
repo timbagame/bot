@@ -91,7 +91,7 @@ test("pool trade poller applies a minimum cooldown to short Retry-After values",
 });
 
 for (const retryAfterMs of [0, null, 30 * 60_000]) {
-  test(`rate-limit backoff grows, respects Retry-After ${retryAfterMs}, and resets on success`, async () => {
+  test(`rate-limit backoff grows, respects Retry-After ${retryAfterMs}, and survives a brief success`, async () => {
     let now = 0;
     let requests = 0;
     const delays: number[] = [];
@@ -128,7 +128,7 @@ for (const retryAfterMs of [0, null, 30 * 60_000]) {
           Math.max(delay, retryAfterMs ?? 0),
         ),
         1_000,
-        Math.max(60_000, retryAfterMs ?? 0),
+        Math.max(900_000, retryAfterMs ?? 0),
       ]);
     } finally {
       poller.stop();

@@ -30,3 +30,32 @@ for (const jsonError of [false, true]) {
     }
   });
 }
+
+test("raw fallback broadcasts add rebate to each Helius endpoint, but not reads", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalRebate = process.env.HELIUS_REBATE_ADDRESS;
+  const urls: URL[] = [];
+  globalThis.fetch = (async (input: any) => {
+    urls.push(new URL(String(input)));
+    return Response.json({ result: "signature" });
+  }) as unknown as typeof fetch;
+  process.env.HELIUS_REBATE_ADDRESS = "recipient";
+  try {
+    const wallet = Object.create(WalletManager.prototype) as any;
+    for (const key of ["first", "second"])
+      await wallet.recoveryRpc(`https://mainnet.helius-rpc.com/?api-key=${key}`)(
+        "sendTransaction",
+        [],
+      );
+    await wallet.recoveryRpc("https://mainnet.helius-rpc.com/?api-key=second")("getSlot", []);
+    expect(urls.slice(0, 2).map((u) => u.searchParams.get("rebate-address"))).toEqual([
+      "recipient",
+      "recipient",
+    ]);
+    expect(urls[2]!.searchParams.has("rebate-address")).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRebate === undefined) delete process.env.HELIUS_REBATE_ADDRESS;
+    else process.env.HELIUS_REBATE_ADDRESS = originalRebate;
+  }
+});
