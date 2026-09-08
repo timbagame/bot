@@ -210,13 +210,26 @@ the bot requires:
   completed games close their accounts, so the same PDA is not a permanent
   duplicate-charge guard.
 
-The history walk is bounded to 256 blocks and 45 seconds per attempt. After a
+The history walk checks at most 256 blocks in total, saving validated progress
+after each parent link. Recovery works in 20-block batches with a 45-second
+attempt deadline and resumes from its SQLite checkpoint after interruptions or
+restarts. Each resume revalidates the transaction identity, cluster, finalized
+anchor, and current absence observations. Background reads share a paced lane
+of at most two requests per second per provider hostname, yield to foreground
+requests, and honor HTTP Retry-After (including plain-text 429 responses).
+Batch completion and transport interruptions schedule a short retry instead of
+entering the long inconclusive-outcome backoff. After a
 restart, a bounded slot lookup (at most 50,000 slots) locates an anchor near
 expiry so later blocks do not consume that lifetime-scan budget. Missing,
 pruned, inconsistent, unavailable, or older history remains reserved for later
 recovery/operator reconciliation. Providers must support finalized `getBlock`
 with `transactionDetails: "signatures"`. Without a reachable independent provider, automatic
 blockhash replacement is disabled; identical-byte rebroadcast still works.
+
+Repeated creation commands reuse the existing pending request before doing RPC
+reads or posting another creation placeholder. Foreground reads retry wrapped
+socket failures within a five-second deadline, with a genesis-verified public
+mainnet fallback when configured providers fail.
 
 Replacement bytes and prior-attempt evidence are persisted before broadcasting.
 Conditional signature checks and submission leases fence concurrent/stale

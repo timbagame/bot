@@ -61,6 +61,12 @@ type CreateGameViaCommandDeps = {
       ...args: Parameters<GameManager["recoverPendingGameCreationByAddress"]>
     ) => ReturnType<GameManager["recoverPendingGameCreationByAddress"]>;
     clearPendingGameCreation?: (gameAddress: string) => void;
+    hasPendingGameCreation?: (telegramId: bigint) => boolean;
+    ownsPendingCreationMessage?: (
+      gameAddress: string,
+      chatId: number,
+      messageId: number,
+    ) => boolean;
   };
 };
 
@@ -96,6 +102,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   });
 
   const gameCreationRateLimitNotices = new Map<string, number>();
+  const activeCreationCommands = new Set<string>();
 
   const shouldSendGameCreationRateLimitNotice = (
     telegramId: bigint,
@@ -153,6 +160,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   ): Promise<void> => {
     console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
 
+    const creatorKey = telegramId.toString();
+    if (activeCreationCommands.has(creatorKey)) return;
+    activeCreationCommands.add(creatorKey);
     let creationMessageInfo: { chatId: number; messageId: number } | null = null;
 
     const deleteCreationMessage = async (): Promise<void> => {
@@ -168,6 +178,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     };
 
     try {
+      // The durable sweep already owns this request. Repeated commands must
+      // not perform fresh RPC reads, bypass its cooldown, or create a spinner.
+      if (createDeps.gameManager.hasPendingGameCreation?.(telegramId)) return;
       const parsed = await createDeps.parseAmount(args, 1, ctx.chat?.id);
       if (!parsed.success) {
         await ctx.reply(formatParseAmountError(parsed, options.usageMessage), {
@@ -299,7 +312,16 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       if (!gameResult.success) {
         if (gameResult.confirmedSignature && gameResult.gameAddress) {
-          creationMessageInfo = null; // Durable recovery owns this placeholder now.
+          if (
+            creationMessageInfo &&
+            createDeps.gameManager.ownsPendingCreationMessage?.(
+              gameResult.gameAddress,
+              creationMessageInfo.chatId,
+              creationMessageInfo.messageId,
+            )
+          ) {
+            creationMessageInfo = null; // Only hand off a durably attached placeholder.
+          }
           if (deps.gameManager.recoverPendingGameCreationByAddress && ctx.chat?.id != null) {
             try {
               await deps.gameManager.recoverPendingGameCreationByAddress(
@@ -374,6 +396,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       console.error(`Error in command-based ${options.gameType}:`, error);
       await ctx.reply(options.errorMessage);
     } finally {
+      activeCreationCommands.delete(creatorKey);
       await deleteCreationMessage();
     }
   };

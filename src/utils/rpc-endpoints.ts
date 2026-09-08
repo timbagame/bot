@@ -1,3 +1,4 @@
+import { boundedRpc, foregroundRpc } from "./rpc-request-budget";
 import { Connection, type Commitment } from "#solana";
 
 export type RpcEndpointLogger = {
@@ -10,6 +11,8 @@ export interface RpcEndpointManagerOptions {
   commitment?: Commitment;
   logger?: RpcEndpointLogger;
   connectionFactory?: (endpoint: string, commitment: Commitment) => Connection;
+  readTimeoutMs?: number;
+  fallbackEndpoint?: string;
 }
 
 export interface ActiveEndpointChange {
@@ -35,6 +38,8 @@ const TRANSIENT_ERROR_TOKENS = [
   "network request failed",
   "failed to fetch",
   "socket hang up",
+  "socket connection was closed",
+  "socketclosed",
   "connection refused",
   "connection reset",
   "econnreset",
@@ -43,15 +48,18 @@ const TRANSIENT_ERROR_TOKENS = [
   "tls",
 ];
 
-function isRetryableRpcError(error: unknown): boolean {
-  if (!error) {
+export function isRetryableRpcError(error: unknown, seen = new Set<unknown>()): boolean {
+  if (!error || seen.has(error)) {
     return false;
   }
 
+  seen.add(error);
+  if (typeof error === "object" && isRetryableRpcError((error as { cause?: unknown }).cause, seen))
+    return true;
   const code = (error as { code?: string | number }).code;
   if (typeof code === "string") {
     const normalized = code.toLowerCase();
-    if (normalized.startsWith("ecconn") || normalized.startsWith("etimedout")) {
+    if (normalized.startsWith("econn") || normalized.startsWith("etimedout")) {
       return true;
     }
   }
@@ -72,6 +80,9 @@ export class RpcEndpointManager {
   private readonly connectionCache = new Map<number, Connection>();
   private readonly proxyConnection: Connection;
   private activeIndex = 0;
+  private readonly readTimeoutMs: number;
+  private readonly fallbackEndpoint: string;
+  private verifiedFallback?: Connection;
   private readonly endpointChangeListeners = new Set<ActiveEndpointChangeListener>();
 
   constructor(endpoints: string[], options: RpcEndpointManagerOptions = {}) {
@@ -87,6 +98,8 @@ export class RpcEndpointManager {
       throw new Error("SOLANA_NETWORK did not resolve to any RPC endpoints");
     }
 
+    this.readTimeoutMs = options.readTimeoutMs ?? 5_000;
+    this.fallbackEndpoint = options.fallbackEndpoint ?? DEFAULT_MAINNET_ENDPOINT;
     this.commitment = options.commitment ?? DEFAULT_COMMITMENT;
     this.logger = options.logger;
     this.connectionFactory =
@@ -194,11 +207,22 @@ export class RpcEndpointManager {
   }
 
   private async invokeWithFallback(prop: string | symbol, args: unknown[]): Promise<any> {
+    const isRead = typeof prop === "string" && /^(get|is)/.test(prop);
+    return foregroundRpc(() => this.invokeAttempts(prop, args, isRead));
+  }
+
+  private async invokeAttempts(
+    prop: string | symbol,
+    args: unknown[],
+    isRead: boolean,
+  ): Promise<any> {
+    const deadline = Date.now() + this.readTimeoutMs;
     let lastError: unknown;
     const total = this.endpoints.length;
     const startIndex = this.activeIndex;
 
     for (let offset = 0; offset < total; offset++) {
+      if (isRead && Date.now() >= deadline) break;
       const index = (startIndex + offset) % total;
       const connection = this.ensureConnection(index);
       const method = Reflect.get(connection, prop, connection);
@@ -208,8 +232,10 @@ export class RpcEndpointManager {
       }
 
       try {
-        const result = method.apply(connection, args);
-        const awaited = await Promise.resolve(result);
+        const call = () => Promise.resolve(method.apply(connection, args));
+        const awaited = isRead
+          ? await boundedRpc(call, Math.min(1_500, deadline - Date.now()))
+          : await call();
         this.promote(index);
         return awaited;
       } catch (error) {
@@ -217,6 +243,7 @@ export class RpcEndpointManager {
         const methodName = typeof prop === "symbol" ? prop.toString() : prop;
         const endpoint = this.endpoints[index];
 
+        if (isRead && isRetryableRpcError(error) && offset === total - 1) break;
         if (!isRetryableRpcError(error) || total === 1 || offset === total - 1) {
           this.logger?.error?.(
             `RPC call ${methodName} failed on ${endpoint} without fallback:`,
@@ -231,6 +258,51 @@ export class RpcEndpointManager {
       }
     }
 
+    if (isRead && isRetryableRpcError(lastError) && Date.now() < deadline) {
+      // Verify cluster identity before using an independent read provider.
+      // Cache a successful verification, but never infer mainnet from a URL.
+      try {
+        if (!this.verifiedFallback && !this.endpoints.includes(this.fallbackEndpoint)) {
+          const fallback = this.connectionFactory(this.fallbackEndpoint, this.commitment);
+          const [primaryGenesis, fallbackGenesis] =
+            typeof fallback.getGenesisHash === "function" &&
+            typeof this.ensureConnection(startIndex).getGenesisHash === "function"
+              ? await boundedRpc(
+                  () =>
+                    Promise.all([
+                      this.ensureConnection(startIndex).getGenesisHash(),
+                      fallback.getGenesisHash(),
+                    ]),
+                  Math.min(1_000, deadline - Date.now()),
+                )
+              : [null, null];
+          if (primaryGenesis && primaryGenesis === fallbackGenesis)
+            this.verifiedFallback = fallback;
+        }
+        if (this.verifiedFallback && Date.now() < deadline) {
+          const fallback = this.verifiedFallback;
+          const method = Reflect.get(fallback, prop, fallback);
+          if (typeof method === "function")
+            return await boundedRpc(
+              () => Promise.resolve(method.apply(fallback, args)),
+              deadline - Date.now(),
+            );
+        }
+      } catch (error) {
+        if (!isRetryableRpcError(error)) throw error;
+        lastError = error;
+      }
+      // A single transient disconnect should also recover on a one-provider
+      // local/devnet setup where an independent provider is unavailable.
+      if (Date.now() < deadline) {
+        const connection = this.ensureConnection(startIndex);
+        const method = Reflect.get(connection, prop, connection);
+        return boundedRpc(
+          () => Promise.resolve(method.apply(connection, args)),
+          deadline - Date.now(),
+        );
+      }
+    }
     throw lastError ?? new Error("RPC invocation failed without specific error");
   }
 }

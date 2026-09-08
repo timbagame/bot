@@ -1,3 +1,4 @@
+import { RpcRetryLaterError } from "./utils/rpc-request-budget";
 import { getCreationRecoveryDelay } from "./utils/game-creation-recovery";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
@@ -3013,6 +3014,9 @@ const gameCommandsModule = createGameCommandsModule({
     recoverPendingGameCreationByAddress: (...args) =>
       gameManager?.recoverPendingGameCreationByAddress?.(...args) ?? Promise.resolve(false),
     clearPendingGameCreation: (gameAddress) => gameManager?.clearPendingGameCreation?.(gameAddress),
+    hasPendingGameCreation: (telegramId) => gameManager.hasPendingGameCreation(telegramId),
+    ownsPendingCreationMessage: (gameAddress, chatId, messageId) =>
+      gameManager.ownsPendingCreationMessage(gameAddress, chatId, messageId),
   },
   getOracleMaxPlayers,
   isGroupChat,
@@ -3343,7 +3347,10 @@ const recoverPendingGameCreations = async (): Promise<void> => {
             const current = gameDb.getPendingGameCreation(record.game_address);
             if (!current) return;
             const now = Date.now();
-            const delayMs = getCreationRecoveryDelay(current, now);
+            const delayMs =
+              error instanceof RpcRetryLaterError
+                ? Math.max(3_000, error.retryAt - now)
+                : getCreationRecoveryDelay(current, now);
             const message = error instanceof Error ? error.message : String(error);
             gameDb.recordPendingGameCreationAttempt(
               record.game_address,

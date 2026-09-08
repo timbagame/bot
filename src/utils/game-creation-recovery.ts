@@ -1,3 +1,4 @@
+import { RpcRetryLaterError } from "./rpc-request-budget";
 /** A missing signature/account is not proof of non-execution: games can be closed.
  * Prove absence by walking the complete finalized parent chain back to the exact
  * recent blockhash, checking every block's signatures. A second RPC must agree
@@ -11,65 +12,122 @@ export type ExpiredCreation = {
   gameAddress: string;
 };
 
+export type CreationProofCheckpoint = {
+  key: string;
+  genesis: string;
+  anchor: { slot: number; hash: string; height: number };
+  cursor: { slot: number; hash: string; height: number };
+  checkedBlocks: number;
+};
+export function parseCreationProofCheckpoint(
+  value?: string | null,
+): CreationProofCheckpoint | null {
+  try {
+    return value ? (JSON.parse(value) as CreationProofCheckpoint) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type CreationProofProgress = {
+  checkpoint?: CreationProofCheckpoint | null;
+  save: (checkpoint: CreationProofCheckpoint) => void;
+  maxBlocks?: number;
+};
+
 export async function proveExpiredCreationAbsent(
   input: ExpiredCreation,
   primary: RecoveryRpc,
   witness: RecoveryRpc,
+  progress?: CreationProofProgress,
 ): Promise<boolean> {
   if (!Number.isSafeInteger(input.lastValidBlockHeight) || input.lastValidBlockHeight < 0) {
     return false;
   }
   const genesis = await Promise.all([primary("getGenesisHash", []), witness("getGenesisHash", [])]);
   if (!genesis[0] || genesis[0] !== genesis[1]) return false;
-  let slot = await primary("getSlot", [{ commitment: "finalized" }]);
   const config = {
     commitment: "finalized",
     transactionDetails: "signatures",
     rewards: false,
     maxSupportedTransactionVersion: 0,
   };
-  let block = await primary("getBlock", [slot, config]);
-  if (
-    !block ||
-    !Number.isSafeInteger(block.blockHeight) ||
-    block.blockHeight <= input.lastValidBlockHeight
-  )
-    return false;
-  // After a restart, jump close to expiry before walking the lifetime. We
-  // need not scan blocks produced after expiry; they cannot include this tx.
-  const distance = block.blockHeight - input.lastValidBlockHeight;
-  if (distance > 64) {
-    const slots = await primary("getBlocks", [
-      Math.max(0, slot - Math.min(50_000, (distance + 256) * 2)),
-      slot,
-      { commitment: "finalized" },
-    ]);
+  const key = `${input.gameAddress}:${input.signature}:${input.blockhash}:${input.lastValidBlockHeight}`;
+  const saved = progress?.checkpoint;
+  const checkpoint =
+    saved &&
+    saved.key === key &&
+    saved.genesis === genesis[0] &&
+    Number.isSafeInteger(saved.checkedBlocks) &&
+    saved.checkedBlocks >= 0 &&
+    saved.checkedBlocks < 256 &&
+    Number.isSafeInteger(saved.anchor?.slot) &&
+    Number.isSafeInteger(saved.cursor?.slot) &&
+    saved.cursor.slot <= saved.anchor.slot &&
+    Number.isSafeInteger(saved.anchor?.height) &&
+    Number.isSafeInteger(saved.cursor?.height) &&
+    saved.anchor.height > input.lastValidBlockHeight &&
+    saved.cursor.height + saved.checkedBlocks === saved.anchor.height &&
+    typeof saved.anchor.hash === "string" &&
+    typeof saved.cursor.hash === "string"
+      ? saved
+      : null;
+  let slot: number;
+  let block: any;
+  if (checkpoint) {
+    slot = checkpoint.anchor.slot;
+    block = await primary("getBlock", [slot, config]);
     if (
-      !Array.isArray(slots) ||
-      !slots.length ||
-      slots.some(
-        (value: unknown, index: number) =>
-          !Number.isSafeInteger(value) ||
-          Number(value) > slot ||
-          (index > 0 && Number(value) <= slots[index - 1]),
-      )
+      !block ||
+      block.blockhash !== checkpoint.anchor.hash ||
+      block.blockHeight !== checkpoint.anchor.height
     )
       return false;
-    let low = 0;
-    let high = slots.length - 1;
-    let candidate: { slot: number; block: any } | undefined;
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const probe = await primary("getBlock", [slots[mid], config]);
-      if (!probe || !Number.isSafeInteger(probe.blockHeight)) return false;
-      if (probe.blockHeight > input.lastValidBlockHeight) {
-        candidate = { slot: slots[mid], block: probe };
-        high = mid - 1;
-      } else low = mid + 1;
+  } else {
+    slot = await primary("getSlot", [{ commitment: "finalized" }]);
+    block = await primary("getBlock", [slot, config]);
+    if (
+      !block ||
+      !Number.isSafeInteger(block.blockHeight) ||
+      block.blockHeight <= input.lastValidBlockHeight
+    )
+      return false;
+    // After a restart, jump close to expiry before walking the lifetime. We
+    // need not scan blocks produced after expiry; they cannot include this tx.
+    const distance = block.blockHeight - input.lastValidBlockHeight;
+    if (distance > 64) {
+      const slots = await primary("getBlocks", [
+        Math.max(0, slot - Math.min(50_000, (distance + 256) * 2)),
+        slot,
+        { commitment: "finalized" },
+      ]);
+      if (
+        !Array.isArray(slots) ||
+        !slots.length ||
+        slots.some(
+          (value: unknown, index: number) =>
+            !Number.isSafeInteger(value) ||
+            Number(value) > slot ||
+            (index > 0 && Number(value) <= slots[index - 1]),
+        )
+      )
+        return false;
+      let low = 0;
+      let high = slots.length - 1;
+      let candidate: { slot: number; block: any } | undefined;
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const probe = await primary("getBlock", [slots[mid], config]);
+        if (!probe || !Number.isSafeInteger(probe.blockHeight)) return false;
+        if (probe.blockHeight > input.lastValidBlockHeight) {
+          candidate = { slot: slots[mid], block: probe };
+          high = mid - 1;
+        } else low = mid + 1;
+      }
+      if (!candidate) return false;
+      slot = candidate.slot;
+      block = candidate.block;
     }
-    if (!candidate) return false;
-    slot = candidate.slot;
-    block = candidate.block;
   }
   const anchor = await witness("getBlock", [slot, config]);
   if (!anchor || anchor.blockhash !== block.blockhash || anchor.blockHeight !== block.blockHeight)
@@ -105,8 +163,25 @@ export async function proveExpiredCreationAbsent(
   }
   // Bounded work for recent incidents. Old/pruned history never becomes an
   // automatic authorization to charge again, even after many retries.
+  const anchorIdentity = {
+    slot,
+    hash: block.blockhash as string,
+    height: block.blockHeight as number,
+  };
   let currentSlot = slot;
-  for (let count = 0; count < 256; count++) {
+  if (checkpoint) {
+    currentSlot = checkpoint.cursor.slot;
+    if (currentSlot !== slot) block = await primary("getBlock", [currentSlot, config]);
+    if (
+      !block ||
+      block.blockhash !== checkpoint.cursor.hash ||
+      block.blockHeight !== checkpoint.cursor.height
+    )
+      return false;
+  }
+  const startCount = checkpoint?.checkedBlocks ?? 0;
+  const maxBlocks = progress?.maxBlocks ?? 256;
+  for (let count = startCount; count < 256; count++) {
     if (
       !Array.isArray(block.signatures) ||
       block.signatures.some((s: unknown) => typeof s !== "string")
@@ -124,6 +199,19 @@ export async function proveExpiredCreationAbsent(
       return false;
     currentSlot = block.parentSlot;
     block = parent;
+    progress?.save({
+      key,
+      genesis: genesis[0],
+      anchor: anchorIdentity,
+      cursor: { slot: currentSlot, hash: block.blockhash, height: block.blockHeight },
+      checkedBlocks: count + 1,
+    });
+    if (count + 1 < 256 && count - startCount + 1 >= maxBlocks) {
+      throw new RpcRetryLaterError(
+        "Finalized history scan checkpointed; continuing shortly",
+        Date.now() + 3_000,
+      );
+    }
   }
   return false;
 }
