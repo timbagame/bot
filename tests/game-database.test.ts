@@ -256,20 +256,39 @@ test("persists game creation intent before broadcast and keeps its signature imm
     timeoutSeconds: 3600,
     expiresAt: 3_601_000,
     transactionSignature: "prepared-signature",
-    state: "submitted" as const,
+    state: "prepared" as const,
     isPrivate: true,
     transactionBlockhash: "prepared-blockhash",
     lastValidBlockHeight: 123,
+    signedTransactionBase64: "prepared-wire-transaction",
+    replyToMessageId: 77,
+    onChainCreatedAt: 1_000,
     now: 1_000,
   };
 
   db.savePendingGameCreation(input);
   expect(db.getPendingGameCreationForCreator("7")).toMatchObject({
-    state: "submitted",
+    state: "prepared",
     is_private: 1,
     transaction_signature: "prepared-signature",
     transaction_blockhash: "prepared-blockhash",
     last_valid_block_height: 123,
+    signed_transaction_base64: "prepared-wire-transaction",
+    reply_to_message_id: 77,
+    on_chain_created_at: 1_000,
+  });
+
+  db.setPendingGameCreationChainTiming("durable-game", 2_000, 3_602_000, 2_000);
+  expect(db.getPendingGameCreation("durable-game")).toMatchObject({
+    expires_at: 3_602_000,
+    on_chain_created_at: 2_000,
+  });
+
+  db.saveGame("durable-game", "7", 100, "coinflip", "mint", "TOK", 2, 2);
+  db.setGameChainTiming("durable-game", 2_000, 3_602_000);
+  expect(db.getGame("durable-game")).toMatchObject({
+    created_at: 2_000,
+    expires_at: 3_602_000,
   });
 
   db.setPendingGameCreationState("durable-game", "unknown", {

@@ -52,6 +52,9 @@ export interface PendingGameCreationRecord {
   is_private: number | null;
   transaction_blockhash: string | null;
   last_valid_block_height: number | null;
+  signed_transaction_base64?: string | null;
+  reply_to_message_id?: number | null;
+  on_chain_created_at?: number | null;
   attempts: number;
   last_error: string | null;
   next_attempt_at: number;
@@ -60,7 +63,7 @@ export interface PendingGameCreationRecord {
 }
 
 export type PendingGameCreationState =
-  "submitted" | "unknown" | "confirmed" | "delivered" | "failed";
+  "prepared" | "submitted" | "unknown" | "confirmed" | "delivered" | "failed";
 
 export type GameMessageDeliveryReservation =
   { acquired: true } | { acquired: false; reason: "sent" | "in-flight"; messageId?: number };
@@ -157,6 +160,9 @@ export class GameDatabase extends BaseDatabase {
           is_private INTEGER,
           transaction_blockhash TEXT,
           last_valid_block_height INTEGER,
+          signed_transaction_base64 TEXT,
+          reply_to_message_id INTEGER,
+          on_chain_created_at INTEGER,
           attempts INTEGER NOT NULL DEFAULT 0,
           last_error TEXT,
           next_attempt_at INTEGER NOT NULL,
@@ -189,6 +195,9 @@ export class GameDatabase extends BaseDatabase {
       ["is_private", "INTEGER"],
       ["transaction_blockhash", "TEXT"],
       ["last_valid_block_height", "INTEGER"],
+      ["signed_transaction_base64", "TEXT"],
+      ["reply_to_message_id", "INTEGER"],
+      ["on_chain_created_at", "INTEGER"],
     ] as const;
     for (const [column, type] of additions) {
       if (!columns.has(column)) {
@@ -692,6 +701,9 @@ export class GameDatabase extends BaseDatabase {
     isPrivate?: boolean;
     transactionBlockhash?: string | null;
     lastValidBlockHeight?: number | null;
+    signedTransactionBase64?: string | null;
+    replyToMessageId?: number | null;
+    onChainCreatedAt?: number | null;
     now?: number;
   }): void {
     const now = input.now ?? Date.now();
@@ -706,6 +718,9 @@ export class GameDatabase extends BaseDatabase {
          SET creator_display_name = COALESCE(?, creator_display_name),
              state = ?, is_private = COALESCE(?, is_private), transaction_blockhash = COALESCE(?, transaction_blockhash),
              last_valid_block_height = COALESCE(?, last_valid_block_height),
+             signed_transaction_base64 = COALESCE(?, signed_transaction_base64),
+             reply_to_message_id = COALESCE(?, reply_to_message_id),
+             on_chain_created_at = COALESCE(?, on_chain_created_at),
              next_attempt_at = ?, updated_at = ?
          WHERE game_address = ?`,
         [
@@ -714,6 +729,9 @@ export class GameDatabase extends BaseDatabase {
           input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
           input.transactionBlockhash ?? null,
           input.lastValidBlockHeight ?? null,
+          input.signedTransactionBase64 ?? null,
+          input.replyToMessageId ?? null,
+          input.onChainCreatedAt ?? null,
           now,
           now,
           input.gameAddress,
@@ -728,8 +746,9 @@ export class GameDatabase extends BaseDatabase {
         game_address, creator_telegram_id, creator_display_name, amount, game_type,
         token_mint, token_ticker, max_players, min_players, chat_id, timeout_seconds,
         expires_at, transaction_signature, state, is_private, transaction_blockhash,
-        last_valid_block_height, attempts, last_error, next_attempt_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+        last_valid_block_height, signed_transaction_base64, reply_to_message_id, on_chain_created_at,
+        attempts, last_error, next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       [
         input.gameAddress,
         input.creatorTelegramId,
@@ -748,6 +767,9 @@ export class GameDatabase extends BaseDatabase {
         input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
         input.transactionBlockhash ?? null,
         input.lastValidBlockHeight ?? null,
+        input.signedTransactionBase64 ?? null,
+        input.replyToMessageId ?? null,
+        input.onChainCreatedAt ?? null,
         now,
         now,
         now,
@@ -783,10 +805,35 @@ export class GameDatabase extends BaseDatabase {
   ): PendingGameCreationRecord | null {
     return this.get<PendingGameCreationRecord>(
       `SELECT * FROM pending_game_creations
-       WHERE creator_telegram_id = ? AND state IN ('submitted', 'unknown', 'confirmed', 'delivered')
+       WHERE creator_telegram_id = ? AND state IN ('prepared', 'submitted', 'unknown', 'confirmed', 'delivered')
        ORDER BY updated_at ASC LIMIT 1`,
       [creatorTelegramId],
       "loading pending game creation for creator",
+    );
+  }
+
+  public setPendingGameCreationChainTiming(
+    gameAddress: string,
+    createdAtMs: number,
+    expiresAtMs: number,
+    now: number = Date.now(),
+  ): void {
+    this.run(
+      `UPDATE pending_game_creations
+       SET on_chain_created_at = ?, expires_at = ?, updated_at = ?
+       WHERE game_address = ?`,
+      [createdAtMs, expiresAtMs, now, gameAddress],
+      "saving pending game chain timing",
+    );
+  }
+
+  public setGameChainTiming(gameAddress: string, createdAtMs: number, expiresAtMs: number): void {
+    this.run(
+      `UPDATE games
+       SET created_at = ?, expires_at = ?
+       WHERE game_address = ?`,
+      [createdAtMs, expiresAtMs, gameAddress],
+      "saving game chain timing",
     );
   }
 
