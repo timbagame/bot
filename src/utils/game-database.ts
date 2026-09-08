@@ -51,9 +51,13 @@ export interface PendingGameCreationRecord {
   state: PendingGameCreationState;
   is_private: number | null;
   transaction_blockhash: string | null;
+  transaction_prepared_at?: number | null;
   last_valid_block_height: number | null;
   signed_transaction_base64?: string | null;
   reply_to_message_id?: number | null;
+  creation_message_id?: number | null;
+  replacement_count?: number;
+  replacement_history?: string | null;
   on_chain_created_at?: number | null;
   submission_lease_id?: string | null;
   submission_lease_expires_at?: number | null;
@@ -74,7 +78,7 @@ export type PendingGameCreationSubmissionClaim =
   | { acquired: true }
   | {
       acquired: false;
-      reason: "not-found" | "in-flight" | "terminal";
+      reason: "not-found" | "in-flight" | "terminal" | "replaced";
       state?: PendingGameCreationState;
       leaseExpiresAt?: number | null;
     };
@@ -216,9 +220,13 @@ export class GameDatabase extends BaseDatabase {
       ["state", "TEXT NOT NULL DEFAULT 'unknown'"],
       ["is_private", "INTEGER"],
       ["transaction_blockhash", "TEXT"],
+      ["transaction_prepared_at", "INTEGER"],
       ["last_valid_block_height", "INTEGER"],
       ["signed_transaction_base64", "TEXT"],
       ["reply_to_message_id", "INTEGER"],
+      ["creation_message_id", "INTEGER"],
+      ["replacement_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["replacement_history", "TEXT"],
       ["on_chain_created_at", "INTEGER"],
       ["submission_lease_id", "TEXT"],
       ["submission_lease_expires_at", "INTEGER"],
@@ -814,7 +822,7 @@ export class GameDatabase extends BaseDatabase {
   ): PendingGameCreationRecord[] {
     return this.all<PendingGameCreationRecord>(
       `SELECT * FROM pending_game_creations
-       WHERE state != 'failed' AND next_attempt_at <= ?
+       WHERE (state != 'failed' OR creation_message_id IS NOT NULL) AND next_attempt_at <= ?
        ORDER BY next_attempt_at ASC, created_at ASC
        LIMIT ?`,
       [now, limit],
@@ -848,6 +856,70 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  /** Replace only a proven-absent attempt, preserving its evidence and fencing senders. */
+  public replaceExpiredGameCreation(
+    gameAddress: string,
+    expectedSignature: string,
+    replacement: {
+      signature: string;
+      blockhash: string;
+      lastValidBlockHeight: number;
+      wire: string;
+    },
+    now = Date.now(),
+  ): boolean {
+    const current = this.getPendingGameCreation(gameAddress);
+    if (
+      !current ||
+      current.transaction_signature !== expectedSignature ||
+      replacement.signature === expectedSignature
+    )
+      return false;
+    const history = JSON.parse(current.replacement_history ?? "[]") as unknown[];
+    history.push({
+      signature: expectedSignature,
+      blockhash: current.transaction_blockhash,
+      lastValidBlockHeight: current.last_valid_block_height,
+      resolvedAt: now,
+      reason: "Absent from complete finalized blockhash lifetime; independent anchor corroborated",
+    });
+    return (
+      this.run(
+        `UPDATE pending_game_creations
+      SET transaction_signature = ?, transaction_blockhash = ?, last_valid_block_height = ?,
+          signed_transaction_base64 = ?, state = 'prepared', replacement_count = replacement_count + 1,
+          replacement_history = ?, submission_lease_id = NULL, submission_lease_expires_at = NULL,
+          next_attempt_at = ?, updated_at = ?, last_error = NULL, transaction_prepared_at = ?, attempts = 0
+      WHERE game_address = ? AND transaction_signature = ? AND state IN ('submitted', 'unknown')
+        AND replacement_count < 1 AND expires_at > ?
+        AND (submission_lease_id IS NULL OR submission_lease_expires_at <= ?)`,
+        [
+          replacement.signature,
+          replacement.blockhash,
+          replacement.lastValidBlockHeight,
+          replacement.wire,
+          JSON.stringify(history),
+          now,
+          now,
+          now,
+          gameAddress,
+          expectedSignature,
+          now,
+          now,
+        ],
+        "replacing proven absent game creation",
+      ).changes > 0
+    );
+  }
+
+  public setPendingCreationMessage(gameAddress: string, messageId: number | null): void {
+    this.run(
+      "UPDATE pending_game_creations SET creation_message_id = ? WHERE game_address = ?",
+      [messageId, gameAddress],
+      "recording creation placeholder",
+    );
+  }
+
   /**
    * Atomically admit one process to the signed-transaction submission path.
    * The state change is the durable proof that a broadcast may now occur.
@@ -860,12 +932,16 @@ export class GameDatabase extends BaseDatabase {
     leaseId: string,
     leaseExpiresAt: number,
     now: number = Date.now(),
+    expectedSignature?: string,
   ): PendingGameCreationSubmissionClaim {
     const current = this.getPendingGameCreation(gameAddress);
     if (!current) {
       return { acquired: false, reason: "not-found" };
     }
 
+    if (expectedSignature && current.transaction_signature !== expectedSignature) {
+      return { acquired: false, reason: "replaced", state: current.state };
+    }
     const claimableStates: PendingGameCreationState[] = ["prepared", "submitted", "unknown"];
     if (!claimableStates.includes(current.state)) {
       return { acquired: false, reason: "terminal", state: current.state };
@@ -898,8 +974,8 @@ export class GameDatabase extends BaseDatabase {
            (submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
            (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?) OR
            submission_lease_id = ?
-         )`,
-      [leaseId, leaseExpiresAt, now, now, gameAddress, now, leaseId],
+         ) AND transaction_signature = ?`,
+      [leaseId, leaseExpiresAt, now, now, gameAddress, now, leaseId, current.transaction_signature],
       "claiming pending game creation submission",
     );
     if (changes.changes > 0) {
@@ -1005,6 +1081,7 @@ export class GameDatabase extends BaseDatabase {
       now?: number;
       clearSubmissionLease?: boolean;
       submissionLeaseId?: string | null;
+      expectedSignature?: string;
     } = {},
   ): boolean {
     if (expectedStates.length === 0) return false;
@@ -1021,7 +1098,8 @@ export class GameDatabase extends BaseDatabase {
       `UPDATE pending_game_creations
        SET state = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
            ${clearLease ? ", submission_lease_id = NULL, submission_lease_expires_at = NULL" : ""}
-       WHERE game_address = ? AND state IN (${placeholders}) AND ${leasePredicate}`,
+       WHERE game_address = ? AND state IN (${placeholders}) AND ${leasePredicate}
+         ${options.expectedSignature ? "AND transaction_signature = ?" : ""}`,
       [
         state,
         options.error == null ? null : options.error.slice(0, 500),
@@ -1031,6 +1109,7 @@ export class GameDatabase extends BaseDatabase {
         ...expectedStates,
         now,
         ...(options.submissionLeaseId ? [options.submissionLeaseId] : []),
+        ...(options.expectedSignature ? [options.expectedSignature] : []),
       ],
       "conditionally updating pending game creation state",
     );
@@ -1191,12 +1270,19 @@ export class GameDatabase extends BaseDatabase {
     error: string,
     nextAttemptAt: number,
     now: number = Date.now(),
+    expectedSignature?: string,
   ): void {
     this.run(
       `UPDATE pending_game_creations
        SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?, updated_at = ?
-       WHERE game_address = ?`,
-      [error.slice(0, 500), nextAttemptAt, now, gameAddress],
+       WHERE game_address = ? ${expectedSignature ? "AND transaction_signature = ?" : ""}`,
+      [
+        error.slice(0, 500),
+        nextAttemptAt,
+        now,
+        gameAddress,
+        ...(expectedSignature ? [expectedSignature] : []),
+      ],
       "recording pending game creation attempt",
     );
   }

@@ -906,3 +906,65 @@ test("cleanupOldGames deletes games and participants older than specified days",
   expect(result.gamesDeleted).toBe(1);
   expect(result.participantsDeleted).toBe(1);
 });
+
+test("replacement survives restart and fences stale workers and concurrent replacements", () => {
+  let db = GameDatabase.getInstance();
+  db.savePendingGameCreation({
+    gameAddress: "refresh",
+    creatorTelegramId: "1",
+    amount: 1,
+    gameType: "coinflip",
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    maxPlayers: 2,
+    minPlayers: 2,
+    chatId: 1,
+    timeoutSeconds: 60,
+    expiresAt: 90000,
+    transactionSignature: "old",
+    state: "unknown",
+    transactionBlockhash: "old-hash",
+    lastValidBlockHeight: 100,
+    signedTransactionBase64: "old-wire",
+    now: 1000,
+  });
+  const replacement = {
+    signature: "new",
+    blockhash: "new-hash",
+    lastValidBlockHeight: 200,
+    wire: "new-wire",
+  };
+  db.claimPendingGameCreationSubmission("refresh", "sender", 3000, 1001, "old");
+  expect(db.replaceExpiredGameCreation("refresh", "old", replacement, 2000)).toBe(false);
+  db.finishPendingGameCreationSubmission("refresh", "sender", "unknown", { now: 2000 });
+  db.setPendingCreationMessage("refresh", 99);
+  expect(db.replaceExpiredGameCreation("refresh", "old", replacement, 2001)).toBe(true);
+  expect(db.replaceExpiredGameCreation("refresh", "old", replacement, 2002)).toBe(false);
+  db = new (GameDatabase as any)(); // Reopen the same SQLite file without the test reset's deletion.
+  expect(db.getPendingGameCreation("refresh")).toMatchObject({
+    state: "prepared",
+    transaction_signature: "new",
+    signed_transaction_base64: "new-wire",
+    replacement_count: 1,
+    creation_message_id: 99,
+  });
+  expect(JSON.parse(db.getPendingGameCreation("refresh")!.replacement_history!)[0].signature).toBe(
+    "old",
+  );
+  expect(
+    db.claimPendingGameCreationSubmission("refresh", "stale", 4000, 2002, "old"),
+  ).toMatchObject({ acquired: false, reason: "replaced" });
+  expect(db.claimPendingGameCreationSubmission("refresh", "fresh", 4000, 2002, "new")).toEqual({
+    acquired: true,
+  });
+  db.finishPendingGameCreationSubmission("refresh", "fresh", "unknown", { now: 2003 });
+  expect(
+    db.setPendingGameCreationStateIfCurrent("refresh", ["unknown"], "failed", {
+      expectedSignature: "old",
+      now: 2004,
+    }),
+  ).toBe(false);
+  expect(
+    db.replaceExpiredGameCreation("refresh", "new", { ...replacement, signature: "third" }, 2004),
+  ).toBe(false);
+});

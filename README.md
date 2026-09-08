@@ -184,3 +184,51 @@ The bot includes comprehensive logging and monitoring:
 The shared local-validator suite lives in the sibling `operations/integration` directory. Run `bun run test:integration --web` from `operations`; see its README for pinned toolchains, candidate protocol packages and optional manual GitHub runs. Normal CI does not run the combined system suite or require a cross-repository credential.
 
 For alternate API endpoints, `TELEGRAM_API_ROOT` selects the Telegram API server, `JUPITER_PRICE_URL` selects the price endpoint, and `SOLANA_WS_ENDPOINT` optionally sets the WebSocket URL separately from the HTTP RPC endpoint. The integration runner supplies local values.
+
+### Dropped game creation recovery
+
+Creation rebroadcasts the **same signed bytes** every three seconds while waiting
+for confirmation. Confirmation returns immediately without waiting for a stalled
+rebroadcast; cancelled foreground work cannot admit a later send. Rebroadcasts use the endpoints configured in `SOLANA_NETWORK`;
+configure at least two providers on the same cluster for fallback delivery and
+independent recovery checks. With a single private mainnet provider, the public
+mainnet RPC is also tried after verifying its genesis hash matches. No priority
+fees are added.
+
+After finalized block height passes the transaction's lifetime, the bot may
+refresh its blockhash **once**, preserving every instruction, account, amount,
+and game address. Oracle revalidates and signs the replacement. Before doing so,
+the bot requires:
+
+- Two providers with different hostnames reporting the same genesis hash and
+  agreeing on a finalized anchor block beyond expiry.
+- Both reporting an invalid old blockhash, no signature status, and no game
+  account at or beyond that anchor.
+- A complete walk of the finalized parent chain from that anchor back to the
+  exact original blockhash, checking every block's signatures for the old
+  transaction. Missing status/account results alone never authorize replacement:
+  completed games close their accounts, so the same PDA is not a permanent
+  duplicate-charge guard.
+
+The history walk is bounded to 256 blocks and 45 seconds per attempt. After a
+restart, a bounded slot lookup (at most 50,000 slots) locates an anchor near
+expiry so later blocks do not consume that lifetime-scan budget. Missing,
+pruned, inconsistent, unavailable, or older history remains reserved for later
+recovery/operator reconciliation. Providers must support finalized `getBlock`
+with `transactionDetails: "signatures"`. Without a reachable independent provider, automatic
+blockhash replacement is disabled; identical-byte rebroadcast still works.
+
+Replacement bytes and prior-attempt evidence are persisted before broadcasting.
+Conditional signature checks and submission leases fence concurrent/stale
+workers, including after restarts. Each replacement persists a new retry-window
+start and resets its attempts; the sweep schedules from the current transaction,
+so an old request cannot delay a fresh replacement by fifteen minutes. Once the second attempt is proven absent (or
+the request's expiry passes), recovery releases the request and updates the
+creation placeholder with a concise failure. Successful recovery removes the
+placeholder after delivering the game. Inconclusive expiry removes the spinner
+after three minutes of the current transaction's retry window, after checking
+the outcome, and logs operator attention without posting recovery or
+payment-processing messages to the group. Background checks continue with backoff.
+
+This follows Solana's [confirmation and expiration guidance](https://solana.com/developers/cookbook/transactions/confirmation),
+with a stricter block-history check because game accounts can be closed.

@@ -1,3 +1,8 @@
+import {
+  proveExpiredCreationAbsent,
+  type ExpiredCreation,
+  type RecoveryRpc,
+} from "./game-creation-recovery";
 import { mnemonicToSeedSync } from "bip39";
 import bs58 from "bs58";
 import {
@@ -335,7 +340,7 @@ export class WalletManager {
   } | null = null;
   private pendingSignatures = new Map<
     string,
-    { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
+    { blockhash: string; lastValidBlockHeight: number; recordedAt: number; gameCreation?: boolean }
   >();
   private lastTokenDiscoveryByUser = new Map<string, number>();
   private postTimeoutProbeBackoffMs = 2000;
@@ -2107,13 +2112,17 @@ export class WalletManager {
 
   public async getTransactionOutcome(
     signature: string,
+    options: { requireFinalizedFailure?: boolean } = {},
   ): Promise<"confirmed" | "failed" | "unknown"> {
     const response = await this.connection.getSignatureStatus(signature, {
       searchTransactionHistory: true,
     });
     const status = response.value;
     if (!status) return "unknown";
-    if (status.err) return "failed";
+    if (status.err)
+      return options.requireFinalizedFailure && status.confirmationStatus !== "finalized"
+        ? "unknown"
+        : "failed";
     return status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized"
       ? "confirmed"
       : "unknown";
@@ -2212,7 +2221,33 @@ export class WalletManager {
           [signature],
           useHistory ? { searchTransactionHistory: true } : undefined,
         );
-        return response?.value?.[0] ?? null;
+        const status = response?.value?.[0] ?? null;
+        if (!status && useHistory && trackedSignature?.gameCreation) {
+          const endpoints = await this.gameRecoveryEndpointsWithFallback();
+          try {
+            return await Promise.any(
+              endpoints
+                .filter((endpoint) => endpoint !== this.connection.rpcEndpoint)
+                .map(async (endpoint) => {
+                  const result = await this.recoveryRpc(endpoint, AbortSignal.timeout(1_500))(
+                    "getSignatureStatuses",
+                    [[signature], { searchTransactionHistory: true }],
+                  );
+                  const alternate = result?.value?.[0];
+                  if (
+                    !alternate ||
+                    (alternate.confirmationStatus !== "confirmed" &&
+                      alternate.confirmationStatus !== "finalized")
+                  )
+                    throw new Error("No confirmed fallback status");
+                  return alternate;
+                }),
+            );
+          } catch {
+            /* Unknown stays unknown; a failed read does not prove failure. */
+          }
+        }
+        return status;
       }
 
       const response = await this.connection.getSignatureStatus(signature);
@@ -2521,6 +2556,7 @@ export class WalletManager {
   public async sendFullySignedGameTransaction(
     transaction: KitTransaction & FullySignedTransaction,
     blockhash: { blockhash: string; lastValidBlockHeight: number },
+    rebroadcast = false,
   ): Promise<string> {
     assertIsFullySignedTransaction(transaction);
     assertIsTransactionWithinSizeLimit(transaction);
@@ -2534,10 +2570,43 @@ export class WalletManager {
     ) {
       rpcUrl.searchParams.set("rebate-address", process.env.HELIUS_REBATE_ADDRESS.trim());
     }
-    const signature = await this.sendGameTransaction(
-      rpcUrl.toString(),
-      getBase64EncodedWireTransaction(transaction),
-    );
+    const wire = getBase64EncodedWireTransaction(transaction);
+    let signature: string;
+    if (rebroadcast) {
+      // Only identical signed bytes may fan out. An RPC accepting a send is
+      // not confirmation, and one rejection cannot negate another submission.
+      const send = async (endpoint: string) => {
+        const result = await this.recoveryRpc(endpoint)("sendTransaction", [
+          wire,
+          {
+            encoding: "base64",
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+            maxRetries: 3,
+          },
+        ]);
+        if (result !== preparedSignature) throw new Error("Unexpected rebroadcast signature");
+        return result;
+      };
+      try {
+        // The active endpoint is sent immediately. Discovery/slow fallback
+        // must not delay a successful primary broadcast.
+        await Promise.any([
+          send(rpcUrl.toString()),
+          this.gameRecoveryEndpointsWithFallback().then((endpoints) =>
+            Promise.any(endpoints.filter((endpoint) => endpoint !== activeEndpoint).map(send)),
+          ),
+        ]);
+      } catch {
+        throw new TransactionOutcomeUnknownError(
+          preparedSignature,
+          "Game rebroadcast outcome is unknown",
+        );
+      }
+      signature = preparedSignature;
+    } else {
+      signature = await this.sendGameTransaction(rpcUrl.toString(), wire);
+    }
     if (signature !== preparedSignature) {
       throw new Error(
         `RPC returned an unexpected game transaction signature: expected ${preparedSignature}, received ${signature}`,
@@ -2547,8 +2616,84 @@ export class WalletManager {
     this.pendingSignatures.set(signature, {
       ...blockhash,
       recordedAt: Date.now(),
+      gameCreation: true,
     });
     return signature;
+  }
+
+  private gameRecoveryEndpoints(): string[] {
+    const configured = this.rpcEndpointManager?.getAllEndpoints() ?? [this.connection.rpcEndpoint];
+    return [...new Set([this.connection.rpcEndpoint, ...configured].filter(Boolean))];
+  }
+
+  private recoveryFallback?: { expiresAt: number; endpoint: Promise<string | null> };
+
+  private async gameRecoveryEndpointsWithFallback(): Promise<string[]> {
+    const endpoints = this.gameRecoveryEndpoints();
+    const primary = endpoints[0];
+    if (
+      !primary ||
+      endpoints.some((endpoint) => new URL(endpoint).hostname !== new URL(primary).hostname)
+    )
+      return endpoints;
+    // The public mainnet endpoint is a fallback only after verifying the
+    // cluster identity. Never broadcast a devnet/local transaction to mainnet.
+    if (new URL(primary).hostname === new URL(DEFAULT_MAINNET_ENDPOINT).hostname) return endpoints;
+    if (!this.recoveryFallback || this.recoveryFallback.expiresAt <= Date.now()) {
+      const endpoint = (async () => {
+        try {
+          const hashes = await Promise.all([
+            this.recoveryRpc(primary)("getGenesisHash", []),
+            this.recoveryRpc(DEFAULT_MAINNET_ENDPOINT)("getGenesisHash", []),
+          ]);
+          return hashes[0] && hashes[0] === hashes[1] ? DEFAULT_MAINNET_ENDPOINT : null;
+        } catch {
+          return null;
+        }
+      })();
+      this.recoveryFallback = { expiresAt: Date.now() + 60_000, endpoint };
+    }
+    const fallback = await this.recoveryFallback.endpoint;
+    return fallback ? [...endpoints, fallback] : endpoints;
+  }
+
+  private recoveryRpc(endpoint: string, signal?: AbortSignal): RecoveryRpc {
+    return async (method, params) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+          : AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) throw new Error(`Recovery RPC HTTP ${response.status}`);
+      const body = (await response.json()) as { result?: unknown; error?: unknown };
+      if (body.error || !("result" in body))
+        throw new Error("Recovery RPC returned no usable result");
+      return body.result;
+    };
+  }
+
+  public async proveGameCreationAbsent(input: ExpiredCreation): Promise<boolean> {
+    const endpoints = await this.gameRecoveryEndpointsWithFallback();
+    const primary = endpoints[0];
+    if (!primary) return false;
+    // Never assume two URLs on one provider are independent witnesses.
+    const witness = endpoints.find(
+      (endpoint) => new URL(endpoint).hostname !== new URL(primary).hostname,
+    );
+    if (!witness) return false;
+    const deadline = AbortSignal.timeout(45_000);
+    try {
+      return await proveExpiredCreationAbsent(
+        input,
+        this.recoveryRpc(primary, deadline),
+        this.recoveryRpc(witness, deadline),
+      );
+    } catch {
+      return false;
+    }
   }
 
   public async sendAndConfirmWithResubmits(
@@ -2765,12 +2910,16 @@ export class WalletManager {
     }
   }
 
-  public async getLatestBlockhash(): Promise<{
+  public async getLatestBlockhash(forceFresh = false): Promise<{
     blockhash: string;
     lastValidBlockHeight: number;
   }> {
     const now = Date.now();
-    if (this.blockhashCache && now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION) {
+    if (
+      !forceFresh &&
+      this.blockhashCache &&
+      now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION
+    ) {
       return {
         blockhash: this.blockhashCache.blockhash,
         lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight,
