@@ -89,6 +89,7 @@ type CreatorSessionCallbackHandler = (
 type CreatorResolver = (ctx: Context) => string | undefined;
 
 type GameSetupModuleDeps = {
+  hasGameCreationRequest?: (telegramId: bigint, chatId?: number, messageId?: number) => boolean;
   wallet: WalletManager;
   getTokenManager: () => TokenManager | undefined;
   getDefaultTokenMetadata: GetDefaultTokenMetadata;
@@ -202,6 +203,7 @@ export const createGameSetupModule = (deps: GameSetupModuleDeps): GameSetupModul
     copy: GameSetupCopy,
     tokenOverride?: GameTokenOverride,
   ): Promise<void> => {
+    if (deps.hasGameCreationRequest?.(telegramId, ctx.chat?.id, ctx.message?.message_id)) return;
     console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
 
     const tokenInfo = tokenOverride

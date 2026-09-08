@@ -53,6 +53,9 @@ export interface PendingGameCreationRecord {
   transaction_blockhash: string | null;
   transaction_prepared_at?: number | null;
   recovery_checkpoint?: string | null;
+  recovery_started_at?: number | null;
+  recovery_retry_not_before?: number | null;
+  recovery_paused_at?: number | null;
   last_valid_block_height: number | null;
   signed_transaction_base64?: string | null;
   reply_to_message_id?: number | null;
@@ -223,6 +226,9 @@ export class GameDatabase extends BaseDatabase {
       ["transaction_blockhash", "TEXT"],
       ["transaction_prepared_at", "INTEGER"],
       ["recovery_checkpoint", "TEXT"],
+      ["recovery_started_at", "INTEGER"],
+      ["recovery_retry_not_before", "INTEGER"],
+      ["recovery_paused_at", "INTEGER"],
       ["last_valid_block_height", "INTEGER"],
       ["signed_transaction_base64", "TEXT"],
       ["reply_to_message_id", "INTEGER"],
@@ -245,6 +251,46 @@ export class GameDatabase extends BaseDatabase {
         );
       }
     }
+    this.run(`CREATE TABLE IF NOT EXISTS game_creation_requests (
+      creator TEXT NOT NULL, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+      game_address TEXT NOT NULL, PRIMARY KEY (creator, chat_id, message_id))`);
+    this.run(`INSERT OR IGNORE INTO game_creation_requests
+      SELECT creator_telegram_id, chat_id, reply_to_message_id, game_address
+      FROM pending_game_creations WHERE reply_to_message_id IS NOT NULL`);
+  }
+
+  public hasGameCreationRequest(creator: string, chatId: number, messageId: number): boolean {
+    return !!this.get(
+      "SELECT game_address FROM game_creation_requests WHERE creator = ? AND chat_id = ? AND message_id = ?",
+      [creator, chatId, messageId],
+    );
+  }
+
+  public resumeGameCreationRecovery(now = Date.now()): void {
+    this.run(
+      `UPDATE pending_game_creations SET
+      recovery_started_at = COALESCE(recovery_started_at, ?),
+      next_attempt_at = MAX(?, COALESCE(recovery_retry_not_before, 0))
+      WHERE recovery_paused_at IS NULL`,
+      [now, now],
+    );
+  }
+
+  public scheduleGameCreationRecovery(
+    gameAddress: string,
+    signature: string,
+    error: string,
+    next: number,
+    notBefore: number | null,
+    now = Date.now(),
+  ): void {
+    this.run(
+      `UPDATE pending_game_creations SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?,
+      recovery_started_at = COALESCE(recovery_started_at, ?), recovery_retry_not_before = ?,
+      recovery_paused_at = CASE WHEN ? - COALESCE(recovery_started_at, ?) >= 900000 THEN ? ELSE recovery_paused_at END,
+      updated_at = ? WHERE game_address = ? AND transaction_signature = ?`,
+      [error.slice(0, 500), next, now, notBefore, now, now, now, now, gameAddress, signature],
+    );
   }
 
   // Game methods
@@ -745,6 +791,20 @@ export class GameDatabase extends BaseDatabase {
   }): void {
     const now = input.now ?? Date.now();
     const state = input.state ?? "confirmed";
+    if (input.replyToMessageId != null) {
+      this.run(`INSERT OR IGNORE INTO game_creation_requests VALUES (?, ?, ?, ?)`, [
+        input.creatorTelegramId,
+        input.chatId,
+        input.replyToMessageId,
+        input.gameAddress,
+      ]);
+      const receipt = this.get<{ game_address: string }>(
+        `SELECT game_address FROM game_creation_requests WHERE creator = ? AND chat_id = ? AND message_id = ?`,
+        [input.creatorTelegramId, input.chatId, input.replyToMessageId],
+      );
+      if (receipt?.game_address !== input.gameAddress)
+        throw new Error("Game request already submitted");
+    }
     const existing = this.getPendingGameCreation(input.gameAddress);
     if (existing) {
       if (existing.transaction_signature !== input.transactionSignature) {
@@ -824,7 +884,7 @@ export class GameDatabase extends BaseDatabase {
   ): PendingGameCreationRecord[] {
     return this.all<PendingGameCreationRecord>(
       `SELECT * FROM pending_game_creations
-       WHERE (state != 'failed' OR creation_message_id IS NOT NULL) AND next_attempt_at <= ?
+       WHERE recovery_paused_at IS NULL AND (state != 'failed' OR creation_message_id IS NOT NULL) AND next_attempt_at <= ?
        ORDER BY next_attempt_at ASC, created_at ASC
        LIMIT ?`,
       [now, limit],

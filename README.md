@@ -60,7 +60,7 @@ Contract deposits are read from the live program, ProgramData, Oracle, and the c
 
 ### Pending game creation recovery
 
-Game creation recovery is fail-closed. The exact signed transaction is saved as `prepared` before any broadcast; a durable submission admission changes it to `submitted` before the network call. A prepared intent may be automatically marked failed only when its current authoritative blockhash lifetime has expired and it is still prepared. Submitted or unknown intents are retained through RPC, restart, and Telegram errors. Confirmed accounts are hydrated and delivered automatically; a failed transaction or completed delivery releases the creator lock.
+Game creation recovery is fail-closed. The exact signed transaction is saved as `prepared` before any broadcast; a durable submission admission changes it to `submitted` before the network call. A prepared intent may be automatically marked failed only when its current authoritative blockhash lifetime has expired and it is still prepared. Submitted or unknown intents are retained through RPC, restart, and Telegram errors. Confirmed accounts are hydrated and delivered automatically; each Telegram request has its own durable duplicate protection. An unresolved request does not block a new command message from the same creator.
 
 For a legacy record without reusable signed bytes, an expired submitted/unknown intent, or another genuinely inconclusive case, an operator must resolve it explicitly after checking the exact signature and game address against trusted Solana evidence:
 
@@ -71,7 +71,7 @@ bun run service-admin resolve-pending-game-creation <game_address> \
   --reason "<evidence and decision>" --actor <operator>
 ```
 
-The command prints the intent, signature, transaction lifetime, retry/error history, signed-wire digest, and current state before applying a compare-and-set. It records the operator, reason, and timestamp, retains the audit row, and releases the creator lock. It refuses `delivered` rows and confirmed rows that still have reusable transaction/account-timing evidence; an evidence-poor legacy `confirmed` row may be resolved only with the exact current state and an explicit operator decision. It never deletes an unresolved record or sends a technical recovery message to Telegram. Automatic recovery and operator resolution are separate paths; do not manually edit or delete the SQLite row.
+The command prints the intent, signature, transaction lifetime, retry/error history, signed-wire digest, and current state before applying a compare-and-set. It records the operator, reason, and timestamp, retains the audit row, without removing the original request receipt. It refuses `delivered` rows and confirmed rows that still have reusable transaction/account-timing evidence; an evidence-poor legacy `confirmed` row may be resolved only with the exact current state and an explicit operator decision. It never deletes an unresolved record or sends a technical recovery message to Telegram. Automatic recovery and operator resolution are separate paths; do not manually edit or delete the SQLite row.
 
 ## 🏗️ Architecture
 
@@ -226,10 +226,24 @@ recovery/operator reconciliation. Providers must support finalized `getBlock`
 with `transactionDetails: "signatures"`. Without a reachable independent provider, automatic
 blockhash replacement is disabled; identical-byte rebroadcast still works.
 
-Repeated creation commands reuse the existing pending request before doing RPC
-reads or posting another creation placeholder. Foreground reads retry wrapped
-socket failures within a five-second deadline, with a genesis-verified public
-mainnet fallback when configured providers fail.
+Each new Telegram command message is an independent game request. Replaying the
+same message or confirming the same setup cannot submit another game: durable
+receipts are keyed by creator, chat, and originating message, retained after
+pending-record cleanup. Existing pending rows are migrated into receipts. Normal
+active-game and creation-rate limits still apply. Interactive confirmation checks
+receipts before showing progress and associates its placeholder with recovery.
+
+Recovery scheduling belongs to GameManager, so command, menu, and sweep calls
+persist the same continuation time. Startup advances legacy backoffs while
+preserving persisted cooldowns and checkpoints. Automatic recovery has a
+15-minute window from its first scheduled recovery (or startup for legacy rows).
+At its end, retries pause; transaction bytes, signatures, checkpoints, and request
+receipts remain for operator reconciliation. Restarting does not renew the window
+or unpause a record. Pausing is not proof of failure or authorization to resubmit
+the original transaction with a new blockhash.
+
+Foreground reads retry wrapped socket failures within a five-second deadline,
+with a genesis-verified public mainnet fallback when configured providers fail.
 
 Replacement bytes and prior-attempt evidence are persisted before broadcasting.
 Conditional signature checks and submission leases fence concurrent/stale

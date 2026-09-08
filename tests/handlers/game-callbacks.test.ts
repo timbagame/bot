@@ -83,7 +83,7 @@ const makeDeps = () => {
   };
 
   const module = createGameCallbacksModule(deps);
-  return { module, gameDb, gameManager };
+  return { module, gameDb, gameManager, deps };
 };
 
 const makeCtx = (username?: string) => ({
@@ -335,4 +335,32 @@ describe("Game callback helpers", () => {
     // Should NOT have sent DM (same chat)
     expect(ctx.api.sendMessage).not.toHaveBeenCalled();
   });
+});
+
+test("replayed confirmation is acknowledged before progress edits or creation", async () => {
+  const { module, gameManager, deps } = makeDeps();
+  let confirm: any;
+  deps.bot = {
+    on: () => {},
+    callbackQuery: (pattern: any, handler: any) => {
+      if (pattern instanceof RegExp && pattern.source === "^cg\\|") confirm = handler;
+    },
+  } as any;
+  gameManager.hasGameCreationRequest = vi.fn(() => true);
+  module.registerHandlers();
+  expect(confirm).toBeDefined();
+  const ctx = {
+    from: { id: 123 },
+    chat: { id: 42 },
+    callbackQuery: {
+      id: "q",
+      data: "cg|anything",
+      message: { message_id: 99, reply_to_message: { message_id: 10 } },
+    },
+    answerCallbackQuery: vi.fn(async () => {}),
+    api: { editMessageText: vi.fn(), answerCallbackQuery: vi.fn() },
+  };
+  await confirm(ctx);
+  expect(gameManager.hasGameCreationRequest).toHaveBeenCalledWith(123n, 42, 10);
+  expect(ctx.api.editMessageText).not.toHaveBeenCalled();
 });
