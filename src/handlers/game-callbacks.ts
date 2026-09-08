@@ -1454,7 +1454,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 minPlayersSelected,
                 timeoutSeconds,
                 callerTelegramId,
-                { isPrivate },
+                {
+                  isPrivate,
+                  replyToMessageId: ctx.callbackQuery?.message?.reply_to_message?.message_id,
+                },
                 ctx.chat?.id,
                 ctx.callbackQuery?.message?.date != null
                   ? ctx.callbackQuery.message.date * 1_000

@@ -58,6 +58,21 @@ The report includes the $7/month DigitalOcean VPS cost and the timba.cc domain r
 
 Contract deposits are read from the live program, ProgramData, Oracle, and the configured game-vault token accounts. They are valued at the current SOL price and shown as assets, not expenses or profit.
 
+### Pending game creation recovery
+
+Game creation recovery is fail-closed. The exact signed transaction is saved as `prepared` before any broadcast; a durable submission admission changes it to `submitted` before the network call. A prepared intent may be automatically marked failed only when its current authoritative blockhash lifetime has expired and it is still prepared. Submitted or unknown intents are retained through RPC, restart, and Telegram errors. Confirmed accounts are hydrated and delivered automatically; a failed transaction or completed delivery releases the creator lock.
+
+For a legacy record without reusable signed bytes, an expired submitted/unknown intent, or another genuinely inconclusive case, an operator must resolve it explicitly after checking the exact signature and game address against trusted Solana evidence:
+
+```bash
+bun run service-admin list-pending-game-creations [game_address]
+bun run service-admin resolve-pending-game-creation <game_address> \
+  --state <prepared|submitted|unknown|confirmed> --confirm \
+  --reason "<evidence and decision>" --actor <operator>
+```
+
+The command prints the intent, signature, transaction lifetime, retry/error history, signed-wire digest, and current state before applying a compare-and-set. It records the operator, reason, and timestamp, retains the audit row, and releases the creator lock. It refuses `delivered` rows and confirmed rows that still have reusable transaction/account-timing evidence; an evidence-poor legacy `confirmed` row may be resolved only with the exact current state and an explicit operator decision. It never deletes an unresolved record or sends a technical recovery message to Telegram. Automatic recovery and operator resolution are separate paths; do not manually edit or delete the SQLite row.
+
 ## 🏗️ Architecture
 
 ### Game Lifecycle

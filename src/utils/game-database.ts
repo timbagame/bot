@@ -48,12 +48,36 @@ export interface PendingGameCreationRecord {
   timeout_seconds: number;
   expires_at: number;
   transaction_signature: string;
+  state: PendingGameCreationState;
+  is_private: number | null;
+  transaction_blockhash: string | null;
+  last_valid_block_height: number | null;
+  signed_transaction_base64?: string | null;
+  reply_to_message_id?: number | null;
+  on_chain_created_at?: number | null;
+  submission_lease_id?: string | null;
+  submission_lease_expires_at?: number | null;
+  resolution_reason?: string | null;
+  resolved_by?: string | null;
+  resolved_at?: number | null;
   attempts: number;
   last_error: string | null;
   next_attempt_at: number;
   created_at: number;
   updated_at: number;
 }
+
+export type PendingGameCreationState =
+  "prepared" | "submitted" | "unknown" | "confirmed" | "delivered" | "failed";
+
+export type PendingGameCreationSubmissionClaim =
+  | { acquired: true }
+  | {
+      acquired: false;
+      reason: "not-found" | "in-flight" | "terminal";
+      state?: PendingGameCreationState;
+      leaseExpiresAt?: number | null;
+    };
 
 export type GameMessageDeliveryReservation =
   { acquired: true } | { acquired: false; reason: "sent" | "in-flight"; messageId?: number };
@@ -146,6 +170,18 @@ export class GameDatabase extends BaseDatabase {
           timeout_seconds INTEGER NOT NULL,
           expires_at INTEGER NOT NULL,
           transaction_signature TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'confirmed',
+          is_private INTEGER,
+          transaction_blockhash TEXT,
+          last_valid_block_height INTEGER,
+          signed_transaction_base64 TEXT,
+          reply_to_message_id INTEGER,
+          on_chain_created_at INTEGER,
+          submission_lease_id TEXT,
+          submission_lease_expires_at INTEGER,
+          resolution_reason TEXT,
+          resolved_by TEXT,
+          resolved_at INTEGER,
           attempts INTEGER NOT NULL DEFAULT 0,
           last_error TEXT,
           next_attempt_at INTEGER NOT NULL,
@@ -164,6 +200,41 @@ export class GameDatabase extends BaseDatabase {
     this.ensureGameSchema();
     this.ensureGameMessagesSchema();
     this.ensureMembershipCacheSchema();
+    this.ensurePendingGameCreationSchema();
+  }
+
+  private ensurePendingGameCreationSchema(): void {
+    const columns = new Set(
+      this.all<{ name: string }>("PRAGMA table_info(pending_game_creations)").map(
+        ({ name }) => name,
+      ),
+    );
+    const additions = [
+      // Rows from the pre-lifecycle schema were written after confirmation
+      // bookkeeping but do not prove a broadcast. Keep them ambiguous rather
+      // than inferring either prepared or confirmed from their age.
+      ["state", "TEXT NOT NULL DEFAULT 'unknown'"],
+      ["is_private", "INTEGER"],
+      ["transaction_blockhash", "TEXT"],
+      ["last_valid_block_height", "INTEGER"],
+      ["signed_transaction_base64", "TEXT"],
+      ["reply_to_message_id", "INTEGER"],
+      ["on_chain_created_at", "INTEGER"],
+      ["submission_lease_id", "TEXT"],
+      ["submission_lease_expires_at", "INTEGER"],
+      ["resolution_reason", "TEXT"],
+      ["resolved_by", "TEXT"],
+      ["resolved_at", "INTEGER"],
+    ] as const;
+    for (const [column, type] of additions) {
+      if (!columns.has(column)) {
+        this.run(
+          `ALTER TABLE pending_game_creations ADD COLUMN ${column} ${type}`,
+          [],
+          `adding pending game creation ${column}`,
+        );
+      }
+    }
   }
 
   // Game methods
@@ -653,21 +724,61 @@ export class GameDatabase extends BaseDatabase {
     timeoutSeconds: number;
     expiresAt: number;
     transactionSignature: string;
+    state?: PendingGameCreationState;
+    isPrivate?: boolean;
+    transactionBlockhash?: string | null;
+    lastValidBlockHeight?: number | null;
+    signedTransactionBase64?: string | null;
+    replyToMessageId?: number | null;
+    onChainCreatedAt?: number | null;
     now?: number;
   }): void {
     const now = input.now ?? Date.now();
+    const state = input.state ?? "confirmed";
+    const existing = this.getPendingGameCreation(input.gameAddress);
+    if (existing) {
+      if (existing.transaction_signature !== input.transactionSignature) {
+        throw new Error("Pending game creation already exists with a different transaction");
+      }
+      if (input.state === "prepared" && existing.state !== "prepared") {
+        throw new Error("Pending game creation cannot be rewritten to prepared after submission");
+      }
+      this.run(
+        `UPDATE pending_game_creations
+         SET creator_display_name = COALESCE(?, creator_display_name),
+             state = ?, is_private = COALESCE(?, is_private), transaction_blockhash = COALESCE(?, transaction_blockhash),
+             last_valid_block_height = COALESCE(?, last_valid_block_height),
+             signed_transaction_base64 = COALESCE(?, signed_transaction_base64),
+             reply_to_message_id = COALESCE(?, reply_to_message_id),
+             on_chain_created_at = COALESCE(?, on_chain_created_at),
+             next_attempt_at = ?, updated_at = ?
+         WHERE game_address = ?`,
+        [
+          input.creatorDisplayName ?? null,
+          input.state ?? existing.state,
+          input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
+          input.transactionBlockhash ?? null,
+          input.lastValidBlockHeight ?? null,
+          input.signedTransactionBase64 ?? null,
+          input.replyToMessageId ?? null,
+          input.onChainCreatedAt ?? null,
+          now,
+          now,
+          input.gameAddress,
+        ],
+        "updating pending game creation",
+      );
+      return;
+    }
+
     this.run(
       `INSERT INTO pending_game_creations (
         game_address, creator_telegram_id, creator_display_name, amount, game_type,
         token_mint, token_ticker, max_players, min_players, chat_id, timeout_seconds,
-        expires_at, transaction_signature, attempts, last_error, next_attempt_at,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
-      ON CONFLICT(game_address) DO UPDATE SET
-        creator_display_name = COALESCE(excluded.creator_display_name, pending_game_creations.creator_display_name),
-        transaction_signature = excluded.transaction_signature,
-        next_attempt_at = excluded.next_attempt_at,
-        updated_at = excluded.updated_at`,
+        expires_at, transaction_signature, state, is_private, transaction_blockhash,
+        last_valid_block_height, signed_transaction_base64, reply_to_message_id, on_chain_created_at,
+        attempts, last_error, next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       [
         input.gameAddress,
         input.creatorTelegramId,
@@ -682,6 +793,13 @@ export class GameDatabase extends BaseDatabase {
         input.timeoutSeconds,
         input.expiresAt,
         input.transactionSignature,
+        state,
+        input.isPrivate == null ? null : input.isPrivate ? 1 : 0,
+        input.transactionBlockhash ?? null,
+        input.lastValidBlockHeight ?? null,
+        input.signedTransactionBase64 ?? null,
+        input.replyToMessageId ?? null,
+        input.onChainCreatedAt ?? null,
         now,
         now,
         now,
@@ -696,7 +814,7 @@ export class GameDatabase extends BaseDatabase {
   ): PendingGameCreationRecord[] {
     return this.all<PendingGameCreationRecord>(
       `SELECT * FROM pending_game_creations
-       WHERE next_attempt_at <= ?
+       WHERE state != 'failed' AND next_attempt_at <= ?
        ORDER BY next_attempt_at ASC, created_at ASC
        LIMIT ?`,
       [now, limit],
@@ -709,6 +827,362 @@ export class GameDatabase extends BaseDatabase {
       "SELECT * FROM pending_game_creations WHERE game_address = ?",
       [gameAddress],
       "loading pending game creation",
+    );
+  }
+
+  /**
+   * Return every lifecycle record for service-admin inspection, including
+   * failed/operator-resolved rows that normal recovery intentionally hides.
+   */
+  public getPendingGameCreationAuditRecords(gameAddress?: string): PendingGameCreationRecord[] {
+    if (gameAddress) {
+      const record = this.getPendingGameCreation(gameAddress);
+      return record ? [record] : [];
+    }
+
+    return this.all<PendingGameCreationRecord>(
+      `SELECT * FROM pending_game_creations
+       ORDER BY updated_at DESC, created_at DESC`,
+      [],
+      "loading pending game creation audit records",
+    );
+  }
+
+  /**
+   * Atomically admit one process to the signed-transaction submission path.
+   * The state change is the durable proof that a broadcast may now occur.
+   * An active lease prevents a concurrent recovery worker from rebroadcasting
+   * the same signed bytes at the same time. Expired leases are reclaimable
+   * because a crashed process may have left one behind.
+   */
+  public claimPendingGameCreationSubmission(
+    gameAddress: string,
+    leaseId: string,
+    leaseExpiresAt: number,
+    now: number = Date.now(),
+  ): PendingGameCreationSubmissionClaim {
+    const current = this.getPendingGameCreation(gameAddress);
+    if (!current) {
+      return { acquired: false, reason: "not-found" };
+    }
+
+    const claimableStates: PendingGameCreationState[] = ["prepared", "submitted", "unknown"];
+    if (!claimableStates.includes(current.state)) {
+      return { acquired: false, reason: "terminal", state: current.state };
+    }
+
+    const currentLeaseExpiresAt =
+      current.submission_lease_expires_at == null
+        ? null
+        : Number(current.submission_lease_expires_at);
+    const hasActiveOtherLease =
+      !!current.submission_lease_id &&
+      current.submission_lease_id !== leaseId &&
+      (currentLeaseExpiresAt == null || currentLeaseExpiresAt > now);
+    if (hasActiveOtherLease) {
+      return {
+        acquired: false,
+        reason: "in-flight",
+        state: current.state,
+        leaseExpiresAt: currentLeaseExpiresAt,
+      };
+    }
+
+    const changes = this.run(
+      `UPDATE pending_game_creations
+       SET state = 'submitted', submission_lease_id = ?, submission_lease_expires_at = ?,
+           last_error = NULL, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ?
+         AND state IN ('prepared', 'submitted', 'unknown')
+         AND (
+           (submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
+           (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?) OR
+           submission_lease_id = ?
+         )`,
+      [leaseId, leaseExpiresAt, now, now, gameAddress, now, leaseId],
+      "claiming pending game creation submission",
+    );
+    if (changes.changes > 0) {
+      return { acquired: true };
+    }
+
+    // A concurrent writer won the compare-and-set. Re-read the authoritative
+    // row and report the reason without changing its state.
+    const latest = this.getPendingGameCreation(gameAddress);
+    if (!latest) {
+      return { acquired: false, reason: "not-found" };
+    }
+    const latestLeaseExpiresAt =
+      latest.submission_lease_expires_at == null
+        ? null
+        : Number(latest.submission_lease_expires_at);
+    if (
+      claimableStates.includes(latest.state) &&
+      latest.submission_lease_id &&
+      latest.submission_lease_id !== leaseId &&
+      (latestLeaseExpiresAt == null || latestLeaseExpiresAt > now)
+    ) {
+      return {
+        acquired: false,
+        reason: "in-flight",
+        state: latest.state,
+        leaseExpiresAt: latestLeaseExpiresAt,
+      };
+    }
+    if (!claimableStates.includes(latest.state)) {
+      return { acquired: false, reason: "terminal", state: latest.state };
+    }
+    return { acquired: false, reason: "in-flight", state: latest.state };
+  }
+
+  /**
+   * Complete an admitted submission without ever moving it back to prepared.
+   * If the lease no longer belongs to this worker, the compare-and-set fails
+   * closed and the durable submitted/unknown state is left for recovery.
+   */
+  public finishPendingGameCreationSubmission(
+    gameAddress: string,
+    leaseId: string,
+    state: "submitted" | "unknown" | "failed",
+    options: { error?: string | null; nextAttemptAt?: number; now?: number } = {},
+  ): boolean {
+    const now = options.now ?? Date.now();
+    const changes = this.run(
+      `UPDATE pending_game_creations
+       SET state = ?, last_error = ?, submission_lease_id = NULL,
+           submission_lease_expires_at = NULL, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ? AND submission_lease_id = ?
+         AND state IN ('submitted', 'unknown')`,
+      [
+        state,
+        options.error == null ? null : options.error.slice(0, 500),
+        options.nextAttemptAt ?? now,
+        now,
+        gameAddress,
+        leaseId,
+      ],
+      "finishing pending game creation submission",
+    );
+    return changes.changes > 0;
+  }
+
+  /**
+   * Resolve an expired prepared intent only if it is still prepared at the
+   * database write. This is the race barrier against a simultaneous submit.
+   */
+  public failPreparedGameCreationIfCurrent(
+    gameAddress: string,
+    error: string,
+    now: number = Date.now(),
+  ): boolean {
+    const changes = this.run(
+      `UPDATE pending_game_creations
+       SET state = 'failed', last_error = ?, submission_lease_id = NULL,
+           submission_lease_expires_at = NULL, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ? AND state = 'prepared'
+         AND (
+           (submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
+           (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?)
+         )`,
+      [error.slice(0, 500), now, now, gameAddress, now],
+      "resolving expired prepared game creation",
+    );
+    return changes.changes > 0;
+  }
+
+  /**
+   * Apply a lifecycle transition only when the expected current state still
+   * holds. Recovery uses this for delivery/failure cleanup so stale snapshots
+   * cannot downgrade or delete a newer submission.
+   */
+  public setPendingGameCreationStateIfCurrent(
+    gameAddress: string,
+    expectedStates: PendingGameCreationState[],
+    state: PendingGameCreationState,
+    options: {
+      error?: string | null;
+      nextAttemptAt?: number;
+      now?: number;
+      clearSubmissionLease?: boolean;
+      submissionLeaseId?: string | null;
+    } = {},
+  ): boolean {
+    if (expectedStates.length === 0) return false;
+    const now = options.now ?? Date.now();
+    const placeholders = expectedStates.map(() => "?").join(", ");
+    const clearLease = options.clearSubmissionLease === true;
+    const leasePredicate = options.submissionLeaseId
+      ? `((submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
+          (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?) OR
+          submission_lease_id = ?)`
+      : `((submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
+          (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?))`;
+    const changes = this.run(
+      `UPDATE pending_game_creations
+       SET state = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
+           ${clearLease ? ", submission_lease_id = NULL, submission_lease_expires_at = NULL" : ""}
+       WHERE game_address = ? AND state IN (${placeholders}) AND ${leasePredicate}`,
+      [
+        state,
+        options.error == null ? null : options.error.slice(0, 500),
+        options.nextAttemptAt ?? now,
+        now,
+        gameAddress,
+        ...expectedStates,
+        now,
+        ...(options.submissionLeaseId ? [options.submissionLeaseId] : []),
+      ],
+      "conditionally updating pending game creation state",
+    );
+    return changes.changes > 0;
+  }
+
+  /**
+   * Delete only a terminal record. In particular, a stale prepared-expiry
+   * worker cannot delete a row that another worker has admitted for submit.
+   */
+  public clearPendingGameCreationIfState(
+    gameAddress: string,
+    expectedStates: PendingGameCreationState[],
+  ): boolean {
+    if (expectedStates.length === 0) return false;
+    const placeholders = expectedStates.map(() => "?").join(", ");
+    const changes = this.run(
+      `DELETE FROM pending_game_creations
+       WHERE game_address = ? AND state IN (${placeholders})`,
+      [gameAddress, ...expectedStates],
+      "conditionally clearing pending game creation",
+    );
+    return changes.changes > 0;
+  }
+
+  /**
+   * Operator-authorized resolution for an unresolved intent. The row is
+   * retained as an audit record and the creator lock is released because
+   * failed rows are excluded from creator-pending queries.
+   */
+  public resolvePendingGameCreation(
+    gameAddress: string,
+    expectedState: "prepared" | "submitted" | "unknown" | "confirmed",
+    reason: string,
+    resolvedBy: string,
+    now: number = Date.now(),
+  ): boolean {
+    const trimmedReason = reason.trim();
+    const trimmedResolvedBy = resolvedBy.trim();
+    if (!trimmedReason || !trimmedResolvedBy) return false;
+
+    const current = this.getPendingGameCreation(gameAddress);
+    if (!current || current.state !== expectedState) return false;
+    const currentLeaseExpiresAt =
+      current.submission_lease_expires_at == null
+        ? null
+        : Number(current.submission_lease_expires_at);
+    if (
+      current.submission_lease_id &&
+      (currentLeaseExpiresAt == null || currentLeaseExpiresAt > now)
+    ) {
+      return false;
+    }
+    // A confirmed row with reusable transaction/account timing evidence is a
+    // normal recovery case, not an ambiguous legacy intent. Keep it on the
+    // automatic path; only evidence-poor legacy-confirmed rows are eligible
+    // for this operator-only escape hatch.
+    if (
+      expectedState === "confirmed" &&
+      (current.signed_transaction_base64 ||
+        current.transaction_blockhash ||
+        current.last_valid_block_height != null ||
+        current.on_chain_created_at != null)
+    ) {
+      return false;
+    }
+
+    const changes = this.run(
+      `UPDATE pending_game_creations
+       SET state = 'failed', last_error = ?, resolution_reason = ?, resolved_by = ?,
+           resolved_at = ?, submission_lease_id = NULL, submission_lease_expires_at = NULL,
+           next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ? AND state = ?
+         AND (
+           (submission_lease_id IS NULL AND submission_lease_expires_at IS NULL) OR
+           (submission_lease_expires_at IS NOT NULL AND submission_lease_expires_at <= ?)
+         )`,
+      [
+        `operator resolution: ${trimmedReason}`.slice(0, 500),
+        trimmedReason.slice(0, 500),
+        trimmedResolvedBy.slice(0, 200),
+        now,
+        now,
+        now,
+        gameAddress,
+        expectedState,
+        now,
+      ],
+      "resolving pending game creation by operator",
+    );
+    return changes.changes > 0;
+  }
+
+  public getPendingGameCreationForCreator(
+    creatorTelegramId: string,
+  ): PendingGameCreationRecord | null {
+    return this.get<PendingGameCreationRecord>(
+      `SELECT * FROM pending_game_creations
+       WHERE creator_telegram_id = ? AND state IN ('prepared', 'submitted', 'unknown', 'confirmed', 'delivered')
+       ORDER BY updated_at ASC LIMIT 1`,
+      [creatorTelegramId],
+      "loading pending game creation for creator",
+    );
+  }
+
+  public setPendingGameCreationChainTiming(
+    gameAddress: string,
+    createdAtMs: number,
+    expiresAtMs: number,
+    now: number = Date.now(),
+  ): void {
+    this.run(
+      `UPDATE pending_game_creations
+       SET on_chain_created_at = ?, expires_at = ?, updated_at = ?
+       WHERE game_address = ?`,
+      [createdAtMs, expiresAtMs, now, gameAddress],
+      "saving pending game chain timing",
+    );
+  }
+
+  public setGameChainTiming(gameAddress: string, createdAtMs: number, expiresAtMs: number): void {
+    this.run(
+      `UPDATE games
+       SET created_at = ?, expires_at = ?
+       WHERE game_address = ?`,
+      [createdAtMs, expiresAtMs, gameAddress],
+      "saving game chain timing",
+    );
+  }
+
+  public setPendingGameCreationState(
+    gameAddress: string,
+    state: PendingGameCreationState,
+    options: { error?: string | null; nextAttemptAt?: number; now?: number } = {},
+  ): void {
+    const now = options.now ?? Date.now();
+    const current = this.getPendingGameCreation(gameAddress);
+    if (state === "prepared" && current && current.state !== "prepared") {
+      throw new Error("Pending game creation cannot be rewritten to prepared after submission");
+    }
+    this.run(
+      `UPDATE pending_game_creations
+       SET state = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
+       WHERE game_address = ?`,
+      [
+        state,
+        options.error == null ? null : options.error.slice(0, 500),
+        options.nextAttemptAt ?? now,
+        now,
+        gameAddress,
+      ],
+      "updating pending game creation state",
     );
   }
 

@@ -3,10 +3,9 @@ import { createDatabaseSingleton, BaseDatabase } from "./base-database";
 export type FaucetStatus = "active" | "cancelled" | "completed" | "expired" | "empty";
 export type FaucetClaimStatus = "processing" | "submitted" | "paid" | "failed";
 
-// A submitted transaction cannot remain valid indefinitely: once its recent
-// blockhash has expired, an unknown signature cannot land later. Keep this
-// window longer than the normal confirmation timeout so transient RPC lag is
-// given time to resolve before the claim is released for retry.
+// Kept as a compatibility export for callers that used the old reconciliation
+// window. An elapsed time is not evidence that a submitted transfer failed:
+// only an authoritative chain outcome may release the claim.
 export const FAUCET_SUBMITTED_CLAIM_TIMEOUT_MS = 5 * 60_000;
 
 export interface FaucetRecord {
@@ -373,25 +372,45 @@ export class FaucetDatabase extends BaseDatabase {
     );
   }
 
-  releaseUnknownSubmittedClaims(now: number, maxAgeMs: number): number {
-    const cutoff = now - Math.max(0, maxAgeMs);
-    return this.run(
-      `UPDATE faucet_claims
-       SET status = 'failed', last_error = 'transaction was not found after the confirmation window',
-           updated_at = ?
-       WHERE status = 'submitted' AND transaction_signature IS NOT NULL AND updated_at <= ?`,
-      [now, cutoff],
-      "releasing unknown submitted faucet claims",
-    ).changes;
+  /**
+   * Unknown submitted claims are intentionally never released by age alone.
+   * Keep this method as a no-op for older integrations; callers should use
+   * `failClaim` only after an authoritative failed transaction outcome.
+   */
+  releaseUnknownSubmittedClaims(_now: number, _maxAgeMs: number): number {
+    return 0;
   }
 
-  releaseStaleProcessing(cutoff: number, now: number): number {
-    return this.run(
-      `UPDATE faucet_claims SET status = 'failed', last_error = 'interrupted before submission',
-       updated_at = ? WHERE status = 'processing' AND updated_at <= ?`,
-      [now, cutoff],
-      "releasing interrupted faucet claims",
-    ).changes;
+  releaseStaleProcessing(
+    cutoff: number,
+    now: number,
+    protectedClaimKeys: ReadonlySet<string> = new Set(),
+  ): number {
+    const staleClaims = this.all<Pick<FaucetClaimRecord, "faucet_id" | "telegram_id">>(
+      `SELECT faucet_id, telegram_id FROM faucet_claims
+       WHERE status = 'processing' AND updated_at <= ?`,
+      [cutoff],
+      "loading stale faucet claims",
+    );
+    const releasable = staleClaims.filter(
+      (claim) => !protectedClaimKeys.has(`${claim.faucet_id}:${claim.telegram_id}`),
+    );
+    if (releasable.length === 0) return 0;
+
+    const release = this.db.transaction(() => {
+      let changed = 0;
+      for (const claim of releasable) {
+        changed += this.run(
+          `UPDATE faucet_claims SET status = 'failed', last_error = 'interrupted before submission',
+           updated_at = ? WHERE faucet_id = ? AND telegram_id = ? AND status = 'processing'
+           AND updated_at <= ?`,
+          [now, claim.faucet_id, claim.telegram_id, cutoff],
+          "releasing interrupted faucet claim",
+        ).changes;
+      }
+      return changed;
+    });
+    return release();
   }
 
   completeClaim(faucetId: number, telegramId: bigint, signature: string, now: number): void {

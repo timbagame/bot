@@ -871,7 +871,7 @@ describe("createGameViaCommand helper", () => {
     expect(minPlayers).toBe(coinflipOptions.minPlayers);
     expect(timeout).toBe(coinflipOptions.timeoutSeconds);
     expect(telegramId).toBe(1n);
-    expect(optionsArg).toEqual({ isPrivate: false });
+    expect(optionsArg).toEqual({ isPrivate: false, replyToMessageId: 1 });
     expect(chatId).toBe(ctx.chat.id);
     expect(typeof requestTimestamp).toBe("number");
     expect(Number.isFinite(requestTimestamp)).toBe(true);
@@ -1424,7 +1424,7 @@ describe("createGameViaCommand helper", () => {
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];
-    expect(optionsArg).toEqual({ isPrivate: true });
+    expect(optionsArg).toEqual({ isPrivate: true, replyToMessageId: 1 });
   });
 
   test("creates a public game when chat setting is public", async () => {
@@ -1466,7 +1466,7 @@ describe("createGameViaCommand helper", () => {
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];
-    expect(optionsArg).toEqual({ isPrivate: false });
+    expect(optionsArg).toEqual({ isPrivate: false, replyToMessageId: 1 });
   });
 
   test("defaults to public games when chat privacy is unset", async () => {
@@ -1508,6 +1508,6 @@ describe("createGameViaCommand helper", () => {
 
     expect(createCalls.length).toBe(1);
     const optionsArg = createCalls[0][6];
-    expect(optionsArg).toEqual({ isPrivate: false });
+    expect(optionsArg).toEqual({ isPrivate: false, replyToMessageId: 1 });
   });
 });

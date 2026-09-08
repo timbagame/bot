@@ -135,16 +135,29 @@ describe("FaucetDatabase", () => {
     expect(db.getPendingNotifications(2_001)).toEqual([]);
   });
 
-  test("releases submitted claims whose signatures remain unknown past the safety window", () => {
+  test("keeps submitted claims locked while their signatures remain unknown", () => {
     const faucet = createFaucet({ maxClaims: 1, expiresAt: 1_000_000 });
     db.reserveClaim(faucet.id, 1n, 1_000);
     db.recordClaimSignature(faucet.id, 1n, "missing-signature", 2_000);
 
-    expect(db.releaseUnknownSubmittedClaims(302_001, 300_000)).toBe(1);
+    expect(db.releaseUnknownSubmittedClaims(302_001, 300_000)).toBe(0);
     expect(db.getClaim(faucet.id, 1n)).toMatchObject({
-      status: "failed",
-      last_error: "transaction was not found after the confirmation window",
+      status: "submitted",
+      transaction_signature: "missing-signature",
     });
-    expect(db.reserveClaim(faucet.id, 2n, 302_002)).toMatchObject({ ok: true });
+    expect(db.reserveClaim(faucet.id, 2n, 302_002)).toMatchObject({ ok: false, reason: "full" });
+
+    db.failClaim(faucet.id, 1n, "submitted transaction failed", 302_003);
+    expect(db.reserveClaim(faucet.id, 2n, 302_004)).toMatchObject({ ok: true });
+  });
+
+  test("does not release a stale processing claim protected by an active operation", () => {
+    const faucet = createFaucet({ maxClaims: 1 });
+    db.reserveClaim(faucet.id, 1n, 1_000);
+
+    expect(db.releaseStaleProcessing(2_000, 3_000, new Set([`${faucet.id}:1`]))).toBe(0);
+    expect(db.getClaim(faucet.id, 1n)?.status).toBe("processing");
+    expect(db.releaseStaleProcessing(2_000, 3_001)).toBe(1);
+    expect(db.getClaim(faucet.id, 1n)?.status).toBe("failed");
   });
 });

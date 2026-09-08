@@ -1,4 +1,5 @@
 import { PublicKey, Keypair, Connection, SystemProgram, TransactionInstruction } from "#solana";
+import { randomUUID } from "node:crypto";
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -8,7 +9,11 @@ import {
 import { Context } from "grammy";
 
 import { WalletManager } from "./wallet";
-import { GameDatabase, type PendingGameCreationRecord } from "./game-database";
+import {
+  GameDatabase,
+  type PendingGameCreationRecord,
+  type PendingGameCreationState,
+} from "./game-database";
 import { OracleClient, formatOraclePolicyError } from "./oracle";
 import { PDAManager } from "./pda";
 import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
@@ -89,7 +94,13 @@ import { DEFAULT_MAINNET_ENDPOINT, resolvePrimaryRpcEndpoint } from "./rpc-endpo
 import { contractCapabilities, contractVersion } from "./contract-idl";
 import { buildGameFundsContext, type ResolvedContractTokenAccounts } from "./contract-adapter";
 import {
+  assertIsFullySignedTransaction,
+  getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
+} from "@solana/kit";
+import {
   buildOracleSignableGameTransaction,
+  decodeGameTransaction,
   finalizeOracleSignedGameTransaction,
 } from "./game-transaction";
 
@@ -230,6 +241,37 @@ const formatRateLimitWindow = (windowMs: number): string => {
 // ================================
 
 const DEFAULT_FRIENDLY_ERROR_MESSAGE = "❌ Something went wrong. Please try again in a moment.";
+const PENDING_GAME_CREATION_SUBMISSION_LEASE_MS = 120_000;
+
+const isDefinitiveGameCreationFailure = (error: unknown): boolean => {
+  const parts: string[] = [];
+  const collect = (value: unknown, seen = new Set<unknown>()): void => {
+    if (value == null || seen.has(value)) return;
+    seen.add(value);
+    if (typeof value === "string") {
+      parts.push(value);
+      return;
+    }
+    if (value instanceof Error) parts.push(value.message);
+    if (typeof value === "object") {
+      const candidate = value as { cause?: unknown; logs?: unknown };
+      collect(candidate.cause, seen);
+      if (Array.isArray(candidate.logs)) candidate.logs.forEach((log) => collect(log, seen));
+    }
+  };
+  collect(error);
+  const message = parts.join(" ").toLowerCase();
+  return (
+    message.includes("simulation failed") ||
+    message.includes("custom program error") ||
+    message.includes("insufficient funds") ||
+    message.includes("insufficient lamports") ||
+    message.includes("invalid transaction") ||
+    message.includes("invalid signature") ||
+    message.includes("transaction failed") ||
+    message.includes("program failed to complete")
+  );
+};
 
 const INTEGER_PATTERN = /^-?\d+$/;
 
@@ -3140,7 +3182,12 @@ export class GameManager {
     tokenTicker: string,
     status: string = "Active",
     replyToMessageId?: number,
-    options?: { priceHint?: CachedPriceLookup | null; reserveDelivery?: boolean },
+    options?: {
+      priceHint?: CachedPriceLookup | null;
+      reserveDelivery?: boolean;
+      winnerAddress?: string;
+      totalPot?: number;
+    },
   ): Promise<number> {
     const deliveryChatId = ctx.chat?.id;
     let deliveryReserved = false;
@@ -3162,6 +3209,8 @@ export class GameManager {
         creatorUsername,
         status,
         tokenTicker,
+        winnerAddress: options?.winnerAddress,
+        totalPot: options?.totalPot,
         chatId: ctx.chat?.id,
         options: { priceHint: cachedPrice },
       });
@@ -4000,7 +4049,7 @@ export class GameManager {
     minTickets: number,
     timeout: number,
     telegramId: bigint,
-    options?: { isPrivate?: boolean },
+    options?: { isPrivate?: boolean; replyToMessageId?: number },
     chatId?: number,
     requestTimestampMs: number = Date.now(),
   ): Promise<{
@@ -4021,6 +4070,27 @@ export class GameManager {
 
     const telegramIdStr = telegramId.toString();
     const isPrivate = options?.isPrivate ?? true;
+    const getPendingForCreator = (this.gameDb as any)?.getPendingGameCreationForCreator;
+    if (typeof getPendingForCreator === "function") {
+      let pending: PendingGameCreationRecord | null;
+      try {
+        pending = getPendingForCreator.call(this.gameDb, telegramIdStr);
+      } catch (error) {
+        console.error(`Failed to inspect pending game creation for ${telegramIdStr}:`, error);
+        return {
+          success: false,
+          error:
+            "❌ Could not verify whether an earlier game creation is still pending. Please try again.",
+        };
+      }
+      if (pending) {
+        return {
+          success: false,
+          gameAddress: pending.game_address,
+          confirmedSignature: pending.transaction_signature,
+        };
+      }
+    }
     const inFlightCount = this.getInFlightCreations(telegramIdStr);
     const activeGameCount = this.gameDb.countActiveGamesByCreator(telegramIdStr);
 
@@ -4037,7 +4107,7 @@ export class GameManager {
     const safeRequestTimestamp = Number.isFinite(requestTimestampMs)
       ? Math.min(nowMs, Math.max(0, Math.trunc(requestTimestampMs)))
       : nowMs;
-    const expiresAtMs = safeRequestTimestamp + timeout * 1000;
+    const requestedExpiresAtMs = safeRequestTimestamp + timeout * 1000;
 
     const windowStart = Math.max(
       nowMs - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
@@ -4066,29 +4136,178 @@ export class GameManager {
     this.incrementInFlightCreations(telegramIdStr);
 
     let confirmedCreation: { gameAddress: string; confirmedSignature: string } | undefined;
-    const persistPendingCreation = () => {
-      if (!confirmedCreation || typeof chatId !== "number" || chatId === 0) return;
+    let pendingCreation:
+      | {
+          gameAddress: string;
+          transactionSignature: string;
+          blockhash: string;
+          lastValidBlockHeight: number;
+          signedTransactionBase64: string;
+        }
+      | undefined;
+    let pendingCreationPersisted = false;
+    let pendingCreationState: PendingGameCreationState = "prepared";
+    let creationConfirmed = false;
+    let activeSubmissionLeaseId: string | null = null;
+    const buildPendingCreationInput = (state: PendingGameCreationState) => ({
+      gameAddress: pendingCreation!.gameAddress,
+      creatorTelegramId: telegramIdStr,
+      creatorDisplayName: null,
+      amount: parsedAmount.amount,
+      gameType,
+      tokenMint: parsedAmount.tokenMint,
+      tokenTicker: parsedAmount.tokenTicker,
+      maxPlayers: maxTickets,
+      minPlayers: minTickets,
+      chatId,
+      timeoutSeconds: timeout,
+      expiresAt: requestedExpiresAtMs,
+      transactionSignature: pendingCreation!.transactionSignature,
+      state,
+      isPrivate,
+      transactionBlockhash: pendingCreation!.blockhash,
+      lastValidBlockHeight: pendingCreation!.lastValidBlockHeight,
+      signedTransactionBase64: pendingCreation!.signedTransactionBase64,
+      replyToMessageId: options?.replyToMessageId ?? null,
+    });
+
+    const persistPendingCreation = (state: PendingGameCreationState, error?: unknown): void => {
+      if (!pendingCreation || typeof chatId !== "number" || chatId === 0) return;
+      const database = this.gameDb as any;
+      const savePending = database.savePendingGameCreation;
+      const setState = database.setPendingGameCreationState;
+      const setStateIfCurrent = database.setPendingGameCreationStateIfCurrent;
+      const errorMessage = error instanceof Error ? error.message : error ? String(error) : null;
+
+      if (state === "prepared" && typeof savePending === "function" && !pendingCreationPersisted) {
+        savePending.call(this.gameDb, buildPendingCreationInput(state));
+        pendingCreationPersisted = true;
+        return;
+      }
+
+      // A prepared record is the proof that no send path has started. Once it
+      // exists, no later error handler may write prepared back over a durable
+      // submission admission.
+      if (state === "prepared") return;
+
+      const expectedStates: PendingGameCreationState[] =
+        state === "confirmed"
+          ? ["submitted", "unknown", "confirmed"]
+          : state === "delivered"
+            ? ["confirmed", "delivered"]
+            : ["submitted", "unknown"];
+
+      if (typeof setStateIfCurrent === "function" && pendingCreationPersisted) {
+        try {
+          setStateIfCurrent.call(this.gameDb, pendingCreation.gameAddress, expectedStates, state, {
+            error: errorMessage,
+            now: Date.now(),
+            clearSubmissionLease: state === "confirmed" || state === "failed",
+            submissionLeaseId: activeSubmissionLeaseId,
+          });
+        } catch (stateError) {
+          console.error(
+            `Failed to update pending game creation state for ${pendingCreation.gameAddress}`,
+            stateError,
+          );
+        }
+        return;
+      }
+
+      if (typeof setState === "function" && pendingCreationPersisted) {
+        try {
+          setState.call(this.gameDb, pendingCreation.gameAddress, state, {
+            error: errorMessage,
+            now: Date.now(),
+          });
+        } catch (stateError) {
+          console.error(
+            `Failed to update pending game creation state for ${pendingCreation.gameAddress}`,
+            stateError,
+          );
+        }
+        return;
+      }
+
+      // Keep compatibility with older database test doubles and deployments
+      // that have the record writer but not the state-update helper.
+      if (typeof savePending === "function" && pendingCreationPersisted) {
+        try {
+          savePending.call(this.gameDb, buildPendingCreationInput(state));
+        } catch (stateError) {
+          console.error(
+            `Failed to update pending game creation for ${pendingCreation.gameAddress}`,
+            stateError,
+          );
+        }
+      }
+    };
+
+    const admitPendingCreationSubmission = (): string | null => {
+      const database = this.gameDb as any;
+      if (!pendingCreationPersisted) {
+        if (typeof database.savePendingGameCreation !== "function") return null;
+        throw new Error("Game creation intent was not durably prepared before broadcast");
+      }
+
+      const claimSubmission = database.claimPendingGameCreationSubmission;
+      if (typeof claimSubmission !== "function") {
+        // A real GameDatabase always has the admission primitive. A test
+        // double without pending persistence has no durable send obligation;
+        // any double that does persist must fail closed here.
+        if (typeof database.savePendingGameCreation === "function") {
+          throw new Error("Durable game submission admission is unavailable");
+        }
+        return null;
+      }
+
+      const leaseId = randomUUID();
+      const result = claimSubmission.call(
+        this.gameDb,
+        pendingCreation!.gameAddress,
+        leaseId,
+        Date.now() + PENDING_GAME_CREATION_SUBMISSION_LEASE_MS,
+        Date.now(),
+      );
+      if (!result || result.acquired !== true) {
+        const reason = result?.reason ?? "unavailable";
+        throw new Error(`Game creation submission was not admitted (${reason})`);
+      }
+      activeSubmissionLeaseId = leaseId;
+      return leaseId;
+    };
+
+    const finishPendingCreationSubmission = (
+      leaseId: string | null,
+      state: "submitted" | "unknown" | "failed",
+      error?: unknown,
+    ): boolean => {
+      if (!leaseId) {
+        persistPendingCreation(state, error);
+        return true;
+      }
+
+      const finishSubmission = (this.gameDb as any).finishPendingGameCreationSubmission;
+      if (typeof finishSubmission !== "function") {
+        // Admission already durably changed prepared -> submitted. Never fall
+        // back to an unconditional state write after a network call.
+        return false;
+      }
+
       try {
-        this.gameDb.savePendingGameCreation?.({
-          gameAddress: confirmedCreation.gameAddress,
-          creatorTelegramId: telegramIdStr,
-          creatorDisplayName: null,
-          amount: parsedAmount.amount,
-          gameType,
-          tokenMint: parsedAmount.tokenMint,
-          tokenTicker: parsedAmount.tokenTicker,
-          maxPlayers: maxTickets,
-          minPlayers: minTickets,
-          chatId,
-          timeoutSeconds: timeout,
-          expiresAt: expiresAtMs,
-          transactionSignature: confirmedCreation.confirmedSignature,
-        });
-      } catch (recoveryError) {
+        const completed =
+          finishSubmission.call(this.gameDb, pendingCreation!.gameAddress, leaseId, state, {
+            error: error instanceof Error ? error.message : error ? String(error) : null,
+            now: Date.now(),
+          }) === true;
+        if (completed) activeSubmissionLeaseId = null;
+        return completed;
+      } catch (stateError) {
         console.error(
-          `Failed to persist confirmed game recovery for ${confirmedCreation.gameAddress}`,
-          recoveryError,
+          `Failed to finish pending game creation submission for ${pendingCreation!.gameAddress}`,
+          stateError,
         );
+        return false;
       }
     };
 
@@ -4349,47 +4568,113 @@ export class GameManager {
         ];
       }
 
-      let submitPreparedCreation: (() => Promise<string>) | undefined;
+      let preparedCreation:
+        | {
+            transaction: Awaited<ReturnType<typeof finalizeOracleSignedGameTransaction>>;
+            blockhash: { blockhash: string; lastValidBlockHeight: number };
+            signature: string;
+          }
+        | undefined;
+      let submissionAttempted = false;
       const sendCreationTransaction = async () => {
-        if (submitPreparedCreation) {
-          return submitPreparedCreation();
+        if (!preparedCreation) {
+          const latestBlockhash = await this.wallet.getLatestBlockhash();
+          const prepared = await buildOracleSignableGameTransaction({
+            instructions: creationInstructions,
+            creator: playerKp,
+            blockhash: latestBlockhash,
+          });
+          const oracleSignedBase64 = await this.oracleClient.signGameTransaction(prepared.txBase64);
+          const fullySigned = await finalizeOracleSignedGameTransaction({
+            oracleSignedBase64,
+            expectedMessageBytes: prepared.messageBytes,
+            creator: playerKp,
+          });
+          const signature = getSignatureFromTransaction(fullySigned);
+          preparedCreation = {
+            transaction: fullySigned,
+            blockhash: latestBlockhash,
+            signature,
+          };
+          pendingCreation = {
+            gameAddress: gamePda.toBase58(),
+            transactionSignature: signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+            signedTransactionBase64: getBase64EncodedWireTransaction(fullySigned),
+          };
+
+          // The exact signed transaction and its stable PDA/signature identity
+          // must be durable before the first broadcast. A prepared record is
+          // known not to have entered the send path yet, so recovery can safely
+          // resolve it as never-sent once its blockhash lifetime expires.
+          pendingCreationState = "prepared";
+          persistPendingCreation("prepared");
+          confirmedCreation = {
+            gameAddress: pendingCreation.gameAddress,
+            confirmedSignature: pendingCreation.transactionSignature,
+          };
         }
-        const latestBlockhash = await this.wallet.getLatestBlockhash();
-        const prepared = await buildOracleSignableGameTransaction({
-          instructions: creationInstructions,
-          creator: playerKp,
-          blockhash: latestBlockhash,
-        });
-        const oracleSignedBase64 = await this.oracleClient.signGameTransaction(prepared.txBase64);
-        const fullySigned = await finalizeOracleSignedGameTransaction({
-          oracleSignedBase64,
-          expectedMessageBytes: prepared.messageBytes,
-          creator: playerKp,
-        });
-        submitPreparedCreation = () =>
-          this.wallet.sendFullySignedGameTransaction(fullySigned, latestBlockhash);
-        return submitPreparedCreation();
+
+        const initialAttempt = !submissionAttempted;
+        const submissionLeaseId = admitPendingCreationSubmission();
+        submissionAttempted = true;
+        pendingCreationState = "submitted";
+        try {
+          const prepared = preparedCreation;
+          if (!prepared) throw new Error("Game creation transaction was not prepared");
+          const signature = await this.wallet.sendFullySignedGameTransaction(
+            prepared.transaction,
+            prepared.blockhash,
+          );
+          finishPendingCreationSubmission(submissionLeaseId, "submitted");
+          return signature;
+        } catch (error) {
+          const nextState =
+            initialAttempt && isDefinitiveGameCreationFailure(error) ? "failed" : "unknown";
+          const durableTransitionCompleted = finishPendingCreationSubmission(
+            submissionLeaseId,
+            nextState,
+            error,
+          );
+          // If the post-send state write failed, the durable admission remains
+          // submitted (or its lease remains recoverable). Never report a
+          // failed state locally in a way that could invite a second creation.
+          pendingCreationState = durableTransitionCompleted ? nextState : "submitted";
+          throw error;
+        }
       };
       const creationTx = await sendCreationTransaction();
 
       debugLog(`📍 Game address: ${gamePda.toBase58()}`);
 
-      const confirmedCreationTx = await this.confirmTransactionWithRecovery(
-        creationTx,
-        gamePda,
-        "Game creation",
-        undefined,
-        sendCreationTransaction,
-      );
+      let confirmedCreationTx: string;
+      try {
+        confirmedCreationTx = await this.confirmTransactionWithRecovery(
+          creationTx,
+          gamePda,
+          "Game creation",
+          undefined,
+          sendCreationTransaction,
+        );
+      } catch (error) {
+        // The transaction was broadcast, so a confirmation timeout is not a
+        // safe reason to let another create request start a second game.
+        pendingCreationState = isDefinitiveGameCreationFailure(error) ? "failed" : "unknown";
+        persistPendingCreation(pendingCreationState, error);
+        throw error;
+      }
 
+      creationConfirmed = true;
+      pendingCreationState = "confirmed";
       confirmedCreation = {
-        gameAddress: gamePda.toBase58(),
+        gameAddress: confirmedCreation?.gameAddress ?? gamePda.toBase58(),
         confirmedSignature: confirmedCreationTx,
       };
-      // Persist the recovery record before local hydration or Telegram
-      // delivery. A confirmed transaction must remain recoverable even if
-      // either of those follow-up steps fails.
-      persistPendingCreation();
+      // Keep the durable intent until local hydration and Telegram delivery
+      // complete. A confirmed transaction must remain recoverable even if
+      // either follow-up step fails.
+      persistPendingCreation("confirmed");
       const createdGameAccount = await this.fetchConfirmedGame(gamePda);
       if (!createdGameAccount.creator.equals(playerKp.publicKey)) {
         throw new Error("Confirmed game creator does not match the requesting wallet");
@@ -4406,6 +4691,44 @@ export class GameManager {
         throw new Error("Confirmed game account does not match the requested configuration");
       }
 
+      if (createdGameAccount.timeout != null && Number(createdGameAccount.timeout) !== timeout) {
+        throw new Error("Confirmed game timeout does not match the requested configuration");
+      }
+      if (
+        createdGameAccount.isPrivate != null &&
+        Boolean(createdGameAccount.isPrivate) !== isPrivate
+      ) {
+        throw new Error("Confirmed game visibility does not match the requested configuration");
+      }
+
+      const createdAtSeconds = Number(createdGameAccount.createdAt ?? 0);
+      const timeoutSeconds = Number(createdGameAccount.timeout ?? 0);
+      const hasAuthoritativeTiming =
+        Number.isFinite(createdAtSeconds) &&
+        createdAtSeconds > 0 &&
+        Number.isFinite(timeoutSeconds) &&
+        timeoutSeconds > 0;
+      const authoritativeCreatedAtMs = hasAuthoritativeTiming
+        ? createdAtSeconds * 1_000
+        : undefined;
+      const authoritativeExpiresAtMs = hasAuthoritativeTiming
+        ? (createdAtSeconds + timeoutSeconds) * 1_000
+        : undefined;
+      const setPendingChainTiming = (this.gameDb as any)?.setPendingGameCreationChainTiming;
+      if (
+        hasAuthoritativeTiming &&
+        typeof setPendingChainTiming === "function" &&
+        pendingCreation
+      ) {
+        setPendingChainTiming.call(
+          this.gameDb,
+          pendingCreation.gameAddress,
+          authoritativeCreatedAtMs,
+          authoritativeExpiresAtMs,
+          Date.now(),
+        );
+      }
+
       // Save game
       this.gameDb.saveGame(
         gamePda.toBase58(),
@@ -4418,7 +4741,8 @@ export class GameManager {
         minTickets,
         chatId,
         timeout,
-        expiresAtMs,
+        authoritativeExpiresAtMs,
+        authoritativeCreatedAtMs,
       );
 
       // Auto-join logic based on game type
@@ -4452,8 +4776,8 @@ export class GameManager {
         autoJoinResult,
       };
     } catch (error: any) {
-      if (confirmedCreation) {
-        persistPendingCreation();
+      if (confirmedCreation && (pendingCreationState as string) !== "failed") {
+        persistPendingCreation(creationConfirmed ? "confirmed" : pendingCreationState, error);
         console.error("Failed to finish confirmed game creation", confirmedCreation, error);
         return {
           success: false,
@@ -6287,32 +6611,19 @@ export class GameManager {
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
-  /**
-   * Ensure local DB contains minimal data for an on-chain game.
-   * Used for /public joins where this bot may not have tracked the game yet.
-   */
-  public async ensureGameDataFromChain(gameAddress: string): Promise<GameData | null> {
-    const existing = this.gameDb.getGame(gameAddress);
-    if (existing) {
-      return existing;
+  private async hydrateGameDataFromChain(
+    gameAddress: string,
+    options: { allowExpired?: boolean } = {},
+  ): Promise<GameData | null> {
+    const allowExpired = options.allowExpired === true;
+    const getGame = (this.gameDb as any)?.getGame;
+    if (!allowExpired && typeof getGame === "function") {
+      const existing = getGame.call(this.gameDb, gameAddress);
+      if (existing) return existing;
     }
 
-    let gameAccount: any | null;
-    try {
-      const gamePda = new PublicKey(gameAddress);
-      const accountApi = this.program.account.game as any;
-      const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
-      gameAccount = fetchNullable ? await fetchNullable(gamePda) : await accountApi.fetch(gamePda);
-    } catch (error: any) {
-      if (isMissingAccountError(error)) {
-        return null;
-      }
-      throw error;
-    }
-
-    if (!gameAccount) {
-      return null;
-    }
+    const gameAccount = await this.fetchGameAccountForRecovery(gameAddress);
+    if (!gameAccount) return null;
 
     const createdAtSeconds = Number(gameAccount.createdAt ?? 0);
     const timeoutSeconds = Number(gameAccount.timeout ?? 0);
@@ -6321,40 +6632,43 @@ export class GameManager {
       createdAtSeconds > 0 &&
       Number.isFinite(timeoutSeconds) &&
       timeoutSeconds > 0;
-
-    if (hasTiming && GameManager.isExpired(gameAccount)) {
-      return null;
-    }
+    if (hasTiming && !allowExpired && GameManager.isExpired(gameAccount)) return null;
 
     const tokenMint =
       typeof gameAccount.tokenMint?.toBase58 === "function"
         ? gameAccount.tokenMint.toBase58()
-        : null;
-    if (!tokenMint) {
-      return null;
-    }
+        : typeof gameAccount.tokenMint === "string"
+          ? gameAccount.tokenMint
+          : null;
+    if (!tokenMint) return null;
 
     let tokenTicker = DEFAULT_TOKEN_TICKER;
-    try {
-      const metadata = await this.wallet.getTokenMetadata(tokenMint);
-      if (metadata?.symbol) {
-        tokenTicker = metadata.symbol;
+    const getTokenMetadata = (this.wallet as any)?.getTokenMetadata;
+    if (typeof getTokenMetadata === "function") {
+      try {
+        const metadata = await getTokenMetadata.call(this.wallet, tokenMint);
+        if (metadata?.symbol) tokenTicker = metadata.symbol;
+      } catch {
+        // Ignore metadata errors; the mint remains the source of truth.
       }
-    } catch {
-      // ignore metadata errors
     }
 
     const creatorPubkey =
       typeof gameAccount.creator?.toBase58 === "function"
         ? gameAccount.creator.toBase58()
         : String(gameAccount.creator ?? "");
-
+    const getPlayerTelegramId = (this.gameDb as any)?.getPlayerTelegramId;
     const creatorTelegramId =
-      (creatorPubkey ? this.gameDb.getPlayerTelegramId(creatorPubkey) : null) ?? creatorPubkey;
+      (creatorPubkey && typeof getPlayerTelegramId === "function"
+        ? getPlayerTelegramId.call(this.gameDb, creatorPubkey)
+        : null) ?? creatorPubkey;
 
     if (creatorPubkey && creatorTelegramId) {
       try {
-        this.gameDb.savePlayerMapping(creatorPubkey, creatorTelegramId);
+        const savePlayerMapping = (this.gameDb as any)?.savePlayerMapping;
+        if (typeof savePlayerMapping === "function") {
+          savePlayerMapping.call(this.gameDb, creatorPubkey, creatorTelegramId);
+        }
       } catch (error) {
         console.warn(`Failed to persist creator mapping for hydrated game ${gameAddress}:`, error);
       }
@@ -6364,30 +6678,256 @@ export class GameManager {
     const amount = this.getDisplayAmountFromAccount(gameAccount, gameType);
     const maxPlayers = Number(gameAccount.maxTickets ?? 0) || undefined;
     const minPlayers = Number(gameAccount.minTickets ?? 0) || undefined;
-
     const createdAtMs = hasTiming ? createdAtSeconds * 1000 : Date.now();
     const expiresAtMs = hasTiming ? (createdAtSeconds + timeoutSeconds) * 1000 : undefined;
+    const hydrated: GameData = {
+      game_address: gameAddress,
+      creator_telegram_id: creatorTelegramId || "unknown",
+      amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
+      created_at: createdAtMs,
+      status: "active",
+      game_type: gameType,
+      token_mint: tokenMint,
+      token_ticker: tokenTicker,
+      max_players: maxPlayers,
+      min_players: minPlayers,
+      timeout_seconds: hasTiming ? timeoutSeconds : undefined,
+      expires_at: expiresAtMs,
+    };
 
     try {
-      this.gameDb.saveGame(
-        gameAddress,
-        creatorTelegramId || "unknown",
-        Number.isFinite(amount) && amount > 0 ? amount : 0,
-        gameType,
-        tokenMint,
-        tokenTicker,
-        maxPlayers,
-        minPlayers,
-        undefined,
-        hasTiming ? timeoutSeconds : undefined,
-        expiresAtMs,
-        createdAtMs,
-      );
+      const saveGame = (this.gameDb as any)?.saveGame;
+      if (typeof saveGame === "function") {
+        saveGame.call(
+          this.gameDb,
+          gameAddress,
+          creatorTelegramId || "unknown",
+          hydrated.amount,
+          gameType,
+          tokenMint,
+          tokenTicker,
+          maxPlayers,
+          minPlayers,
+          undefined,
+          hasTiming ? timeoutSeconds : undefined,
+          expiresAtMs,
+          createdAtMs,
+        );
+      }
+
+      if (hasTiming) {
+        const setGameChainTiming = (this.gameDb as any)?.setGameChainTiming;
+        if (typeof setGameChainTiming === "function") {
+          setGameChainTiming.call(this.gameDb, gameAddress, createdAtMs, expiresAtMs);
+        }
+      }
     } catch (error) {
       console.warn(`Failed to hydrate game ${gameAddress} into local DB:`, error);
     }
 
-    return this.gameDb.getGame(gameAddress);
+    if (typeof getGame === "function") {
+      try {
+        return getGame.call(this.gameDb, gameAddress) ?? hydrated;
+      } catch {
+        return hydrated;
+      }
+    }
+    return hydrated;
+  }
+
+  /**
+   * Ensure local DB contains minimal data for an on-chain game.
+   * Used for /public joins where this bot may not have tracked the game yet.
+   */
+  public async ensureGameDataFromChain(gameAddress: string): Promise<GameData | null> {
+    return this.hydrateGameDataFromChain(gameAddress);
+  }
+
+  private createChatBoundContext(ctx: Context, chatId: number): Context {
+    if (ctx.chat?.id === chatId) {
+      return ctx;
+    }
+
+    const api = ctx.api as any;
+    return {
+      api,
+      chat: { id: chatId },
+      from: ctx.from,
+      reply: (text: string, options?: any) => api.sendMessage(chatId, text, options),
+      replyWithPhoto: (photo: any, options?: any) => api.sendPhoto(chatId, photo, options),
+      replyWithAnimation: (animation: any, options?: any) =>
+        api.sendAnimation(chatId, animation, options),
+      replyWithVideo: (video: any, options?: any) => api.sendVideo(chatId, video, options),
+    } as unknown as Context;
+  }
+
+  private getPendingGameCreationMessages(gameAddress: string): Array<{
+    chatId?: number;
+    chat_id?: number;
+    messageId?: number;
+    message_id?: number;
+  }> {
+    const getGameMessages = (this.gameDb as any)?.getGameMessages;
+    if (typeof getGameMessages !== "function") {
+      return [];
+    }
+
+    const messages = getGameMessages.call(this.gameDb, gameAddress);
+    return Array.isArray(messages) ? messages : [];
+  }
+
+  private async deliverPendingGameCreation(
+    ctx: Context,
+    pending: PendingGameCreationRecord,
+    gameData: GameData,
+  ): Promise<void> {
+    const originContext = this.createChatBoundContext(ctx, pending.chat_id);
+    const hasOriginMessage = this.getPendingGameCreationMessages(pending.game_address).some(
+      (message) =>
+        Number(message.chatId ?? message.chat_id) === pending.chat_id &&
+        Number(message.messageId ?? message.message_id) > 0,
+    );
+    if (hasOriginMessage) {
+      return;
+    }
+
+    let creatorDisplayName = pending.creator_display_name || "Unknown";
+    if (!pending.creator_display_name) {
+      try {
+        const getCreatorInfo = (this.gameDb as any)?.getCreatorInfo;
+        const creatorInfo =
+          typeof getCreatorInfo === "function"
+            ? getCreatorInfo.call(this.gameDb, pending.game_address)
+            : null;
+        if (creatorInfo?.publicKey) {
+          creatorDisplayName = await this.getPlayerUsername(originContext, creatorInfo.publicKey);
+        }
+      } catch (error) {
+        console.warn(
+          `Failed to resolve creator for recovered game ${pending.game_address}:`,
+          error,
+        );
+      }
+    }
+
+    const status = String(gameData.status ?? "active").toLowerCase();
+    const terminal = status === "completed" || status === "cancelled" || !!gameData.winner_address;
+    const messageId = await this.createGameMessage(
+      originContext,
+      pending.game_address,
+      gameData.game_type || pending.game_type,
+      gameData.amount || pending.amount,
+      creatorDisplayName,
+      gameData.token_ticker || pending.token_ticker,
+      terminal ? "Completed" : "Active",
+      pending.reply_to_message_id ?? undefined,
+      {
+        reserveDelivery: true,
+        winnerAddress: terminal ? gameData.winner_address : undefined,
+        totalPot: terminal ? gameData.total_amount : undefined,
+      },
+    );
+    if (messageId === 0) {
+      throw new Error("game message delivery is already in flight");
+    }
+  }
+
+  private async isPendingGameCreationLifetimeExpired(
+    pending: PendingGameCreationRecord,
+  ): Promise<boolean> {
+    const lastValidBlockHeight = Number(pending.last_valid_block_height);
+    if (!Number.isSafeInteger(lastValidBlockHeight) || lastValidBlockHeight < 0) {
+      return false;
+    }
+
+    const getConnection = (this.wallet as any)?.getConnection;
+    if (typeof getConnection !== "function") {
+      return false;
+    }
+
+    const connection = getConnection.call(this.wallet) as unknown as {
+      getBlockHeight?: () => Promise<number | bigint>;
+    };
+    if (typeof connection.getBlockHeight !== "function") {
+      return false;
+    }
+
+    const currentBlockHeight = Number(await connection.getBlockHeight());
+    return Number.isFinite(currentBlockHeight) && currentBlockHeight > lastValidBlockHeight;
+  }
+
+  private async rebroadcastPendingGameCreation(pending: PendingGameCreationRecord): Promise<void> {
+    const signedTransactionBase64 = pending.signed_transaction_base64;
+    const blockhash = pending.transaction_blockhash;
+    const lastValidBlockHeight = Number(pending.last_valid_block_height);
+    if (
+      !signedTransactionBase64 ||
+      !blockhash ||
+      !Number.isSafeInteger(lastValidBlockHeight) ||
+      lastValidBlockHeight < 0
+    ) {
+      throw new Error("pending game creation has no reusable signed transaction lifetime");
+    }
+
+    const claimSubmission = (this.gameDb as any)?.claimPendingGameCreationSubmission;
+    if (typeof claimSubmission !== "function") {
+      throw new Error("Durable game submission admission is unavailable");
+    }
+
+    const leaseId = randomUUID();
+    const now = Date.now();
+    const claim = claimSubmission.call(
+      this.gameDb,
+      pending.game_address,
+      leaseId,
+      now + PENDING_GAME_CREATION_SUBMISSION_LEASE_MS,
+      now,
+    );
+    if (!claim || claim.acquired !== true) {
+      const reason = claim?.reason ?? "unavailable";
+      if (reason === "in-flight") {
+        throw new Error(
+          `Pending game creation submission is already in flight; keeping ${pending.game_address} reserved`,
+        );
+      }
+      throw new Error(`Pending game creation submission was not admitted (${reason})`);
+    }
+
+    const finishSubmission = (state: "submitted" | "unknown", error?: unknown): void => {
+      const finish = (this.gameDb as any)?.finishPendingGameCreationSubmission;
+      if (typeof finish !== "function") return;
+      try {
+        finish.call(this.gameDb, pending.game_address, leaseId, state, {
+          error: error instanceof Error ? error.message : error ? String(error) : null,
+          now: Date.now(),
+        });
+      } catch (stateError) {
+        // The admission itself is already durable. If this write fails, leave
+        // submitted/leased state in place so expiry cannot unlock the intent.
+        console.error(
+          `Failed to finish pending game creation submission for ${pending.game_address}`,
+          stateError,
+        );
+      }
+    };
+
+    try {
+      const transaction = decodeGameTransaction(signedTransactionBase64);
+      assertIsFullySignedTransaction(transaction);
+      const signature = await this.wallet.sendFullySignedGameTransaction(transaction, {
+        blockhash,
+        lastValidBlockHeight,
+      });
+      if (signature !== pending.transaction_signature) {
+        throw new Error(
+          `Pending game rebroadcast returned an unexpected signature for ${pending.game_address}`,
+        );
+      }
+      finishSubmission("submitted");
+    } catch (error) {
+      finishSubmission("unknown", error);
+      throw error;
+    }
   }
 
   /**
@@ -6399,48 +6939,439 @@ export class GameManager {
     ctx: Context,
     pending: PendingGameCreationRecord,
   ): Promise<boolean> {
-    const gameData = await this.ensureGameDataFromChain(pending.game_address);
-    if (!gameData) {
-      throw new Error("confirmed game account is not available yet");
+    const getGame = (this.gameDb as any)?.getGame;
+    const clearPending = (this.gameDb as any)?.clearPendingGameCreation;
+    const clearPendingIfState = (this.gameDb as any)?.clearPendingGameCreationIfState;
+    const setPendingState = (this.gameDb as any)?.setPendingGameCreationState;
+    const setPendingStateIfCurrent = (this.gameDb as any)?.setPendingGameCreationStateIfCurrent;
+    const failPreparedIfCurrent = (this.gameDb as any)?.failPreparedGameCreationIfCurrent;
+    const getPending = (this.gameDb as any)?.getPendingGameCreation;
+    const currentPending =
+      typeof getPending === "function"
+        ? getPending.call(this.gameDb, pending.game_address)
+        : pending;
+    if (currentPending) {
+      // Recovery callers receive a retry snapshot. Replace it with the
+      // authoritative row before making any expiry or lifecycle decision.
+      pending = currentPending;
+    }
+    if (pending.state === "failed") return true;
+
+    const setGameOriginChat = (this.gameDb as any)?.setGameOriginChat;
+    const persistOriginChat = (): void => {
+      if (typeof setGameOriginChat === "function") {
+        setGameOriginChat.call(this.gameDb, pending.game_address, pending.chat_id);
+      }
+    };
+    const clearAsFailed = (error: string): boolean => {
+      const now = Date.now();
+      let transitioned = false;
+      if (typeof setPendingStateIfCurrent === "function") {
+        transitioned =
+          setPendingStateIfCurrent.call(
+            this.gameDb,
+            pending.game_address,
+            ["prepared", "submitted", "unknown"],
+            "failed",
+            { error, now, clearSubmissionLease: true },
+          ) === true;
+      } else if (typeof setPendingState === "function") {
+        // Compatibility for focused test doubles; production uses the
+        // compare-and-set method above.
+        setPendingState.call(this.gameDb, pending.game_address, "failed", { error, now });
+        transitioned = true;
+      }
+      if (!transitioned) return false;
+
+      if (typeof clearPendingIfState === "function") {
+        clearPendingIfState.call(this.gameDb, pending.game_address, ["failed"]);
+      } else if (typeof clearPending === "function") {
+        clearPending.call(this.gameDb, pending.game_address);
+      }
+      return true;
+    };
+    const localGame =
+      typeof getGame === "function" ? getGame.call(this.gameDb, pending.game_address) : null;
+    const localTerminal =
+      localGame &&
+      (String(localGame.status).toLowerCase() === "completed" ||
+        String(localGame.status).toLowerCase() === "cancelled" ||
+        Boolean(localGame.winner_address));
+
+    if (localTerminal) {
+      // A locally terminal game can still be missing its Telegram card. Finish
+      // that delivery before deleting the durable creation intent.
+      persistOriginChat();
+      await this.deliverPendingGameCreation(ctx, pending, localGame as GameData);
+      let markedDelivered = false;
+      if (typeof setPendingStateIfCurrent === "function") {
+        markedDelivered =
+          setPendingStateIfCurrent.call(
+            this.gameDb,
+            pending.game_address,
+            ["submitted", "unknown", "confirmed", "delivered"],
+            "delivered",
+            { now: Date.now(), clearSubmissionLease: true },
+          ) === true;
+      } else if (typeof setPendingState === "function") {
+        setPendingState.call(this.gameDb, pending.game_address, "delivered", {
+          now: Date.now(),
+        });
+        markedDelivered = true;
+      }
+      if (markedDelivered && typeof clearPendingIfState === "function") {
+        clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+      } else if (markedDelivered && typeof clearPending === "function") {
+        clearPending.call(this.gameDb, pending.game_address);
+      }
+      if (!markedDelivered) {
+        throw new Error(
+          "Pending game creation state changed while finalizing local delivery; keeping the current record",
+        );
+      }
+      return true;
     }
 
-    this.gameDb.setGameOriginChat(pending.game_address, pending.chat_id);
-    const hasOriginMessage = this.gameDb
-      .getGameMessages(pending.game_address)
-      .some(({ chatId }) => chatId === pending.chat_id);
-
-    if (!hasOriginMessage) {
-      let creatorDisplayName = pending.creator_display_name || "Unknown";
-      if (!pending.creator_display_name) {
+    const gameAccount = await this.fetchGameAccountForRecovery(pending.game_address);
+    if (!gameAccount) {
+      const getTransactionOutcome = (this.wallet as any)?.getTransactionOutcome;
+      let transactionOutcome: "confirmed" | "failed" | "unknown" | undefined;
+      if (typeof getTransactionOutcome === "function" && pending.transaction_signature) {
         try {
-          const creatorInfo = this.gameDb.getCreatorInfo(pending.game_address);
-          if (creatorInfo?.publicKey) {
-            creatorDisplayName = await this.getPlayerUsername(ctx, creatorInfo.publicKey);
-          }
-        } catch (error) {
-          console.warn(
-            `Failed to resolve creator for recovered game ${pending.game_address}:`,
-            error,
+          transactionOutcome = await getTransactionOutcome.call(
+            this.wallet,
+            pending.transaction_signature,
           );
+        } catch (error) {
+          throw new Error("Unable to determine the pending game transaction outcome", {
+            cause: error,
+          });
         }
       }
-      const messageId = await this.createGameMessage(
-        ctx,
-        pending.game_address,
-        gameData.game_type || pending.game_type,
-        gameData.amount || pending.amount,
-        creatorDisplayName,
-        gameData.token_ticker || pending.token_ticker,
-        gameData.status || "Active",
-        undefined,
-        { reserveDelivery: true },
+
+      if (transactionOutcome === "failed") {
+        const resolved = clearAsFailed(
+          "Game creation transaction failed before the game account was created",
+        );
+        if (resolved) return true;
+        throw new Error(
+          "Pending game creation state changed while resolving the failed transaction; keeping the current record",
+        );
+      }
+
+      // A confirmed signature is evidence that the transaction landed, not
+      // evidence that this RPC read has caught up with the account. Keep the
+      // record so a later sweep can hydrate and deliver it.
+      if (transactionOutcome === "confirmed") {
+        throw new Error(
+          "Game creation transaction is confirmed, but the game account is not available yet; keeping the pending creation for recovery",
+        );
+      }
+
+      const lifetimeExpired = await this.isPendingGameCreationLifetimeExpired(pending);
+      if (pending.state === "prepared" && lifetimeExpired) {
+        // Prepared means the process recorded the exact transaction before it
+        // entered the send path. Once its lifetime expires it is safe to
+        // resolve as never broadcast, but only if the authoritative row is
+        // still prepared at the conditional database write.
+        const error = "Prepared game creation transaction expired before broadcast";
+        if (typeof failPreparedIfCurrent === "function") {
+          const resolved =
+            failPreparedIfCurrent.call(this.gameDb, pending.game_address, error, Date.now()) ===
+            true;
+          if (resolved) {
+            if (typeof clearPendingIfState === "function") {
+              clearPendingIfState.call(this.gameDb, pending.game_address, ["failed"]);
+            } else if (typeof clearPending === "function") {
+              clearPending.call(this.gameDb, pending.game_address);
+            }
+            return true;
+          }
+
+          const latest =
+            typeof getPending === "function"
+              ? getPending.call(this.gameDb, pending.game_address)
+              : null;
+          if (latest) pending = latest;
+        } else if (clearAsFailed(error)) {
+          return true;
+        }
+
+        // Another worker may have admitted the submission between the read
+        // and the expiry check. Retain that authoritative state.
+        if (pending.state !== "prepared") {
+          throw new Error(
+            "Pending game creation submission was admitted while expiry was being resolved; keeping it reserved",
+          );
+        }
+        throw new Error(
+          "Prepared game creation expiry could not be resolved atomically; keeping the pending creation reserved",
+        );
+      }
+
+      if (
+        !lifetimeExpired &&
+        pending.signed_transaction_base64 &&
+        pending.transaction_blockhash &&
+        pending.last_valid_block_height != null
+      ) {
+        await this.rebroadcastPendingGameCreation(pending);
+        throw new Error(
+          "Pending game transaction was rebroadcast; the game account is not available yet",
+        );
+      }
+
+      if (lifetimeExpired) {
+        throw new Error(
+          "Pending game transaction lifetime expired before the game account became available; keeping the pending creation for manual reconciliation",
+        );
+      }
+
+      throw new Error(
+        "Game account is not available yet and the transaction outcome is unknown; keeping the pending creation for recovery",
       );
-      if (messageId === 0) {
-        throw new Error("game message delivery is already in flight");
+    }
+
+    const accountAddress = (value: unknown): string =>
+      typeof (value as { toBase58?: unknown })?.toBase58 === "function"
+        ? (value as { toBase58: () => string }).toBase58()
+        : String(value ?? "");
+    const accountCreator = accountAddress(gameAccount.creator);
+    const getKeyPair = (this.wallet as any)?.getKeyPair;
+    if (typeof getKeyPair === "function" && pending.creator_telegram_id) {
+      const creatorKeypair = await getKeyPair.call(
+        this.wallet,
+        BigInt(pending.creator_telegram_id),
+      );
+      if (accountCreator && !creatorKeypair.publicKey.equals(new PublicKey(accountCreator))) {
+        throw new Error("Pending game creator does not match the confirmed game account");
+      }
+    }
+    if (accountCreator && pending.creator_telegram_id) {
+      const savePlayerMapping = (this.gameDb as any)?.savePlayerMapping;
+      if (typeof savePlayerMapping === "function") {
+        savePlayerMapping.call(this.gameDb, accountCreator, pending.creator_telegram_id);
       }
     }
 
-    this.gameDb.clearPendingGameCreation(pending.game_address);
+    const accountTokenMint = accountAddress(gameAccount.tokenMint);
+    if (pending.token_mint && accountTokenMint && pending.token_mint !== accountTokenMint) {
+      throw new Error("Pending game token mint does not match the confirmed game account");
+    }
+
+    const accountGameType = this.getGameType(gameAccount);
+    if (pending.game_type && accountGameType !== pending.game_type) {
+      throw new Error("Pending game type does not match the confirmed game account");
+    }
+    const accountAmount = this.getDisplayAmountFromAccount(gameAccount, accountGameType);
+    if (Number.isFinite(pending.amount) && pending.amount > 0 && accountAmount !== pending.amount) {
+      throw new Error("Pending game amount does not match the confirmed game account");
+    }
+    if (
+      pending.max_players > 0 &&
+      gameAccount.maxTickets != null &&
+      Number(gameAccount.maxTickets) !== pending.max_players
+    ) {
+      throw new Error("Pending game player limit does not match the confirmed game account");
+    }
+    if (
+      pending.min_players > 0 &&
+      gameAccount.minTickets != null &&
+      Number(gameAccount.minTickets) !== pending.min_players
+    ) {
+      throw new Error(
+        "Pending game minimum player limit does not match the confirmed game account",
+      );
+    }
+    if (
+      pending.timeout_seconds > 0 &&
+      gameAccount.timeout != null &&
+      Number(gameAccount.timeout) !== pending.timeout_seconds
+    ) {
+      throw new Error("Pending game timeout does not match the confirmed game account");
+    }
+    if (
+      pending.is_private != null &&
+      gameAccount.isPrivate != null &&
+      Boolean(pending.is_private) !== Boolean(gameAccount.isPrivate)
+    ) {
+      throw new Error("Pending game visibility does not match the confirmed game account");
+    }
+
+    const createdAtSeconds = Number(gameAccount.createdAt ?? 0);
+    const timeoutSeconds = Number(gameAccount.timeout ?? 0);
+    const hasAuthoritativeTiming =
+      Number.isFinite(createdAtSeconds) &&
+      createdAtSeconds > 0 &&
+      Number.isFinite(timeoutSeconds) &&
+      timeoutSeconds > 0;
+    if (!hasAuthoritativeTiming) {
+      throw new Error("Confirmed game account is missing authoritative creation timing");
+    }
+    const authoritativeCreatedAtMs = createdAtSeconds * 1_000;
+    const authoritativeExpiresAtMs = (createdAtSeconds + timeoutSeconds) * 1_000;
+
+    // Account existence plus the identity/configuration checks above are the
+    // evidence-bearing transition. Persist it before local hydration or
+    // Telegram work so either of those failures leaves a confirmed intent for
+    // the next sweep.
+    let markedConfirmed = false;
+    if (typeof setPendingStateIfCurrent === "function") {
+      markedConfirmed =
+        setPendingStateIfCurrent.call(
+          this.gameDb,
+          pending.game_address,
+          ["prepared", "submitted", "unknown", "confirmed"],
+          "confirmed",
+          { now: Date.now(), clearSubmissionLease: true },
+        ) === true;
+    } else if (typeof setPendingState === "function") {
+      setPendingState.call(this.gameDb, pending.game_address, "confirmed", { now: Date.now() });
+      markedConfirmed = true;
+    }
+    if (!markedConfirmed) {
+      throw new Error(
+        "Confirmed game could not be durably marked confirmed; retaining the pending creation",
+      );
+    }
+
+    const setPendingChainTiming = (this.gameDb as any)?.setPendingGameCreationChainTiming;
+    if (typeof setPendingChainTiming === "function") {
+      setPendingChainTiming.call(
+        this.gameDb,
+        pending.game_address,
+        authoritativeCreatedAtMs,
+        authoritativeExpiresAtMs,
+        Date.now(),
+      );
+    }
+
+    const setGameChainTiming = (this.gameDb as any)?.setGameChainTiming;
+    if (typeof setGameChainTiming === "function") {
+      setGameChainTiming.call(
+        this.gameDb,
+        pending.game_address,
+        authoritativeCreatedAtMs,
+        authoritativeExpiresAtMs,
+      );
+    }
+
+    const hydratedGameData = await this.hydrateGameDataFromChain(pending.game_address, {
+      allowExpired: true,
+    });
+    const accountMaxPlayers = Number(gameAccount.maxTickets);
+    const accountMinPlayers = Number(gameAccount.minTickets);
+    const displayAmount = this.getDisplayAmountFromAccount(gameAccount, accountGameType);
+    const gameData: GameData = {
+      ...(hydratedGameData ?? {}),
+      game_address: pending.game_address,
+      creator_telegram_id: pending.creator_telegram_id,
+      amount: displayAmount > 0 ? displayAmount : pending.amount,
+      created_at: authoritativeCreatedAtMs,
+      status: hydratedGameData?.status ?? "active",
+      game_type: accountGameType || pending.game_type,
+      token_mint: accountTokenMint || pending.token_mint,
+      token_ticker: hydratedGameData?.token_ticker || pending.token_ticker,
+      max_players:
+        Number.isFinite(accountMaxPlayers) && accountMaxPlayers > 0
+          ? accountMaxPlayers
+          : pending.max_players,
+      min_players:
+        Number.isFinite(accountMinPlayers) && accountMinPlayers > 0
+          ? accountMinPlayers
+          : pending.min_players,
+      timeout_seconds: timeoutSeconds,
+      expires_at: authoritativeExpiresAtMs,
+    };
+
+    const expired = GameManager.isExpired(gameAccount);
+    if (expired) {
+      const cancellation = await this.handleExpiredGame(
+        new PublicKey(pending.game_address),
+        gameAccount,
+      );
+      if (cancellation && typeof cancellation === "object" && cancellation.cancelled) {
+        const completeGame = (this.gameDb as any)?.completeGame;
+        if (typeof completeGame === "function") {
+          completeGame.call(
+            this.gameDb,
+            pending.game_address,
+            "cancelled",
+            Date.now(),
+            Number(cancellation.amount) || undefined,
+          );
+        }
+        persistOriginChat();
+        const terminalGameData: GameData = {
+          ...gameData,
+          status: "completed",
+          winner_address: "cancelled",
+          total_amount: Number(cancellation.amount) || gameData.total_amount,
+        };
+        await this.deliverPendingGameCreation(ctx, pending, terminalGameData);
+        let markedDelivered = false;
+        if (typeof setPendingStateIfCurrent === "function") {
+          markedDelivered =
+            setPendingStateIfCurrent.call(
+              this.gameDb,
+              pending.game_address,
+              ["prepared", "submitted", "unknown", "confirmed", "delivered"],
+              "delivered",
+              { now: Date.now(), clearSubmissionLease: true },
+            ) === true;
+        } else if (typeof setPendingState === "function") {
+          setPendingState.call(this.gameDb, pending.game_address, "delivered", {
+            now: Date.now(),
+          });
+          markedDelivered = true;
+        }
+        if (markedDelivered && typeof clearPendingIfState === "function") {
+          clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+        } else if (markedDelivered && typeof clearPending === "function") {
+          clearPending.call(this.gameDb, pending.game_address);
+        }
+        if (!markedDelivered) {
+          throw new Error(
+            "Pending game creation state changed while finalizing expired-game delivery; keeping the current record",
+          );
+        }
+        return true;
+      }
+
+      // An expired account may still be waiting for the oracle, the expiry
+      // buffer, or participant cleanup. Do not publish an "Expired" card and
+      // clear the durable record while the on-chain account is still live;
+      // the next recovery sweep must get another chance to finish cleanup.
+      throw new Error("expired confirmed game still requires cleanup");
+    }
+
+    persistOriginChat();
+    await this.deliverPendingGameCreation(ctx, pending, gameData);
+
+    let markedDelivered = false;
+    if (typeof setPendingStateIfCurrent === "function") {
+      markedDelivered =
+        setPendingStateIfCurrent.call(
+          this.gameDb,
+          pending.game_address,
+          ["confirmed", "delivered"],
+          "delivered",
+          { now: Date.now(), clearSubmissionLease: true },
+        ) === true;
+    } else if (typeof setPendingState === "function") {
+      setPendingState.call(this.gameDb, pending.game_address, "delivered", { now: Date.now() });
+      markedDelivered = true;
+    }
+    if (markedDelivered && typeof clearPendingIfState === "function") {
+      clearPendingIfState.call(this.gameDb, pending.game_address, ["delivered"]);
+    } else if (markedDelivered && typeof clearPending === "function") {
+      clearPending.call(this.gameDb, pending.game_address);
+    }
+    if (!markedDelivered) {
+      throw new Error(
+        "Pending game creation state changed while finalizing delivery; keeping the current record",
+      );
+    }
     return true;
   }
 
