@@ -928,6 +928,9 @@ test("replacement survives restart and fences stale workers and concurrent repla
     signedTransactionBase64: "old-wire",
     now: 1000,
   });
+  db.saveCreationRecoveryCheckpoint("refresh", "old", "saved-progress");
+  db = new (GameDatabase as any)();
+  expect(db.getPendingGameCreation("refresh")?.recovery_checkpoint).toBe("saved-progress");
   const replacement = {
     signature: "new",
     blockhash: "new-hash",
@@ -947,6 +950,7 @@ test("replacement survives restart and fences stale workers and concurrent repla
     signed_transaction_base64: "new-wire",
     replacement_count: 1,
     creation_message_id: 99,
+    recovery_checkpoint: null,
   });
   expect(JSON.parse(db.getPendingGameCreation("refresh")!.replacement_history!)[0].signature).toBe(
     "old",
@@ -958,6 +962,8 @@ test("replacement survives restart and fences stale workers and concurrent repla
     acquired: true,
   });
   db.finishPendingGameCreationSubmission("refresh", "fresh", "unknown", { now: 2003 });
+  db.saveCreationRecoveryCheckpoint("refresh", "old", "stale-progress");
+  expect(db.getPendingGameCreation("refresh")?.recovery_checkpoint).toBeNull();
   expect(
     db.setPendingGameCreationStateIfCurrent("refresh", ["unknown"], "failed", {
       expectedSignature: "old",

@@ -1,4 +1,4 @@
-import { withCreationRebroadcast } from "./game-creation-recovery";
+import { withCreationRebroadcast, parseCreationProofCheckpoint } from "./game-creation-recovery";
 import { PublicKey, Keypair, Connection, SystemProgram, TransactionInstruction } from "#solana";
 import { randomUUID } from "node:crypto";
 import {
@@ -4041,6 +4041,19 @@ export class GameManager {
     }
   }
 
+  public hasPendingGameCreation(telegramId: bigint): boolean {
+    return this.gameDb.getPendingGameCreationForCreator(telegramId.toString()) != null;
+  }
+
+  public ownsPendingCreationMessage(
+    gameAddress: string,
+    chatId: number,
+    messageId: number,
+  ): boolean {
+    const pending = this.gameDb.getPendingGameCreation(gameAddress);
+    return pending?.chat_id === chatId && pending.creation_message_id === messageId;
+  }
+
   public async createGame(
     gameType: GameType,
     parsedAmount: Pick<
@@ -7246,12 +7259,23 @@ export class GameManager {
           pending.transaction_blockhash &&
           pending.signed_transaction_base64 &&
           typeof this.wallet.proveGameCreationAbsent === "function" &&
-          (await this.wallet.proveGameCreationAbsent({
-            signature: pending.transaction_signature,
-            blockhash: pending.transaction_blockhash,
-            lastValidBlockHeight: pending.last_valid_block_height!,
-            gameAddress: pending.game_address,
-          }))
+          (await this.wallet.proveGameCreationAbsent(
+            {
+              signature: pending.transaction_signature,
+              blockhash: pending.transaction_blockhash,
+              lastValidBlockHeight: pending.last_valid_block_height!,
+              gameAddress: pending.game_address,
+            },
+            {
+              checkpoint: parseCreationProofCheckpoint(pending.recovery_checkpoint),
+              save: (checkpoint) =>
+                this.gameDb.saveCreationRecoveryCheckpoint(
+                  pending.game_address,
+                  pending.transaction_signature,
+                  JSON.stringify(checkpoint),
+                ),
+            },
+          ))
         ) {
           if ((pending.replacement_count ?? 0) >= 1 || Date.now() > pending.expires_at) {
             if (clearAsFailed("Game creation expired without landing")) {

@@ -1,7 +1,14 @@
 import {
+  backgroundRpc,
+  foregroundRpc,
+  noteRpcRateLimit,
+  RpcRetryLaterError,
+} from "./rpc-request-budget";
+import {
   proveExpiredCreationAbsent,
   type ExpiredCreation,
   type RecoveryRpc,
+  type CreationProofProgress,
 } from "./game-creation-recovery";
 import { mnemonicToSeedSync } from "bip39";
 import bs58 from "bs58";
@@ -76,6 +83,7 @@ import { TokenManager } from "./token-manager";
 import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
+  isRetryableRpcError,
   parseRpcEndpointList,
   type ActiveEndpointChange,
 } from "./rpc-endpoints";
@@ -2657,25 +2665,45 @@ export class WalletManager {
     return fallback ? [...endpoints, fallback] : endpoints;
   }
 
-  private recoveryRpc(endpoint: string, signal?: AbortSignal): RecoveryRpc {
+  private recoveryRpc(endpoint: string, signal?: AbortSignal, background = false): RecoveryRpc {
     return async (method, params) => {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-          : AbortSignal.timeout(8_000),
-      });
-      if (!response.ok) throw new Error(`Recovery RPC HTTP ${response.status}`);
-      const body = (await response.json()) as { result?: unknown; error?: unknown };
-      if (body.error || !("result" in body))
-        throw new Error("Recovery RPC returned no usable result");
-      return body.result;
+      const request = async () => {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000),
+        });
+        if (response.status === 429) {
+          throw new RpcRetryLaterError(
+            "Recovery RPC rate limited",
+            noteRpcRateLimit(endpoint, response.headers.get("retry-after")),
+          );
+        }
+        if (!response.ok)
+          throw new RpcRetryLaterError(`Recovery RPC HTTP ${response.status}`, Date.now() + 5_000);
+        const body = (await response.json()) as { result?: unknown; error?: unknown };
+        if (body.error && /429|rate.limit|too many requests/i.test(JSON.stringify(body.error)))
+          throw new RpcRetryLaterError(
+            "Recovery RPC rate limited",
+            noteRpcRateLimit(endpoint, null),
+          );
+        if (body.error || !("result" in body))
+          throw new Error("Recovery RPC returned no usable result");
+        return body.result;
+      };
+      return background
+        ? backgroundRpc(endpoint, signal ?? AbortSignal.timeout(45_000), request)
+        : foregroundRpc(request);
     };
   }
 
-  public async proveGameCreationAbsent(input: ExpiredCreation): Promise<boolean> {
+  public async proveGameCreationAbsent(
+    input: ExpiredCreation,
+    progress?: CreationProofProgress,
+  ): Promise<boolean> {
     const endpoints = await this.gameRecoveryEndpointsWithFallback();
     const primary = endpoints[0];
     if (!primary) return false;
@@ -2688,10 +2716,24 @@ export class WalletManager {
     try {
       return await proveExpiredCreationAbsent(
         input,
-        this.recoveryRpc(primary, deadline),
-        this.recoveryRpc(witness, deadline),
+        this.recoveryRpc(primary, deadline, true),
+        this.recoveryRpc(witness, deadline, true),
+        progress ? { ...progress, maxBlocks: 20 } : undefined,
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof RpcRetryLaterError) throw error;
+      // Preserve checkpoints and retry transport/deadline failures promptly.
+      if (
+        deadline.aborted ||
+        isRetryableRpcError(error) ||
+        error instanceof TypeError ||
+        error instanceof SyntaxError
+      ) {
+        throw new RpcRetryLaterError(
+          "Recovery RPC interrupted; checkpoint retained",
+          Date.now() + 5_000,
+        );
+      }
       return false;
     }
   }

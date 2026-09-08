@@ -52,6 +52,7 @@ export interface PendingGameCreationRecord {
   is_private: number | null;
   transaction_blockhash: string | null;
   transaction_prepared_at?: number | null;
+  recovery_checkpoint?: string | null;
   last_valid_block_height: number | null;
   signed_transaction_base64?: string | null;
   reply_to_message_id?: number | null;
@@ -221,6 +222,7 @@ export class GameDatabase extends BaseDatabase {
       ["is_private", "INTEGER"],
       ["transaction_blockhash", "TEXT"],
       ["transaction_prepared_at", "INTEGER"],
+      ["recovery_checkpoint", "TEXT"],
       ["last_valid_block_height", "INTEGER"],
       ["signed_transaction_base64", "TEXT"],
       ["reply_to_message_id", "INTEGER"],
@@ -889,7 +891,7 @@ export class GameDatabase extends BaseDatabase {
       SET transaction_signature = ?, transaction_blockhash = ?, last_valid_block_height = ?,
           signed_transaction_base64 = ?, state = 'prepared', replacement_count = replacement_count + 1,
           replacement_history = ?, submission_lease_id = NULL, submission_lease_expires_at = NULL,
-          next_attempt_at = ?, updated_at = ?, last_error = NULL, transaction_prepared_at = ?, attempts = 0
+          next_attempt_at = ?, updated_at = ?, last_error = NULL, transaction_prepared_at = ?, attempts = 0, recovery_checkpoint = NULL
       WHERE game_address = ? AND transaction_signature = ? AND state IN ('submitted', 'unknown')
         AND replacement_count < 1 AND expires_at > ?
         AND (submission_lease_id IS NULL OR submission_lease_expires_at <= ?)`,
@@ -909,6 +911,18 @@ export class GameDatabase extends BaseDatabase {
         ],
         "replacing proven absent game creation",
       ).changes > 0
+    );
+  }
+
+  public saveCreationRecoveryCheckpoint(
+    gameAddress: string,
+    signature: string,
+    checkpoint: string,
+  ): void {
+    this.run(
+      "UPDATE pending_game_creations SET recovery_checkpoint = ? WHERE game_address = ? AND transaction_signature = ? AND state IN ('submitted', 'unknown')",
+      [checkpoint, gameAddress, signature],
+      "saving validated recovery progress",
     );
   }
 

@@ -210,3 +210,49 @@ test("retry timing follows the current transaction lifetime and keeps failed not
   );
   expect(getCreationRecoveryDelay({ ...old, state: "failed" }, 1_000_000)).toBe(3_000);
 });
+
+describe("Checkpointed absence scans", () => {
+  test("resumes after a batch and still inspects the remaining signatures", async () => {
+    const { input, rpc, blocks } = fixture();
+    let checkpoint: any;
+    const save = (value: any) => {
+      checkpoint = JSON.parse(JSON.stringify(value));
+    };
+    await expect(
+      proveExpiredCreationAbsent(input, rpc, rpc, { save, maxBlocks: 2 }),
+    ).rejects.toThrow("checkpointed");
+    expect(checkpoint.cursor.slot).toBe(12);
+    expect(checkpoint.checkedBlocks).toBe(2);
+    const resumeCheckpoint = checkpoint;
+    const visited: number[] = [];
+    const resumed: RecoveryRpc = async (method, params) => {
+      if (method === "getBlock") visited.push(params[0] as number);
+      return rpc(method, params);
+    };
+    expect(await proveExpiredCreationAbsent(input, resumed, rpc, { checkpoint, save })).toBe(true);
+    expect(visited).not.toContain(13);
+    checkpoint = resumeCheckpoint;
+    blocks.get(11).signatures.push(input.signature);
+    expect(await proveExpiredCreationAbsent(input, rpc, rpc, { checkpoint, save })).toBe(false);
+  });
+  test("revalidates the anchor and discards checkpoints for other transactions", async () => {
+    const { input, rpc, blocks } = fixture();
+    let checkpoint: any;
+    const save = (value: any) => {
+      checkpoint = value;
+    };
+    await expect(
+      proveExpiredCreationAbsent(input, rpc, rpc, { save, maxBlocks: 2 }),
+    ).rejects.toThrow("checkpointed");
+    blocks.get(14).blockhash = "changed";
+    expect(await proveExpiredCreationAbsent(input, rpc, rpc, { checkpoint, save })).toBe(false);
+    blocks.get(14).blockhash = "hash14";
+    blocks.get(13).signatures.push("replacement");
+    expect(
+      await proveExpiredCreationAbsent({ ...input, signature: "replacement" }, rpc, rpc, {
+        checkpoint,
+        save,
+      }),
+    ).toBe(false);
+  });
+});

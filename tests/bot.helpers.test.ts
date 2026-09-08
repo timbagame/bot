@@ -800,6 +800,57 @@ describe("createGameViaCommand helper", () => {
     };
   };
 
+  for (const ownsMessage of [true, false])
+    test(`only durable owners retain creation placeholders: ${ownsMessage}`, async () => {
+      const ctx = makeCtx();
+      const deleted: number[] = [];
+      ctx.api.deleteMessage = async (...args: any[]) => {
+        deleted.push(args[1]);
+        return { ok: true };
+      };
+      const deps = makeDeps({
+        gameManager: {
+          createGame: async () => ({
+            success: false,
+            gameAddress: "old-game",
+            confirmedSignature: "signature",
+          }),
+          ownsPendingCreationMessage: () => ownsMessage,
+        } as any,
+      });
+      await botModule.__test_createGameViaCommand(
+        ctx as any,
+        ["/cf", "5"],
+        1n,
+        coinflipOptions,
+        deps,
+      );
+      expect(ctx.__progressCalls).toHaveLength(1);
+      expect(deleted).toEqual(ownsMessage ? [] : [100]);
+    });
+
+  test("an existing pending creation skips RPC reads and new placeholders", async () => {
+    const ctx = makeCtx();
+    let parsed = false;
+    const deps = makeDeps({
+      parseAmount: async () => {
+        parsed = true;
+        throw new Error("must not parse");
+      },
+      gameManager: { hasPendingGameCreation: () => true } as any,
+    });
+    await botModule.__test_createGameViaCommand(
+      ctx as any,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps,
+    );
+    expect(parsed).toBe(false);
+    expect(ctx.__progressCalls).toHaveLength(0);
+    expect(ctx.__calls).toHaveLength(0);
+  });
+
   test("returns usage guidance when amount parsing fails", async () => {
     const ctx: any = makeCtx();
     const deps = makeDeps({

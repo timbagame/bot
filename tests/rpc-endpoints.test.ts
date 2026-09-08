@@ -150,3 +150,58 @@ describe("RpcEndpointManager", () => {
     expect(manager.getActiveEndpoint()).toBe("https://rpc-secondary");
   });
 });
+
+describe("Foreground read recovery", () => {
+  test("retries a wrapped socket closure on a single provider", async () => {
+    let calls = 0;
+    const manager = new RpcEndpointManager(["https://private.test"], {
+      connectionFactory: () =>
+        ({
+          getSlot: async () => {
+            if (++calls === 1)
+              throw new Error("account read failed", {
+                cause: new TypeError("The socket connection was closed unexpectedly"),
+              });
+            return 42n;
+          },
+        }) as unknown as Connection,
+    });
+    expect(await manager.getConnection().getSlot()).toBe(42n);
+    expect(calls).toBe(2);
+  });
+  for (const sameCluster of [true, false])
+    test(`independent fallback requires matching genesis: ${sameCluster}`, async () => {
+      let fallbackReads = 0;
+      const manager = new RpcEndpointManager(["https://private.test"], {
+        connectionFactory: (endpoint) =>
+          ({
+            getGenesisHash: async () =>
+              endpoint === DEFAULT_MAINNET_ENDPOINT && !sameCluster ? "other" : "chain",
+            getSlot: async () => {
+              if (endpoint !== DEFAULT_MAINNET_ENDPOINT)
+                throw new Error("socket connection was closed");
+              fallbackReads++;
+              return 42n;
+            },
+          }) as unknown as Connection,
+      });
+      if (sameCluster) expect(await manager.getConnection().getSlot()).toBe(42n);
+      else await expect(manager.getConnection().getSlot()).rejects.toThrow("socket");
+      expect(fallbackReads).toBe(sameCluster ? 1 : 0);
+    });
+  test("a hung read cannot consume an unlimited deadline or start more attempts", async () => {
+    let calls = 0;
+    const manager = new RpcEndpointManager(["https://one.test", "https://two.test"], {
+      readTimeoutMs: 25,
+      connectionFactory: () =>
+        ({
+          getSlot: () => {
+            calls++;
+            return new Promise(() => {});
+          },
+        }) as unknown as Connection,
+    });
+    await expect(manager.getConnection().getSlot()).rejects.toThrow("timed out");
+    expect(calls).toBe(1);
+  });
+});
