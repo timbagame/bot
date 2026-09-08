@@ -829,7 +829,7 @@ describe("createGameViaCommand helper", () => {
       expect(deleted).toEqual(ownsMessage ? [] : [100]);
     });
 
-  test("an existing pending creation skips RPC reads and new placeholders", async () => {
+  test("a duplicate creation request skips RPC reads and new placeholders", async () => {
     const ctx = makeCtx();
     let parsed = false;
     const deps = makeDeps({
@@ -837,7 +837,7 @@ describe("createGameViaCommand helper", () => {
         parsed = true;
         throw new Error("must not parse");
       },
-      gameManager: { hasPendingGameCreation: () => true } as any,
+      gameManager: { hasGameCreationRequest: () => true } as any,
     });
     await botModule.__test_createGameViaCommand(
       ctx as any,

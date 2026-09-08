@@ -1,5 +1,3 @@
-import { RpcRetryLaterError } from "./utils/rpc-request-budget";
-import { getCreationRecoveryDelay } from "./utils/game-creation-recovery";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
@@ -2969,6 +2967,7 @@ const fetchTokenPriceUSD = async ({ tokenMint }: { tokenMint: string }): Promise
 };
 
 const gameSetupModule = createGameSetupModule({
+  hasGameCreationRequest: (...args) => gameManager?.hasGameCreationRequest?.(...args) ?? false,
   wallet,
   getTokenManager: () => tokenManager,
   getDefaultTokenMetadata,
@@ -3014,7 +3013,7 @@ const gameCommandsModule = createGameCommandsModule({
     recoverPendingGameCreationByAddress: (...args) =>
       gameManager?.recoverPendingGameCreationByAddress?.(...args) ?? Promise.resolve(false),
     clearPendingGameCreation: (gameAddress) => gameManager?.clearPendingGameCreation?.(gameAddress),
-    hasPendingGameCreation: (telegramId) => gameManager.hasPendingGameCreation(telegramId),
+    hasGameCreationRequest: (...args) => gameManager?.hasGameCreationRequest?.(...args) ?? false,
     ownsPendingCreationMessage: (gameAddress, chatId, messageId) =>
       gameManager.ownsPendingCreationMessage(gameAddress, chatId, messageId),
   },
@@ -3341,24 +3340,10 @@ const recoverPendingGameCreations = async (): Promise<void> => {
         pending.slice(offset, offset + 4).map(async (record) => {
           try {
             const ctx = createApiContext(record.chat_id, bot.api);
-            await gameManager.recoverPendingGameCreation(ctx, record);
-            console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
+            const recovered = await gameManager.recoverPendingGameCreation(ctx, record);
+            if (recovered) console.log(`♻️ Recovered confirmed game setup ${record.game_address}`);
           } catch (error) {
-            const current = gameDb.getPendingGameCreation(record.game_address);
-            if (!current) return;
-            const now = Date.now();
-            const delayMs =
-              error instanceof RpcRetryLaterError
-                ? Math.max(3_000, error.retryAt - now)
-                : getCreationRecoveryDelay(current, now);
             const message = error instanceof Error ? error.message : String(error);
-            gameDb.recordPendingGameCreationAttempt(
-              record.game_address,
-              message,
-              now + delayMs,
-              now,
-              current.transaction_signature,
-            );
             console.warn(`Pending game setup will be retried for ${record.game_address}:`, message);
           }
         }),
@@ -6371,6 +6356,7 @@ if (process.env.NODE_ENV !== "test") {
       // Reload game message mappings from database
       await gameManager.reloadGameMessages();
       console.log(`Reloaded game message mappings from database`);
+      gameDb.resumeGameCreationRecovery();
       void recoverPendingGameCreations();
       setInterval(recoverPendingGameCreations, 3_000);
 

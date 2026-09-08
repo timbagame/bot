@@ -61,7 +61,7 @@ type CreateGameViaCommandDeps = {
       ...args: Parameters<GameManager["recoverPendingGameCreationByAddress"]>
     ) => ReturnType<GameManager["recoverPendingGameCreationByAddress"]>;
     clearPendingGameCreation?: (gameAddress: string) => void;
-    hasPendingGameCreation?: (telegramId: bigint) => boolean;
+    hasGameCreationRequest?: (telegramId: bigint, chatId?: number, messageId?: number) => boolean;
     ownsPendingCreationMessage?: (
       gameAddress: string,
       chatId: number,
@@ -178,9 +178,15 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     };
 
     try {
-      // The durable sweep already owns this request. Repeated commands must
-      // not perform fresh RPC reads, bypass its cooldown, or create a spinner.
-      if (createDeps.gameManager.hasPendingGameCreation?.(telegramId)) return;
+      // Deduplicate this Telegram request; a new message is a new game request.
+      if (
+        createDeps.gameManager.hasGameCreationRequest?.(
+          telegramId,
+          ctx.chat?.id,
+          ctx.message?.message_id,
+        )
+      )
+        return;
       const parsed = await createDeps.parseAmount(args, 1, ctx.chat?.id);
       if (!parsed.success) {
         await ctx.reply(formatParseAmountError(parsed, options.usageMessage), {

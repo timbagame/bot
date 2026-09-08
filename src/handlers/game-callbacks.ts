@@ -1354,6 +1354,17 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         },
         async (ctx, { tokenContext, clearSession, creatorId }) => {
           const gameManager = getGameManager();
+          if (
+            gameManager.hasGameCreationRequest?.(
+              getTelegramId(ctx),
+              ctx.chat?.id,
+              ctx.callbackQuery?.message?.reply_to_message?.message_id ??
+                ctx.callbackQuery?.message?.message_id,
+            )
+          ) {
+            await safeAnswerCallbackQuery(ctx);
+            return;
+          }
           let createdGameAddress: string | undefined;
           try {
             const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
@@ -1456,7 +1467,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                 callerTelegramId,
                 {
                   isPrivate,
-                  replyToMessageId: ctx.callbackQuery?.message?.reply_to_message?.message_id,
+                  replyToMessageId:
+                    ctx.callbackQuery?.message?.reply_to_message?.message_id ??
+                    ctx.callbackQuery?.message?.message_id,
+                  creationMessageId: messageId,
                 },
                 ctx.chat?.id,
                 ctx.callbackQuery?.message?.date != null

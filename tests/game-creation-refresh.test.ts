@@ -1,3 +1,4 @@
+import { RpcRetryLaterError } from "../src/utils/rpc-request-budget";
 import { getCreationRecoveryDelay } from "../src/utils/game-creation-recovery";
 import { expect, test } from "bun:test";
 import { Keypair, PublicKey, TransactionInstruction } from "#solana";
@@ -147,7 +148,9 @@ test("definitive failure placeholder is retried after Telegram failure", async (
       row,
     ),
   ).rejects.toThrow("Telegram unavailable");
-  expect(f.db.getPendingGameCreations().some((p) => p.game_address === f.game)).toBe(true);
+  expect(
+    f.db.getPendingGameCreations(Date.now() + 900_000).some((p) => p.game_address === f.game),
+  ).toBe(true);
   const edits: unknown[][] = [];
   await f.manager.recoverPendingGameCreation(
     {
@@ -244,7 +247,7 @@ test("a replacement of an old request resets durable retry timing and fences sta
   );
   const current = f.db.getPendingGameCreation(f.game)!;
   expect(current.replacement_count).toBe(1);
-  expect(current.attempts).toBe(0);
+  expect(current.attempts).toBe(1);
   expect(current.created_at).toBe(snapshot.created_at);
   expect(getCreationRecoveryDelay(current)).toBe(3_000);
   f.db.recordPendingGameCreationAttempt(
@@ -254,7 +257,7 @@ test("a replacement of an old request resets durable retry timing and fences sta
     Date.now(),
     snapshot.transaction_signature,
   );
-  expect(f.db.getPendingGameCreation(f.game)!.attempts).toBe(0);
+  expect(f.db.getPendingGameCreation(f.game)!.attempts).toBe(1);
   const reopened = new (GameDatabase as any)();
   expect(getCreationRecoveryDelay(reopened.getPendingGameCreation(f.game))).toBe(3_000);
 });
@@ -286,4 +289,106 @@ test("a cancelled foreground rebroadcast cannot admit a send after a slow height
   await expect(attempt).rejects.toThrow();
   expect(f.sends()).toBe(0);
   expect(f.db.getPendingGameCreation(f.game)!.state).toBe("unknown");
+});
+
+test("interactive recovery persists continuation and startup preserves cooldown", async () => {
+  const f = await fixture();
+  f.db.recordPendingGameCreationAttempt(f.game, "old backoff", Date.now() + 900000);
+  const retryAt = Date.now() + 30000;
+  f.wallet.proveGameCreationAbsent = async () => {
+    throw new RpcRetryLaterError("checkpointed", retryAt);
+  };
+  await expect(
+    f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game),
+  ).rejects.toThrow("checkpointed");
+  expect(f.db.getPendingGameCreation(f.game)?.next_attempt_at).toBe(retryAt);
+  const reopened = new (GameDatabase as any)() as GameDatabase;
+  reopened.resumeGameCreationRecovery();
+  expect(reopened.getPendingGameCreation(f.game)?.next_attempt_at).toBe(retryAt);
+  expect(await f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game)).toBe(
+    false,
+  );
+});
+
+test("startup advances legacy backoff and recovery eventually pauses without discarding evidence", async () => {
+  const f = await fixture();
+  const now = Date.now();
+  f.db.recordPendingGameCreationAttempt(f.game, "old backoff", now + 900000);
+  f.db.resumeGameCreationRecovery(now);
+  expect(f.db.getPendingGameCreation(f.game)?.next_attempt_at).toBe(now);
+  (f.db as any).run(
+    "UPDATE pending_game_creations SET recovery_started_at = ? WHERE game_address = ?",
+    [now - 900001, f.game],
+  );
+  await expect(
+    f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game),
+  ).rejects.toThrow("window ended");
+  const row = f.db.getPendingGameCreation(f.game)!;
+  expect(row.recovery_paused_at).toBeGreaterThan(0);
+  expect(row.state).toBe("unknown");
+  expect(row.signed_transaction_base64).toBeTruthy();
+  f.db.resumeGameCreationRecovery();
+  expect(
+    f.db.getPendingGameCreations(Date.now() + 3600000).some((p) => p.game_address === f.game),
+  ).toBe(false);
+  expect(await f.manager.recoverPendingGameCreationByAddress({ api: {} } as any, f.game)).toBe(
+    false,
+  );
+});
+
+test("request receipts survive clearing and do not block other messages or chats", async () => {
+  const f = await fixture();
+  (f.db as any).run("INSERT INTO game_creation_requests VALUES (?, ?, ?, ?)", [
+    "1",
+    42,
+    100,
+    f.game,
+  ]);
+  expect(f.manager.hasGameCreationRequest(1n, 42, 100)).toBe(true);
+  expect(f.manager.hasGameCreationRequest(1n, 42, 101)).toBe(false);
+  expect(f.manager.hasGameCreationRequest(1n, 43, 100)).toBe(false);
+  f.db.clearPendingGameCreation(f.game);
+  const reopened = new (GameDatabase as any)() as GameDatabase;
+  expect(reopened.hasGameCreationRequest("1", 42, 100)).toBe(true);
+});
+
+test("an unrelated pending game does not block a new creation request", async () => {
+  const f = await fixture();
+  const originalCount = f.db.countActiveGamesByCreator;
+  f.db.countActiveGamesByCreator = () => {
+    throw new Error("reached normal creation checks");
+  };
+  try {
+    await expect(
+      f.manager.createGame(
+        "coinflip",
+        { amount: 1, tokenMint: PublicKey.default.toBase58(), tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        3600,
+        1n,
+        { replyToMessageId: 101 },
+        42,
+      ),
+    ).rejects.toThrow("reached normal creation checks");
+    (f.db as any).run("INSERT INTO game_creation_requests VALUES (?, ?, ?, ?)", [
+      "1",
+      42,
+      101,
+      f.game,
+    ]);
+    const result = await f.manager.createGame(
+      "coinflip",
+      { amount: 1, tokenMint: PublicKey.default.toBase58(), tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      3600,
+      1n,
+      { replyToMessageId: 101 },
+      42,
+    );
+    expect(result.error).toContain("already been submitted");
+  } finally {
+    f.db.countActiveGamesByCreator = originalCount;
+  }
 });

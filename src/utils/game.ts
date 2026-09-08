@@ -1,4 +1,9 @@
-import { withCreationRebroadcast, parseCreationProofCheckpoint } from "./game-creation-recovery";
+import { RpcRetryLaterError } from "./rpc-request-budget";
+import {
+  getCreationRecoveryDelay,
+  withCreationRebroadcast,
+  parseCreationProofCheckpoint,
+} from "./game-creation-recovery";
 import { PublicKey, Keypair, Connection, SystemProgram, TransactionInstruction } from "#solana";
 import { randomUUID } from "node:crypto";
 import {
@@ -516,6 +521,7 @@ export class GameManager {
   };
   private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
+  private activeCreationRequestKeys = new Set<string>();
   private inFlightGameCreations = new Map<string, number>();
   private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
@@ -4041,8 +4047,12 @@ export class GameManager {
     }
   }
 
-  public hasPendingGameCreation(telegramId: bigint): boolean {
-    return this.gameDb.getPendingGameCreationForCreator(telegramId.toString()) != null;
+  public hasGameCreationRequest(telegramId: bigint, chatId?: number, messageId?: number): boolean {
+    return (
+      chatId != null &&
+      messageId != null &&
+      (this.gameDb.hasGameCreationRequest?.(telegramId.toString(), chatId, messageId) ?? false)
+    );
   }
 
   public ownsPendingCreationMessage(
@@ -4085,26 +4095,14 @@ export class GameManager {
 
     const telegramIdStr = telegramId.toString();
     const isPrivate = options?.isPrivate ?? true;
-    const getPendingForCreator = (this.gameDb as any)?.getPendingGameCreationForCreator;
-    if (typeof getPendingForCreator === "function") {
-      let pending: PendingGameCreationRecord | null;
-      try {
-        pending = getPendingForCreator.call(this.gameDb, telegramIdStr);
-      } catch (error) {
-        console.error(`Failed to inspect pending game creation for ${telegramIdStr}:`, error);
-        return {
-          success: false,
-          error:
-            "❌ Could not verify whether an earlier game creation is still pending. Please try again.",
-        };
-      }
-      if (pending) {
-        return {
-          success: false,
-          gameAddress: pending.game_address,
-          confirmedSignature: pending.transaction_signature,
-        };
-      }
+    const requestKey =
+      chatId != null && options?.replyToMessageId != null
+        ? `${telegramIdStr}:${chatId}:${options.replyToMessageId}`
+        : undefined;
+    if (requestKey && this.activeCreationRequestKeys.has(requestKey))
+      return { success: false, error: "This game request is already being handled." };
+    if (this.hasGameCreationRequest(telegramId, chatId, options?.replyToMessageId)) {
+      return { success: false, error: "This game request has already been submitted." };
     }
     const inFlightCount = this.getInFlightCreations(telegramIdStr);
     const activeGameCount = this.gameDb.countActiveGamesByCreator(telegramIdStr);
@@ -4147,6 +4145,7 @@ export class GameManager {
       };
     }
 
+    if (requestKey) this.activeCreationRequestKeys.add(requestKey);
     this.trackPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
     this.incrementInFlightCreations(telegramIdStr);
 
@@ -4844,6 +4843,7 @@ export class GameManager {
         error: userFriendlyError,
       };
     } finally {
+      if (requestKey) this.activeCreationRequestKeys.delete(requestKey);
       this.decrementInFlightCreations(telegramIdStr);
       this.clearPendingCreationRequest(telegramIdStr, pendingRequestTimestamp);
     }
@@ -7027,12 +7027,35 @@ export class GameManager {
     ctx: Context,
     pending: PendingGameCreationRecord,
   ): Promise<boolean> {
+    const latest = this.gameDb.getPendingGameCreation?.(pending.game_address) ?? pending;
+    if (latest.recovery_paused_at != null || (latest.recovery_retry_not_before ?? 0) > Date.now())
+      return false;
+    pending = latest;
     try {
+      if (
+        pending.recovery_started_at != null &&
+        Date.now() - pending.recovery_started_at >= 900_000
+      )
+        throw new Error("Automatic recovery window ended; evidence retained for reconciliation");
       return await this.recoverPendingGameCreationAttempt(ctx, pending);
     } catch (error) {
       // Resolve the chain outcome first. A definitive failure must retain its
       // placeholder for the durable failure edit, even on an old request.
       const current = this.gameDb.getPendingGameCreation?.(pending.game_address);
+      if (current) {
+        const now = Date.now();
+        const notBefore =
+          error instanceof RpcRetryLaterError ? Math.max(now + 3_000, error.retryAt) : null;
+        this.gameDb.scheduleGameCreationRecovery?.(
+          current.game_address,
+          current.transaction_signature,
+          error instanceof Error ? error.message : String(error),
+          notBefore ?? now + getCreationRecoveryDelay(current, now),
+          notBefore,
+          now,
+        );
+      }
+
       if (
         current &&
         current.state !== "failed" &&
