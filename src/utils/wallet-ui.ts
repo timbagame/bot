@@ -184,6 +184,8 @@ export async function buildWalletTokenLines({
  * TICKER: amount [UNIT] ($usdValue)
  */
 export type WalletCaptionOptions = {
+  networkName?: string;
+  explorerUrl?: string | null;
   page?: number;
   pageSize?: number;
 };
@@ -196,10 +198,13 @@ export function buildWalletCaption(
   const maxCaptionLength = 1_024;
   const lines: string[] = [];
 
-  const explorerUrl = NetworkDetector.buildSolscanAccountUrl(walletAddress);
+  const explorerUrl =
+    options.explorerUrl !== undefined
+      ? options.explorerUrl
+      : NetworkDetector.buildSolscanAccountUrl(walletAddress);
   const explorerIcon = explorerUrl ? `<a href="${explorerUrl}">🅴</a>` : "🅴";
 
-  lines.push(`Solana Address · ${explorerIcon}`);
+  lines.push(`${escapeHtml(options.networkName ?? "Solana")} Address · ${explorerIcon}`);
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");

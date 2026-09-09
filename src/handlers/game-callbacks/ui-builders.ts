@@ -57,6 +57,7 @@ export const buildGameConfirmationMessage = ({
   tokenDecimals,
   advanced,
   usdApproximation,
+  exactAmount,
 }: {
   gameType: GameType;
   amount: string;
@@ -65,6 +66,7 @@ export const buildGameConfirmationMessage = ({
   tokenDecimals: number;
   advanced: AdvancedOptionState;
   usdApproximation?: string | null;
+  exactAmount?: boolean;
 }): string => {
   const parsedAmount = Number(amount);
   const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
@@ -85,7 +87,7 @@ export const buildGameConfirmationMessage = ({
   return [
     `<b>Confirm ${formattedGameType}</b>`,
     "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>${usdSegment}`,
+    `Amount: <b>${exactAmount ? amount : amountFormatted} ${tokenTicker}</b>${usdSegment}`,
     `Players: <b>${players}</b>`,
     "",
     `Timeout: <b>${timeoutLabel}</b>`,

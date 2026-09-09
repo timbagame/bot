@@ -1,3 +1,6 @@
+import { resolveChatDefaultPlayers } from "./utils/chat-settings";
+import { resolveAdvancedOptions } from "./utils/game-settings";
+import { registerEvmBot } from "./evm/bot";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
@@ -3136,6 +3139,7 @@ const chatDefaultsModule = createChatDefaultsModule({
   isUserGroupAdmin,
   replyToMessage,
   buyAlerts: buyAlertService,
+  network: (chatId) => evmRuntime?.network(chatId),
 });
 
 registerGameCallbackHandlers();
@@ -3492,7 +3496,6 @@ const createBalanceDeps = (): BalanceDeps => ({
 const caseInsensitiveCommands = new CommandGroup<Context>({
   ignoreCase: true,
 });
-bot.use(caseInsensitiveCommands);
 
 const botMenuCommandNames = new Set<string>();
 
@@ -3512,13 +3515,51 @@ const registerCaseInsensitiveCommand =
     }
   };
 
-const getBotMenuCommands = () =>
-  caseInsensitiveCommands
+const getBotMenuCommands = () => [
+  ...caseInsensitiveCommands
     .toElementals("default")
     .filter(({ command }) => botMenuCommandNames.has(command))
-    .map(({ command, description }) => ({ command, description }));
+    .map(({ command, description }) => ({ command, description })),
+];
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
+
+const evmRuntime = process.env["EVM_BOT_CONFIG_FILE"]
+  ? registerEvmBot(
+      bot,
+      process.env["EVM_BOT_CONFIG_FILE"],
+      (chatId, type) => {
+        const settings = chatDb.getChatGameSettings(chatId);
+        const maxPlayers = resolveChatDefaultPlayers(
+          settings,
+          type,
+          type === "coinflip" ? 2 : 10,
+          100,
+        );
+        const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
+        return {
+          maxPlayers,
+          minPlayers: options.minPlayers,
+          timeout: options.timeoutSeconds,
+          isPrivate: options.isPrivate,
+        };
+      },
+      async (token, chatId) => {
+        const resolved = await tokenManager.resolveGameTokenContext(chatId, token, "game");
+        return resolved.success
+          ? { address: resolved.tokenMint, symbol: resolved.tokenTicker }
+          : null;
+      },
+      async (ctx) => {
+        const command = ctx.message?.text?.split(/\s+/)[0]?.toLowerCase().split("@")[0];
+        if (command === "/cf" || command === "/coinflip")
+          await handleCoinflipCommand(ctx, createCoinflipDeps());
+        else await handleGiveawayCommand(ctx);
+      },
+    )
+  : undefined;
+
+bot.use(caseInsensitiveCommands);
 
 registerCaseInsensitiveCommand(
   ["start", "balance"],
@@ -6595,6 +6636,7 @@ if (process.env.NODE_ENV !== "test") {
         try {
           rpcEndpointListenerCleanup?.();
           rpcEndpointListenerCleanup = null;
+          evmRuntime?.stop();
           financeBackfillWorker.stop();
           buyAlertService.stop();
           await unregisterProgramEventListeners();

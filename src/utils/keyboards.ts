@@ -26,15 +26,21 @@ import type { GameType } from "../types";
 
 export type WalletPagination = { page: number; pageCount: number };
 
-export const createWalletKeyboard = (pagination?: WalletPagination): InlineKeyboard => {
-  const keyboard = new InlineKeyboard()
-    .text("🔄 Swap", "cmd_swap")
-    .text("💸 Withdraw", "cmd_withdraw")
-    .row()
-    .text("📊 Positions", "wallet_positions")
-    .text("🔁 Refresh", "wallet_refresh")
-    .row()
-    .text("⚙️ Settings", "wallet_settings");
+export const createWalletKeyboard = (
+  pagination?: WalletPagination,
+  actions = {
+    swap: "cmd_swap",
+    withdraw: "cmd_withdraw",
+    positions: "wallet_positions",
+    refresh: "wallet_refresh",
+    settings: "wallet_settings",
+  },
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  if (actions.swap) keyboard.text("🔄 Swap", actions.swap);
+  keyboard.text("💸 Withdraw", actions.withdraw).row();
+  if (actions.positions) keyboard.text("📊 Positions", actions.positions);
+  keyboard.text("🔁 Refresh", actions.refresh).row().text("⚙️ Settings", actions.settings);
 
   if (pagination && pagination.pageCount > 1) {
     keyboard.row();
@@ -247,6 +253,20 @@ export const getSuggestedStakeAmounts = (
   return unique.length > 0 ? unique : [{ amount: min }];
 };
 
+/** Shared amount menu layout; adapters supply exact labels and callback identities. */
+export const createAmountMenuKeyboard = (
+  amounts: readonly { text: string; callback: string }[],
+  custom: string,
+  cancel: string,
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  amounts.forEach(({ text, callback }, index) => {
+    keyboard.text(text, callback);
+    if (index % 2 === 1 && index < amounts.length - 1) keyboard.row();
+  });
+  return keyboard.row().text("✏️ Custom Amount", custom).row().text("❌ Cancel", cancel).row();
+};
+
 export const createAmountSelectionKeyboard = (
   gameType: string,
   userBalance?: number,
@@ -276,8 +296,6 @@ export const createAmountSelectionKeyboard = (
       : undefined;
 
   const amounts = getSuggestedStakeAmounts(contractMinimum, balance, tokenPriceUSD);
-
-  const keyboard = new InlineKeyboard();
 
   const minUsdText =
     tokenPriceUSD !== undefined
@@ -340,28 +358,17 @@ export const createAmountSelectionKeyboard = (
     });
   });
 
-  amountButtons.forEach(({ text, callback }, index) => {
-    keyboard.text(text, callback);
-    const isEndOfPair = index % 2 === 1;
-    const isLast = index === amountButtons.length - 1;
-    if (isEndOfPair && !isLast) {
-      keyboard.row();
-    }
-  });
-
-  keyboard.row();
-
-  keyboard
-    .text("✏️ Custom Amount", guard(withCreatorSuffix(`custom_amount_${gameType}`, creatorId)))
-    .row()
-    .text("❌ Cancel", guard(withCreatorSuffix("cancel_game_setup", creatorId)))
-    .row();
+  const result = createAmountMenuKeyboard(
+    amountButtons,
+    guard(withCreatorSuffix(`custom_amount_${gameType}`, creatorId)),
+    guard(withCreatorSuffix("cancel_game_setup", creatorId)),
+  );
 
   if (hasOverflow()) {
     return createOverflowKeyboard();
   }
 
-  return keyboard;
+  return result;
 };
 
 const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {

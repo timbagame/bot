@@ -1,0 +1,12 @@
+{
+  "chainId": 31337,
+  "address": "0x1111111111111111111111111111111111111111",
+  "version": "0.1.0",
+  "name": "Anvil",
+  "rpcUrls": ["http://127.0.0.1:8545"],
+  "oracleUrl": "http://evm-oracle:3002",
+  "oracleTokenFile": "/run/secrets/evm_api_token",
+  "database": "/data/evm-bot.sqlite",
+  "webUrl": "https://timba.cc",
+  "confirmations": 2
+}
