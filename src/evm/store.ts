@@ -26,6 +26,8 @@ export class EvmBotStore {
     this.db = new Database(path, { create: true, strict: true });
     if (path !== ":memory:") chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+      CREATE TABLE IF NOT EXISTS network_tokens (chat TEXT PRIMARY KEY, token TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS network_preferences (chat TEXT PRIMARY KEY, chain TEXT NOT NULL CHECK(chain IN ('solana','evm')));
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY,user TEXT NOT NULL,chat INTEGER NOT NULL,message INTEGER NOT NULL,kind TEXT NOT NULL,body TEXT NOT NULL,phase TEXT NOT NULL,raw TEXT,hash TEXT,notified INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS invitations (game TEXT NOT NULL,user TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(game,user));
@@ -37,6 +39,34 @@ export class EvmBotStore {
       this.db.close();
       throw new Error("EVM bot database deployment mismatch");
     }
+  }
+  token(chat: string): string | undefined {
+    return this.db
+      .query<{ token: string }, [string]>("SELECT token FROM network_tokens WHERE chat=?")
+      .get(chat)?.token;
+  }
+  setToken(chat: string, token: string) {
+    this.db
+      .query(
+        "INSERT INTO network_tokens VALUES (?,?) ON CONFLICT(chat) DO UPDATE SET token=excluded.token",
+      )
+      .run(chat, token);
+  }
+  network(chat: string): "solana" | "evm" {
+    return (
+      this.db
+        .query<{ chain: "solana" | "evm" }, [string]>(
+          "SELECT chain FROM network_preferences WHERE chat=?",
+        )
+        .get(chat)?.chain ?? "solana"
+    );
+  }
+  setNetwork(chat: string, chain: "solana" | "evm") {
+    this.db
+      .query(
+        "INSERT INTO network_preferences VALUES (?,?) ON CONFLICT(chat) DO UPDATE SET chain=excluded.chain",
+      )
+      .run(chat, chain);
   }
   action(id: string) {
     return this.db.query<EvmAction, [string]>("SELECT * FROM actions WHERE id=?").get(id);

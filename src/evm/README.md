@@ -8,11 +8,11 @@ configured network. Back up the mnemonic and the deployment-specific database.
 
 Commands:
 
-- `/evm` in private chat: EVM deposit address and configured token/ETH balances.
-- `/ecf AMOUNT [PLAYERS] [TOKEN] [private]`: coinflip (2–100 players).
-- `/egiveaway AMOUNT [PLAYERS] [TOKEN] [private]`: funded giveaway (1–100 players).
-- `/einvite GAME_ID TELEGRAM_ID`: creator-approved five-minute private invitation.
-- `/ewithdraw TOKEN AMOUNT ADDRESS`: private-chat withdrawal with explicit
+- `/balance` in private chat: EVM deposit address and configured token/ETH balances.
+- `/cf AMOUNT [TOKEN] [PLAYERS] [private]`: coinflip (2–100 players).
+- `/ga AMOUNT [TOKEN] [PLAYERS] [private]`: funded giveaway (1–100 players).
+- `/invite GAME_ID TELEGRAM_ID`: creator-approved five-minute private invitation.
+- `/withdraw ADDRESS AMOUNT TOKEN`: private-chat withdrawal with explicit
   confirmation. Use `ETH` for native currency.
 
 Amounts are token units, not dollars. Games expire after one hour. The token
@@ -25,3 +25,21 @@ creation and final message publication resume after restart. The database
 records the chain/proxy identity and refuses reuse for a different deployment.
 Only the affected wallet waits on its own pending transaction. There is no
 automatic fee bump or unsafe dismissal of submitted transactions.
+
+## Shared UX and adapters
+
+Select the network through `/settings` → Network (group admins only in groups).
+Existing command names route through the selected network. Default token selection
+is scoped to the EVM deployment; player counts, timeout and privacy reuse chat
+settings. `/evm`, `/ecf`, `/egiveaway`, `/einvite` and `/ewithdraw` remain legacy
+aliases, with `/ewithdraw TOKEN AMOUNT ADDRESS` preserving its original syntax.
+
+Wallet captions, wallet keyboards, game headers and game status text reuse the
+existing presenters. Unsupported swap/position actions are omitted. EVM stakes
+currently use token units; USD conversion needs an available price source.
+
+Protocol owns API validation, draft limits, authorization checks and action
+eligibility. Adapters own signing, allowance transactions and confirmation/recovery.
+The existing database identity and wallet derivation remain unchanged. Network
+and token preferences are additive tables; changing preferences does not rewrite
+pending actions or existing game callbacks.

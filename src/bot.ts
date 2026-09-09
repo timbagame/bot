@@ -1,3 +1,5 @@
+import { resolveChatDefaultPlayers } from "./utils/chat-settings";
+import { resolveAdvancedOptions } from "./utils/game-settings";
 import { registerEvmBot } from "./evm/bot";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
@@ -3137,6 +3139,7 @@ const chatDefaultsModule = createChatDefaultsModule({
   isUserGroupAdmin,
   replyToMessage,
   buyAlerts: buyAlertService,
+  network: (chatId) => evmRuntime?.network(chatId),
 });
 
 registerGameCallbackHandlers();
@@ -3518,19 +3521,27 @@ const getBotMenuCommands = () => [
     .toElementals("default")
     .filter(({ command }) => botMenuCommandNames.has(command))
     .map(({ command, description }) => ({ command, description })),
-  ...(process.env["EVM_BOT_CONFIG_FILE"]
-    ? [
-        { command: "evm", description: "Open your EVM wallet" },
-        { command: "ecf", description: "Create an EVM coinflip" },
-        { command: "egiveaway", description: "Create an EVM giveaway" },
-      ]
-    : []),
 ];
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
 
 const evmRuntime = process.env["EVM_BOT_CONFIG_FILE"]
-  ? registerEvmBot(bot, process.env["EVM_BOT_CONFIG_FILE"])
+  ? registerEvmBot(bot, process.env["EVM_BOT_CONFIG_FILE"], (chatId, type) => {
+      const settings = chatDb.getChatGameSettings(chatId);
+      const maxPlayers = resolveChatDefaultPlayers(
+        settings,
+        type,
+        type === "coinflip" ? 2 : 10,
+        100,
+      );
+      const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
+      return {
+        maxPlayers,
+        minPlayers: options.minPlayers,
+        timeout: options.timeoutSeconds,
+        isPrivate: options.isPrivate,
+      };
+    })
   : undefined;
 
 registerCaseInsensitiveCommand(

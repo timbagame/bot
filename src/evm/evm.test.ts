@@ -42,3 +42,67 @@ test("confirmed creations atomically produce a durable message and only lock the
   expect(store.unnotified()).toHaveLength(0);
   store.close();
 });
+
+test("network routing preserves canonical syntax, mentions and deep links", async () => {
+  const { routeNetworkCommand } = await import("./command-router");
+  expect(routeNetworkCommand("/CF@TimbaBot .5 TEST", "TimbaBot", "evm")).toEqual({
+    command: "ecf",
+    args: ".5 TEST",
+  });
+  expect(routeNetworkCommand("/cf .5 TEST", "TimbaBot", "solana")).toBeNull();
+  expect(routeNetworkCommand("/cf@AnotherBot .5", "TimbaBot", "evm")).toBeNull();
+  expect(routeNetworkCommand("/start buy_123", "TimbaBot", "evm")).toBeNull();
+  expect(routeNetworkCommand("/withdraw 0x123 .5 TEST", "TimbaBot", "evm")).toEqual({
+    command: "ewithdraw",
+    args: "TEST .5 0x123",
+  });
+});
+
+test("network preference changes do not mutate pending actions", () => {
+  const store = new EvmBotStore(":memory:", "test");
+  expect(store.network("-100")).toBe("solana");
+  const pending = {
+    id: "1",
+    user: "101",
+    chat: -100,
+    message: 1,
+    kind: "join" as const,
+    body: "{}",
+    phase: "transaction" as const,
+    raw: "0x12" as const,
+    hash: "0x34" as const,
+  };
+  store.add(pending);
+  store.setNetwork("-100", "evm");
+  expect(store.network("-100")).toBe("evm");
+  expect(store.network("-200")).toBe("solana");
+  store.setNetwork("-100", "solana");
+  expect(store.action("1")).toMatchObject(pending);
+  expect(store.network("-100")).toBe("solana");
+  store.close();
+});
+
+test("shared wallet presentation keeps the selected network and supported actions", async () => {
+  const { buildWalletCaption } = await import("../utils/wallet-ui");
+  const { createWalletKeyboard } = await import("../utils/keyboards");
+  const caption = buildWalletCaption(
+    "0x123",
+    [{ ticker: "TEST", amount: "0.000000000000000001" }],
+    { networkName: "Base", explorerUrl: null },
+  );
+  expect(caption).toContain("Base Address");
+  expect(caption).toContain("0.000000000000000001");
+  expect(caption).not.toContain("solscan");
+  const buttons = createWalletKeyboard(undefined, {
+    swap: "",
+    positions: "",
+    withdraw: "withdraw",
+    refresh: "refresh",
+    settings: "network",
+  }).inline_keyboard.flat();
+  expect(buttons.map((button) => button.text)).toEqual([
+    "💸 Withdraw",
+    "🔁 Refresh",
+    "⚙️ Settings",
+  ]);
+});

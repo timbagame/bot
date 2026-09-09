@@ -1,3 +1,4 @@
+import { transactionProgress } from "@timbagame/protocol/games";
 import {
   createPublicClient,
   createWalletClient,
@@ -6,7 +7,6 @@ import {
   http,
   erc20Abi,
   encodeFunctionData,
-  getAddress,
   keccak256,
   zeroHash,
   type Address,
@@ -15,7 +15,6 @@ import {
 import {
   creationTypedData,
   createGameTransaction,
-  gameIdFor,
   joinGameTransaction,
   refundPlayerTransaction,
   closeGameTransaction,
@@ -23,29 +22,15 @@ import {
   privateJoinTypedData,
   type CreateGameRequest,
 } from "@timbagame/protocol/evm/v0.1.0";
-import { z } from "zod";
+import {
+  evmMetadataSchema as metadataSchema,
+  checkCreationAuthorization,
+} from "@timbagame/protocol/evm";
 import { evmAccount } from "./wallet";
 import { EvmBotStore, json, type EvmAction } from "./store";
 import type { EvmBotConfig } from "./config";
 
-const addressSchema = z
-  .string()
-  .regex(/^0x[0-9a-fA-F]{40}$/)
-  .transform((v) => getAddress(v));
-const metadataSchema = z.object({
-  chainId: z.number(),
-  address: addressSchema,
-  version: z.literal("0.1.0"),
-  tokens: z.array(
-    z.object({
-      address: addressSchema,
-      symbol: z.string().regex(/^[A-Za-z0-9_-]{1,16}$/),
-      decimals: z.number().int().min(0).max(36),
-      minimumAmount: z.string().regex(/^[1-9][0-9]*$/),
-    }),
-  ),
-});
-export type EvmMetadata = z.output<typeof metadataSchema>;
+export type { EvmMetadata } from "@timbagame/protocol/evm";
 export interface ActionBody {
   game?: Hex;
   token?: Address;
@@ -53,6 +38,7 @@ export interface ActionBody {
   recipient?: Address;
   request?: CreateGameRequest;
   signature?: Hex;
+  timeout?: number;
   minPlayers?: number;
   maxPlayers?: number;
   gameType?: 0 | 1;
@@ -153,12 +139,17 @@ export class EvmBotService {
           .catch(() => undefined);
         return;
       }
-      if (
-        (await this.client.getBlockNumber({ cacheTime: 0 })) - receipt.blockNumber + 1n <
-        BigInt(this.config.confirmations)
-      )
-        return;
-      if (receipt.status === "reverted") {
+      const progress = transactionProgress(
+        {
+          success: receipt.status === "success",
+          confirmations: Number(
+            (await this.client.getBlockNumber({ cacheTime: 0 })) - receipt.blockNumber + 1n,
+          ),
+        },
+        this.config.confirmations,
+      );
+      if (progress === "submitted") return;
+      if (progress === "failed") {
         action.phase = "failed";
         this.store.update(action);
         return;
@@ -206,32 +197,19 @@ export class EvmBotService {
           amount: BigInt(body.amount),
           minPlayers: body.minPlayers ?? 2,
           maxPlayers: body.maxPlayers ?? 2,
-          timeout: 3600,
+          timeout: body.timeout ?? 3600,
           isPrivate: body.isPrivate ?? false,
           nonce,
           deadline,
           commitment: zeroHash,
         };
         const proof = await wallet.signTypedData(creationTypedData(this.config, request));
-        const result = (await this.oracle("/evm/authorize", {
-          ...request,
-          commitment: undefined,
-          proof,
-        })) as { gameId: Hex; request: Record<string, unknown>; signature: Hex };
-        const authorized = { ...request, commitment: result.request["commitment"] as Hex };
-        // Verify every server-controlled field before signing a spending transaction.
-        if (json(result.request) !== json(authorized)) {
-          for (const key of Object.keys(authorized) as (keyof CreateGameRequest)[])
-            if (String(result.request[key]) !== String(authorized[key]))
-              throw new Error("Oracle changed game terms");
-        }
-        if (
-          !/^0x[0-9a-fA-F]{64}$/.test(authorized.commitment) ||
-          authorized.commitment === zeroHash
-        )
-          throw new Error("Invalid commitment");
-        if (result.gameId !== gameIdFor(this.config, wallet.account.address, nonce))
-          throw new Error("Oracle game identity mismatch");
+        const result = checkCreationAuthorization(
+          this.config,
+          request,
+          await this.oracle("/evm/authorize", { ...request, commitment: undefined, proof }),
+        );
+        const authorized = result.request;
         const operator = await this.client.readContract({
           address: this.config.address,
           abi: timbaAbi,

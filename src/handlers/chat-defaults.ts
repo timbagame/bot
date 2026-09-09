@@ -82,6 +82,9 @@ type SettingsTarget =
   | "video_buy_alerts";
 
 type ChatDefaultsModuleDeps = {
+  network?: (
+    chatId: number,
+  ) => { chain: "evm" | "solana"; name: string; token: string | undefined } | undefined;
   bot: Bot;
   chatDb: ChatDatabase;
   gameDb: GameDatabase;
@@ -105,9 +108,9 @@ export type ChatDefaultsModule = {
   ) => Promise<boolean>;
 };
 
-const buildMenuKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("🪙 Default token", "chat_defaults_token")
+const buildMenuKeyboard = (evm = false): InlineKeyboard => {
+  const keyboard = new InlineKeyboard()
+    .text("🪙 Default token", evm ? "game_network_token" : "chat_defaults_token")
     .text("⏱️ Game timeout", "chat_defaults_timeout")
     .row()
     .text("👥 Coinflip", "chat_defaults_game_coinflip")
@@ -117,6 +120,8 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("🌐 Public game feed", "chat_defaults_public_game_feed")
     .row()
     .text("🚨 Buy alerts", "chat_defaults_buy_alerts");
+  if (process.env["EVM_BOT_CONFIG_FILE"]) keyboard.row().text("Network", "game_network");
+  return keyboard;
 };
 
 const buildSettingsSummary = async (
@@ -156,6 +161,9 @@ const buildSettingsSummary = async (
     deps.getOracleMaxPlayers(),
   );
 
+  const network = deps.network?.(chatId);
+  if (network?.chain === "evm")
+    tokenLine = `Network: ${escapeHtml(network.name)}\n🪙 Token: ${network.token ? escapeHtml(network.token) : "Network default"}`;
   const timeoutSeconds = resolveChatTimeout(chatSettings, DEFAULT_GAME_TIMEOUT);
 
   const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
@@ -666,7 +674,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
     await respondWithMenu(ctx, {
       text: summary,
       parseMode: "HTML",
-      keyboard: buildMenuKeyboard(),
+      keyboard: buildMenuKeyboard(deps.network?.(chatId)?.chain === "evm"),
     });
   };
 

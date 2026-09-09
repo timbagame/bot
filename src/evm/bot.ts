@@ -1,6 +1,20 @@
+import { inferMaxPlayers } from "../utils/arg-parsing";
+import { buildWalletCaption } from "../utils/wallet-ui";
+import { createWalletKeyboard } from "../utils/keyboards";
+import { respondWithMenu } from "../utils/menu-response";
+import { routeNetworkCommand } from "./command-router";
+import { evmGameActions } from "@timbagame/protocol/evm";
+import { buildGameHeader, buildGameStatus, buildPrizeLine } from "../utils/game-ui";
+import { escapeHtml } from "../utils/format-amount";
+import { parseTokenAmount, formatTokenAmount } from "@timbagame/protocol/amounts";
 import { GrammyError, Bot, InlineKeyboard, type Context } from "grammy";
-import { erc20Abi, formatUnits, getAddress, parseUnits, type Hex } from "viem";
-import { gameLifecycle, observeEvmGame } from "@timbagame/protocol/games";
+import { erc20Abi, formatUnits, getAddress, type Hex } from "viem";
+import {
+  validateGameDraft,
+  gameCapabilities,
+  GAME_DEFAULTS,
+  gamePath,
+} from "@timbagame/protocol/games";
 import { timbaAbi } from "@timbagame/protocol/evm/v0.1.0";
 import { loadEvmBotConfig } from "./config";
 import { EvmBotStore, json, type EvmAction } from "./store";
@@ -17,7 +31,14 @@ export function callbackGame(value: string): Hex {
     throw new Error("Invalid game callback");
   return `0x${bytes.toString("hex")}`;
 }
-export function registerEvmBot(bot: Bot<Context>, file: string) {
+export function registerEvmBot(
+  bot: Bot<Context>,
+  file: string,
+  defaults?: (
+    chat: number,
+    type: "coinflip" | "giveaway",
+  ) => { maxPlayers: number; minPlayers: number; timeout: number; isPrivate: boolean },
+) {
   const config = loadEvmBotConfig(file);
   const store = new EvmBotStore(
     config.database,
@@ -29,6 +50,77 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
     readProtectedSecretFile(config.oracleTokenFile, "EVM oracle API token"),
     store,
   );
+  const handlers = new Map<string, (ctx: Context) => Promise<void>>();
+  const command = (name: string, handler: (ctx: Context) => Promise<void>) => {
+    handlers.set(name, handler);
+    bot.command(name, handler);
+  };
+  // Canonical commands route before the Solana handlers. Old EVM commands remain aliases.
+  bot.use(async (ctx, next) => {
+    if (!ctx.chat) return next();
+    const route = routeNetworkCommand(
+      ctx.message?.text ?? "",
+      ctx.me.username,
+      store.network(String(ctx.chat.id)),
+    );
+    if (!route) return next();
+    ctx.match = route.args;
+    await handlers.get(route.command)!(ctx);
+  });
+
+  bot.callbackQuery(/^game_network(?::(solana|evm))?$/, async (ctx) => {
+    if (!ctx.chat || !ctx.from) return;
+    if (ctx.chat?.type !== "private") {
+      const member = await ctx.getChatMember(ctx.from.id);
+      if (member.status !== "creator" && member.status !== "administrator") {
+        await ctx.answerCallbackQuery("Only group admins can change the network.");
+        return;
+      }
+    }
+    const choice = ctx.match[1];
+    if (choice === "solana" || choice === "evm") store.setNetwork(String(ctx.chat.id), choice);
+    await ctx.answerCallbackQuery();
+    const selected = store.network(String(ctx.chat.id));
+    await ctx.reply(
+      `Network: ${selected === "evm" ? config.name : "Solana"}\nThis applies to new commands. Existing games and pending transactions stay on their original network.`,
+      {
+        reply_markup: new InlineKeyboard()
+          .text("Solana", "game_network:solana")
+          .text(config.name, "game_network:evm"),
+      },
+    );
+  });
+  bot.callbackQuery(/^(?:game_network_token|game_token:(0x[0-9a-fA-F]{40}))$/, async (ctx) => {
+    if (!ctx.chat || !ctx.from) return;
+    if (ctx.chat.type !== "private") {
+      const member = await ctx.getChatMember(ctx.from.id);
+      if (member.status !== "creator" && member.status !== "administrator") {
+        await ctx.answerCallbackQuery("Only group admins can change the token.");
+        return;
+      }
+    }
+    try {
+      const metadata = await service.metadata();
+      const chosen = ctx.match[1];
+      if (chosen) {
+        const token = metadata.tokens.find(
+          (token) => token.address.toLowerCase() === chosen.toLowerCase(),
+        );
+        if (!token) throw new Error("Unsupported token");
+        store.setToken(String(ctx.chat.id), token.address);
+      }
+      const keyboard = new InlineKeyboard();
+      for (const token of metadata.tokens)
+        keyboard.text(token.symbol, `game_token:${token.address}`).row();
+      await ctx.answerCallbackQuery();
+      await ctx.reply(
+        `Default token on ${config.name}: ${metadata.tokens.find((token) => token.address === store.token(String(ctx.chat!.id)))?.symbol ?? metadata.tokens[0]?.symbol}\nChoose a token for new games.`,
+        { reply_markup: keyboard },
+      );
+    } catch {
+      await ctx.answerCallbackQuery("Token settings are temporarily unavailable.");
+    }
+  });
   let busy = false;
   let stopped = false;
   let lastWarning = 0;
@@ -58,9 +150,9 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
     });
     return id;
   };
-  bot.command("evm", async (ctx) => {
-    if (ctx.chat.type !== "private") {
-      await ctx.reply("Open a private chat with me and use /evm to view your EVM wallet.");
+  command("evm", async (ctx) => {
+    if (ctx.chat?.type !== "private") {
+      await ctx.reply("Open a private chat with me and use /balance to view your wallet.");
       return;
     }
     try {
@@ -68,49 +160,109 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
       const account = service.account(user(ctx));
       const native = await service.client.getBalance({ address: account.address });
       const balances = await Promise.all(
-        metadata.tokens.map(
-          async (token) =>
-            `${formatUnits(await service.client.readContract({ address: token.address, abi: erc20Abi, functionName: "balanceOf", args: [account.address] }), token.decimals)} ${token.symbol}`,
+        metadata.tokens.map(async (token) => ({
+          ticker: token.symbol,
+          mint: token.address,
+          amount: formatUnits(
+            await service.client.readContract({
+              address: token.address,
+              abi: erc20Abi,
+              functionName: "balanceOf",
+              args: [account.address],
+            }),
+            token.decimals,
+          ),
+        })),
+      );
+      await respondWithMenu(ctx, {
+        text: buildWalletCaption(
+          account.address,
+          [{ ticker: "ETH", amount: formatUnits(native, 18) }, ...balances],
+          { networkName: config.name, explorerUrl: null },
         ),
-      );
-      await ctx.reply(
-        `${config.name} wallet\n${account.address}\n${formatUnits(native, 18)} ETH\n${balances.join("\n")}\n\nDeposit tokens and ETH for network fees on ${config.name}.\n/ecf AMOUNT [PLAYERS] [TOKEN] [private]\n/egiveaway AMOUNT [PLAYERS] [TOKEN] [private]\n/einvite GAME_ID TELEGRAM_ID\n/ewithdraw TOKEN AMOUNT ADDRESS\nYour Telegram ID: ${user(ctx)}`,
-      );
+        parseMode: "HTML",
+        keyboard: createWalletKeyboard(undefined, {
+          swap: "",
+          positions: "",
+          withdraw: "evm_wallet_withdraw",
+          refresh: "evm_wallet_refresh",
+          settings: "game_network",
+        }),
+      });
     } catch {
-      await ctx.reply("EVM wallet is temporarily unavailable.");
+      await ctx.reply(`${config.name} wallet is temporarily unavailable.`);
     }
   });
+  bot.callbackQuery("evm_wallet_refresh", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handlers.get("evm")!(ctx);
+  });
+  bot.callbackQuery("evm_wallet_withdraw", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (ctx.chat?.type !== "private") return;
+    await ctx.reply(
+      `To withdraw on ${config.name}, select that network in /settings and use /withdraw ADDRESS AMOUNT TOKEN. You will review the destination and amount before confirming.`,
+    );
+  });
+  const registerGameCommand = command;
   for (const [command, gameType] of [
     ["ecf", 0],
     ["egiveaway", 1],
   ] as const)
-    bot.command(command, async (ctx) => {
+    registerGameCommand(command, async (ctx) => {
       try {
         if (store.pending().some((action) => action.user === user(ctx))) {
           await ctx.reply("Your EVM wallet still has a transaction awaiting confirmation.");
           return;
         }
-        const [amountText, playersText = "2", symbol, visibility] = String(ctx.match)
-          .trim()
-          .split(/\s+/);
+        const type = gameType === 0 ? "coinflip" : "giveaway";
+        const settings = defaults?.(ctx.chat!.id, type) ?? {
+          ...GAME_DEFAULTS[type],
+          timeout: 3600,
+          isPrivate: false,
+        };
+        const args = String(ctx.match).trim().split(/\s+/).filter(Boolean);
+        const amountText = args.shift();
+        const playersText = args.find((arg) => /^[0-9]+$/.test(arg));
+        const visibility = args.find((arg) => arg === "private" || arg === "public");
+        const symbol = args.find((arg) => arg !== playersText && arg !== visibility);
         const metadata = await service.metadata();
         const token = symbol
           ? metadata.tokens.find((token) => token.symbol.toLowerCase() === symbol.toLowerCase())
-          : metadata.tokens[0];
-        const players = Number(playersText);
-        if (
-          !token ||
-          !amountText ||
-          !/^\d+(\.\d+)?$/.test(amountText) ||
-          !Number.isInteger(players) ||
-          players < (gameType === 0 ? 2 : 1) ||
-          players > 100
-        )
-          throw new Error("Invalid terms");
-        if ((amountText.split(".")[1]?.length ?? 0) > token.decimals)
-          throw new Error("Too many decimals");
-        const amount = parseUnits(amountText, token.decimals);
-        if (amount < BigInt(token.minimumAmount)) throw new Error("Stake below minimum");
+          : (metadata.tokens.find((token) => token.address === store.token(String(ctx.chat!.id))) ??
+            metadata.tokens[0]);
+        if (!token) throw new Error("Invalid token");
+        const inferred = inferMaxPlayers(
+          [
+            command,
+            amountText ?? "",
+            ...(symbol ? [symbol] : []),
+            ...(playersText ? [playersText] : []),
+          ],
+          1,
+          Boolean(symbol),
+          settings.maxPlayers,
+          gameType === 0 ? 2 : 1,
+          100,
+        );
+        if (!inferred.ok) throw new Error(inferred.error);
+        const players = inferred.value;
+        const amount = validateGameDraft(
+          {
+            type,
+            tokenMint: token.address,
+            amount: amountText ?? formatTokenAmount(BigInt(token.minimumAmount), token.decimals),
+            minPlayers: Math.min(settings.minPlayers, players),
+            maxPlayers: players,
+            timeoutMinutes: settings.timeout / 60,
+            isPrivate: visibility ? visibility === "private" : settings.isPrivate,
+          },
+          {
+            decimals: token.decimals,
+            minimumAmount: formatTokenAmount(BigInt(token.minimumAmount), token.decimals),
+          },
+          gameCapabilities("evm"),
+        );
         const address = service.account(user(ctx)).address;
         const balance = await service.client.readContract({
           address: token.address,
@@ -120,7 +272,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
         });
         if (balance < amount) {
           await ctx.reply(
-            `Insufficient ${token.symbol}. Use /evm in private chat to fund your ${config.name} wallet.`,
+            `Insufficient ${token.symbol}. Use /balance in private chat to fund your ${config.name} wallet.`,
           );
           return;
         }
@@ -132,9 +284,10 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
             token: token.address,
             amount: amount.toString(),
             gameType,
-            minPlayers: players,
+            minPlayers: Math.min(settings.minPlayers, players),
             maxPlayers: players,
-            isPrivate: visibility === "private",
+            isPrivate: visibility ? visibility === "private" : settings.isPrivate,
+            timeout: settings.timeout,
           },
           message.message_id,
         );
@@ -144,7 +297,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
         );
       }
     });
-  bot.command("einvite", async (ctx) => {
+  command("einvite", async (ctx) => {
     try {
       const [game, player] = String(ctx.match).trim().split(/\s+/);
       if (!game || !/^0x[0-9a-fA-F]{64}$/.test(game) || !player)
@@ -156,12 +309,12 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
       );
     } catch {
       await ctx.reply(
-        "Only the creator can invite a Telegram ID to an open private game. Use /einvite GAME_ID TELEGRAM_ID.",
+        "Only the creator can invite a Telegram ID to an open private game. Use /invite GAME_ID TELEGRAM_ID.",
       );
     }
   });
-  bot.command("ewithdraw", async (ctx) => {
-    if (ctx.chat.type !== "private") return;
+  command("ewithdraw", async (ctx) => {
+    if (ctx.chat?.type !== "private") return;
     try {
       const [symbol, amountText, recipientText] = String(ctx.match).trim().split(/\s+/);
       const metadata = await service.metadata();
@@ -179,7 +332,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
       )
         throw new Error("Invalid withdrawal");
       const recipient = getAddress(recipientText);
-      const amount = parseUnits(amountText, decimals);
+      const amount = parseTokenAmount(amountText, decimals);
       if (amount <= 0n) throw new Error("Invalid amount");
       const reply = await ctx.reply(
         `Withdraw ${amountText} ${native ? "ETH" : token!.symbol} on ${config.name} to ${recipient}? Network fees are paid from this wallet's ETH balance.`,
@@ -197,7 +350,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
           .text("Cancel", `evm:x:${id}`),
       });
     } catch {
-      await ctx.reply("Use /ewithdraw TOKEN AMOUNT ADDRESS in private chat.");
+      await ctx.reply("Use /withdraw ADDRESS AMOUNT TOKEN in private chat.");
     }
   });
   bot.callbackQuery(/^evm:([a-z]):(.+)$/, async (ctx) => {
@@ -233,35 +386,14 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
           abi: timbaAbi,
           functionName: "config",
         });
-        const observation = observeEvmGame(
-          {
-            chain: "evm",
-            chainId: BigInt(config.chainId),
-            deployment: config.address,
-            gameId: game,
-          },
+        const actions = evmGameActions(
           data,
-        );
-        if (!observation.game) throw new Error("Game unavailable");
-        const lifecycle = gameLifecycle(
-          observation.game,
+          account,
           (await service.client.getBlock()).timestamp,
           BigInt(limits[1]),
         );
-        if (
-          operation === "j" &&
-          (!lifecycle.canJoin ||
-            data.participants.some((player) => player.toLowerCase() === account.toLowerCase()))
-        )
-          throw new Error("Cannot join");
-        if (
-          operation === "r" &&
-          (!lifecycle.canRefund ||
-            !data.participants.some((player) => player.toLowerCase() === account.toLowerCase()))
-        )
-          throw new Error("Refund unavailable");
-        if (operation === "c" && data.creator.toLowerCase() !== account.toLowerCase())
-          throw new Error("Creator only");
+        const actionName = operation === "j" ? "join" : operation === "r" ? "refund" : "close";
+        if (!actions[actionName]) throw new Error("Action unavailable");
         const invitation = store.invitation(game, user(ctx));
         if (operation === "j" && data.isPrivate && !invitation)
           throw new Error("Invitation required");
@@ -340,9 +472,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
               ? "Completed"
               : game.status === 3
                 ? "Closed"
-                : game.participants.length >= game.maxPlayers
-                  ? "Full — starting soon!"
-                  : "Open";
+                : buildGameStatus(game.participants.length, game.minPlayers, game.maxPlayers);
           let result = "";
           if (game.status === 2) {
             const indexed = (await service.oracle(`/evm/games/${row.game}`)) as {
@@ -352,7 +482,11 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
             if (completed?.winner && completed.prize)
               result = `\nWinner: ${completed.winner}\nPrize: ${formatUnits(BigInt(completed.prize), token.decimals)} ${token.symbol}`;
           }
-          const text = `${game.gameType === 0 ? "🪙 Coinflip" : "🎁 Giveaway"} • ${config.name}\n${formatUnits(game.ticketAmount, token.decimals)} ${token.symbol}\nCreator: ${game.creator}\n${game.participants.length}/${game.maxPlayers} players\n${game.participants.slice(0, 10).join("\n")}${game.participants.length > 10 ? `\n… and ${game.participants.length - 10} more` : ""}\nStatus: ${state}${result}\nGame: ${row.game}`;
+          const text = `${buildGameHeader(game.gameType === 0 ? "🪙 Coinflip" : "🎁 Giveaway", formatUnits(game.gameType === 0 ? game.ticketAmount : game.totalAmount, token.decimals), token.symbol, game.creator, game.participants.length, game.maxPlayers)}\nNetwork: ${escapeHtml(config.name)}\n${buildPrizeLine(true, formatUnits(game.totalAmount, token.decimals), token.symbol)}\n${game.participants
+            .slice(0, 10)
+            .map((player) => escapeHtml(player))
+            .join("\n")}\nStatus: ${state}${escapeHtml(result)}\nGame: ${row.game}`;
+
           if (text === row.body) {
             store.deferMessage(
               row,
@@ -362,7 +496,7 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
           }
           const keyboard = new InlineKeyboard().url(
             "View game",
-            `${config.webUrl.replace(/\/$/, "")}/en/evm/${config.chainId}/${config.address}/${row.game}`,
+            `${config.webUrl.replace(/\/$/, "")}/en${gamePath({ chain: "evm", chainId: BigInt(config.chainId), deployment: config.address, gameId: row.game })}`,
           );
           if (game.status === 1)
             keyboard
@@ -370,7 +504,10 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
               .text("Join", gameCallback("j", row.game))
               .text("Refund", gameCallback("r", row.game))
               .text("Close", gameCallback("c", row.game));
-          await bot.api.editMessageText(row.chat, row.message, text, { reply_markup: keyboard });
+          await bot.api.editMessageText(row.chat, row.message, text, {
+            reply_markup: keyboard,
+            parse_mode: "HTML",
+          });
           store.message({ ...row, body: text });
         } catch {
           store.deferMessage(row, 30_000);
@@ -391,6 +528,11 @@ export function registerEvmBot(bot: Bot<Context>, file: string) {
   timer.unref();
   return {
     service,
+    network: (chatId: number) => ({
+      chain: store.network(String(chatId)),
+      name: config.name,
+      token: store.token(String(chatId)),
+    }),
     stop: () => {
       stopped = true;
       clearInterval(timer);
