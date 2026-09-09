@@ -26,6 +26,7 @@ export class EvmBotStore {
     this.db = new Database(path, { create: true, strict: true });
     if (path !== ":memory:") chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+      CREATE TABLE IF NOT EXISTS command_networks (id TEXT PRIMARY KEY, chain TEXT NOT NULL CHECK(chain IN ('solana','evm')));
       CREATE TABLE IF NOT EXISTS network_tokens (chat TEXT PRIMARY KEY, token TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS network_preferences (chat TEXT PRIMARY KEY, chain TEXT NOT NULL CHECK(chain IN ('solana','evm')));
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
@@ -39,6 +40,16 @@ export class EvmBotStore {
       this.db.close();
       throw new Error("EVM bot database deployment mismatch");
     }
+  }
+  commandNetwork(id: string, chat: string): "solana" | "evm" {
+    // Pin the first route before any signing, including Solana commands. Replays
+    // retain that route even if an administrator changed the chat preference.
+    this.db
+      .query("INSERT OR IGNORE INTO command_networks VALUES (?,?)")
+      .run(id, this.action(id) ? "evm" : this.network(chat));
+    return this.db
+      .query<{ chain: "solana" | "evm" }, [string]>("SELECT chain FROM command_networks WHERE id=?")
+      .get(id)!.chain;
   }
   token(chat: string): string | undefined {
     return this.db

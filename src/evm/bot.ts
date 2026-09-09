@@ -58,12 +58,14 @@ export function registerEvmBot(
   // Canonical commands route before the Solana handlers. Old EVM commands remain aliases.
   bot.use(async (ctx, next) => {
     if (!ctx.chat) return next();
-    const route = routeNetworkCommand(
-      ctx.message?.text ?? "",
-      ctx.me.username,
-      store.network(String(ctx.chat.id)),
-    );
-    if (!route) return next();
+    const candidate = routeNetworkCommand(ctx.message?.text ?? "", ctx.me.username, "evm");
+    if (!candidate) return next();
+    const network =
+      candidate.command === "evm"
+        ? store.network(String(ctx.chat.id))
+        : store.commandNetwork(String(ctx.update.update_id), String(ctx.chat.id));
+    if (network !== "evm") return next();
+    const route = candidate;
     ctx.match = route.args;
     await handlers.get(route.command)!(ctx);
   });
@@ -395,7 +397,18 @@ export function registerEvmBot(
           BigInt(limits[1]),
         );
         const actionName = operation === "j" ? "join" : operation === "r" ? "refund" : "close";
-        if (!actions[actionName]) throw new Error("Action unavailable");
+        const cleanup =
+          operation === "c" &&
+          actions.creator &&
+          data.gameType === 0 &&
+          data.participants[0] &&
+          evmGameActions(
+            data,
+            data.participants[0],
+            (await service.client.getBlock()).timestamp,
+            BigInt(limits[1]),
+          ).refund;
+        if (!actions[actionName] && !cleanup) throw new Error("Action unavailable");
         const invitation = store.invitation(game, user(ctx));
         if (operation === "j" && data.isPrivate && !invitation)
           throw new Error("Invitation required");

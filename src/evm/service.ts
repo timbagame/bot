@@ -38,6 +38,7 @@ export interface ActionBody {
   recipient?: Address;
   request?: CreateGameRequest;
   signature?: Hex;
+  refundingPlayer?: boolean;
   timeout?: number;
   minPlayers?: number;
   maxPlayers?: number;
@@ -174,6 +175,15 @@ export class EvmBotService {
         this.store.update(action);
         return;
       }
+      if (action.kind === "close" && body.refundingPlayer) {
+        delete body.refundingPlayer;
+        action.body = json(body);
+        action.phase = "new";
+        action.raw = null;
+        action.hash = null;
+        this.store.update(action);
+        return;
+      }
       action.phase = "done";
       this.store.finish(action);
       return;
@@ -273,7 +283,19 @@ export class EvmBotService {
         );
       } else if (action.kind === "refund")
         tx = refundPlayerTransaction(this.config, body.game, wallet.account.address);
-      else tx = closeGameTransaction(this.config, body.game);
+      else {
+        const game = await this.game(body.game);
+        if (game.status === 2 || game.status === 3) {
+          action.phase = "done";
+          this.store.finish(action);
+          return;
+        }
+        const player = game.gameType === 0 ? game.participants[0] : undefined;
+        body.refundingPlayer = Boolean(player);
+        tx = player
+          ? refundPlayerTransaction(this.config, body.game, player)
+          : closeGameTransaction(this.config, body.game);
+      }
     }
     if (spend > 0n && body.token) {
       const allowance = await this.client.readContract({

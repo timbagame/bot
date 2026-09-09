@@ -43,3 +43,8 @@ eligibility. Adapters own signing, allowance transactions and confirmation/recov
 The existing database identity and wallet derivation remain unchanged. Network
 and token preferences are additive tables; changing preferences does not rewrite
 pending actions or existing game callbacks.
+
+Command routes are persisted before spending, so replaying an update after a
+network preference change keeps its original chain. Creator close actions on
+expired coinflips refund remaining participants before closing; signed refund
+steps survive restarts in the same action journal.

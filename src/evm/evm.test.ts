@@ -106,3 +106,14 @@ test("shared wallet presentation keeps the selected network and supported action
     "⚙️ Settings",
   ]);
 });
+
+test("a replay cannot switch spending networks when chat defaults change", () => {
+  const store = new EvmBotStore(":memory:", "test");
+  expect(store.commandNetwork("100", "chat")).toBe("solana");
+  store.setNetwork("chat", "evm");
+  expect(store.commandNetwork("100", "chat")).toBe("solana");
+  expect(store.commandNetwork("101", "chat")).toBe("evm");
+  store.setNetwork("chat", "solana");
+  expect(store.commandNetwork("101", "chat")).toBe("evm");
+  store.close();
+});
