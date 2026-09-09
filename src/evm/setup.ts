@@ -1,4 +1,4 @@
-import { Bot, type InlineKeyboard, type Context } from "grammy";
+import { Bot, GrammyError, type InlineKeyboard, type Context } from "grammy";
 import { formatTokenAmount, parseTokenAmount } from "@timbagame/protocol/amounts";
 import {
   createAmountMenuKeyboard,
@@ -35,6 +35,7 @@ export interface Setup {
   screen: "amount" | "players" | "confirm";
   actions: string[];
   generation: number;
+  pendingPreviousGeneration?: number;
   prompt?: number;
   input?: "amount" | "players";
   done?: boolean;
@@ -56,7 +57,7 @@ export function registerEvmSetup(
       .get(id);
     return row ? (JSON.parse(row.body) as Setup) : undefined;
   };
-  async function render(ctx: Context, s: Setup) {
+  async function render(ctx: Context, s: Setup, retry = false) {
     let keyboard: InlineKeyboard;
     let text: string;
     const amount = s.amount;
@@ -83,7 +84,7 @@ export function registerEvmSetup(
       text = buildPlayerSelectionMessage(s.type, amount, s.token.symbol);
     } else {
       // Shared confirmation presentation; the exact amount is rendered separately.
-      keyboard = createGameConfirmKeyboard(s.type, amount, String(s.players), s.user, advanced);
+      keyboard = createGameConfirmKeyboard(s.type, "0", String(s.players), s.user, advanced);
       text = buildGameConfirmationMessage({
         gameType: s.type,
         amount,
@@ -95,7 +96,10 @@ export function registerEvmSetup(
       });
     }
     s.actions = [];
-    s.generation++;
+    if (!retry) {
+      s.pendingPreviousGeneration = s.generation;
+      s.generation++;
+    }
     for (const row of keyboard.inline_keyboard)
       for (const button of row) {
         if ("callback_data" in button) {
@@ -104,10 +108,22 @@ export function registerEvmSetup(
         }
       }
     save(s);
-    await ctx.api.editMessageText(s.chat, s.message, `${text}\nNetwork: ${name}`, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
+    try {
+      await ctx.api.editMessageText(s.chat, s.message, `${text}\nNetwork: ${name}`, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+    } catch (error) {
+      // A previous attempt may have reached Telegram despite a lost response.
+      if (!(
+        error instanceof GrammyError &&
+        error.error_code === 400 &&
+        error.description.includes("message is not modified")
+      ))
+        throw error;
+    }
+    delete s.pendingPreviousGeneration;
+    save(s);
   }
   bot.callbackQuery(/^evs:([^:]+):(\d+):(\d+)$/, async (ctx) => {
     const s = read(ctx.match[1]!);
@@ -117,14 +133,24 @@ export function registerEvmSetup(
       s.user !== String(ctx.from.id) ||
       s.chat !== ctx.chat?.id ||
       s.message !== ctx.callbackQuery.message?.message_id ||
-      s.generation !== Number(ctx.match[2])
+      (s.generation !== Number(ctx.match[2]) &&
+        s.pendingPreviousGeneration !== Number(ctx.match[2]))
     ) {
       await ctx.answerCallbackQuery("This setup is unavailable.");
       return;
     }
     const action = s.actions[Number(ctx.match[3])];
     try {
+      if (s.generation !== Number(ctx.match[2])) {
+        // These buttons are still visible after a failed edit. Retry the saved
+        // transition without applying the old selection a second time.
+        await render(ctx, s, true);
+        await ctx.answerCallbackQuery();
+        return;
+      }
       if (!action) throw new Error("Invalid selection");
+      // A click on the new generation proves that Telegram received its menu.
+      delete s.pendingPreviousGeneration;
       if (action === "cancel" || action.startsWith("cancel_game")) {
         s.done = true;
         save(s);
@@ -223,7 +249,12 @@ export function registerEvmSetup(
     defaults: { maxPlayers: number; minPlayers: number; timeout: number; isPrivate: boolean },
   ) => {
     const id = String(ctx.update.update_id);
-    if (read(id)) return;
+    const existing = read(id);
+    if (existing) {
+      if (!existing.done && existing.pendingPreviousGeneration !== undefined)
+        await render(ctx, existing, true);
+      return;
+    }
     const message = await ctx.reply(GAME_SETUP_COPY[type].heading, { parse_mode: "HTML" });
     const s: Setup = {
       id,
