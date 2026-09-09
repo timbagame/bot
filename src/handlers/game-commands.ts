@@ -1,3 +1,4 @@
+import { parseGameCommandInput } from "./game-command-input";
 import type { Context } from "grammy";
 import { formatParseAmountError } from "../utils/token-manager";
 import {
@@ -431,25 +432,21 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         return;
       }
 
-      const args = ctx.message?.text?.split(" ");
-      const tokenCandidate = args?.[1]?.trim();
-
-      if (!args || args.length < 2) {
-        await deps.startInteractiveGameSetup(ctx, telegramId, deps.gameSetupCopy.giveaway);
-        return;
-      }
-
-      let tokenOverride: GameTokenOverride | null = null;
-      if (tokenCandidate) {
-        tokenOverride = await deps.resolveCommandTokenOverride(tokenCandidate, ctx.chat?.id);
-      }
-
-      if (tokenOverride) {
+      const args = ctx.message?.text?.trim().split(/\s+/) ?? [];
+      const input = parseGameCommandInput(args.slice(1));
+      if (input.mode === "menu") {
+        const override = input.token
+          ? await deps.resolveCommandTokenOverride(input.token, ctx.chat?.id)
+          : undefined;
+        if (input.token && !override) {
+          await ctx.reply("Token unavailable. Check its symbol or address.");
+          return;
+        }
         await deps.startInteractiveGameSetup(
           ctx,
           telegramId,
           deps.gameSetupCopy.giveaway,
-          tokenOverride,
+          override ?? undefined,
         );
         return;
       }

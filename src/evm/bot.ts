@@ -1,3 +1,5 @@
+import { parseGameCommandInput } from "../handlers/game-command-input";
+import { registerEvmSetup } from "./setup";
 import { inferMaxPlayers } from "../utils/arg-parsing";
 import { buildWalletCaption } from "../utils/wallet-ui";
 import { createWalletKeyboard } from "../utils/keyboards";
@@ -7,7 +9,7 @@ import { evmGameActions } from "@timbagame/protocol/evm";
 import { buildGameHeader, buildGameStatus, buildPrizeLine } from "../utils/game-ui";
 import { escapeHtml } from "../utils/format-amount";
 import { parseTokenAmount, formatTokenAmount } from "@timbagame/protocol/amounts";
-import { GrammyError, Bot, InlineKeyboard, type Context } from "grammy";
+import { GrammyError, Bot, InlineKeyboard, Context } from "grammy";
 import { erc20Abi, formatUnits, getAddress, type Hex } from "viem";
 import {
   validateGameDraft,
@@ -38,6 +40,11 @@ export function registerEvmBot(
     chat: number,
     type: "coinflip" | "giveaway",
   ) => { maxPlayers: number; minPlayers: number; timeout: number; isPrivate: boolean },
+  resolveSolana?: (
+    token: string | undefined,
+    chat: number,
+  ) => Promise<{ address: string; symbol: string } | null>,
+  dispatchSolana?: (ctx: Context) => Promise<void>,
 ) {
   const config = loadEvmBotConfig(file);
   const store = new EvmBotStore(
@@ -50,6 +57,53 @@ export function registerEvmBot(
     readProtectedSecretFile(config.oracleTokenFile, "EVM oracle API token"),
     store,
   );
+  store.db.exec(
+    "CREATE TABLE IF NOT EXISTS token_choices (id TEXT PRIMARY KEY, body TEXT NOT NULL, selected TEXT)",
+  );
+  bot.callbackQuery(/^game_choice:(\d+):(solana|evm)$/, async (ctx) => {
+    const row = store.db
+      .query<{ body: string; selected: string | null }, [string]>(
+        "SELECT body,selected FROM token_choices WHERE id=?",
+      )
+      .get(ctx.match[1]!);
+    if (!row) {
+      await ctx.answerCallbackQuery("Selection unavailable.");
+      return;
+    }
+    const saved = JSON.parse(row.body) as {
+      update: Context["update"];
+      user: number;
+      chat: number;
+      solana: string;
+      evm: string;
+    };
+    if (saved.user !== ctx.from.id || saved.chat !== ctx.chat?.id) {
+      await ctx.answerCallbackQuery("Only the creator can choose.");
+      return;
+    }
+    const chain = (row.selected ?? ctx.match[2]) as "solana" | "evm";
+    store.db
+      .query("UPDATE token_choices SET selected=? WHERE id=? AND selected IS NULL")
+      .run(chain, ctx.match[1]!);
+    const original = saved.update.message!;
+    const parts = ("text" in original ? (original.text ?? "") : "").trim().split(/\s+/);
+    const input = parseGameCommandInput(parts.slice(1));
+    parts[input.mode === "menu" ? 1 : 2] = saved[chain];
+    const restored = new Context(
+      { ...saved.update, message: { ...original, text: parts.join(" ") } },
+      ctx.api,
+      ctx.me,
+    );
+    store.commandNetwork(String(restored.update.update_id), String(saved.chat), chain);
+    await ctx.answerCallbackQuery();
+    if (chain === "solana") await dispatchSolana?.(restored);
+    else {
+      const route = routeNetworkCommand(parts.join(" "), ctx.me.username, "evm")!;
+      restored.match = route.args;
+      await handlers.get(route.command)!(restored);
+    }
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+  });
   const handlers = new Map<string, (ctx: Context) => Promise<void>>();
   const command = (name: string, handler: (ctx: Context) => Promise<void>) => {
     handlers.set(name, handler);
@@ -60,14 +114,95 @@ export function registerEvmBot(
     if (!ctx.chat) return next();
     const candidate = routeNetworkCommand(ctx.message?.text ?? "", ctx.me.username, "evm");
     if (!candidate) return next();
-    const network =
-      candidate.command === "evm"
-        ? store.network(String(ctx.chat.id))
-        : store.commandNetwork(String(ctx.update.update_id), String(ctx.chat.id));
-    if (network !== "evm") return next();
-    const route = candidate;
-    ctx.match = route.args;
-    await handlers.get(route.command)!(ctx);
+    if (candidate.command === "ecf" || candidate.command === "egiveaway") {
+      const args = candidate.args.trim().split(/\s+/).filter(Boolean);
+      const { token: tokenInput } = parseGameCommandInput(args);
+      const preferred = store.network(String(ctx.chat.id));
+      let selected: "solana" | "evm" = preferred;
+      if (tokenInput) {
+        const [solana, metadata] = await Promise.all([
+          resolveSolana?.(tokenInput, ctx.chat.id).catch(() => null),
+          service.metadata().catch(() => null),
+        ]);
+        if (!metadata && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenInput)) {
+          await ctx.reply("Token lookup is temporarily unavailable. Please try again shortly.");
+          return;
+        }
+        const evm = metadata?.tokens.find(
+          (t) =>
+            t.symbol.toLowerCase() === tokenInput.toLowerCase() ||
+            t.address.toLowerCase() === tokenInput.toLowerCase(),
+        );
+        if (solana && evm) {
+          const defaultSolana =
+            preferred === "solana"
+              ? await resolveSolana?.(undefined, ctx.chat.id).catch(() => null)
+              : null;
+          const defaultEvm = store.token(String(ctx.chat.id)) ?? metadata?.tokens[0]?.address;
+          const matchesDefault =
+            preferred === "solana"
+              ? defaultSolana?.address === solana.address
+              : defaultEvm === evm.address;
+          if (!matchesDefault) {
+            store.db.query("INSERT OR IGNORE INTO token_choices (id,body) VALUES (?,?)").run(
+              String(ctx.update.update_id),
+              JSON.stringify({
+                update: ctx.update,
+                user: ctx.from!.id,
+                chat: ctx.chat.id,
+                solana: solana.address,
+                evm: evm.address,
+              }),
+            );
+            await ctx.reply("Choose the token for this game:", {
+              reply_markup: new InlineKeyboard()
+                .text(`${solana.symbol} · Solana`, `game_choice:${ctx.update.update_id}:solana`)
+                .text(`${evm.symbol} · ${config.name}`, `game_choice:${ctx.update.update_id}:evm`),
+            });
+            return;
+          }
+        }
+        if (solana && !evm) selected = "solana";
+        else if (evm && !solana) selected = "evm";
+        else if (!evm && !solana) {
+          await ctx.reply("Token unavailable. Check its symbol or address.");
+          return;
+        }
+      }
+      const network = store.commandNetwork(
+        String(ctx.update.update_id),
+        String(ctx.chat.id),
+        selected,
+      );
+      if (network !== "evm") return next();
+    } else if (candidate.command === "ewithdraw") {
+      const symbol = candidate.args.split(/\s+/)[0];
+      const [solana, metadata] = await Promise.all([
+        resolveSolana?.(symbol, ctx.chat.id).catch(() => null),
+        service.metadata().catch(() => null),
+      ]);
+      if (!metadata && symbol?.toUpperCase() !== "ETH") {
+        await ctx.reply("Token lookup is temporarily unavailable. Please try again shortly.");
+        return;
+      }
+      const evm =
+        symbol?.toUpperCase() === "ETH" ||
+        metadata?.tokens.some((token) => token.symbol.toLowerCase() === symbol?.toLowerCase());
+      const selected =
+        evm && !solana ? "evm" : solana && !evm ? "solana" : store.network(String(ctx.chat.id));
+      if (
+        store.commandNetwork(String(ctx.update.update_id), String(ctx.chat.id), selected) !== "evm"
+      )
+        return next();
+    } else {
+      const network =
+        candidate.command === "evm"
+          ? store.network(String(ctx.chat.id))
+          : store.commandNetwork(String(ctx.update.update_id), String(ctx.chat.id));
+      if (network !== "evm") return next();
+    }
+    ctx.match = candidate.args;
+    await handlers.get(candidate.command)!(ctx);
   });
 
   bot.callbackQuery(/^game_network(?::(solana|evm))?$/, async (ctx) => {
@@ -110,6 +245,7 @@ export function registerEvmBot(
         );
         if (!token) throw new Error("Unsupported token");
         store.setToken(String(ctx.chat.id), token.address);
+        store.setNetwork(String(ctx.chat.id), "evm");
       }
       const keyboard = new InlineKeyboard();
       for (const token of metadata.tokens)
@@ -136,8 +272,9 @@ export function registerEvmBot(
     body: ActionBody,
     message: number,
     phase: EvmAction["phase"] = "new",
+    requestId = String(ctx.update.update_id),
   ) => {
-    const id = String(ctx.update.update_id);
+    const id = requestId;
     if (store.action(id)) return id;
     store.add({
       id,
@@ -152,6 +289,51 @@ export function registerEvmBot(
     });
     return id;
   };
+  const openSetup = registerEvmSetup(bot, store, config.name, async (ctx, setup) => {
+    if (store.action(`setup:${setup.id}`)) return;
+    const amount = validateGameDraft(
+      {
+        type: setup.type,
+        tokenMint: setup.token.address,
+        amount: setup.amount,
+        minPlayers: setup.minPlayers,
+        maxPlayers: setup.players,
+        timeoutMinutes: setup.timeoutSeconds / 60,
+        isPrivate: setup.isPrivate,
+      },
+      {
+        decimals: setup.token.decimals,
+        minimumAmount: formatTokenAmount(BigInt(setup.token.minimumAmount), setup.token.decimals),
+      },
+      gameCapabilities("evm"),
+    );
+    const balance = await service.client.readContract({
+      address: setup.token.address,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [service.account(setup.user).address],
+    });
+    if (balance < amount) throw new Error("Insufficient token balance");
+    queue(
+      ctx,
+      "create",
+      {
+        token: setup.token.address,
+        amount: amount.toString(),
+        gameType: setup.type === "coinflip" ? 0 : 1,
+        minPlayers: setup.minPlayers,
+        maxPlayers: setup.players,
+        timeout: setup.timeoutSeconds,
+        isPrivate: setup.isPrivate,
+      },
+      setup.message,
+      "new",
+      `setup:${setup.id}`,
+    );
+    await ctx.api
+      .editMessageText(setup.chat, setup.message, "⏳ Creating game…")
+      .catch(() => undefined);
+  });
   command("evm", async (ctx) => {
     if (ctx.chat?.type !== "private") {
       await ctx.reply("Open a private chat with me and use /balance to view your wallet.");
@@ -203,7 +385,7 @@ export function registerEvmBot(
     await ctx.answerCallbackQuery();
     if (ctx.chat?.type !== "private") return;
     await ctx.reply(
-      `To withdraw on ${config.name}, select that network in /settings and use /withdraw ADDRESS AMOUNT TOKEN. You will review the destination and amount before confirming.`,
+      `To withdraw on ${config.name}, use /withdraw ADDRESS AMOUNT TOKEN. You will review the destination and amount before confirming.`,
     );
   });
   const registerGameCommand = command;
@@ -213,6 +395,7 @@ export function registerEvmBot(
   ] as const)
     registerGameCommand(command, async (ctx) => {
       try {
+        if (store.action(String(ctx.update.update_id))) return;
         if (store.pending().some((action) => action.user === user(ctx))) {
           await ctx.reply(
             `Your ${config.name} wallet still has a transaction awaiting confirmation.`,
@@ -226,16 +409,34 @@ export function registerEvmBot(
           isPrivate: false,
         };
         const args = String(ctx.match).trim().split(/\s+/).filter(Boolean);
-        const amountText = args.shift();
+        const input = parseGameCommandInput(args);
+        const amountText = input.amount;
+        if (input.mode === "direct") args.shift();
         const playersText = args.find((arg) => /^[0-9]+$/.test(arg));
         const visibility = args.find((arg) => arg === "private" || arg === "public");
-        const symbol = args.find((arg) => arg !== playersText && arg !== visibility);
+        const symbol = args.find(
+          (arg) => arg !== playersText && arg !== visibility && arg.toUpperCase() !== "USD",
+        );
         const metadata = await service.metadata();
         const token = symbol
-          ? metadata.tokens.find((token) => token.symbol.toLowerCase() === symbol.toLowerCase())
+          ? metadata.tokens.find(
+              (token) =>
+                token.symbol.toLowerCase() === symbol.toLowerCase() ||
+                token.address.toLowerCase() === symbol.toLowerCase(),
+            )
           : (metadata.tokens.find((token) => token.address === store.token(String(ctx.chat!.id))) ??
             metadata.tokens[0]);
         if (!token) throw new Error("Invalid token");
+        if (!amountText) {
+          await openSetup(ctx, token, type, settings);
+          return;
+        }
+        if (amountText.includes("$") || args.some((arg) => arg.toUpperCase() === "USD")) {
+          await ctx.reply(
+            "USD pricing is unavailable for this token on this network. Enter the amount in token units.",
+          );
+          return;
+        }
         const inferred = inferMaxPlayers(
           [
             command,
@@ -436,7 +637,6 @@ export function registerEvmBot(
     if (busy || stopped) return;
     busy = true;
     try {
-      const metadata = await service.metadata();
       for (const action of store.pending()) {
         try {
           await service.step(action);
@@ -475,6 +675,7 @@ export function registerEvmBot(
             store.notified(action.id);
         }
       }
+      const metadata = await service.metadata();
       for (const row of store.messages()) {
         try {
           const game = await service.game(row.game);
@@ -543,6 +744,7 @@ export function registerEvmBot(
   timer.unref();
   return {
     service,
+    refresh,
     network: (chatId: number) => ({
       chain: store.network(String(chatId)),
       name: config.name,

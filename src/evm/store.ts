@@ -41,12 +41,12 @@ export class EvmBotStore {
       throw new Error("EVM bot database deployment mismatch");
     }
   }
-  commandNetwork(id: string, chat: string): "solana" | "evm" {
+  commandNetwork(id: string, chat: string, selected?: "solana" | "evm"): "solana" | "evm" {
     // Pin the first route before any signing, including Solana commands. Replays
     // retain that route even if an administrator changed the chat preference.
     this.db
       .query("INSERT OR IGNORE INTO command_networks VALUES (?,?)")
-      .run(id, this.action(id) ? "evm" : this.network(chat));
+      .run(id, this.action(id) ? "evm" : (selected ?? this.network(chat)));
     return this.db
       .query<{ chain: "solana" | "evm" }, [string]>("SELECT chain FROM command_networks WHERE id=?")
       .get(id)!.chain;

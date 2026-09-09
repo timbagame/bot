@@ -48,3 +48,22 @@ Command routes are persisted before spending, so replaying an update after a
 network preference change keeps its original chain. Creator close actions on
 expired coinflips refund remaining participants before closing; signed refund
 steps survive restarts in the same action journal.
+
+## Shared command and setup flow
+
+`/cf` and `/ga` open the amount menu with the chat's default token. A token-only
+command, such as `/cf USDC`, opens that menu with a token override. An amount,
+such as `/cf .5 TEST`, creates directly. The shared parser runs before chain
+selection. A unique supported token selects its chain; a symbol present on both
+chains uses a matching default token or asks the creator to choose. The same group
+can have games on both chains without changing its default for every command.
+
+EVM setup reuses the amount, player and confirmation menu presentation. Its SQLite
+record keeps the exact amount, token and deployment-scoped identity behind short,
+creator-only callbacks. Custom amounts stay decimal strings until bigint conversion.
+Token amounts work without prices; USD commands require a price source and are
+explicitly rejected for EVM tokens while no such source is configured.
+
+Pending transaction recovery runs before metadata lookup, so Oracle API outages
+do not suspend receipt checks or signed transaction rebroadcasts. Replayed creation
+requests reuse their journal entry without sending another creation placeholder.

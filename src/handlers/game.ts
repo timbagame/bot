@@ -1,3 +1,4 @@
+import { parseGameCommandInput } from "./game-command-input";
 import type { Context } from "grammy";
 import { getRequiredTelegramIdForContext } from "../utils/context-helpers";
 
@@ -29,22 +30,18 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
   if (telegramId == null) {
     return;
   }
-  const args = ctx.message?.text?.split(" ");
-
-  if (!args || args.length < 2) {
-    await deps.showInteractiveSetup(ctx, telegramId);
-    return;
-  }
-
-  if (args.length === 2) {
-    const tokenCandidate = args[1]?.trim();
-    if (tokenCandidate && !/^[0-9]+(?:\.[0-9]+)?$/.test(tokenCandidate)) {
-      const override = await deps.resolveTokenOverride(tokenCandidate, ctx.chat?.id);
-      if (override) {
-        await deps.showInteractiveSetup(ctx, telegramId, override);
-        return;
-      }
+  const args = ctx.message?.text?.trim().split(/\s+/) ?? [];
+  const input = parseGameCommandInput(args.slice(1));
+  if (input.mode === "menu") {
+    const override = input.token
+      ? await deps.resolveTokenOverride(input.token, ctx.chat?.id)
+      : undefined;
+    if (input.token && !override) {
+      await ctx.reply("Token unavailable. Check its symbol or address.");
+      return;
     }
+    await deps.showInteractiveSetup(ctx, telegramId, override ?? undefined);
+    return;
   }
 
   await deps.createGameViaCommand(ctx, args, telegramId);
