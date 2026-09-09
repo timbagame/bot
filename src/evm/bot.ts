@@ -212,7 +212,9 @@ export function registerEvmBot(
     registerGameCommand(command, async (ctx) => {
       try {
         if (store.pending().some((action) => action.user === user(ctx))) {
-          await ctx.reply("Your EVM wallet still has a transaction awaiting confirmation.");
+          await ctx.reply(
+            `Your ${config.name} wallet still has a transaction awaiting confirmation.`,
+          );
           return;
         }
         const type = gameType === 0 ? "coinflip" : "giveaway";
@@ -293,7 +295,7 @@ export function registerEvmBot(
         );
       } catch {
         await ctx.reply(
-          `Use /${command} AMOUNT [PLAYERS] [TOKEN] [private]. Check the token minimum and your wallet balance.`,
+          `Use /${gameType === 0 ? "cf" : "ga"} AMOUNT [TOKEN] [PLAYERS] [private]. Check the token minimum and your wallet balance.`,
         );
       }
     });
@@ -439,7 +441,7 @@ export function registerEvmBot(
             await bot.api.editMessageText(
               action.chat,
               action.message,
-              "Game creation failed. Check your EVM wallet balance.",
+              `Game creation failed. Check your ${config.name} wallet balance.`,
             );
           if (action.kind === "withdraw")
             await bot.api.editMessageText(
@@ -452,7 +454,7 @@ export function registerEvmBot(
           if (action.phase === "failed" && !["create", "withdraw"].includes(action.kind))
             await bot.api.sendMessage(
               Number(action.user),
-              `Your EVM ${action.kind} could not complete. Use /evm to check your wallet and try the game button again.`,
+              `Your ${config.name} ${action.kind} could not complete. Use /balance to check your wallet and try the game button again.`,
             );
           store.notified(action.id);
         } catch (error) {
