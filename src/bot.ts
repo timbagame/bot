@@ -1,3 +1,4 @@
+import { registerLightningDeposits } from "./handlers/lightning";
 import { resolveChatDefaultPlayers } from "./utils/chat-settings";
 import { resolveAdvancedOptions } from "./utils/game-settings";
 import { registerEvmBot } from "./evm/bot";
@@ -495,6 +496,7 @@ const {
 } = walletMenuModule;
 
 registerWalletMenuHandlers();
+const lightningDeposits = registerLightningDeposits(bot, wallet, clearWalletCache);
 
 export const __test_setWalletCache = setWalletCacheForTests;
 export const __test_getCachedWalletData = getCachedWalletData;
@@ -6386,6 +6388,7 @@ if (process.env.NODE_ENV !== "test") {
   setupProgram()
     .then(async () => {
       console.log("Starting bot...");
+      lightningDeposits.start();
 
       try {
         await bot.api.setMyCommands(getBotMenuCommands());
@@ -6637,6 +6640,7 @@ if (process.env.NODE_ENV !== "test") {
           rpcEndpointListenerCleanup?.();
           rpcEndpointListenerCleanup = null;
           evmRuntime?.stop();
+          lightningDeposits.stop();
           financeBackfillWorker.stop();
           buyAlertService.stop();
           await unregisterProgramEventListeners();
