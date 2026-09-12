@@ -274,3 +274,51 @@ responses. Five minutes of successful polling without another 429 resets the
 rate-limit history. Retry-After continues to take precedence over shorter local
 cooldowns; this reduces repeated throttling but cannot guarantee availability
 of the public GeckoTerminal service.
+
+## Lightning deposits through FixedFloat
+
+Set `FIXEDFLOAT_ENABLED=true`, `FIXEDFLOAT_API_KEY_FILE`, and
+`FIXEDFLOAT_API_SECRET_FILE` to enable **Deposit** in the Solana wallet menu and
+`/deposit <sats>` in private chats. Secret files must have mode 400 or 600;
+`FIXEDFLOAT_API_KEY` and `FIXEDFLOAT_API_SECRET` are supported for local development.
+Mount secret files into the bot container before enabling the feature.
+The optional `deploy/quadlet/timba-bot.container.d/20-lightning.conf.example`
+provides the secret mounts and a persistent journal directory. Create
+`~/timba/bot/lightning` with mode 700 and both secret files with mode 600, then
+install the drop-in without `.example` when activating the feature. Use mainnet
+Solana RPC for this mainnet Lightning → native SOL route. No deployment or credentials
+are included in this PR.
+
+The bot checks the live BTCLN/SOL route, shows a one-minute quote, and creates a
+fixed-rate invoice only after confirmation. The actual invoice displays the final
+SOL amount. FixedFloat's fixed-rate fee is 1%; network costs and pricing are reflected
+in its quoted output. Amounts are handled as decimal strings. Provider API:
+https://ff.io/api
+
+Set `FIXEDFLOAT_DATABASE_FILE` to a path in a persistent directory and back it up
+(the drop-in uses `/app/lightning/deposits.sqlite`). Local development defaults to
+`lightning.sqlite` under `BOT_DB_DIR`.
+Order payloads, including access tokens, are encrypted with a key derived from the
+API secret. Retain that secret with the journal: changing it requires migrating
+existing payloads first. Run one bot instance per journal/API key. Requests share
+a conservative weighted API budget; polling backs off during outages.
+
+Completed deposits require an explicit successful native SOL transfer to the saved
+destination in a finalized transaction. The bot refreshes the wallet and edits the
+saved status message; it does not create an off-chain balance credit. Expired invoices
+are never displayed for payment. Expired provider orders are checked for seven days
+for late payments; after that, users should contact FixedFloat support. Emergency orders link to FixedFloat for the user's
+exchange/refund decision.
+
+A timeout during order creation is ambiguous and is never retried automatically.
+After checking FixedFloat's order history/support and confirming that no payable
+order remains, an operator can close an unknown local request:
+
+```bash
+bun scripts/lightning-admin.ts list
+bun scripts/lightning-admin.ts abandon <request-id> --confirm --reason "<provider evidence>"
+```
+
+This records the reason and retains the original row; it does not cancel an exchange
+or move money. Never close a request with an unresolved payment. Users can recover
+a persisted invoice/status with `/deposit` after restarting the bot.
