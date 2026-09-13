@@ -266,8 +266,8 @@ test("quote and invoice creation use identical floating affiliate terms", async 
       const data =
         method === "ccies"
           ? [
-              { code: "BTCLN", coin: "BTC", network: "LN", recv: true, send: true },
-              { code: "SOL", coin: "SOL", network: "SOL", recv: true, send: true },
+              { code: "BTCLN", coin: "BTC", network: "LN", recv: 1, send: 0 },
+              { code: "SOL", coin: "SOL", network: "SOL", recv: 0, send: 1 },
             ]
           : method === "price"
             ? quote
@@ -360,6 +360,34 @@ test("preserves legacy fixed orders and accepts changed floating output at settl
       expect(db.get(deposit.id)?.state).toBe("completed");
     } finally {
       db.close();
+    }
+  }
+});
+
+test("availability accepts boolean flags and rejects disabled or malformed routes", async () => {
+  for (const recv of [true, false, 0, 2, "1"]) {
+    let priceCalls = 0;
+    const client = new FixedFloatClient(
+      { key: "synthetic-key", secret: "synthetic-secret", refcode: "synthetic-ref" },
+      (async (url: unknown) => {
+        if (String(url).endsWith("/ccies"))
+          return Response.json({
+            code: 0,
+            data: [
+              { code: "BTCLN", coin: "BTC", network: "LN", recv, send: false },
+              { code: "SOL", coin: "SOL", network: "SOL", recv: false, send: true },
+            ],
+          });
+        priceCalls++;
+        return Response.json({ code: 0, data: quote });
+      }) as typeof fetch,
+    );
+    if (recv === true) {
+      expect((await client.getQuote("10000")).to.amount).toBe("0.02");
+      expect(priceCalls).toBe(1);
+    } else {
+      await expect(client.getQuote("10000")).rejects.toThrow();
+      expect(priceCalls).toBe(0);
     }
   }
 });

@@ -18,12 +18,16 @@ export function fixedFloatConfig(env: Readonly<Record<string, string | undefined
 const decimal = z
   .union([z.string().regex(/^\d+(\.\d+)?$/), z.number().finite().nonnegative()])
   .transform(String);
+// FixedFloat returns numeric flags in live responses; also accept documented booleans.
+const availability = z
+  .union([z.boolean(), z.literal(0), z.literal(1)])
+  .transform((value) => value === true || value === 1);
 const currency = z.object({
   code: z.string(),
   coin: z.string(),
   network: z.string(),
-  recv: z.boolean(),
-  send: z.boolean(),
+  recv: availability,
+  send: availability,
 });
 const side = z.object({
   code: z.string(),
