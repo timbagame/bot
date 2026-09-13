@@ -278,8 +278,19 @@ of the public GeckoTerminal service.
 ## Lightning deposits through FixedFloat
 
 Set `FIXEDFLOAT_ENABLED=true`, `FIXEDFLOAT_REFCODE`, `FIXEDFLOAT_API_KEY_FILE`, and
-`FIXEDFLOAT_API_SECRET_FILE` to enable **Deposit** in the Solana wallet menu and
-`/deposit <sats>` in private chats. Secret files must have mode 400 or 600;
+`FIXEDFLOAT_API_SECRET_FILE` to enable **Lightning** inside Deposit.
+**Deposit** and `/deposit` always offer direct Solana deposits, with a locally generated
+QR code and copyable address, even when Lightning is disabled.
+Lightning amounts are selected in USD using $10/$25/$50 presets within the live
+provider limits or **Custom Amount**. Reply with a USD amount such as `20.50`.
+The quote shows exact sats, estimated SOL and USD equivalents, and **Fee: 1%**.
+`/deposit` (including legacy arguments) opens the same method selector as the button;
+old sats buttons reopen the USD selector without reinterpreting their amounts.
+Custom prompts use the shared wallet input sessions and timeout, and navigation
+invalidates them. Leaving an invoice detaches its card from automatic updates;
+the payable order continues reconciliation and can be reopened through Lightning.
+
+Secret files must have mode 400 or 600;
 `FIXEDFLOAT_API_KEY` and `FIXEDFLOAT_API_SECRET` are supported for local development.
 Mount secret files into the bot container before enabling the feature.
 The optional `deploy/quadlet/timba-bot.container.d/20-lightning.conf.example`

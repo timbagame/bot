@@ -297,10 +297,10 @@ test("shows provider rules and floating estimates before payment", () => {
     for (const state of ["quoted", "active"]) {
       if (state === "active") db.update(deposit.id, state, order());
       const message = depositMessage(db.get(deposit.id)!);
-      expect(message.text).toContain("Estimated receipt:");
+      expect(message.text).toContain("You receive: ≈");
       expect(message.text).toContain("Fee: 1%");
       expect(message.text).toContain("https://ff.io/terms-of-service");
-      expect(message.text).toContain("Exchange processed by FixedFloat");
+      expect(message.text).toContain("Exchange provided by");
     }
   } finally {
     db.close();
@@ -416,7 +416,7 @@ test("quote limits are shown in sats and unexpected errors stay private", async 
     }) as typeof fetch,
   );
   for (const [sats, expected] of [
-    ["10000", "Minimum deposit: 15,000 sats. Try /deposit 15000."],
+    ["10000", "Minimum deposit: 15,000 sats."],
     ["20000001", "Maximum deposit: 20,000,000 sats."],
   ]) {
     let error: unknown;

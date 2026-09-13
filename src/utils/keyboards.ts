@@ -37,8 +37,8 @@ export const createWalletKeyboard = (
   },
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
-  if (process.env["FIXEDFLOAT_ENABLED"] === "true" && actions.swap === "cmd_swap") {
-    keyboard.text("⚡ Deposit", "wallet_lightning").text("💸 Withdraw", actions.withdraw).row();
+  if (actions.swap === "cmd_swap") {
+    keyboard.text("💰 Deposit", "wallet_deposit").text("💸 Withdraw", actions.withdraw).row();
     keyboard.text("🔄 Swap", actions.swap);
     if (actions.positions) keyboard.text("📊 Positions", actions.positions);
     keyboard.row().text("🔁 Refresh", actions.refresh).text("⚙️ Settings", actions.settings);

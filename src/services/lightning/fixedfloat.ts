@@ -34,6 +34,7 @@ const side = z.object({
   code: z.string(),
   amount: decimal,
   address: z.string(),
+  usd: decimal.optional(),
   tx: z
     .object({ id: z.string().nullable().optional(), amount: decimal.nullable().optional() })
     .optional(),
@@ -49,8 +50,14 @@ export const OrderSchema = z.object({
 });
 export type FixedFloatOrder = z.output<typeof OrderSchema>;
 const quote = z.object({
-  from: z.object({ code: z.string(), amount: decimal, min: decimal, max: decimal }),
-  to: z.object({ code: z.string(), amount: decimal }),
+  from: z.object({
+    code: z.string(),
+    amount: decimal,
+    min: decimal,
+    max: decimal,
+    usd: decimal.optional(),
+  }),
+  to: z.object({ code: z.string(), amount: decimal, usd: decimal.optional() }),
   errors: z.array(z.string()),
 });
 export type FixedFloatQuote = z.output<typeof quote>;
@@ -131,7 +138,7 @@ export class FixedFloatClient {
     if (result.code !== 0) throw new FixedFloatError(true);
     return result.data;
   }
-  async getQuote(sats: string): Promise<FixedFloatQuote> {
+  private async price(sats: string): Promise<FixedFloatQuote> {
     const currencies = z.array(currency).parse(await this.call("ccies", {}));
     if (
       !currencies.some((c) => c.code === "BTCLN" && c.coin === "BTC" && c.recv) ||
@@ -150,11 +157,33 @@ export class FixedFloatClient {
       }),
     );
     if (result.from.code !== "BTCLN" || result.to.code !== "SOL") throw new FixedFloatError(true);
+    return result;
+  }
+  async getMarket() {
+    const result = await this.price("100000");
+    if (result.errors.some((error) => !["LIMIT_MIN", "LIMIT_MAX"].includes(error)))
+      throw new FixedFloatError(true);
+    const btcUsd = Number(result.from.usd) / Number(result.from.amount);
+    const minSats = Number(parseTokenAmount(result.from.min, 8));
+    const maxSats = Number(parseTokenAmount(result.from.max, 8));
+    if (
+      !Number.isFinite(btcUsd) ||
+      btcUsd <= 0 ||
+      !Number.isSafeInteger(minSats) ||
+      !Number.isSafeInteger(maxSats) ||
+      minSats <= 0 ||
+      maxSats < minSats
+    )
+      throw new FixedFloatError(true);
+    return { btcUsd, minSats, maxSats };
+  }
+  async getQuote(sats: string): Promise<FixedFloatQuote> {
+    const result = await this.price(sats);
     const min = parseTokenAmount(result.from.min, 8);
     const max = parseTokenAmount(result.from.max, 8);
     const formatSats = (amount: bigint) => amount.toLocaleString("en-US");
     if (BigInt(sats) < min)
-      throw new DepositInputError(`Minimum deposit: ${formatSats(min)} sats. Try /deposit ${min}.`);
+      throw new DepositInputError(`Minimum deposit: ${formatSats(min)} sats.`);
     if (BigInt(sats) > max)
       throw new DepositInputError(`Maximum deposit: ${formatSats(max)} sats.`);
     if (result.errors.length) throw new FixedFloatError(true);

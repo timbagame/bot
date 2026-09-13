@@ -27,7 +27,10 @@ export class LightningDeposits {
     if (parseTokenAmount(quote.from.amount, 8) !== BigInt(sats))
       throw new Error("Quote amount changed. Please try again.");
     // A competing request may have won while fetching the quote.
-    return this.store.active(owner) ?? this.store.quote(owner, destination, sats, quote.to.amount);
+    return (
+      this.store.active(owner) ??
+      this.store.quote(owner, destination, sats, quote.to.amount, quote.from.usd, quote.to.usd)
+    );
   }
   private validate(order: FixedFloatOrder, deposit: Deposit) {
     if (

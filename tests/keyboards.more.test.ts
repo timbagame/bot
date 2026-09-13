@@ -90,7 +90,7 @@ describe("keyboards: main and wallet", () => {
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
     expect(kb.inline_keyboard).toHaveLength(3);
-    expect(kb.inline_keyboard[2]).toHaveLength(1);
+    expect(kb.inline_keyboard[2]).toHaveLength(2);
     expect(texts).toContain("📊 Positions");
     expect(texts).toContain("⚙️ Settings");
   });
@@ -393,7 +393,7 @@ test("Lightning wallet actions fit in three rows", () => {
     expect(
       createWalletKeyboard().inline_keyboard.map((row) => row.map((button) => button.text)),
     ).toEqual([
-      ["⚡ Deposit", "💸 Withdraw"],
+      ["💰 Deposit", "💸 Withdraw"],
       ["🔄 Swap", "📊 Positions"],
       ["🔁 Refresh", "⚙️ Settings"],
     ]);

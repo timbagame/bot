@@ -10,6 +10,8 @@ export type Deposit = {
   destination: string;
   sats: string;
   quotedSol: string;
+  payUsd?: string | null;
+  receiveUsd?: string | null;
   state: string;
   created: number;
   order: FixedFloatOrder | null;
@@ -35,6 +37,13 @@ export class DepositStore {
       CREATE INDEX IF NOT EXISTS lightning_pending ON lightning_deposits(state,nextPoll);
       CREATE UNIQUE INDEX IF NOT EXISTS lightning_active_owner ON lightning_deposits(owner)
       WHERE state IN ('quoted','creating','unknown');`);
+    const columns = this.db.query("PRAGMA table_info(lightning_deposits)").all() as {
+      name: string;
+    }[];
+    for (const column of ["payUsd", "receiveUsd"]) {
+      if (!columns.some((entry) => entry.name === column))
+        this.db.exec(`ALTER TABLE lightning_deposits ADD COLUMN ${column} TEXT`);
+    }
     // A crashed create cannot be replayed: FixedFloat has no documented idempotency key.
     if (recoverCreating) {
       this.db.run("UPDATE lightning_deposits SET state='unknown' WHERE state='creating'");
@@ -66,6 +75,8 @@ export class DepositStore {
       destination: row.destination,
       sats: row.sats,
       quotedSol: row.quotedSol,
+      payUsd: row.payUsd,
+      receiveUsd: row.receiveUsd,
       state: row.state,
       created: row.created,
       nextPoll: row.nextPoll,
@@ -91,11 +102,18 @@ export class DepositStore {
         .get(owner),
     );
   }
-  quote(owner: string, destination: string, sats: string, quotedSol: string): Deposit {
+  quote(
+    owner: string,
+    destination: string,
+    sats: string,
+    quotedSol: string,
+    payUsd?: string,
+    receiveUsd?: string,
+  ): Deposit {
     const id = randomUUID();
     this.db.run(
-      "INSERT INTO lightning_deposits (id,owner,destination,sats,quotedSol,state,created) VALUES (?,?,?,?,?,'quoted',?)",
-      [id, owner, destination, sats, quotedSol, Date.now()],
+      "INSERT INTO lightning_deposits (id,owner,destination,sats,quotedSol,state,created,payUsd,receiveUsd) VALUES (?,?,?,?,?,'quoted',?,?,?)",
+      [id, owner, destination, sats, quotedSol, Date.now(), payUsd ?? null, receiveUsd ?? null],
     );
     return this.get(id)!;
   }
@@ -120,9 +138,10 @@ export class DepositStore {
     nextPoll = Date.now() + 30_000,
     attempts = 0,
   ) {
+    const changedStatus = order && this.get(id)?.order?.status !== order.status;
     this.db.run(
-      "UPDATE lightning_deposits SET state=?,payload=COALESCE(?,payload),nextPoll=?,attempts=? WHERE id=?",
-      [state, order ? this.encrypt(order) : null, nextPoll, attempts, id],
+      "UPDATE lightning_deposits SET state=?,payload=COALESCE(?,payload),nextPoll=?,attempts=?,notified=CASE WHEN ? THEN '' ELSE notified END WHERE id=?",
+      [state, order ? this.encrypt(order) : null, nextPoll, attempts, changedStatus ? 1 : 0, id],
     );
   }
   due(now = Date.now()): Deposit[] {
@@ -136,13 +155,19 @@ export class DepositStore {
   notifications(): Deposit[] {
     return this.db
       .query(
-        "SELECT * FROM lightning_deposits WHERE state IN ('completed','expired','emergency') AND notified<>state AND messageId IS NOT NULL LIMIT 20",
+        "SELECT * FROM lightning_deposits WHERE state IN ('active','settling','completed','expired','emergency') AND notified<>state AND messageId IS NOT NULL LIMIT 20",
       )
       .all()
       .map((r) => this.decode(r)!);
   }
   markNotified(id: string) {
     this.db.run("UPDATE lightning_deposits SET notified=state WHERE id=?", [id]);
+  }
+  detachMessage(owner: string, messageId: number) {
+    this.db.run("UPDATE lightning_deposits SET messageId=NULL WHERE owner=? AND messageId=?", [
+      owner,
+      messageId,
+    ]);
   }
   rememberMessage(id: string, messageId: number) {
     this.db.run("UPDATE lightning_deposits SET messageId=? WHERE id=?", [messageId, id]);
