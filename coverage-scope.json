@@ -1,0 +1,15 @@
+{
+  "roots": ["src"],
+  "extensions": [".ts"],
+  "exclude": [
+    "*.d.ts",
+    "*.test.ts",
+    "*.spec.ts",
+    "*/tests/*",
+    "*/fixtures/*",
+    "src/services/buy-alerts/types.ts",
+    "src/types/index.ts",
+    "src/types/wallet.ts",
+    "src/utils/swap/types.ts"
+  ]
+}
