@@ -1,0 +1,25 @@
+{
+  "roots": [
+    "src/utils/swap",
+    "src/services/lightning",
+    "src/utils/game.ts",
+    "src/utils/token-manager.ts",
+    "src/utils/transaction-history.ts",
+    "src/utils/jupiter.ts",
+    "src/utils/swap-manager.ts",
+    "src/utils/game-creation-recovery.ts",
+    "src/utils/faucet-database.ts",
+    "src/services/finance-report.ts",
+    "src/utils/wallet-ui.ts",
+    "src/utils/keyboards.ts"
+  ],
+  "extensions": [".ts"],
+  "exclude": [
+    "*.d.ts",
+    "*.test.ts",
+    "*.spec.ts",
+    "*/tests/*",
+    "*/fixtures/*",
+    "src/utils/swap/types.ts"
+  ]
+}
