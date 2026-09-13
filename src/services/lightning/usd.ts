@@ -27,5 +27,12 @@ export function usdToSats(input: string, market: DepositMarket): string {
 
 export function depositUsdPresets(market: DepositMarket): number[] {
   const { min, max } = depositUsdLimits(market);
-  return [10, 25, 50].filter((amount) => amount >= min && amount <= max);
+  const presets = [10, 25, 50].filter((amount) => amount >= min && amount <= max);
+  if (presets.length === 3) return presets;
+  const candidates = [Math.ceil(min / 5) * 5, 100, 250, 500, 1000, 2500, 5000, 10000, 25000];
+  for (const amount of candidates) {
+    if (amount >= min && amount <= max && !presets.includes(amount)) presets.push(amount);
+    if (presets.length === 3) break;
+  }
+  return presets.sort((a, b) => a - b);
 }

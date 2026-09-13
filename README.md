@@ -281,8 +281,9 @@ Set `FIXEDFLOAT_ENABLED=true`, `FIXEDFLOAT_REFCODE`, `FIXEDFLOAT_API_KEY_FILE`, 
 `FIXEDFLOAT_API_SECRET_FILE` to enable **Lightning** inside Deposit.
 **Deposit** and `/deposit` always offer direct Solana deposits, with a locally generated
 QR code and copyable address, even when Lightning is disabled.
-Lightning amounts are selected in USD using $10/$25/$50 presets within the live
-provider limits or **Custom Amount**. Reply with a USD amount such as `20.50`.
+Lightning amounts are selected in USD using $10/$25/$50 presets or **Custom Amount**.
+Presets outside the live limits are replaced with valid amounts closer to the minimum
+(for example, $15/$25/$50 when the minimum is $10.38). Reply with a USD amount such as `20.50`.
 The quote shows exact sats, estimated SOL and USD equivalents, and **Fee: 1%**.
 `/deposit` (including legacy arguments) opens the same method selector as the button;
 old sats buttons reopen the USD selector without reinterpreting their amounts.

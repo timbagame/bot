@@ -91,7 +91,7 @@ export function depositMethodsMessage(lightningEnabled: boolean) {
   const keyboard = new InlineKeyboard().text("◎ Solana", "deposit_solana");
   if (lightningEnabled) keyboard.text("⚡ Lightning", "wallet_lightning");
   keyboard.row().text("← Wallet", "main_wallet");
-  return { text: "💰 <b>Deposit</b>\n\nChoose how to fund your wallet.", keyboard };
+  return { text: "💰 <b>Deposit</b>\n\nChoose a deposit method.", keyboard };
 }
 
 export function depositAmountMessage(market: DepositMarket, error?: string) {
@@ -101,7 +101,7 @@ export function depositAmountMessage(market: DepositMarket, error?: string) {
   if (keyboard.inline_keyboard[0]?.length) keyboard.row();
   keyboard.text("✏️ Custom Amount", "ln_custom").row().text("← Deposit", "wallet_deposit");
   return {
-    text: `⚡ <b>Deposit via Lightning</b>\n\n${error ? `${escapeHtml(error)}\n\n` : ""}Choose an amount in USD.\nMinimum: ${usdLabel(min)} · Maximum: ${usdLabel(max)}`,
+    text: `⚡ <b>Deposit via Lightning</b>\n\n${error ? `${escapeHtml(error)}\n\n` : ""}Choose an amount in USD.\nLimits: ${usdLabel(min)}–${usdLabel(max)}`,
     keyboard,
   };
 }
@@ -169,15 +169,19 @@ export function registerLightningDeposits(
   ) => {
     const message = ctx.callbackQuery?.message;
     // Telegram cannot turn a photo into text. Replace media cards so a Solana QR
-    // is never left above Lightning payment instructions.
-    const replaceMedia = Boolean(message && !("text" in message));
+    // is never left above Lightning payment instructions. Replace old reply cards
+    // too: editing their text cannot remove Telegram's reply header.
+    const replaceCard = Boolean(
+      message &&
+      (!("text" in message) || "reply_to_message" in message || "external_reply" in message),
+    );
     const result = await respondWithMenu(ctx, payload, {
       targetChatId: target ? ctx.chat?.id : undefined,
       targetMessageId: target,
       replyToMessageId: null,
-      skipEdit: replaceMedia,
+      skipEdit: replaceCard,
     });
-    if (replaceMedia && result.respondedWithReply) await ctx.deleteMessage().catch(() => {});
+    if (replaceCard && result.respondedWithReply) await ctx.deleteMessage().catch(() => {});
     return result;
   };
   const show = async (ctx: Context, deposit: Deposit, target?: number) => {

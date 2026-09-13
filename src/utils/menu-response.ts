@@ -318,10 +318,18 @@ export const respondWithMenu = async (
     options.replyToMessageId ?? ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
 
   const sentMessage = await awaitTelegramRetry(() =>
-    ctx.reply(payload.text, {
-      ...buildMenuTextOptions(payload),
-      reply_to_message_id: replyToId ?? undefined,
-    }),
+    // An explicit null means a standalone card. Bypass ctx.reply because the
+    // application's reply middleware otherwise restores the triggering message.
+    options.replyToMessageId === null && ctx.chat
+      ? ctx.api.sendMessage(ctx.chat.id, payload.text, {
+          ...buildMenuTextOptions(payload),
+          message_thread_id:
+            ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id,
+        })
+      : ctx.reply(payload.text, {
+          ...buildMenuTextOptions(payload),
+          reply_to_message_id: replyToId ?? undefined,
+        }),
   );
 
   return {
