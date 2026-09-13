@@ -36,8 +36,11 @@ export class DepositStore {
       CREATE UNIQUE INDEX IF NOT EXISTS lightning_active_owner ON lightning_deposits(owner)
       WHERE state IN ('quoted','creating','unknown');`);
     // A crashed create cannot be replayed: FixedFloat has no documented idempotency key.
-    if (recoverCreating)
+    if (recoverCreating) {
       this.db.run("UPDATE lightning_deposits SET state='unknown' WHERE state='creating'");
+      // Require a fresh review after restart, including when pricing/disclosures change.
+      this.db.run("UPDATE lightning_deposits SET state='expired' WHERE state='quoted'");
+    }
   }
   private encrypt(order: FixedFloatOrder) {
     const nonce = randomBytes(12);

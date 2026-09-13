@@ -34,7 +34,7 @@ export class LightningDeposits {
       order.from.code !== "BTCLN" ||
       order.to.code !== "SOL" ||
       order.to.address !== deposit.destination ||
-      order.type !== "fixed" ||
+      order.type !== (deposit.order?.type ?? "float") ||
       parseTokenAmount(order.from.amount, 8) !== BigInt(deposit.sats) ||
       (deposit.order && order.id !== deposit.order.id)
     )

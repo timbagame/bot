@@ -2,14 +2,17 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { readProtectedSecretFile } from "../../utils/secrets";
 
-export function fixedFloatConfig(env: NodeJS.ProcessEnv = process.env) {
+export function fixedFloatConfig(env: Readonly<Record<string, string | undefined>> = process.env) {
   if (env["FIXEDFLOAT_ENABLED"] !== "true") return null;
   const secret = (name: string) =>
     env[`${name}_FILE`] ? readProtectedSecretFile(env[`${name}_FILE`]!, name) : env[name]?.trim();
   const key = secret("FIXEDFLOAT_API_KEY");
   const apiSecret = secret("FIXEDFLOAT_API_SECRET");
   if (!key || !apiSecret) throw new Error("FixedFloat credentials are required when enabled");
-  return { key, secret: apiSecret };
+  const refcode = env["FIXEDFLOAT_REFCODE"]?.trim();
+  if (!refcode || !/^[A-Za-z0-9_-]{1,64}$/.test(refcode))
+    throw new Error("FIXEDFLOAT_REFCODE is required when Lightning deposits are enabled");
+  return { key, secret: apiSecret, refcode };
 }
 
 const decimal = z
@@ -78,7 +81,7 @@ export function invoiceMatchesSats(invoice: string, sats: string): boolean {
 export class FixedFloatClient {
   private requests: { at: number; weight: number }[] = [];
   constructor(
-    private readonly config: { key: string; secret: string },
+    private readonly config: { key: string; secret: string; refcode: string },
     private readonly fetcher: typeof fetch = fetch,
     private readonly now = Date.now,
   ) {}
@@ -134,7 +137,9 @@ export class FixedFloatClient {
         toCcy: "SOL",
         amount: satsToBtc(sats),
         direction: "from",
-        type: "fixed",
+        type: "float",
+        refcode: this.config.refcode,
+        afftax: 0.5,
       }),
     );
     if (result.from.code !== "BTCLN" || result.to.code !== "SOL" || result.errors.length)
@@ -151,7 +156,9 @@ export class FixedFloatClient {
         toCcy: "SOL",
         amount: satsToBtc(sats),
         direction: "from",
-        type: "fixed",
+        type: "float",
+        refcode: this.config.refcode,
+        afftax: 0.5,
         toAddress: destination,
       },
       50,

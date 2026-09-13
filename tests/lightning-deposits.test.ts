@@ -5,6 +5,7 @@ import {
   FixedFloatError,
   satsToBtc,
   invoiceMatchesSats,
+  fixedFloatConfig,
   type FixedFloatOrder,
 } from "../src/services/lightning/fixedfloat";
 import { DepositStore } from "../src/services/lightning/store";
@@ -15,7 +16,7 @@ const destination = "So11111111111111111111111111111111111111112";
 const order = (): FixedFloatOrder => ({
   id: "TEST01",
   token: "synthetic-token",
-  type: "fixed",
+  type: "float",
   status: "NEW",
   time: { expiration: Math.floor(Date.now() / 1000) + 600 },
   from: { code: "BTCLN", amount: "0.00010000", address: "lnbc100u1syntheticinvoice" },
@@ -47,11 +48,14 @@ describe("Lightning deposits", () => {
         toCcy: "SOL",
         amount: "0.00010000",
         toAddress: destination,
+        type: "float",
+        refcode: "synthetic-ref",
+        afftax: 0.5,
       });
       throw new Error("timeout");
     }) as unknown as typeof fetch;
     const client = new FixedFloatClient(
-      { key: "synthetic-key", secret: "synthetic-secret" },
+      { key: "synthetic-key", secret: "synthetic-secret", refcode: "synthetic-ref" },
       fetcher,
     );
     await expect(client.create("10000", destination)).rejects.toMatchObject({ retrySafe: false });
@@ -193,11 +197,14 @@ test("restart restores orders, hides plaintext tokens, and preserves ambiguous r
     db.update(pending.id, "active", order());
     const creating = db.quote("2", destination, "10000", "0.02");
     db.admit(creating.id, "2");
+    const oldQuote = db.quote("3", destination, "10000", "0.02");
     db.close();
     expect(readFileSync(path).includes(Buffer.from("synthetic-token"))).toBe(false);
     db = new DepositStore("synthetic-key", path, true);
     expect(db.get(pending.id)?.order?.token).toBe("synthetic-token");
     expect(db.get(creating.id)?.state).toBe("unknown");
+    expect(db.get(oldQuote.id)?.state).toBe("expired");
+    expect(db.admit(oldQuote.id, "3")).toBe(false);
     expect(() => db.abandonUnknown(pending.id, "test evidence")).toThrow();
     db.abandonUnknown(creating.id, "synthetic provider evidence: no payable order");
     expect(db.get(creating.id)?.state).toBe("failed");
@@ -233,4 +240,126 @@ test("invoice network and amount must match the requested sats", () => {
   expect(invoiceMatchesSats("lnbc200u1synthetic", "10000")).toBe(false);
   expect(invoiceMatchesSats("lntb100u1synthetic", "10000")).toBe(false);
   expect(invoiceMatchesSats("lnbc10000p1synthetic", "1")).toBe(true);
+});
+
+test("requires referral configuration only when enabled", () => {
+  expect(fixedFloatConfig({})).toBeNull();
+  const env = {
+    FIXEDFLOAT_ENABLED: "true",
+    FIXEDFLOAT_API_KEY: "synthetic-key",
+    FIXEDFLOAT_API_SECRET: "synthetic-secret",
+  };
+  expect(() => fixedFloatConfig(env)).toThrow("FIXEDFLOAT_REFCODE");
+  expect(() => fixedFloatConfig({ ...env, FIXEDFLOAT_REFCODE: " " })).toThrow();
+  expect(fixedFloatConfig({ ...env, FIXEDFLOAT_REFCODE: " synthetic-ref " })?.refcode).toBe(
+    "synthetic-ref",
+  );
+});
+
+test("quote and invoice creation use identical floating affiliate terms", async () => {
+  const requests: { method: string; body: Record<string, unknown> }[] = [];
+  const client = new FixedFloatClient(
+    { key: "synthetic-key", secret: "synthetic-secret", refcode: "synthetic-ref" },
+    (async (url: unknown, init: RequestInit) => {
+      const method = String(url).split("/").at(-1)!;
+      requests.push({ method, body: JSON.parse(String(init.body)) });
+      const data =
+        method === "ccies"
+          ? [
+              { code: "BTCLN", coin: "BTC", network: "LN", recv: true, send: true },
+              { code: "SOL", coin: "SOL", network: "SOL", recv: true, send: true },
+            ]
+          : method === "price"
+            ? quote
+            : order();
+      return Response.json({ code: 0, data });
+    }) as typeof fetch,
+  );
+  await client.getQuote("10000");
+  await client.create("10000", destination);
+  expect(requests.map((r) => r.method)).toEqual(["ccies", "price", "create"]);
+  expect(requests[1]!.body).toEqual({
+    fromCcy: "BTCLN",
+    toCcy: "SOL",
+    amount: "0.00010000",
+    direction: "from",
+    type: "float",
+    refcode: "synthetic-ref",
+    afftax: 0.5,
+  });
+  expect(requests[2]!.body).toEqual({ ...requests[1]!.body, toAddress: destination });
+});
+
+test("shows provider rules and floating estimates before payment", () => {
+  const db = store();
+  try {
+    const deposit = db.quote("1", destination, "10000", "0.02");
+    for (const state of ["quoted", "active"]) {
+      if (state === "active") db.update(deposit.id, state, order());
+      const message = depositMessage(db.get(deposit.id)!);
+      expect(message.text).toContain("Estimated receipt:");
+      expect(message.text).toContain("Fee: 1%");
+      expect(message.text).toContain("https://ff.io/terms-of-service");
+      expect(message.text).toContain("Exchange processed by FixedFloat");
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test("rejects fixed-rate responses for new orders without revealing their invoice", async () => {
+  const db = store();
+  try {
+    const service = new LightningDeposits(
+      db,
+      {
+        getQuote: async () => quote,
+        create: async () => ({ ...order(), type: "fixed" }),
+        order: async () => order(),
+      },
+      async () => true,
+    );
+    const deposit = await service.quote("1", destination, "10000");
+    const result = await service.create(deposit.id, "1");
+    expect(result.state).toBe("unknown");
+    expect(result.order?.token).toBe("synthetic-token");
+    expect(depositMessage(result).text).not.toContain("lnbc");
+  } finally {
+    db.close();
+  }
+});
+
+test("preserves legacy fixed orders and accepts changed floating output at settlement", async () => {
+  for (const type of ["fixed", "float"] as const) {
+    const db = store();
+    try {
+      const deposit = db.quote("1", destination, "10000", "0.02");
+      db.update(deposit.id, "active", { ...order(), type }, 0);
+      const done = {
+        ...order(),
+        type,
+        status: "DONE" as const,
+        to: { ...order().to, amount: "0.019", tx: { id: "synthetic-signature", amount: "0.019" } },
+      };
+      let observed = 0n;
+      const service = new LightningDeposits(
+        db,
+        {
+          getQuote: async () => quote,
+          create: async () => order(),
+          order: async () => done,
+        },
+        async (_signature, recipient, amount) => {
+          expect(recipient).toBe(destination);
+          observed = amount;
+          return true;
+        },
+      );
+      await service.poll();
+      expect(observed).toBe(19_000_000n);
+      expect(db.get(deposit.id)?.state).toBe("completed");
+    } finally {
+      db.close();
+    }
+  }
 });

@@ -1,6 +1,8 @@
 # Copy without .example only after creating the directory and protected secret files.
 [Container]
 Environment=FIXEDFLOAT_ENABLED=true
+# Must belong to the API-key account and be enabled for API earnings.
+Environment=FIXEDFLOAT_REFCODE=4f4rrafb
 Environment=FIXEDFLOAT_API_KEY_FILE=/run/secrets/fixedfloat_api_key
 Environment=FIXEDFLOAT_API_SECRET_FILE=/run/secrets/fixedfloat_api_secret
 Environment=FIXEDFLOAT_DATABASE_FILE=/app/lightning/deposits.sqlite
