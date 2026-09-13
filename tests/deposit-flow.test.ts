@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Bot } from "grammy";
+import { patchReplyBehavior } from "../src/utils/reply-patch";
 import type { Update } from "grammy/types";
 import {
   registerLightningDeposits,
@@ -41,7 +42,7 @@ test("USD amounts use whole sats and reject unsupported or out-of-range input", 
     expect(() => usdToSats(value, market)).toThrow();
   expect(
     depositAmountMessage(market).keyboard.inline_keyboard[0]?.map((button) => button.text),
-  ).toEqual(["$25", "$50"]);
+  ).toEqual(["$15", "$25", "$50"]);
   expect(
     depositMethodsMessage(false)
       .keyboard.inline_keyboard.flat()
@@ -107,6 +108,10 @@ function harness(enabled = true) {
       },
     } as never;
   });
+  bot.use(async (ctx, next) => {
+    patchReplyBehavior(ctx);
+    await next();
+  });
   const wallet = {
     getPublicKey: async () => ({ toBase58: () => address }),
     getConnection: () => ({}),
@@ -132,7 +137,7 @@ function harness(enabled = true) {
     store,
     providerCalls,
     passedText: () => passedText,
-    async click(data: string, photo = false) {
+    async click(data: string, photo = false, reply = false) {
       await bot.handleUpdate({
         update_id: updateId++,
         callback_query: {
@@ -144,6 +149,9 @@ function harness(enabled = true) {
             message_id: 10,
             date: 0,
             chat,
+            ...(reply
+              ? { reply_to_message: { message_id: 5, date: 0, chat, text: "Old card" } }
+              : {}),
             ...(photo
               ? {
                   photo: [
@@ -199,6 +207,10 @@ describe("deposit navigation", () => {
       expect(media.caption).toContain(address);
       await h.click("wallet_deposit", true);
       expect(h.calls.at(-1)?.method).toBe("deleteMessage");
+      for (const call of h.calls.filter((entry) => entry.method === "sendMessage")) {
+        expect(call.payload["reply_to_message_id"]).toBeUndefined();
+        expect(call.payload["reply_parameters"]).toBeUndefined();
+      }
       expect(h.providerCalls).toHaveLength(0);
     } finally {
       h.close();
@@ -208,7 +220,7 @@ describe("deposit navigation", () => {
     const h = harness();
     try {
       await h.click("wallet_lightning");
-      expect(h.calls.at(-1)?.payload["text"]).toContain("Minimum: $15.00");
+      expect(h.calls.at(-1)?.payload["text"]).toContain("Limits: $15.00");
       await h.click("ln_custom");
       await h.text("1");
       expect(h.store.active(String(owner.id))).toBeNull();
@@ -363,5 +375,32 @@ test("legacy deposit journals migrate without losing existing quotes", async () 
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the reported $10.38 minimum offers three valid presets close to the minimum", () => {
+  const menu = depositAmountMessage({ btcUsd: 100000, minSats: 10380, maxSats: 15458000 });
+  expect(menu.keyboard.inline_keyboard[0]?.map((button) => button.text)).toEqual([
+    "$15",
+    "$25",
+    "$50",
+  ]);
+  const narrow = depositAmountMessage({ btcUsd: 100000, minSats: 10380, maxSats: 12000 });
+  expect(narrow.keyboard.inline_keyboard.flat().some((button) => button.text === "$15")).toBe(
+    false,
+  );
+});
+
+test("existing reply cards are replaced without carrying forward their reply header", async () => {
+  const h = harness();
+  try {
+    await h.click("wallet_lightning", false, true);
+    const sent = h.calls.find((call) => call.method === "sendMessage");
+    expect(sent).toBeDefined();
+    expect(sent?.payload["reply_to_message_id"]).toBeUndefined();
+    expect(sent?.payload["reply_parameters"]).toBeUndefined();
+    expect(h.calls.at(-1)?.method).toBe("deleteMessage");
+  } finally {
+    h.close();
   }
 });
