@@ -90,7 +90,7 @@ describe("keyboards: main and wallet", () => {
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
     expect(kb.inline_keyboard).toHaveLength(3);
-    expect(kb.inline_keyboard[2]).toHaveLength(1);
+    expect(kb.inline_keyboard[2]).toHaveLength(2);
     expect(texts).toContain("📊 Positions");
     expect(texts).toContain("⚙️ Settings");
   });
@@ -384,4 +384,21 @@ describe("keyboards: player selection and confirm", () => {
     expect(texts).toContain("Min 2");
     expect(texts).toContain("MAX");
   });
+});
+
+test("Lightning wallet actions fit in three rows", () => {
+  const previous = process.env["FIXEDFLOAT_ENABLED"];
+  process.env["FIXEDFLOAT_ENABLED"] = "true";
+  try {
+    expect(
+      createWalletKeyboard().inline_keyboard.map((row) => row.map((button) => button.text)),
+    ).toEqual([
+      ["💰 Deposit", "💸 Withdraw"],
+      ["🔄 Swap", "📊 Positions"],
+      ["🔁 Refresh", "⚙️ Settings"],
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env["FIXEDFLOAT_ENABLED"];
+    else process.env["FIXEDFLOAT_ENABLED"] = previous;
+  }
 });

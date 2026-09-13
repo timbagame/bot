@@ -37,12 +37,17 @@ export const createWalletKeyboard = (
   },
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
-  if (process.env["FIXEDFLOAT_ENABLED"] === "true" && actions.swap === "cmd_swap")
-    keyboard.text("⚡ Deposit", "wallet_lightning").row();
-  if (actions.swap) keyboard.text("🔄 Swap", actions.swap);
-  keyboard.text("💸 Withdraw", actions.withdraw).row();
-  if (actions.positions) keyboard.text("📊 Positions", actions.positions);
-  keyboard.text("🔁 Refresh", actions.refresh).row().text("⚙️ Settings", actions.settings);
+  if (actions.swap === "cmd_swap") {
+    keyboard.text("💰 Deposit", "wallet_deposit").text("💸 Withdraw", actions.withdraw).row();
+    keyboard.text("🔄 Swap", actions.swap);
+    if (actions.positions) keyboard.text("📊 Positions", actions.positions);
+    keyboard.row().text("🔁 Refresh", actions.refresh).text("⚙️ Settings", actions.settings);
+  } else {
+    if (actions.swap) keyboard.text("🔄 Swap", actions.swap);
+    keyboard.text("💸 Withdraw", actions.withdraw).row();
+    if (actions.positions) keyboard.text("📊 Positions", actions.positions);
+    keyboard.text("🔁 Refresh", actions.refresh).row().text("⚙️ Settings", actions.settings);
+  }
 
   if (pagination && pagination.pageCount > 1) {
     keyboard.row();

@@ -10,7 +10,7 @@ import {
 } from "../src/services/lightning/fixedfloat";
 import { DepositStore } from "../src/services/lightning/store";
 import { LightningDeposits, hasSettlementTransfer } from "../src/services/lightning/service";
-import { depositMessage } from "../src/handlers/lightning";
+import { depositMessage, depositQuoteErrorMessage } from "../src/handlers/lightning";
 
 const destination = "So11111111111111111111111111111111111111112";
 const order = (): FixedFloatOrder => ({
@@ -297,10 +297,10 @@ test("shows provider rules and floating estimates before payment", () => {
     for (const state of ["quoted", "active"]) {
       if (state === "active") db.update(deposit.id, state, order());
       const message = depositMessage(db.get(deposit.id)!);
-      expect(message.text).toContain("Estimated receipt:");
+      expect(message.text).toContain("You receive: ≈");
       expect(message.text).toContain("Fee: 1%");
       expect(message.text).toContain("https://ff.io/terms-of-service");
-      expect(message.text).toContain("Exchange processed by FixedFloat");
+      expect(message.text).toContain("Exchange provided by");
     }
   } finally {
     db.close();
@@ -390,4 +390,44 @@ test("availability accepts boolean flags and rejects disabled or malformed route
       expect(priceCalls).toBe(0);
     }
   }
+});
+
+test("quote limits are shown in sats and unexpected errors stay private", async () => {
+  const client = new FixedFloatClient(
+    { key: "synthetic-key", secret: "synthetic-secret", refcode: "synthetic-ref" },
+    (async (url: unknown, init: RequestInit) => {
+      if (String(url).endsWith("/ccies"))
+        return Response.json({
+          code: 0,
+          data: [
+            { code: "BTCLN", coin: "BTC", network: "LN", recv: 1, send: 0 },
+            { code: "SOL", coin: "SOL", network: "SOL", recv: 0, send: 1 },
+          ],
+        });
+      const amount = JSON.parse(String(init.body)).amount;
+      return Response.json({
+        code: 0,
+        data: {
+          ...quote,
+          from: { ...quote.from, amount, min: "0.00015000", max: "0.2" },
+          errors: ["amount"],
+        },
+      });
+    }) as typeof fetch,
+  );
+  for (const [sats, expected] of [
+    ["10000", "Minimum deposit: 15,000 sats."],
+    ["20000001", "Maximum deposit: 20,000,000 sats."],
+  ]) {
+    let error: unknown;
+    try {
+      await client.getQuote(sats!);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(depositQuoteErrorMessage(error)).toBe(expected!);
+  }
+  expect(depositQuoteErrorMessage(new Error("synthetic private provider data"))).toBe(
+    "Unable to get a quote right now. Please try again shortly.",
+  );
 });

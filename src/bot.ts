@@ -495,8 +495,8 @@ const {
   __test_setWalletCache: setWalletCacheForTests,
 } = walletMenuModule;
 
-registerWalletMenuHandlers();
 const lightningDeposits = registerLightningDeposits(bot, wallet, clearWalletCache);
+registerWalletMenuHandlers();
 
 export const __test_setWalletCache = setWalletCacheForTests;
 export const __test_getCachedWalletData = getCachedWalletData;
@@ -3516,6 +3516,8 @@ const registerCaseInsensitiveCommand =
       }
     }
   };
+
+registerCaseInsensitiveCommand("deposit", "💰 Deposit funds")(lightningDeposits.open);
 
 const getBotMenuCommands = () => [
   ...caseInsensitiveCommands
