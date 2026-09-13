@@ -1,5 +1,5 @@
 {
-  "roots": ["src"],
+  "roots": ["src/utils", "src/services"],
   "extensions": [".ts"],
   "exclude": [
     "*.d.ts",
