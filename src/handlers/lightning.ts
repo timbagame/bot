@@ -10,7 +10,7 @@ export function depositMessage(deposit: Deposit) {
   const keyboard = new InlineKeyboard();
   let text: string;
   if (deposit.state === "quoted") {
-    text = `⚡ Lightning → SOL\n\nSend: ${deposit.sats} sats\nEstimated receipt: ${escapeHtml(deposit.quotedSol)} SOL\nFixedFloat fixed-rate fee: 1%; the quote includes the provider's pricing. The invoice will show the final SOL amount.\n\nDestination: <code>${escapeHtml(deposit.destination)}</code>\n\nQuote expires after one minute.`;
+    text = `⚡ Lightning → SOL\n\nSend: ${deposit.sats} sats\nEstimated receipt: ${escapeHtml(deposit.quotedSol)} SOL\nFloating rate. Exchange fee: 1% (0.5% FixedFloat + 0.5% Timba). Network costs are separate. The SOL amount may change before conversion.\n\nDestination: <code>${escapeHtml(deposit.destination)}</code>\n\nQuote expires after one minute.`;
     keyboard
       .text("Create invoice", `ln_create:${deposit.id}`)
       .row()
@@ -34,13 +34,20 @@ export function depositMessage(deposit: Deposit) {
     text =
       "Your Lightning payment is being processed. This message will update after the SOL transfer is confirmed.";
   } else if (order && order.time.expiration * 1000 > Date.now()) {
-    text = `⚡ Pay with Lightning\n\nSend: ${deposit.sats} sats\nReceive: ${escapeHtml(order.to.amount)} SOL\nExpires: ${new Date(order.time.expiration * 1000).toISOString()}\n\n<code>${escapeHtml(order.from.address)}</code>\n\nPay this invoice once. SOL will be sent to <code>${escapeHtml(deposit.destination)}</code>.`;
+    text = `⚡ Pay with Lightning\n\nSend: ${deposit.sats} sats\n${order.type === "float" ? "Estimated receipt" : "Receive"}: ${escapeHtml(order.to.amount)} SOL\nExpires: ${new Date(order.time.expiration * 1000).toISOString()}\n\n<code>${escapeHtml(order.from.address)}</code>\n\nPay this invoice once. SOL will be sent to <code>${escapeHtml(deposit.destination)}</code>.`;
   } else {
     text = "This invoice has expired. Do not pay it. Checking the final order status…";
   }
+  if (deposit.state === "active" && order?.status === "NEW" && order.type === "float")
+    text +=
+      "\n\nFloating rate: the final SOL amount may change. Exchange fee: 1% (0.5% FixedFloat + 0.5% Timba). Network costs are separate.";
   if (order && ["active", "settling", "emergency", "expired"].includes(deposit.state))
     keyboard.url("Open FixedFloat order", `https://ff.io/order/${order.id}`).row();
   if (deposit.state !== "quoted") keyboard.text("Check status", `ln_status:${deposit.id}`).row();
+  if (deposit.state === "quoted" || (deposit.state === "active" && order?.status === "NEW")) {
+    text +=
+      '\n\nExchange processed by FixedFloat under its <a href="https://ff.io/terms-of-service">service rules</a>.';
+  }
   keyboard.text("← Wallet", "main_wallet");
   return { text, keyboard };
 }

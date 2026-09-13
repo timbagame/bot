@@ -277,7 +277,7 @@ of the public GeckoTerminal service.
 
 ## Lightning deposits through FixedFloat
 
-Set `FIXEDFLOAT_ENABLED=true`, `FIXEDFLOAT_API_KEY_FILE`, and
+Set `FIXEDFLOAT_ENABLED=true`, `FIXEDFLOAT_REFCODE`, `FIXEDFLOAT_API_KEY_FILE`, and
 `FIXEDFLOAT_API_SECRET_FILE` to enable **Deposit** in the Solana wallet menu and
 `/deposit <sats>` in private chats. Secret files must have mode 400 or 600;
 `FIXEDFLOAT_API_KEY` and `FIXEDFLOAT_API_SECRET` are supported for local development.
@@ -290,9 +290,18 @@ Solana RPC for this mainnet Lightning → native SOL route. No deployment or cre
 are included in this PR.
 
 The bot checks the live BTCLN/SOL route, shows a one-minute quote, and creates a
-fixed-rate invoice only after confirmation. The actual invoice displays the final
-SOL amount. FixedFloat's fixed-rate fee is 1%; network costs and pricing are reflected
-in its quoted output. Amounts are handled as decimal strings. Provider API:
+floating-rate invoice only after confirmation. Quotes and orders both send
+`type: "float"`, the configured `refcode`, and `afftax: 0.5`, targeting a 1%
+exchange fee (0.5% FixedFloat + 0.5% Timba). The SOL receipt is an estimate until
+conversion; network costs are separate. Both quote and invoice identify FixedFloat
+as the exchange provider and link its service rules. Amounts remain decimal strings.
+
+The referral code must belong to the API-key account and be enabled for API earnings.
+FixedFloat can ignore invalid/ineligible referral parameters, so verify attribution
+and pricing with the approved account before enabling deposits. No extra Timba fee
+is deducted from the wallet. Existing fixed-rate orders continue reconciliation
+with their stored terms; uncreated quotes expire on restart to require fresh review.
+Provider API:
 https://ff.io/api
 
 Set `FIXEDFLOAT_DATABASE_FILE` to a path in a persistent directory and back it up
