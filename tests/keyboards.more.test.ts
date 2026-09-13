@@ -385,3 +385,20 @@ describe("keyboards: player selection and confirm", () => {
     expect(texts).toContain("MAX");
   });
 });
+
+test("Lightning wallet actions fit in three rows", () => {
+  const previous = process.env["FIXEDFLOAT_ENABLED"];
+  process.env["FIXEDFLOAT_ENABLED"] = "true";
+  try {
+    expect(
+      createWalletKeyboard().inline_keyboard.map((row) => row.map((button) => button.text)),
+    ).toEqual([
+      ["⚡ Deposit", "💸 Withdraw"],
+      ["🔄 Swap", "📊 Positions"],
+      ["🔁 Refresh", "⚙️ Settings"],
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env["FIXEDFLOAT_ENABLED"];
+    else process.env["FIXEDFLOAT_ENABLED"] = previous;
+  }
+});

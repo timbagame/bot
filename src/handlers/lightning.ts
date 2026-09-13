@@ -1,9 +1,19 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { FixedFloatClient, fixedFloatConfig } from "../services/lightning/fixedfloat";
+import {
+  FixedFloatClient,
+  fixedFloatConfig,
+  DepositInputError,
+} from "../services/lightning/fixedfloat";
 import { DepositStore, type Deposit } from "../services/lightning/store";
 import { LightningDeposits, hasSettlementTransfer } from "../services/lightning/service";
 import type { WalletManager } from "../utils/wallet";
 import { escapeHtml } from "../utils/format-amount";
+
+export function depositQuoteErrorMessage(error: unknown): string {
+  return error instanceof DepositInputError
+    ? error.message
+    : "Unable to get a quote right now. Please try again shortly.";
+}
 
 export function depositMessage(deposit: Deposit) {
   const order = deposit.order;
@@ -100,11 +110,11 @@ export function registerLightningDeposits(
       if (active) return await show(ctx, active);
       if (!sats) {
         await ctx.reply(
-          "⚡ Deposit Lightning and receive SOL\nChoose an amount, or send /deposit <sats> (for example /deposit 10000).",
+          "⚡ Deposit Lightning and receive SOL\nChoose an amount, or send /deposit <sats> (for example /deposit 100000).",
           {
             reply_markup: new InlineKeyboard()
-              .text("10,000 sats", "ln_quote:10000")
               .text("100,000 sats", "ln_quote:100000")
+              .text("1,000,000 sats", "ln_quote:1000000")
               .row()
               .text("← Wallet", "main_wallet"),
           },
@@ -113,10 +123,8 @@ export function registerLightningDeposits(
       }
       const destination = (await wallet.getPublicKey(BigInt(owner))).toBase58();
       await show(ctx, await service.quote(owner, destination, sats));
-    } catch {
-      await ctx.reply(
-        "Unable to quote this amount. Use a positive whole number of sats within FixedFloat's current limits, or try again later.",
-      );
+    } catch (error) {
+      await ctx.reply(depositQuoteErrorMessage(error));
     }
   };
   bot.command("deposit", (ctx) => offer(ctx, ctx.match.trim() || undefined));

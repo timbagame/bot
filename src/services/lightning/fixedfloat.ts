@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
+import { parseTokenAmount } from "@timbagame/protocol/amounts";
 import { readProtectedSecretFile } from "../../utils/secrets";
 
 export function fixedFloatConfig(env: Readonly<Record<string, string | undefined>> = process.env) {
@@ -54,6 +55,8 @@ const quote = z.object({
 });
 export type FixedFloatQuote = z.output<typeof quote>;
 
+export class DepositInputError extends Error {}
+
 export class FixedFloatError extends Error {
   constructor(readonly retrySafe: boolean) {
     super("FixedFloat is temporarily unavailable. Please try again later.");
@@ -62,7 +65,7 @@ export class FixedFloatError extends Error {
 
 export function satsToBtc(sats: string): string {
   if (!/^[1-9]\d{0,14}$/.test(sats) || BigInt(sats) > 2_100_000_000_000_000n)
-    throw new Error("Enter a positive whole number of sats.");
+    throw new DepositInputError("Enter a positive whole number of sats.");
   return `${BigInt(sats) / 100_000_000n}.${(BigInt(sats) % 100_000_000n).toString().padStart(8, "0")}`;
 }
 
@@ -134,7 +137,7 @@ export class FixedFloatClient {
       !currencies.some((c) => c.code === "BTCLN" && c.coin === "BTC" && c.recv) ||
       !currencies.some((c) => c.code === "SOL" && c.coin === "SOL" && c.send)
     )
-      throw new Error("Lightning deposits are temporarily unavailable.");
+      throw new DepositInputError("Lightning deposits are temporarily unavailable.");
     const result = quote.parse(
       await this.call("price", {
         fromCcy: "BTCLN",
@@ -146,10 +149,15 @@ export class FixedFloatClient {
         afftax: 0.5,
       }),
     );
-    if (result.from.code !== "BTCLN" || result.to.code !== "SOL" || result.errors.length)
-      throw new Error(
-        `Amount unavailable. FixedFloat currently accepts ${result.from.min}–${result.from.max} BTC for this route.`,
-      );
+    if (result.from.code !== "BTCLN" || result.to.code !== "SOL") throw new FixedFloatError(true);
+    const min = parseTokenAmount(result.from.min, 8);
+    const max = parseTokenAmount(result.from.max, 8);
+    const formatSats = (amount: bigint) => amount.toLocaleString("en-US");
+    if (BigInt(sats) < min)
+      throw new DepositInputError(`Minimum deposit: ${formatSats(min)} sats. Try /deposit ${min}.`);
+    if (BigInt(sats) > max)
+      throw new DepositInputError(`Maximum deposit: ${formatSats(max)} sats.`);
+    if (result.errors.length) throw new FixedFloatError(true);
     return result;
   }
   async create(sats: string, destination: string): Promise<FixedFloatOrder> {
