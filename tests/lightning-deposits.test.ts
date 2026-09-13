@@ -298,11 +298,9 @@ test("shows provider rules and floating estimates before payment", () => {
       if (state === "active") db.update(deposit.id, state, order());
       const message = depositMessage(db.get(deposit.id)!);
       expect(message.text).toContain("Estimated receipt:");
-      expect(message.text).toContain("1% (0.5% FixedFloat + 0.5% Timba)");
-      expect(message.text).toContain("Network costs are separate");
+      expect(message.text).toContain("Fee: 1%");
       expect(message.text).toContain("https://ff.io/terms-of-service");
       expect(message.text).toContain("Exchange processed by FixedFloat");
-      expect(message.text).toContain("may change");
     }
   } finally {
     db.close();

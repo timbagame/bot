@@ -10,7 +10,7 @@ export function depositMessage(deposit: Deposit) {
   const keyboard = new InlineKeyboard();
   let text: string;
   if (deposit.state === "quoted") {
-    text = `⚡ Lightning → SOL\n\nSend: ${deposit.sats} sats\nEstimated receipt: ${escapeHtml(deposit.quotedSol)} SOL\nFloating rate. Exchange fee: 1% (0.5% FixedFloat + 0.5% Timba). Network costs are separate. The SOL amount may change before conversion.\n\nDestination: <code>${escapeHtml(deposit.destination)}</code>\n\nQuote expires after one minute.`;
+    text = `⚡ Lightning → SOL\n\nSend: ${deposit.sats} sats\nEstimated receipt: ${escapeHtml(deposit.quotedSol)} SOL\nFee: 1%\n\nDestination: <code>${escapeHtml(deposit.destination)}</code>\n\nQuote expires after one minute.`;
     keyboard
       .text("Create invoice", `ln_create:${deposit.id}`)
       .row()
@@ -39,8 +39,7 @@ export function depositMessage(deposit: Deposit) {
     text = "This invoice has expired. Do not pay it. Checking the final order status…";
   }
   if (deposit.state === "active" && order?.status === "NEW" && order.type === "float")
-    text +=
-      "\n\nFloating rate: the final SOL amount may change. Exchange fee: 1% (0.5% FixedFloat + 0.5% Timba). Network costs are separate.";
+    text += "\n\nFee: 1%";
   if (order && ["active", "settling", "emergency", "expired"].includes(deposit.state))
     keyboard.url("Open FixedFloat order", `https://ff.io/order/${order.id}`).row();
   if (deposit.state !== "quoted") keyboard.text("Check status", `ln_status:${deposit.id}`).row();
