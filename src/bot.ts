@@ -47,7 +47,6 @@ import {
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   GAME_MESSAGE_UPDATE_DEBOUNCE_MS,
-  JOIN_ANNOUNCEMENT_MAX_TICKETS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
   JUPITER_GASLESS_MIN_TRADE_USD,
   USER_SOL_MAX_BUFFER_LAMPORTS,
@@ -1712,7 +1711,6 @@ const cancelPendingGameMessageUpdate = (gameAddress: string): void => {
 };
 
 let gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
-let joinAnnouncementMaxTickets = JOIN_ANNOUNCEMENT_MAX_TICKETS;
 
 export const __test_setGameMessageUpdateDebounceMs = (ms: number): void => {
   if (!Number.isFinite(ms) || ms < 0) {
@@ -1723,31 +1721,6 @@ export const __test_setGameMessageUpdateDebounceMs = (ms: number): void => {
 
 export const __test_resetGameMessageUpdateDebounceMs = (): void => {
   gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
-};
-
-export const __test_setJoinAnnouncementMaxTickets = (max: number): void => {
-  if (!Number.isFinite(max) || max < 0) {
-    throw new Error("Max tickets must be a finite non-negative number");
-  }
-  joinAnnouncementMaxTickets = Math.trunc(max);
-};
-
-export const __test_resetJoinAnnouncementMaxTickets = (): void => {
-  joinAnnouncementMaxTickets = JOIN_ANNOUNCEMENT_MAX_TICKETS;
-};
-
-const shouldAnnounceJoinForTickets = (ticketsCount: unknown): boolean => {
-  const normalized = Number(ticketsCount);
-  if (!Number.isFinite(normalized) || normalized < 0) {
-    // If we can't confidently determine size, default to announcing (small games UX).
-    return joinAnnouncementMaxTickets !== 0;
-  }
-
-  if (joinAnnouncementMaxTickets === 0) {
-    return false;
-  }
-
-  return normalized <= joinAnnouncementMaxTickets;
 };
 
 // ================================
@@ -2005,10 +1978,6 @@ const processPlayerEvent = async (
     scheduleGameMessageUpdate(gameAddress, targets[0]!.chatId, totalPot);
 
     if (eventName === "PlayerJoined") {
-      if (!shouldAnnounceJoinForTickets((event as any).ticketsCount)) {
-        return;
-      }
-
       const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
       const playerPublicKey = event.player.toString();
       const creatorPublicKey =

@@ -157,14 +157,6 @@ export const GAME_MESSAGE_UPDATE_DEBOUNCE_MS = parsePositiveDuration(
   5_000,
 );
 
-// Standalone per-join announcements are disabled by default because the game
-// message itself is updated with the latest participant count.
-// Set this above 0 only when explicitly opting into join announcements.
-export const JOIN_ANNOUNCEMENT_MAX_TICKETS = parseNonNegativeInteger(
-  "JOIN_ANNOUNCEMENT_MAX_TICKETS",
-  0,
-);
-
 // Default settings for per-chat join notification controls
 export const DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL = false; // By default, only origin chat receives join notifications
 export const DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE = 0; // Disabled unless explicitly configured
@@ -293,28 +285,6 @@ function parsePositiveInteger(key: string, fallback: number): number {
     const clamped = Math.max(1, Math.floor(fallback));
     console.warn(`[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`);
     return clamped;
-  }
-
-  return Math.floor(parsed);
-}
-
-function parseNonNegativeInteger(key: string, fallback: number): number {
-  const raw = process.env[key];
-  if (raw === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    console.warn(
-      `[Config] ${key} must be a non-negative integer. Received '${raw}', using fallback ${fallback}.`,
-    );
-    return fallback;
-  }
-
-  if (parsed < 0) {
-    console.warn(`[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`);
-    return 0;
   }
 
   return Math.floor(parsed);

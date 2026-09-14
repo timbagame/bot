@@ -41,6 +41,7 @@ describe("Pending player events", async () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
       getGameMessages: () => [],
     } as any);
   });
@@ -50,7 +51,6 @@ describe("Pending player events", async () => {
     (module.bot.api as any).sendMessage = originalSendMessage;
     module.__test_clearPendingPlayerEvents();
     module.__test_resetGameMessageUpdateDebounceMs?.();
-    module.__test_resetJoinAnnouncementMaxTickets?.();
     module.__test_resetChatDatabase?.();
     module.__test_resetGameDatabase?.();
   });
@@ -78,7 +78,6 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
-    botModule.__test_setJoinAnnouncementMaxTickets(50);
     enableJoinAnnouncementsForTest();
 
     botModule.__test_setGameDatabase({
@@ -98,7 +97,6 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
-    botModule.__test_setJoinAnnouncementMaxTickets(50);
     enableJoinAnnouncementsForTest();
 
     botModule.__test_setGameManager({
@@ -128,7 +126,6 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent((await Keypair.generate()).publicKey, 5, 10);
 
-    botModule.__test_setJoinAnnouncementMaxTickets(50);
     enableJoinAnnouncementsForTest();
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -162,11 +159,11 @@ describe("Pending player events", async () => {
     expect(sendCalls).toHaveLength(0);
   });
 
-  test("player join announcements are disabled above ticket threshold", async () => {
+  test("player join announcements are sent regardless of ticket count when enabled", async () => {
     const target = { chatId: 77, messageId: 301 };
     const player = (await Keypair.generate()).publicKey;
 
-    botModule.__test_setJoinAnnouncementMaxTickets(1);
+    enableJoinAnnouncementsForTest();
 
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
@@ -181,7 +178,7 @@ describe("Pending player events", async () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
-      getGame: () => ({ game_type: "coinflip" }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
       getGameMessages: () => [],
     } as any);
 
@@ -191,7 +188,7 @@ describe("Pending player events", async () => {
       [target],
     );
 
-    expect(sendCalls.length).toBe(0);
+    expect(sendCalls.length).toBe(1);
   });
 
   test("player event message updates are coalesced per game", async () => {
@@ -200,7 +197,6 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const player = (await Keypair.generate()).publicKey;
 
-    isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
     isolatedModule.__test_setGameMessageUpdateDebounceMs(10);
 
     const updateCalls: Array<{ gameAddress: string; totalPot?: number }> = [];
@@ -251,7 +247,6 @@ describe("Pending player events", async () => {
     const target = { chatId: 77, messageId: 301 };
     const player = (await Keypair.generate()).publicKey;
 
-    isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
     isolatedModule.__test_setGameMessageUpdateDebounceMs(1);
 
     let updateAttempts = 0;
@@ -312,7 +307,6 @@ describe("Pending player events", async () => {
     const gameAddress = "GAME123";
     const firstPlayer = (await Keypair.generate()).publicKey;
     const secondPlayer = (await Keypair.generate()).publicKey;
-    botModule.__test_setJoinAnnouncementMaxTickets(50);
     enableJoinAnnouncementsForTest();
 
     const names = new Map<string, string>([
@@ -374,7 +368,6 @@ describe("Pending player events", async () => {
   test("pending events near age limit flush once target becomes available", async () => {
     const gameAddress = "BOUNDARY_GAME";
     const player = (await Keypair.generate()).publicKey;
-    botModule.__test_setJoinAnnouncementMaxTickets(50);
     enableJoinAnnouncementsForTest(88);
     const names = new Map<string, string>([[player.toBase58(), "Boundary"]]);
 
