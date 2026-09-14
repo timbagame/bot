@@ -8,11 +8,9 @@ import {
   __test_processPlayerEvent,
   __test_resetChatDatabase,
   __test_resetGameDatabase,
-  __test_resetJoinAnnouncementMaxTickets,
   __test_setChatDatabase,
   __test_setGameDatabase,
   __test_setGameManager,
-  __test_setJoinAnnouncementMaxTickets,
 } from "../../src/bot";
 import { ChatDatabase } from "../../src/utils/chat-database";
 import { createGameCallbacksModule } from "../../src/handlers/game-callbacks";
@@ -136,7 +134,6 @@ describe("Game callback helpers", () => {
   afterEach(() => {
     sendMessageSpy.mockRestore();
     __test_resetChatDatabase();
-    __test_resetJoinAnnouncementMaxTickets();
     __test_setGameManager(undefined as any);
     __test_resetGameDatabase();
   });
@@ -229,7 +226,6 @@ describe("Game callback helpers", () => {
   });
 
   test("announcements escape HTML-sensitive usernames", async () => {
-    __test_setJoinAnnouncementMaxTickets(50);
     ChatDatabase.getInstance().upsertChatGameSettings(2, {
       join_notifications_per_minute: 50,
     });
