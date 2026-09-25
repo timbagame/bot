@@ -117,8 +117,8 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Default media");
-      expect(summary).toContain("Giveaway: 10 players · Private 🔒 · Default media");
+      expect(summary).toContain("Coinflip: 2 players, Public 🌍, Default media");
+      expect(summary).toContain("Giveaway: 10 players, Private 🔒, Default media");
     });
 
     test("displays a compact custom media state", async () => {
@@ -131,7 +131,7 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Custom media");
+      expect(summary).toContain("Coinflip: 2 players, Public 🌍, Custom media");
     });
 
     test("displays disabled state", async () => {
@@ -144,7 +144,7 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Giveaway: 10 players · Private 🔒 · Text only");
+      expect(summary).toContain("Giveaway: 10 players, Private 🔒, Text only");
     });
 
     test("displays cleared state as bot default", async () => {
@@ -157,7 +157,7 @@ describe("Chat defaults video settings handlers", () => {
       const deps = createMockDeps();
       const summary = await buildSettingsSummary(123, deps);
 
-      expect(summary).toContain("Coinflip: 2 players · Public 🌍 · Default media");
+      expect(summary).toContain("Coinflip: 2 players, Public 🌍, Default media");
     });
 
     test("does not expose custom media IDs in the compact summary", async () => {

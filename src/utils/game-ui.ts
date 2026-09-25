@@ -53,9 +53,9 @@ export function buildGameStatus(
     return `${bar} Needs ${plural(minTickets - currentTickets, "more player")} to start`;
   }
   if (currentTickets < maxTickets) {
-    return `${bar} Ready · ${plural(maxTickets - currentTickets, "spot")} left`;
+    return `${bar} Ready, ${plural(maxTickets - currentTickets, "spot")} left`;
   }
-  return `${bar} Full · drawing soon`;
+  return `${bar} Full, drawing soon`;
 }
 
 /**

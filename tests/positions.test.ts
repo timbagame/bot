@@ -362,7 +362,7 @@ test("a USDC buy keeps a USD average entry", () => {
   expect(position?.solSpent).toBe(0);
   expect(position?.usdcSpent).toBeCloseTo(50, 8);
   expect(position?.pnlPercent).toBeCloseTo(0.2, 8);
-  expect(formatPositionMessage(position!)).toContain("Spent: 50 USDC · 1 buy");
+  expect(formatPositionMessage(position!)).toContain("Spent: 50 USDC, 1 buy");
   expect(formatPositionMessage(position!)).not.toContain("SOL");
 });
 
@@ -600,7 +600,7 @@ test("a USDT buy is treated like a USDC buy", () => {
   expect(position?.avgEntrySol).toBeNull();
   expect(position?.solSpent).toBe(0);
   expect(position?.usdtSpent).toBeCloseTo(50, 8);
-  expect(formatPositionMessage(position!)).toContain("Spent: 50 USDT · 1 buy");
+  expect(formatPositionMessage(position!)).toContain("Spent: 50 USDT, 1 buy");
 });
 
 test("mixed SOL and USDC buys share one weighted USD average", () => {
@@ -630,7 +630,7 @@ test("mixed SOL and USDC buys share one weighted USD average", () => {
   expect(position?.solSpent).toBeCloseTo(1, 8);
   expect(position?.usdcSpent).toBeCloseTo(50, 8);
   expect(position?.buyCount).toBe(2);
-  expect(formatPositionMessage(position!)).toContain("Spent: 1 SOL + 50 USDC · 2 buys");
+  expect(formatPositionMessage(position!)).toContain("Spent: 1 SOL + 50 USDC, 2 buys");
 });
 
 test("selling more than the tracked lot just closes the books", () => {
@@ -742,7 +742,7 @@ test("buildTokenPositions leaves PNL blank when the token has no price", () => {
   expect(position?.priceUsd).toBeNull();
   expect(position?.pnlPercent).toBeNull();
   expect(position?.unrealizedUsd).toBeNull();
-  expect(formatPositionMessage(position!)).toContain("Unrealized: —");
+  expect(formatPositionMessage(position!)).toContain("Unrealized: -");
 });
 
 test("sortTokenPositions puts the largest USD bag first", () => {
@@ -785,7 +785,7 @@ test("format helpers match the wallet PNL style", () => {
   expect(formatSolSpent(0.42)).toBe("0.42 SOL");
   expect(formatPositionSpent({ solSpent: 0.2, usdcSpent: 10 })).toBe("0.2 SOL + 10 USDC");
   expect(formatPositionSpent({ usdcSpent: 12 })).toBe("12 USDC");
-  expect(formatPositionSpent({})).toBe("—");
+  expect(formatPositionSpent({})).toBe("-");
 });
 
 test("formatPositionMessage includes avg entry and unrealized PNL", () => {
@@ -799,7 +799,7 @@ test("formatPositionMessage includes avg entry and unrealized PNL", () => {
   expect(text).not.toContain("Price:");
   expect(text).toContain("Avg entry: $0.00000441");
   expect(text).toContain("Unrealized: +18.4% (+$0.95) 🟢");
-  expect(text).toContain("Spent: 0.42 SOL · 1 buy");
+  expect(text).toContain("Spent: 0.42 SOL, 1 buy");
 });
 
 test("formatPositionMessage escapes an on-chain token symbol", () => {
@@ -867,7 +867,7 @@ test("formatPositionMessage scopes Unrealized to the swap piece of a transferred
   expect(text).toContain("Balance: <code>16350307.619063</code> ($90.09)");
   expect(text).toContain("on 194012.995423 ($1.07)");
   expect(text).toContain("Unrealized: +1.34% (+$0.01) 🟢");
-  expect(text).toContain("Spent: 1.055 USDC · 1 buy");
+  expect(text).toContain("Spent: 1.055 USDC, 1 buy");
   expect(text).not.toContain("Bought here:");
   expect(text).not.toContain("Received");
 });
@@ -903,10 +903,10 @@ test("formatPositionsPage lists cards and only paginates after three positions",
   expect(onePage).toContain("AAA");
   expect(onePage).toContain("BBB");
   expect(onePage).toContain("CCC");
-  expect(onePage).not.toContain("Positions ·");
+  expect(onePage).not.toContain("Positions (");
 
   const paged = formatPositionsPage([card({ ticker: "DDD" })], { page: 1, pageCount: 2 });
-  expect(paged).toContain("📊 Positions · 2/2");
+  expect(paged).toContain("📊 Positions (2/2)");
   expect(paged).toContain("DDD");
 });
 

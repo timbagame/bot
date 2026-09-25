@@ -78,7 +78,7 @@ export function registerEvmSetup(
         "custom_amount",
         "cancel",
       );
-      text = `${GAME_SETUP_COPY[s.type].heading}\n\nToken: <b>${s.token.symbol}</b> · ${name}\n\n${GAME_SETUP_COPY[s.type].amountPrompt}`;
+      text = `${GAME_SETUP_COPY[s.type].heading}\n\nToken: <b>${s.token.symbol}</b> (${name})\n\n${GAME_SETUP_COPY[s.type].amountPrompt}`;
     } else if (s.screen === "players") {
       keyboard = createPlayerSelectionKeyboard(s.type, "0", s.user);
       text = buildPlayerSelectionMessage(s.type, amount, s.token.symbol);

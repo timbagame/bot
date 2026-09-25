@@ -188,7 +188,7 @@ describe("chat defaults module", () => {
       replyToMessage: async () => {},
     });
 
-    expect(summary).toContain("🚨 Buy alerts: On · AAA · min 0.05 SOL · media Custom");
+    expect(summary).toContain("🚨 Buy alerts: On, AAA, min 0.05 SOL, media Custom");
   });
 
   test("updates settings via text input handler", async () => {
@@ -548,7 +548,7 @@ describe("chat defaults module", () => {
     expect(settingsPublic?.coinflip_default_privacy).toBe("public");
 
     expect(lastMenu.text).toContain("⚙️ Chat settings");
-    expect(lastMenu.text).toContain("Coinflip: 2 players · Public 🌍");
+    expect(lastMenu.text).toContain("Coinflip: 2 players, Public 🌍");
 
     // 3. Click "Private" for Coinflip
     ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_private";
@@ -556,7 +556,7 @@ describe("chat defaults module", () => {
 
     const settingsPrivate = chatDb.getChatGameSettings(99);
     expect(settingsPrivate?.coinflip_default_privacy).toBe("private");
-    expect(lastMenu.text).toContain("Coinflip: 2 players · Private 🔒");
+    expect(lastMenu.text).toContain("Coinflip: 2 players, Private 🔒");
 
     // 4. Click "Clear" for Coinflip
     ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_clear";
@@ -565,7 +565,7 @@ describe("chat defaults module", () => {
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.coinflip_default_privacy).toBeNull();
     // Default is Public (bot default)
-    expect(lastMenu.text).toContain("Coinflip: 2 players · Public 🌍");
+    expect(lastMenu.text).toContain("Coinflip: 2 players, Public 🌍");
 
     // 5. Test Giveaway Privacy (briefly)
     ctx.callbackQuery.data = "chat_defaults_privacy_giveaway";
@@ -578,7 +578,7 @@ describe("chat defaults module", () => {
 
     const settingsGiveaway = chatDb.getChatGameSettings(99);
     expect(settingsGiveaway?.giveaway_default_privacy).toBe("public");
-    expect(lastMenu.text).toContain("Giveaway: 10 players · Public 🌍");
+    expect(lastMenu.text).toContain("Giveaway: 10 players, Public 🌍");
 
     // 6. Verify distinct settings persistence (Regression Test)
     // Set Coinflip to Public

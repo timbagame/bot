@@ -204,7 +204,7 @@ export function buildWalletCaption(
       : NetworkDetector.buildSolscanAccountUrl(walletAddress);
   const explorerIcon = explorerUrl ? `<a href="${explorerUrl}">🔎</a>` : "🔎";
 
-  lines.push(`${escapeHtml(options.networkName ?? "Solana")} address · ${explorerIcon}`);
+  lines.push(`${escapeHtml(options.networkName ?? "Solana")} address ${explorerIcon}`);
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
@@ -227,7 +227,7 @@ export function buildWalletCaption(
       parts.push(escapeHtml(`($${truncateTokenDisplay(line.usdValue, 32)})`));
     }
     if (line.pnlPercent != null && Number.isFinite(line.pnlPercent)) {
-      parts.push(escapeHtml(`· ${formatSignedPercent(line.pnlPercent)}`));
+      parts.push(escapeHtml(formatSignedPercent(line.pnlPercent)));
     }
 
     const candidate = parts.join(" ");

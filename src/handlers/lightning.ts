@@ -81,7 +81,7 @@ export function depositMessage(deposit: Deposit) {
     keyboard.text("🔁 Refresh", `ln_status:${deposit.id}`).row();
   if (deposit.state === "quoted" || (deposit.state === "active" && order?.status === "NEW"))
     text +=
-      '\n\nExchange provided by <a href="https://ff.io/terms-of-service">FixedFloat · Service rules</a>.';
+      '\n\nExchange provided by <a href="https://ff.io/terms-of-service">FixedFloat service rules</a>.';
   if (deposit.state !== "quoted")
     keyboard.text("← Deposit", "wallet_deposit").text("← Wallet", "main_wallet");
   return { text, keyboard };
@@ -101,7 +101,7 @@ export function depositAmountMessage(market: DepositMarket, error?: string) {
   if (keyboard.inline_keyboard[0]?.length) keyboard.row();
   keyboard.text("✏️ Custom Amount", "ln_custom").row().text("← Deposit", "wallet_deposit");
   return {
-    text: `⚡ <b>Deposit via Lightning</b>\n\n${error ? `${escapeHtml(error)}\n\n` : ""}Choose an amount in USD.\nLimits: ${usdLabel(min)}–${usdLabel(max)}`,
+    text: `⚡ <b>Deposit via Lightning</b>\n\n${error ? `${escapeHtml(error)}\n\n` : ""}Choose an amount in USD.\nLimits: ${usdLabel(min)} to ${usdLabel(max)}`,
     keyboard,
   };
 }

@@ -525,7 +525,7 @@ export function formatPositionSpent(position: {
     formatQuoteSpent(position.usdcSpent ?? 0, "USDC"),
     formatQuoteSpent(position.usdtSpent ?? 0, "USDT"),
   ].filter((part): part is string => part != null);
-  return parts.length > 0 ? parts.join(" + ") : "—";
+  return parts.length > 0 ? parts.join(" + ") : "-";
 }
 
 function formatExactTokenAmount(value: number, decimals: number): string {
@@ -558,15 +558,15 @@ export const POSITIONS_PAGE_SIZE = 3;
 export function formatPositionMessage(position: TokenPosition): string {
   const dexLink = `<a href="${buildDexScreenerTokenUrl(position.mint)}">📈</a>`;
   const title = `📊 ${escapeHtml(position.ticker)} ${dexLink}`;
-  const mark = position.priceUsd != null ? `$${formatRate(position.priceUsd)}` : "—";
-  const avgEntry = position.avgEntryUsd != null ? `$${formatRate(position.avgEntryUsd)}` : "—";
+  const mark = position.priceUsd != null ? `$${formatRate(position.priceUsd)}` : "-";
+  const avgEntry = position.avgEntryUsd != null ? `$${formatRate(position.avgEntryUsd)}` : "-";
   const valueUsd =
     position.priceUsd != null && position.balance > 0
       ? ` ($${formatUsdValue(position.balance * position.priceUsd)})`
       : "";
   const pnl =
     position.pnlPercent == null
-      ? "—"
+      ? "-"
       : `${formatSignedPercent(position.pnlPercent)}${
           position.unrealizedUsd != null
             ? ` (${position.unrealizedUsd >= 0 ? "+" : "-"}$${formatUsdValue(Math.abs(position.unrealizedUsd))})`
@@ -574,7 +574,7 @@ export function formatPositionMessage(position: TokenPosition): string {
         }${position.pnlPercent > 0 ? " 🟢" : position.pnlPercent < 0 ? " 🟥" : ""}`;
   const spent =
     position.buyCount > 0
-      ? `${formatPositionSpent(position)} · ${position.buyCount} buy${
+      ? `${formatPositionSpent(position)}, ${position.buyCount} buy${
           position.buyCount === 1 ? "" : "s"
         }`
       : formatPositionSpent(position);
@@ -625,7 +625,7 @@ export function formatPositionsPage(
   const pageCount = options.pageCount ?? 1;
   const page = options.page ?? 0;
   if (pageCount > 1) {
-    return [`📊 Positions · ${page + 1}/${pageCount}`, "", cards.join("\n\n")].join("\n");
+    return [`📊 Positions (${page + 1}/${pageCount})`, "", cards.join("\n\n")].join("\n");
   }
   return cards.join("\n\n");
 }

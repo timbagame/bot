@@ -6234,7 +6234,7 @@ export class GameManager {
 
   /**
    * Build the summary header for /games command.
-   * 🎲 Games — @username
+   * 🎲 Games: @username
    * Last 30 days
    * Net: <code>+$13.00</code> (Won <code>$21.00</code> • Lost <code>$8.00</code>)
    * ────────
@@ -6268,7 +6268,7 @@ export class GameManager {
     const summaryLine = `Net: ${netSign}$${netStr.replace("$", "")} (Won ${wonUsd} • Lost ${lostUsd})`;
 
     const lines = [
-      `🎲 <b>Games</b> — ${escapeHtml(username)} [30D]`,
+      `🎲 <b>Games</b>: ${escapeHtml(username)} [30D]`,
       summaryLine,
       `${wins} wins • ${losses} losses • ${winRateStr}% WR`,
       "────────",

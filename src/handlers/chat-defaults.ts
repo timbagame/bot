@@ -173,8 +173,8 @@ const buildSettingsSummary = async (
   const giveawayPrivacy = chatSettings?.giveaway_default_privacy;
   const isGiveawayPrivate = giveawayPrivacy !== "public";
   const giveawayPrivacyDisplay = isGiveawayPrivate ? "Private 🔒" : "Public 🌍";
-  const coinflipLine = `👥 Coinflip: ${coinflipPlayers} players · ${coinflipPrivacyDisplay} · ${formatMediaSummary(chatSettings?.coinflip_video_id)}`;
-  const giveawayLine = `🎁 Giveaway: ${giveawayPlayers} players · ${giveawayPrivacyDisplay} · ${formatMediaSummary(chatSettings?.giveaway_video_id)}`;
+  const coinflipLine = `👥 Coinflip: ${coinflipPlayers} players, ${coinflipPrivacyDisplay}, ${formatMediaSummary(chatSettings?.coinflip_video_id)}`;
+  const giveawayLine = `🎁 Giveaway: ${giveawayPlayers} players, ${giveawayPrivacyDisplay}, ${formatMediaSummary(chatSettings?.giveaway_video_id)}`;
 
   // Join notification settings
   const joinNotificationsExternal =
@@ -185,7 +185,7 @@ const buildSettingsSummary = async (
   const rateDisplay =
     joinNotificationsPerMinute === 0 ? "Off" : `up to ${joinNotificationsPerMinute}/min`;
 
-  const joinNotificationsLine = `📢 Join notifications: ${rateDisplay} · other groups ${externalDisplay}`;
+  const joinNotificationsLine = `📢 Join notifications: ${rateDisplay}, other groups ${externalDisplay}`;
   const publicGameFeedEnabled = Boolean(chatSettings?.global_public_game_feed);
   const publicGameFeedLine = `🌐 Public game feed: ${publicGameFeedEnabled ? "On" : "Off"}`;
 
@@ -196,7 +196,7 @@ const buildSettingsSummary = async (
     tokenManager.getDefaultToken(),
   );
   const buyAlertsLine = buyAlerts?.enabled
-    ? `🚨 Buy alerts: On · ${escapeHtml(buyToken.ticker)} · min ${formatMinSolLabel(buyAlerts.min_sol_lamports)} · media ${formatBuyAlertMediaSummary(buyAlerts.media_file_id)}`
+    ? `🚨 Buy alerts: On, ${escapeHtml(buyToken.ticker)}, min ${formatMinSolLabel(buyAlerts.min_sol_lamports)}, media ${formatBuyAlertMediaSummary(buyAlerts.media_file_id)}`
     : "🚨 Buy alerts: Off";
 
   return [

@@ -8,12 +8,12 @@ test("buildGameStatus before minimum", () => {
 });
 
 test("buildGameStatus after minimum but not full", () => {
-  expect(buildGameStatus(2, 2, 5)).toBe("▰▰▱▱▱ Ready · 3 spots left");
-  expect(buildGameStatus(4, 2, 5)).toBe("▰▰▰▰▱ Ready · 1 spot left");
+  expect(buildGameStatus(2, 2, 5)).toBe("▰▰▱▱▱ Ready, 3 spots left");
+  expect(buildGameStatus(4, 2, 5)).toBe("▰▰▰▰▱ Ready, 1 spot left");
 });
 
 test("buildGameStatus full", () => {
-  expect(buildGameStatus(5, 2, 5)).toBe("▰▰▰▰▰ Full · drawing soon");
+  expect(buildGameStatus(5, 2, 5)).toBe("▰▰▰▰▰ Full, drawing soon");
 });
 
 test("buildProgressBar scales large games to ten segments", () => {
