@@ -11,8 +11,8 @@ describe("errors extras", () => {
       new Error("insufficient lamports 100, need 200"),
       walletStub,
     );
-    expect(msg).toContain("This transaction needs about 0.000001 SOL more");
-    expect(msg).toContain("Add SOL and try again.");
+    expect(msg).toContain("This needs about 0.000001 SOL more");
+    expect(msg).toContain("Top up with /deposit and try again.");
     expect(msg).not.toContain("rent and fees");
   });
 
@@ -23,7 +23,7 @@ describe("errors extras", () => {
 
   test("account missing maps to setup guidance", async () => {
     const msg = await parseTransactionError(new Error("Account does not exist"));
-    expect(msg).toContain("Account setup required");
+    expect(msg).toContain("Account setup needed");
   });
 
   test("simulation failure maps to fee guidance", async () => {
@@ -31,31 +31,31 @@ describe("errors extras", () => {
       new Error("simulation failed: custom program error: 0x1"),
     );
     expect(msg).toContain("Transaction failed");
-    expect(msg).toContain("network couldn't process");
+    expect(msg).toContain("network rejected it");
   });
 
   test("quote unavailable maps to friendly retry guidance", async () => {
     const msg = await parseTransactionError(new Error("Jupiter quote failed: quote failed"));
-    expect(msg).toContain("Quote unavailable.");
+    expect(msg).toContain("No price available");
   });
 
   test("token not tradable surfaces actionable message", async () => {
     const msg = await parseTransactionError(new Error("token_not_tradable on Jupiter"));
-    expect(msg).toContain("Token not tradable.");
-    expect(msg).toContain("Jupiter can't swap this token yet.");
+    expect(msg).toContain("Token can't be swapped");
+    expect(msg).toContain("Try a more liquid pair");
   });
 
   test("same token swap error explains restriction", async () => {
     const msg = await parseTransactionError(
       new Error("Jupiter: input and output mints are not allowed to be equal"),
     );
-    expect(msg).toContain("Cannot swap the same token.");
+    expect(msg).toContain("Same token");
   });
 
   test("percentage rounding guidance highlights fee buffer", async () => {
     const msg = await parseTransactionError(new Error("Percentage results in zero amount"));
-    expect(msg).toContain("Amount too small.");
-    expect(msg).toContain("Try a larger percentage or type a custom amount.");
+    expect(msg).toContain("Amount too small");
+    expect(msg).toContain("Pick a larger one or type a custom amount.");
   });
 
   test("rent shortfall error explains SOL top up instead of dumping logs", async () => {
@@ -70,7 +70,7 @@ describe("errors extras", () => {
     ];
 
     const msg = await parseTransactionError(rentError, walletStub);
-    expect(msg).toContain("Not enough SOL for rent-exempt accounts.");
+    expect(msg).toContain("Opening a token account needs a small deposit");
     expect(msg).toContain("Keep at least");
     expect(msg).not.toContain("InitializeImmutableOwner");
     expect(msg).not.toContain("SPL Token 2022");

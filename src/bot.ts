@@ -3170,7 +3170,7 @@ const validateAndProcessTransaction = async (
     : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
     const shortageLabel = balanceLabel ?? (isSol ? "SOL" : DEFAULT_TOKEN_TICKER);
-    const shortageMessage = `❌ Not enough ${shortageLabel}. Add more ${shortageLabel} or lower the amount and try again.`;
+    const shortageMessage = `❌ Not enough ${shortageLabel}. Deposit more with /deposit or lower the amount.`;
     await ctx.reply(shortageMessage, {
       reply_to_message_id: ctx.message?.message_id,
     });
@@ -3178,7 +3178,7 @@ const validateAndProcessTransaction = async (
   }
 
   // Process transaction with loading state
-  const processingMsg = await ctx.reply(`Processing ${description}...`, {
+  const processingMsg = await ctx.reply(`⏳ ${description}…`, {
     reply_to_message_id: ctx.message?.message_id,
   });
 
@@ -3201,7 +3201,7 @@ const validateAndProcessTransaction = async (
       );
     }
 
-    const baseMessage = `${description} successful! 💸`;
+    const baseMessage = `✅ ${description} sent`;
     let successMessage = overrideMessage ?? baseMessage;
 
     let disablePreview = false;
@@ -3710,7 +3710,7 @@ registerCaseInsensitiveCommand(
 
           const totalText = wallet.formatSolBalance(result.totalLamportsSent);
 
-          const message = `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
+          const message = `✅ <b>Withdrawal sent</b>\n\n${totalText} SOL is on its way.`;
 
           return { signature: result.signature, message };
         },

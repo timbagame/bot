@@ -530,7 +530,7 @@ test("handleTipCommand notifies the recipient after showing confirmed success", 
     await botModule.__test_handleTipCommand(ctx);
 
     expect(events).toEqual(["transfer", "edit", "dm"]);
-    expect(edits[0]).toContain("successful");
+    expect(edits[0]).toContain("sent");
     expect(directMessages).toEqual([
       expect.objectContaining({
         chatId: 555,

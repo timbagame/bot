@@ -55,9 +55,8 @@ export const buildFriendlyShortfallMessage = (options: FriendlyShortfallOptions)
   const actionSentence = options.action ?? "Add SOL or reduce the amount and try again.";
 
   return (
-    `💰 Not enough SOL to complete this.` +
-    `${reasonSentence ? ` ${reasonSentence}.` : ""}\n` +
-    `You need about ${amount} SOL more.\n` +
+    `💰 Not enough SOL\n` +
+    `${reasonSentence ? `${reasonSentence}. ` : ""}You need about ${amount} SOL more.\n` +
     actionSentence
   );
 };
@@ -70,21 +69,17 @@ const formatInsufficientFundsError = (
   const missingLamports = Math.max(neededLamports - currentLamports, 0);
   const amount = formatSolAmount(missingLamports, walletManager);
 
-  return `💰 This transaction needs about ${amount} SOL more.\n\nAdd SOL and try again.`;
+  return `💰 Not enough SOL\nThis needs about ${amount} SOL more. Top up with /deposit and try again.`;
 };
 
 const handleTransactionTimeoutError = (errorMessage: string): string => {
   const signature = extractSignature(errorMessage);
 
   return (
-    `⏳ Transaction confirmation timed out!\n\n` +
-    `The transaction may have succeeded but confirmation took longer than expected.\n\n` +
-    `${
-      signature
-        ? `Transaction signature: ${signature}\nUse Solscan or another explorer to verify the status.\n\n`
-        : ""
-    }` +
-    `💡 This can happen during network congestion. Please check the transaction status before retrying.`
+    `⏳ Still confirming\n` +
+    `The network is slow, so this may still go through.\n` +
+    `${signature ? `Signature: ${signature}\n` : ""}` +
+    `Check it on Solscan before you retry.`
   );
 };
 
@@ -92,14 +87,10 @@ const handleTransactionExpiredError = (errorMessage: string): string => {
   const signature = extractSignature(errorMessage);
 
   return (
-    `⛔ Transaction expired before confirmation!\n\n` +
-    `The network dropped the transaction before it could be processed.\n\n` +
-    `${
-      signature
-        ? `Transaction signature: ${signature}\nYou can still look it up on an explorer to confirm it never landed.\n\n`
-        : ""
-    }` +
-    `Please retry the action to submit a fresh transaction.`
+    `⛔ Transaction dropped\n` +
+    `The network dropped it before it was confirmed.\n` +
+    `${signature ? `Signature: ${signature}\n` : ""}` +
+    `Try again to send a fresh transaction.`
   );
 };
 
@@ -114,7 +105,7 @@ type ErrorHandler = (ctx: ErrorContext) => string | null;
 const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: ErrorHandler }> = [
   {
     matcher: (ctx) => ctx.lowerMessage.includes("swaps under"),
-    handler: () => `⚠️ Swap amount is too small.\n` + `Increase the amount and try again.`,
+    handler: () => `⚠️ Amount too small\n` + `Increase the swap amount and try again.`,
   },
   {
     matcher: (ctx) =>
@@ -122,8 +113,8 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
     handler: (ctx) => {
       const minimum = ctx.recommendedMinimum ?? "the required amount";
       return (
-        `💰 Not enough SOL for rent-exempt accounts.\n` +
-        `Keep at least ${minimum} SOL on hand before retrying.`
+        `💰 Not enough SOL\n` +
+        `Opening a token account needs a small deposit. Keep at least ${minimum} SOL in your wallet and try again.`
       );
     },
   },
@@ -132,15 +123,16 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
     handler: (ctx) => {
       const minimum = ctx.minimumSolForFees ?? "enough";
       return (
-        `💰 Not enough SOL for fees.\n` + `Hold at least ${minimum} SOL or add more and try again.`
+        `💰 Not enough SOL for fees\n` +
+        `Keep at least ${minimum} SOL in your wallet, or top up with /deposit.`
       );
     },
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("percentage results in zero amount"),
     handler: () =>
-      `⚠️ Amount too small.\n` +
-      `The requested percentage leaves nothing after fees. Try a larger percentage or type a custom amount.`,
+      `⚠️ Amount too small\n` +
+      `That percentage leaves nothing after fees. Pick a larger one or type a custom amount.`,
   },
   {
     matcher: (ctx) =>
@@ -149,22 +141,21 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
     handler: (ctx) => {
       const minimum = ctx.minimumSolForFees ?? "enough";
       return (
-        `🏗️ Account setup required.\n` +
-        `Keep at least ${minimum} SOL to pay for the account creation fees.`
+        `🏗️ Account setup needed\n` +
+        `Keep at least ${minimum} SOL in your wallet to cover the setup fee.`
       );
     },
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("instruction does not support non-native tokens"),
     handler: () =>
-      `🪙 Wrap failed.\n` +
-      `We couldn't convert SOL to WSOL. Unwrap any stuck WSOL or contact an admin if the issue keeps happening.`,
+      `🪙 Couldn't convert SOL\n` +
+      `Unwrap any leftover WSOL from wallet ⚙️ Settings, then try again. Ask an admin if it keeps happening.`,
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("failed to wrap sol automatically"),
     handler: () =>
-      `🪙 Failed to wrap SOL automatically.\n` +
-      `Try again shortly or add more SOL if the problem continues.`,
+      `🪙 Couldn't convert SOL\n` + `Try again in a moment, or add more SOL if it keeps happening.`,
   },
   {
     // Must come before "simulation failed" handler since it's more specific
@@ -172,16 +163,15 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       ctx.lowerMessage.includes("no record of a prior credit") ||
       ctx.lowerMessage.includes("attempt to debit an account"),
     handler: () =>
-      `💰 Insufficient token balance.\n` +
-      `Your wallet doesn't have enough tokens to complete this action. Use /balance to check your balance and add tokens before trying again.`,
+      `💰 Not enough tokens\n` + `Check your balance with /balance and top up before trying again.`,
   },
   {
     matcher: (ctx) =>
       ctx.lowerMessage.includes("simulation failed") ||
       ctx.lowerMessage.includes("custom program error"),
     handler: () =>
-      `❌ Transaction failed.\n` +
-      `The network couldn't process this action. Try again shortly or contact an admin if it keeps happening.`,
+      `❌ Transaction failed\n` +
+      `The network rejected it. Try again shortly, or ask an admin if it keeps happening.`,
   },
   {
     matcher: (ctx) =>
@@ -189,21 +179,21 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       ctx.lowerMessage.includes("no routes") ||
       ctx.lowerMessage.includes("failed to get quotes"),
     handler: () =>
-      `🛣️ Swap route missing.\n` +
-      `Jupiter could not find a path for this pair. Try a different token pair, a smaller amount, or retry later.\n` +
-      `Keep some SOL in the wallet for route fees before trying again.`,
+      `🛣️ No swap route\n` +
+      `There's no way to trade this pair right now. Try a smaller amount, another pair, or later.\n` +
+      `Keep some SOL in your wallet for fees.`,
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("slippage"),
     handler: () =>
-      `📊 Slippage error.\n` +
-      `The price moved too much while the swap was submitting. Try a smaller amount or slightly higher tolerance.`,
+      `📊 Price moved\n` +
+      `The price changed too much while swapping. Try a smaller amount or a slightly higher tolerance.`,
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("price impact"),
     handler: () =>
-      `💹 Price impact too high.\n` +
-      `This swap would push the price too far. Try a smaller amount or split it into multiple trades.`,
+      `💹 Price impact too high\n` +
+      `This swap would move the price too much. Try a smaller amount or split it into several trades.`,
   },
   {
     matcher: (ctx) =>
@@ -211,32 +201,31 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
         (p) => ctx.lowerMessage.includes(p),
       ),
     handler: () =>
-      `🌐 Jupiter is temporarily unavailable.\n` +
-      `We can't reach the quote service right now. Wait a moment or try a different token pair.`,
+      `🌐 Swaps temporarily unavailable\n` +
+      `We can't reach the price service right now. Wait a moment and try again.`,
   },
   {
     matcher: (ctx) =>
       ctx.lowerMessage.includes("quote failed") ||
       ctx.lowerMessage.includes("failed to get swap quote"),
     handler: () =>
-      `📋 Quote unavailable.\n` +
-      `We couldn't price this swap. Try again shortly or pick a different token pair.`,
+      `📋 No price available\n` +
+      `We couldn't price this swap. Try again shortly or pick another pair.`,
   },
   {
     matcher: (ctx) =>
       ctx.lowerMessage.includes("token_not_tradable") ||
       ctx.lowerMessage.includes("is not tradable"),
     handler: () =>
-      `🚫 Token not tradable.\n` +
-      `Jupiter can't swap this token yet. Try a more liquid pair like SOL, WSOL, or USDC.`,
+      `🚫 Token can't be swapped\n` +
+      `This token isn't tradable yet. Try a more liquid pair like SOL or USDC.`,
   },
   {
     matcher: (ctx) =>
       ctx.lowerMessage.includes("circular_arbitrage_is_disabled") ||
       ctx.lowerMessage.includes("input and output mints are not allowed to be equal"),
     handler: () =>
-      `🔄 Cannot swap the same token.\n` +
-      `You're trying to swap a token for itself. Pick a different output token before continuing.`,
+      `🔄 Same token\n` + `You can't swap a token for itself. Pick a different token to receive.`,
   },
   {
     matcher: (ctx) =>
@@ -244,8 +233,8 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       ctx.lowerMessage.includes("lookup table") ||
       ctx.lowerMessage.includes("addresstablelookup"),
     handler: () =>
-      `🔗 Swap route unavailable.\n` +
-      `This trade needs a special route we can't use here. Try a smaller amount or a different token pair.`,
+      `🔗 No swap route\n` +
+      `This trade needs a route we can't use here. Try a smaller amount or another pair.`,
   },
 ];
 
@@ -312,9 +301,8 @@ export const parseTransactionError = async (
 
   // Default error message
   return (
-    `❌ Something went wrong.\n\n` +
-    `We couldn't complete that action. Please try again in a moment.\n\n` +
-    `If this keeps happening, reach out to an admin for help.`
+    `❌ Something went wrong\n` +
+    `That didn't go through. Try again in a moment, or ask an admin if it keeps happening.`
   );
 };
 

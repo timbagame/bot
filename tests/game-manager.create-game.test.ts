@@ -190,7 +190,7 @@ describe("GameManager.createGame", () => {
       1n,
     );
     expect(res.success).toBe(false);
-    expect(String(res.error)).toContain("Failed to wrap SOL automatically");
+    expect(String(res.error)).toContain("Couldn't convert SOL");
   });
 
   test("errors on insufficient balance with formatted message", async () => {

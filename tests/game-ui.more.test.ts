@@ -36,13 +36,13 @@ test("buildGameHeader links explorer icon when URL provided", () => {
 test("buildPrizeLine shows only when flag true", () => {
   const shown = buildPrizeLine(true, "20.000000", "TIMBA");
   const hidden = buildPrizeLine(false, "20.000000", "TIMBA");
-  expect(shown).toContain("Current Prize: 20 TIMBA");
+  expect(shown).toContain("Prize pool: 20 TIMBA");
   expect(hidden).toBe("");
 });
 
 test("buildPrizeLine appends USD approximation when provided", () => {
   const shown = buildPrizeLine(true, "20.000000", "TIMBA", "$5.0");
-  expect(shown).toContain("Current Prize: 20 TIMBA ($5.0)");
+  expect(shown).toContain("Prize pool: 20 TIMBA ($5.0)");
 });
 
 test("buildWinnerPrizeDetails wraps the prize amount for tap-to-copy", () => {
