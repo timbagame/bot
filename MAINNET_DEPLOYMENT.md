@@ -1,4 +1,4 @@
-# Telegram Bot — Service Deployment
+# Telegram Bot: Service Deployment
 
 This guide covers only the Bot service. Cross-project production operations and chain administration are documented in the private Operations repository.
 

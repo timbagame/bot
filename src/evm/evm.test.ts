@@ -90,7 +90,7 @@ test("shared wallet presentation keeps the selected network and supported action
     [{ ticker: "TEST", amount: "0.000000000000000001" }],
     { networkName: "Base", explorerUrl: null },
   );
-  expect(caption).toContain("Base Address");
+  expect(caption).toContain("Base address");
   expect(caption).toContain("0.000000000000000001");
   expect(caption).not.toContain("solscan");
   const buttons = createWalletKeyboard(undefined, {

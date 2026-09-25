@@ -156,8 +156,8 @@ export function registerEvmBot(
             );
             await ctx.reply("Choose the token for this game:", {
               reply_markup: new InlineKeyboard()
-                .text(`${solana.symbol} · Solana`, `game_choice:${ctx.update.update_id}:solana`)
-                .text(`${evm.symbol} · ${config.name}`, `game_choice:${ctx.update.update_id}:evm`),
+                .text(`${solana.symbol} on Solana`, `game_choice:${ctx.update.update_id}:solana`)
+                .text(`${evm.symbol} on ${config.name}`, `game_choice:${ctx.update.update_id}:evm`),
             });
             return;
           }

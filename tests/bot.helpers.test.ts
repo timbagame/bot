@@ -607,7 +607,7 @@ describe("Bot helper utilities", () => {
       );
 
       expect(signatures).toEqual(["confirmed-signature"]);
-      expect(edits).toEqual(["Test payment successful! 💸"]);
+      expect(edits).toEqual(["✅ Test payment sent"]);
       expect(events).toEqual(["edit", "callback"]);
     } finally {
       botModule.wallet.getKeyPair = original.getKeyPair;

@@ -45,6 +45,6 @@ export function resolveTokenDisplaySymbols(
 
   return sanitized.map((symbol, index) => {
     if ((counts.get(symbol) ?? 0) <= 1) return symbol;
-    return `${symbol} · ${abbreviateMint(tokens[index]?.mint)}`;
+    return `${symbol} (${abbreviateMint(tokens[index]?.mint)})`;
   });
 }

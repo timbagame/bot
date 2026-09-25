@@ -120,7 +120,7 @@ const buildMenuKeyboard = (evm = false): InlineKeyboard => {
     .text("🌐 Public game feed", "chat_defaults_public_game_feed")
     .row()
     .text("🚨 Buy alerts", "chat_defaults_buy_alerts");
-  if (process.env["EVM_BOT_CONFIG_FILE"]) keyboard.row().text("Network", "game_network");
+  if (process.env["EVM_BOT_CONFIG_FILE"]) keyboard.row().text("⛓️ Network", "game_network");
   return keyboard;
 };
 
@@ -173,8 +173,8 @@ const buildSettingsSummary = async (
   const giveawayPrivacy = chatSettings?.giveaway_default_privacy;
   const isGiveawayPrivate = giveawayPrivacy !== "public";
   const giveawayPrivacyDisplay = isGiveawayPrivate ? "Private 🔒" : "Public 🌍";
-  const coinflipLine = `👥 Coinflip: ${coinflipPlayers} players · ${coinflipPrivacyDisplay} · ${formatMediaSummary(chatSettings?.coinflip_video_id)}`;
-  const giveawayLine = `🎁 Giveaway: ${giveawayPlayers} players · ${giveawayPrivacyDisplay} · ${formatMediaSummary(chatSettings?.giveaway_video_id)}`;
+  const coinflipLine = `👥 Coinflip: ${coinflipPlayers} players, ${coinflipPrivacyDisplay}, ${formatMediaSummary(chatSettings?.coinflip_video_id)}`;
+  const giveawayLine = `🎁 Giveaway: ${giveawayPlayers} players, ${giveawayPrivacyDisplay}, ${formatMediaSummary(chatSettings?.giveaway_video_id)}`;
 
   // Join notification settings
   const joinNotificationsExternal =
@@ -183,11 +183,11 @@ const buildSettingsSummary = async (
     chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
   const externalDisplay = joinNotificationsExternal ? "On" : "Off";
   const rateDisplay =
-    joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
+    joinNotificationsPerMinute === 0 ? "Off" : `up to ${joinNotificationsPerMinute}/min`;
 
-  const joinNotificationsLine = `📢 Notifications: External ${externalDisplay} · ${rateDisplay}`;
+  const joinNotificationsLine = `📢 Join notifications: ${rateDisplay}, other groups ${externalDisplay}`;
   const publicGameFeedEnabled = Boolean(chatSettings?.global_public_game_feed);
-  const publicGameFeedLine = `🌐 Global public game feed: ${publicGameFeedEnabled ? "✅ Enabled" : "❌ Disabled"}`;
+  const publicGameFeedLine = `🌐 Public game feed: ${publicGameFeedEnabled ? "On" : "Off"}`;
 
   const buyAlerts = deps.chatDb.getChatBuyAlerts(chatId);
   const buyToken = resolveBuyAlertToken(
@@ -196,18 +196,22 @@ const buildSettingsSummary = async (
     tokenManager.getDefaultToken(),
   );
   const buyAlertsLine = buyAlerts?.enabled
-    ? `🚨 Buy alerts: On · ${escapeHtml(buyToken.ticker)} · min ${formatMinSolLabel(buyAlerts.min_sol_lamports)} · media ${formatBuyAlertMediaSummary(buyAlerts.media_file_id)}`
+    ? `🚨 Buy alerts: On, ${escapeHtml(buyToken.ticker)}, min ${formatMinSolLabel(buyAlerts.min_sol_lamports)}, media ${formatBuyAlertMediaSummary(buyAlerts.media_file_id)}`
     : "🚨 Buy alerts: Off";
 
   return [
-    "<b>Chat defaults</b>",
+    "<b>⚙️ Chat settings</b>",
+    "<i>Admins can tap a button below to change a setting.</i>",
     "",
+    "<b>General</b>",
     tokenLine,
-    `⏱️ Timeout: ${formatDuration(timeoutSeconds)}`,
+    `⏱️ Game timeout: ${formatDuration(timeoutSeconds)}`,
     "",
+    "<b>Games</b>",
     coinflipLine,
     giveawayLine,
     "",
+    "<b>Alerts</b>",
     joinNotificationsLine,
     publicGameFeedLine,
     buyAlertsLine,
@@ -239,23 +243,24 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
   const currentRate =
     chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
 
-  const externalLabel = currentExternal ? "✅ External: On" : "❌ External: Off";
-  const rateLabel = currentRate === 0 ? "Disabled" : `${currentRate}/min`;
+  const externalLabel = currentExternal ? "On" : "Off";
+  const rateLabel = currentRate === 0 ? "Off" : `up to ${currentRate}/min`;
 
   return {
     text: [
-      "<b>Join Notification Settings</b>",
+      "<b>📢 Join notifications</b>",
+      "Post a message here when someone joins a game.",
       "",
-      "<b>External notifications:</b> Show join messages for games created in other groups",
-      `Current: ${externalLabel}`,
+      `<b>Limit:</b> ${rateLabel}`,
+      `<i>Choose how many per minute (0 turns them off, max ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE}).</i>`,
       "",
-      `<b>Rate limit:</b> Max join notifications per minute (max ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE})`,
-      `Current: ${rateLabel}`,
+      `<b>Games from other groups:</b> ${externalLabel}`,
+      "<i>Also announce joins for games created in other groups.</i>",
     ].join("\n"),
     parseMode: "HTML" as const,
     keyboard: new InlineKeyboard()
       .text(
-        currentExternal ? "🔕 Disable External" : "🔔 Enable External",
+        currentExternal ? "🔕 Hide other groups" : "🔔 Show other groups",
         currentExternal
           ? "chat_defaults_set_join_external_off"
           : "chat_defaults_set_join_external_on",
@@ -268,9 +273,9 @@ const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) 
       .row()
       .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
       .row()
-      .text("❌ Restore defaults", "chat_defaults_clear_join_notifications")
+      .text("↩️ Restore defaults", "chat_defaults_clear_join_notifications")
       .row()
-      .text("🔙 Back", "chat_defaults_cancel"),
+      .text("← Back", "chat_defaults_cancel"),
   };
 };
 
@@ -309,7 +314,7 @@ const buildBuyAlertsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) => {
       .row()
       .text("✏️ Custom min", "chat_defaults_set_buy_alerts_min_custom")
       .row()
-      .text("🔙 Back", "chat_defaults_cancel"),
+      .text("← Back", "chat_defaults_cancel"),
   };
 };
 
@@ -354,7 +359,7 @@ const buildGameSettingsMenu = (
       .row()
       .text("🎬 Media", `chat_defaults_video_${gameType}`)
       .row()
-      .text("🔙 Back", "chat_defaults_cancel"),
+      .text("← Back", "chat_defaults_cancel"),
   };
 };
 
@@ -462,9 +467,9 @@ const promptForSetting = async (
   }
 
   const keyboard = new InlineKeyboard()
-    .text("❌ Restore defaults", `chat_defaults_clear_${target}`)
+    .text("↩️ Restore defaults", `chat_defaults_clear_${target}`)
     .row()
-    .text("🔙 Back", "chat_defaults_cancel");
+    .text("← Back", "chat_defaults_cancel");
 
   const { messageId, chatId } = await respondWithMenu(ctx, {
     text: messageLines.join("\n"),
@@ -809,9 +814,9 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
             .text("🌍 Public", "chat_defaults_set_privacy_coinflip_public")
             .text("🔒 Private", "chat_defaults_set_privacy_coinflip_private")
             .row()
-            .text("❌ Restore defaults", "chat_defaults_set_privacy_coinflip_clear")
+            .text("↩️ Restore defaults", "chat_defaults_set_privacy_coinflip_clear")
             .row()
-            .text("🔙 Back", "chat_defaults_cancel"),
+            .text("← Back", "chat_defaults_cancel"),
         });
       } else if (action === "privacy_giveaway") {
         await respondWithMenu(ctx, {
@@ -820,9 +825,9 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
             .text("🌍 Public", "chat_defaults_set_privacy_giveaway_public")
             .text("🔒 Private", "chat_defaults_set_privacy_giveaway_private")
             .row()
-            .text("❌ Restore defaults", "chat_defaults_set_privacy_giveaway_clear")
+            .text("↩️ Restore defaults", "chat_defaults_set_privacy_giveaway_clear")
             .row()
-            .text("🔙 Back", "chat_defaults_cancel"),
+            .text("← Back", "chat_defaults_cancel"),
         });
       } else if (action === "video_coinflip" || action === "video_giveaway") {
         const gameType = action === "video_coinflip" ? "coinflip" : "giveaway";
@@ -833,9 +838,9 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
             .row()
             .text("🚫 Disable (no media)", `chat_defaults_disable_${action}`)
             .row()
-            .text("❌ Restore defaults", `chat_defaults_clear_${action}`)
+            .text("↩️ Restore defaults", `chat_defaults_clear_${action}`)
             .row()
-            .text("🔙 Back", "chat_defaults_cancel"),
+            .text("← Back", "chat_defaults_cancel"),
         });
       } else if (action === "join_notifications") {
         await respondWithMenu(ctx, {
@@ -862,7 +867,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
                 : "chat_defaults_set_public_game_feed_on",
             )
             .row()
-            .text("🔙 Back", "chat_defaults_cancel"),
+            .text("← Back", "chat_defaults_cancel"),
         });
       } else if (action === "buy_alerts") {
         await respondWithMenu(ctx, buildBuyAlertsMenu(ctx, deps));
@@ -951,7 +956,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
           INPUT_TIMEOUT_HINT,
         ].join("\n"),
         parseMode: "HTML",
-        keyboard: new InlineKeyboard().text("🔙 Back", "chat_defaults_buy_alerts"),
+        keyboard: new InlineKeyboard().text("← Back", "chat_defaults_buy_alerts"),
       });
 
       if (messageId != null && chatId != null) {
@@ -980,9 +985,9 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
           .row()
           .text("🚫 Disable (no media)", "chat_defaults_disable_video_buy_alerts")
           .row()
-          .text("❌ Restore defaults", "chat_defaults_clear_video_buy_alerts")
+          .text("↩️ Restore defaults", "chat_defaults_clear_video_buy_alerts")
           .row()
-          .text("🔙 Back", "chat_defaults_buy_alerts"),
+          .text("← Back", "chat_defaults_buy_alerts"),
       });
       await safeAnswerCallbackQuery(ctx);
     }),
@@ -1139,7 +1144,7 @@ export const createChatDefaultsModule = (deps: ChatDefaultsModuleDeps): ChatDefa
 
       if (!(await checkCallbackAdmin(ctx, deps))) return;
 
-      const keyboard = new InlineKeyboard().text("🔙 Back", "chat_defaults_cancel");
+      const keyboard = new InlineKeyboard().text("← Back", "chat_defaults_cancel");
       await respondWithMenu(ctx, {
         text: `Enter a custom rate limit (0-${MAX_JOIN_NOTIFICATIONS_PER_MINUTE} per minute):`,
         keyboard,

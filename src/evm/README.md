@@ -9,8 +9,8 @@ configured network. Back up the mnemonic and the deployment-specific database.
 Commands:
 
 - `/balance` in private chat: EVM deposit address and configured token/ETH balances.
-- `/cf AMOUNT [TOKEN] [PLAYERS] [private]`: coinflip (2–100 players).
-- `/ga AMOUNT [TOKEN] [PLAYERS] [private]`: funded giveaway (1–100 players).
+- `/cf AMOUNT [TOKEN] [PLAYERS] [private]`: coinflip (2 to 100 players).
+- `/ga AMOUNT [TOKEN] [PLAYERS] [private]`: funded giveaway (1 to 100 players).
 - `/invite GAME_ID TELEGRAM_ID`: creator-approved five-minute private invitation.
 - `/withdraw ADDRESS AMOUNT TOKEN`: private-chat withdrawal with explicit
   confirmation. Use `ETH` for native currency.

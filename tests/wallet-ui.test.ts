@@ -79,11 +79,11 @@ test("buildWalletCaption formats address and token lines", () => {
       { ticker: "USDC", amount: "10.00", usdValue: "10" },
     ]);
 
-    expect(caption).toContain('Solana Address · <a href="https://solscan.io/account/AbCdEf">🅴</a>');
+    expect(caption).toContain('Solana address <a href="https://solscan.io/account/AbCdEf">🔎</a>');
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: <code>1.234567</code> SOL ($123.46)");
     expect(caption).toContain("TIMBA: <code>123</code> ($6,150)");
-    expect(caption).not.toContain("· +");
+    expect(caption).not.toContain(") +");
     expect(caption).toContain("USDC: <code>10.00</code> ($10)");
     expect(caption).not.toContain("SOL: <code>1.234567</code> SOL ($123.46) (Tap to copy)");
     expect(caption.split("(Tap to copy)")[1]).not.toContain("Tap to copy");
@@ -91,7 +91,7 @@ test("buildWalletCaption formats address and token lines", () => {
     const withPnl = buildWalletCaption("AbCdEf", [
       { ticker: "TIMBA", mint: "mint", amount: "123", usdValue: "6,150", pnlPercent: 0.184 },
     ]);
-    expect(withPnl).toContain("TIMBA: <code>123</code> ($6,150) · +18.4%");
+    expect(withPnl).toContain("TIMBA: <code>123</code> ($6,150) +18.4%");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -111,7 +111,7 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
     ]);
 
     expect(caption).toContain(
-      'Solana Address · <a href="https://solscan.io/account/ADDR%3C%26%22">🅴</a>',
+      'Solana address <a href="https://solscan.io/account/ADDR%3C%26%22">🔎</a>',
     );
     expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
     expect(caption).toContain("BAD&lt;&amp;&quot;: <code>5 &amp; rising</code> ($12.34)");
@@ -174,7 +174,7 @@ test("buildWalletCaption shows the on-chain amount once and copies it exactly", 
     ]);
     const tokenLine = caption.split("\n").find((line) => line.includes("MAGAIBA"));
 
-    expect(tokenLine).toBe("MAGAIBA: <code>3703.33795378</code> ($0.57) · -1.74%");
+    expect(tokenLine).toBe("MAGAIBA: <code>3703.33795378</code> ($0.57) -1.74%");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -207,8 +207,8 @@ test("buildWalletCaption disambiguates duplicate symbols by mint", () => {
     { ticker: "SAME", mint: "222222222222", amount: "2" },
   ]);
 
-  expect(caption).toContain("SAME · 1111…1111: <code>1</code>");
-  expect(caption).toContain("SAME · 2222…2222: <code>2</code>");
+  expect(caption).toContain("SAME (1111…1111): <code>1</code>");
+  expect(caption).toContain("SAME (2222…2222): <code>2</code>");
 });
 
 test("buildWalletCaption stays within Telegram's media caption limit", () => {
@@ -260,7 +260,7 @@ test("buildWalletTokenLines uses hold marks instead of swap PNL", async () => {
       "AbCdEf",
       doubled.filter((line) => line.ticker === "TIMBA"),
     ),
-  ).toContain("· +100%");
+  ).toContain(" +100%");
 });
 
 test("buildWalletTokenLines omits unavailable USD prices", async () => {

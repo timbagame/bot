@@ -7,14 +7,14 @@ export type ProcessingStatusOptions = {
 
 const PROCESSING_STATUS_CONFIG = {
   swap: {
-    headingHtml: "🔄 <b>Processing Swap</b>",
-    headingText: "🔄 Processing Swap",
+    headingHtml: "⏳ <b>Swapping…</b>",
+    headingText: "⏳ Swapping…",
     actionHtml: (amount: string, fromToken: string, toToken: string) =>
-      `Swapping ${amount} ${fromToken} → ${toToken}...`,
+      `${amount} ${fromToken} → ${toToken}`,
     actionText: (amount: string, fromToken: string, toToken: string) =>
-      `Swapping ${amount} ${fromToken} → ${toToken}...`,
-    waitHtml: "<i>Please wait...</i>",
-    waitText: "Please wait...",
+      `${amount} ${fromToken} → ${toToken}`,
+    waitHtml: "<i>This usually takes a few seconds.</i>",
+    waitText: "This usually takes a few seconds.",
     defaultKeyboard: () => new InlineKeyboard(),
   },
 } as const;

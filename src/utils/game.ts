@@ -2736,7 +2736,7 @@ export class GameManager {
     const keyboard = [
       [
         { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
-        { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` },
+        { text: "🔁 Refresh", callback_data: `refresh_${gamePda.toBase58()}` },
       ],
     ];
 
@@ -2780,7 +2780,7 @@ export class GameManager {
       Array.isArray(formatted.keyboard) && formatted.keyboard.length > 0
         ? formatted.keyboard
         : stateUnavailable
-          ? [[{ text: "🔄 Refresh", callback_data: `refresh_${gameAddress}` }]]
+          ? [[{ text: "🔁 Refresh", callback_data: `refresh_${gameAddress}` }]]
           : [];
     const replyMarkup = { inline_keyboard: keyboard };
     let message: any;
@@ -2892,7 +2892,7 @@ export class GameManager {
     if (!isCompleted && stateUnavailable) {
       return {
         messageText: buildGameStateUnavailableMessage(gameCacheKey, gameType),
-        keyboard: [[{ text: "🔄 Refresh", callback_data: `refresh_${gameCacheKey}` }]],
+        keyboard: [[{ text: "🔁 Refresh", callback_data: `refresh_${gameCacheKey}` }]],
         skipUpdate: true,
         stateUnavailable: true,
       };
@@ -3118,7 +3118,7 @@ export class GameManager {
       Array.isArray(formatResult.keyboard) && formatResult.keyboard.length > 0
         ? formatResult.keyboard
         : isUnavailable
-          ? [[{ text: "🔄 Refresh", callback_data: `refresh_${params.gameAddress}` }]]
+          ? [[{ text: "🔁 Refresh", callback_data: `refresh_${params.gameAddress}` }]]
           : [];
 
     return {
@@ -3977,7 +3977,7 @@ export class GameManager {
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       const tokenTicker = gameData.token_ticker || "WSOL";
       const explorerUrl = gameAddress ? NetworkDetector.buildSolscanAccountUrl(gameAddress) : null;
-      const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
+      const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🔎</a>` : "🔎";
       const gameLabel = `${escapeHtml(gameTypeText)} ${gameExplorerIcon}`;
       let formatBalanceForDisplay = (value: number) => this.wallet.formatTokenBalance(value, 6);
       if (gameAddress) {
@@ -4019,7 +4019,7 @@ export class GameManager {
       const safePlayerCount = escapeHtml(playerCountDisplay);
       const message =
         `${gameLabel} • ${safeAmountDisplay} ${safeTicker}` +
-        `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
+        `\nCreator: ${safeCreator} • ${safePlayerCount} players`;
 
       // Build simple message without participants list
       const winnerSection = winnerLine ? `\n\n${winnerLine}` : "";
@@ -6200,9 +6200,9 @@ export class GameManager {
 
   /**
    * Format a single game line for the compact /games output.
-   * ✅ 151.1k TIMBA 🅴 • 2/2 • by @seebaacs • 19 Dec 00:02
-   * ❌ 154.0k TIMBA 🅴 • 7/10 • vs @ThrasherMagazinee • 19 Dec 00:00
-   * 🚫 14.0k TIMBA 🅴 • 0/2 • 19 Dec 00:44
+   * ✅ 151.1k TIMBA 🔎 • 2/2 • by @seebaacs • 19 Dec 00:02
+   * ❌ 154.0k TIMBA 🔎 • 7/10 • vs @ThrasherMagazinee • 19 Dec 00:00
+   * 🚫 14.0k TIMBA 🔎 • 0/2 • 19 Dec 00:44
    */
   public formatCompactGameLine(game: GameHistoryEntry): string {
     const emoji = game.category === "won" ? "✅" : game.category === "lost" ? "❌" : "🚫";
@@ -6226,15 +6226,15 @@ export class GameManager {
       }
     }
 
-    // Build explorer link with 🅴 emoji (like game messages)
-    const explorerIcon = game.explorerUrl ? `<a href="${escapeHtml(game.explorerUrl)}">🅴</a>` : "";
+    // Build explorer link with 🔎 emoji (like game messages)
+    const explorerIcon = game.explorerUrl ? `<a href="${escapeHtml(game.explorerUrl)}">🔎</a>` : "";
 
     return `${emoji} ${escapeHtml(amountStr)} ${ticker} ${explorerIcon}• ${ticketsStr}${personPart} • ${dateStr}`;
   }
 
   /**
    * Build the summary header for /games command.
-   * 🎲 Games — @username
+   * 🎲 Games: @username
    * Last 30 days
    * Net: <code>+$13.00</code> (Won <code>$21.00</code> • Lost <code>$8.00</code>)
    * ────────
@@ -6268,7 +6268,7 @@ export class GameManager {
     const summaryLine = `Net: ${netSign}$${netStr.replace("$", "")} (Won ${wonUsd} • Lost ${lostUsd})`;
 
     const lines = [
-      `🎲 <b>Games</b> — ${escapeHtml(username)} [30D]`,
+      `🎲 <b>Games</b>: ${escapeHtml(username)} [30D]`,
       summaryLine,
       `${wins} wins • ${losses} losses • ${winRateStr}% WR`,
       "────────",
@@ -6424,7 +6424,7 @@ export class GameManager {
 
       // Refresh button
       navRow.push({
-        text: "↻ Refresh",
+        text: "🔁 Refresh",
         callback_data: `games_refresh:${telegramId}`,
       });
 
@@ -6441,7 +6441,7 @@ export class GameManager {
       // Just refresh button
       keyboard.push([
         {
-          text: "↻ Refresh",
+          text: "🔁 Refresh",
           callback_data: `games_refresh:${telegramId}`,
         },
       ]);

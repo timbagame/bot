@@ -82,9 +82,9 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
       dbStub(),
     );
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
-    expect(info).toContain("<b>🪙 Coinflip 🅴 • 1 TOK</b>");
+    expect(info).toContain("<b>🪙 Coinflip 🔎 • 1 TOK</b>");
     expect(info).toContain(`Creator: ${sanitizeTelegramDisplayNameWithoutMention("@user777")}`);
-    expect(info).toContain("1/2 tickets");
+    expect(info).toContain("1/2 players");
     expect(info).toContain("Status:");
     expect(info).toContain("⏰ Expires in:");
   });
@@ -115,7 +115,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
         new PublicKey("11111111111111111111111111111111"),
       );
       expect(info).toContain(
-        '<b>🪙 Coinflip <a href="https://solscan.io/account/11111111111111111111111111111111">🅴</a> • 1 TOK</b>',
+        '<b>🪙 Coinflip <a href="https://solscan.io/account/11111111111111111111111111111111">🔎</a> • 1 TOK</b>',
       );
     } finally {
       resetGM();
@@ -165,7 +165,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
       winner_address: "WINNER111",
     });
 
-    expect(output).toContain("3/10 tickets");
+    expect(output).toContain("3/10 players");
   });
 
   test("getCompletedGameInfo falls back gracefully on non-numeric amount", async () => {
@@ -184,6 +184,6 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     });
 
     expect(message).not.toContain("NaN");
-    expect(message).toContain("🪙 Coinflip 🅴 • 0 TOK");
+    expect(message).toContain("🪙 Coinflip 🔎 • 0 TOK");
   });
 });

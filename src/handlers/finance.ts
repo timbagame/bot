@@ -68,7 +68,7 @@ export function formatFinanceReport(report: FinanceReport): string {
   const estimatedSponsor = report.hasEstimatedSponsorExpenses ? " <i>estimated</i>" : "";
 
   return [
-    `📊 <b>Timba Finance — ${escapeHtml(report.label)}</b>`,
+    `📊 <b>Timba Finance: ${escapeHtml(report.label)}</b>`,
     "",
     `<b>Revenue</b>`,
     `Game fees earned: ${formatUsd(report.gameRevenueUsd)}`,
@@ -94,7 +94,7 @@ export function formatFinanceReport(report: FinanceReport): string {
     ...tokenLines("Game fees claimed in this period", report.gameClaimed),
     ...tokenLines("Swap fees claimed in this period", report.swapClaimed),
     "",
-    `<b>Capital — not profit</b>`,
+    `<b>Capital (not profit)</b>`,
     `Contract deposits: ${formatTokenAmount(report.contractRentLamports, 9)} SOL${
       report.contractRentUsd === null ? "" : ` ≈ ${formatUsd(report.contractRentUsd)}`
     }${report.contractRentEstimated ? " <i>estimated</i>" : ""}`,

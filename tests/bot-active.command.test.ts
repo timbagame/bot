@@ -68,11 +68,11 @@ describe("/active command in group chats", () => {
 
     const firstKeyboard: InlineKeyboardButton[][] = [
       [{ text: "🎮 Join", callback_data: "join_first" }],
-      [{ text: "🔄 Refresh", callback_data: "refresh_first" }],
+      [{ text: "🔁 Refresh", callback_data: "refresh_first" }],
     ];
     const secondKeyboard: InlineKeyboardButton[][] = [
       [{ text: "🎮 Join", callback_data: "join_second" }],
-      [{ text: "🔄 Refresh", callback_data: "refresh_second" }],
+      [{ text: "🔁 Refresh", callback_data: "refresh_second" }],
     ];
 
     const mockGames = [
@@ -146,7 +146,7 @@ describe("/active command in group chats", () => {
       callback_data: "join_second",
     });
     expect(inlineKeyboard?.[2]).not.toMatchObject({
-      text: "🔄 Refresh",
+      text: "🔁 Refresh",
     });
 
     const hasRefreshButton = inlineKeyboard

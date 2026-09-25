@@ -147,7 +147,7 @@ test("onWalletPositions shows the second page of four tracked tokens", async () 
   );
 
   expect(pages[0]).toEqual({ page: 1, pageCount: 2 });
-  expect(menus[0]?.text).toContain("📊 Positions · 2/2");
+  expect(menus[0]?.text).toContain("📊 Positions (2/2)");
   expect(menus[0]?.text).toContain("DDD");
   expect(menus[0]?.text).not.toContain("📊 TIMBA");
 });

@@ -27,24 +27,35 @@ export function buildPlayerProfileLink(address: string, label?: string): string 
   return `<a href="${escapeHtml(profileUrl)}">${escapeHtml(label ?? formatPlayerAddress(address))}</a>`;
 }
 
+const PROGRESS_SEGMENTS = 10;
+
+/** Render ticket progress as a fixed-width bar, e.g. "▰▰▰▱▱▱▱▱▱▱". */
+export function buildProgressBar(current: number, max: number): string {
+  const segments = Math.min(PROGRESS_SEGMENTS, Math.max(1, max));
+  const ratio = max > 0 ? Math.min(1, Math.max(0, current / max)) : 0;
+  const filled = current > 0 && max > 0 ? Math.max(1, Math.round(ratio * segments)) : 0;
+  return "▰".repeat(filled) + "▱".repeat(segments - filled);
+}
+
+const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`;
+
 /**
  * Build the status text line for a game based on tickets.
- * Returns a concise human-readable status.
+ * Returns a progress bar followed by a concise human-readable status.
  */
 export function buildGameStatus(
   currentTickets: number,
   minTickets: number,
   maxTickets: number,
 ): string {
+  const bar = buildProgressBar(currentTickets, maxTickets);
   if (currentTickets < minTickets) {
-    const neededForMin = minTickets - currentTickets;
-    return `${neededForMin} more until minimum`;
+    return `${bar} Needs ${plural(minTickets - currentTickets, "more player")} to start`;
   }
   if (currentTickets < maxTickets) {
-    const neededForMax = maxTickets - currentTickets;
-    return `Minimum reached, ${neededForMax} more until full`;
+    return `${bar} Ready, ${plural(maxTickets - currentTickets, "spot")} left`;
   }
-  return "Full - starting soon!";
+  return `${bar} Full, drawing soon`;
 }
 
 /**
@@ -62,7 +73,7 @@ export function buildGameHeader(
   creatorWalletAddress?: string | null,
 ): string {
   const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
-  const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
+  const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🔎</a>` : "🔎";
   const gameLabel = `${escapeHtml(gameTypeLabel)} ${gameExplorerIcon}`;
   const amountDisplay = escapeHtml(formatCompactTokenDisplay(amountFormatted));
   const tickerDisplay = escapeHtml(tokenTicker);
@@ -71,7 +82,7 @@ export function buildGameHeader(
     : escapeHtml(creatorUsername);
   return (
     `<b>${gameLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
-    `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} tickets`
+    `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} players`
   );
 }
 
@@ -88,7 +99,7 @@ export function buildPrizeLine(
   const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
   const prizeDisplay = escapeHtml(formatCompactTokenDisplay(totalFormatted));
   const safeTicker = escapeHtml(tokenTicker);
-  return `\nCurrent Prize: ${prizeDisplay} ${safeTicker}${usdSegment}\n`;
+  return `\nPrize pool: ${prizeDisplay} ${safeTicker}${usdSegment}\n`;
 }
 
 /**
