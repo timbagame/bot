@@ -9,7 +9,7 @@ import {
 test("buildGameHeader formats header line", () => {
   const header = buildGameHeader("🪙 Coinflip", "10.000000", "TIMBA", "@user", 1, 2);
   expect(header).toContain("🪙 Coinflip 🔎 • 10 TIMBA");
-  expect(header).toContain("Creator: @user • 1/2 tickets");
+  expect(header).toContain("Creator: @user • 1/2 players");
 });
 
 test("buildGameHeader includes USD approximation when provided", () => {
@@ -71,7 +71,7 @@ test("buildGameHeader escapes ticker markup", () => {
 
 test("buildGameHeader escapes creator markup", () => {
   const header = buildGameHeader("🪙 Coinflip", "10.000000", "TIMBA", "<b>attacker</b>", 1, 2);
-  expect(header).toContain("Creator: &lt;b&gt;attacker&lt;/b&gt; • 1/2 tickets");
+  expect(header).toContain("Creator: &lt;b&gt;attacker&lt;/b&gt; • 1/2 players");
   expect(header).not.toContain("<b>attacker</b>");
 });
 

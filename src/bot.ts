@@ -4823,14 +4823,14 @@ registerCaseInsensitiveCommand("oracle", "Fees and game limits", { showInMenu: f
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
 
       const response = [
-        "🔮 <b>Oracle Configuration</b>",
+        "🔮 <b>Fees and game limits</b>",
         "",
-        `Operator: <code>${oracleAccount.operator.toString()}</code>`,
-        `Fee Percentage: ${oracleAccount.feePercentage}%`,
-        `Min Timeout: ${formatDuration(Number(oracleAccount.minTimeout))}`,
-        `Max Timeout: ${formatDuration(Number(oracleAccount.maxTimeout))}`,
-        `Max Tickets: ${oracleAccount.maxTickets}`,
-        `Oracle Buffer Time: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
+        `💸 Fee: ${oracleAccount.feePercentage}% of each prize pool`,
+        `⏱️ Game timeout: ${formatDuration(Number(oracleAccount.minTimeout))} to ${formatDuration(Number(oracleAccount.maxTimeout))}`,
+        `👥 Max players: ${oracleAccount.maxTickets}`,
+        `⏳ Grace period after expiry: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
+        "",
+        `Oracle: <code>${oracleAccount.operator.toString()}</code>`,
       ].join("\n");
 
       await ctx.reply(response, {
@@ -5020,7 +5020,7 @@ const handleSolWsolSwap = async (
       onProcessing: async (formattedAmount) => {
         const amountLabel = escapeHtml(formattedAmount ?? fallbackAmountLabel);
         await resolvedDeps.respondWithMenu(ctx, {
-          text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountLabel} SOL to WSOL...\n\n<i>Please wait...</i>`,
+          text: `⏳ <b>Wrapping…</b>\n\nWrapping ${amountLabel} SOL to WSOL...\n\n<i>This usually takes a few seconds.</i>`,
           keyboard: new InlineKeyboard(),
         });
       },
@@ -5074,7 +5074,7 @@ const handleSolWsolSwap = async (
     onProcessing: async (formattedAmount) => {
       const amountLabel = escapeHtml(formattedAmount ?? fallbackAmountLabel);
       await resolvedDeps.respondWithMenu(ctx, {
-        text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${amountLabel} WSOL to SOL...\n\n<i>Please wait...</i>`,
+        text: `⏳ <b>Unwrapping…</b>\n\nUnwrapping ${amountLabel} WSOL to SOL...\n\n<i>This usually takes a few seconds.</i>`,
         keyboard: new InlineKeyboard(),
       });
     },
@@ -5901,7 +5901,7 @@ const showSwapQuoteAndConfirmation = async (
         };
       },
       spinnerText: ({ displayAmount }) =>
-        `🔄 <b>Getting Quote</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+        `⏳ <b>Getting a quote…</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>This usually takes a few seconds.</i>`,
       cacheQuote: (txId, quote, context) => {
         storePendingTransaction(txId, {
           type: "swap",
@@ -6188,11 +6188,11 @@ const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: stri
   }
 
   const loadingLines = [
-    "🔍 <b>Looking up token...</b>",
+    "🔍 <b>Looking up token…</b>",
     "",
     `<b>Input:</b> ${escapeHtml(trimmedInput)}`,
     "",
-    "<i>Please wait...</i>",
+    "<i>This usually takes a few seconds.</i>",
   ];
 
   await respondWithMenu(ctx, {

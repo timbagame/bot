@@ -861,9 +861,9 @@ export const createWalletTransactionsModule = (
         const result = await executeUnwrapFlow(telegramId, {
           onProcessing: async (formattedAmount) => {
             await respondWithMenu(ctx, {
-              text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${escapeHtml(
+              text: `⏳ <b>Unwrapping…</b>\n\nUnwrapping ${escapeHtml(
                 formattedAmount ?? "0",
-              )} WSOL to SOL...\n\n<i>Please wait...</i>`,
+              )} WSOL to SOL...\n\n<i>This usually takes a few seconds.</i>`,
               keyboard: new InlineKeyboard(),
             });
           },
@@ -933,7 +933,7 @@ export const createWalletTransactionsModule = (
         const result = await executeWrapFlow(telegramId, lamportsToWrap, {
           onProcessing: async (amountDisplay) => {
             await respondWithMenu(ctx, {
-              text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>Please wait...</i>`,
+              text: `⏳ <b>Wrapping…</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>This usually takes a few seconds.</i>`,
               keyboard: new InlineKeyboard(),
             });
           },
@@ -1129,9 +1129,9 @@ export const createWalletTransactionsModule = (
             : `${transaction.amount} ${transaction.token}`);
 
         await respondWithMenu(ctx, {
-          text: `🔄 <b>Processing Transaction</b>\n\nSending ${escapeHtml(
+          text: `⏳ <b>Sending…</b>\n\nSending ${escapeHtml(
             amountSummary,
-          )}...\n\n<i>Please wait...</i>`,
+          )}...\n\n<i>This usually takes a few seconds.</i>`,
           keyboard: new InlineKeyboard(),
         });
 

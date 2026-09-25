@@ -117,7 +117,7 @@ describe("getCompletedGameInfo output format", () => {
     // Should still contain essential info
     expect(output).toContain("🪙 Coinflip");
     expect(output).toContain("TOK");
-    expect(output).toContain("tickets");
+    expect(output).toContain("players");
     expect(output).toContain("Winner:");
   });
 

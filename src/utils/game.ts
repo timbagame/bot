@@ -4019,7 +4019,7 @@ export class GameManager {
       const safePlayerCount = escapeHtml(playerCountDisplay);
       const message =
         `${gameLabel} • ${safeAmountDisplay} ${safeTicker}` +
-        `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
+        `\nCreator: ${safeCreator} • ${safePlayerCount} players`;
 
       // Build simple message without participants list
       const winnerSection = winnerLine ? `\n\n${winnerLine}` : "";

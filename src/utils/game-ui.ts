@@ -82,7 +82,7 @@ export function buildGameHeader(
     : escapeHtml(creatorUsername);
   return (
     `<b>${gameLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
-    `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} tickets`
+    `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} players`
   );
 }
 
