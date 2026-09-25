@@ -62,7 +62,7 @@ export function buildGameHeader(
   creatorWalletAddress?: string | null,
 ): string {
   const usdSegment = usdApproximation ? ` (${escapeHtml(usdApproximation)})` : "";
-  const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>` : "🅴";
+  const gameExplorerIcon = explorerUrl ? `<a href="${escapeHtml(explorerUrl)}">🔎</a>` : "🔎";
   const gameLabel = `${escapeHtml(gameTypeLabel)} ${gameExplorerIcon}`;
   const amountDisplay = escapeHtml(formatCompactTokenDisplay(amountFormatted));
   const tickerDisplay = escapeHtml(tokenTicker);

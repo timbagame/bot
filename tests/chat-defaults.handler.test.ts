@@ -547,7 +547,7 @@ describe("chat defaults module", () => {
     const settingsPublic = chatDb.getChatGameSettings(99);
     expect(settingsPublic?.coinflip_default_privacy).toBe("public");
 
-    expect(lastMenu.text).toContain("Chat defaults");
+    expect(lastMenu.text).toContain("⚙️ Chat settings");
     expect(lastMenu.text).toContain("Coinflip: 2 players · Public 🌍");
 
     // 3. Click "Private" for Coinflip
@@ -782,9 +782,9 @@ describe("chat defaults module", () => {
 
     // 1. Open Join Notifications Menu
     await mockBot.dispatch("chat_defaults_join_notifications", ctx);
-    expect(lastMenu.text).toContain("Join Notification Settings");
-    expect(lastMenu.text).toContain("External: Off"); // Default
-    expect(lastMenu.text).toContain("Disabled"); // Default
+    expect(lastMenu.text).toContain("📢 Join notifications");
+    expect(lastMenu.text).toContain("<b>Games from other groups:</b> Off"); // Default
+    expect(lastMenu.text).toContain("<b>Limit:</b> Off"); // Default
 
     // 2. Enable External Notifications
     ctx.callbackQuery.data = "chat_defaults_set_join_external_on";
@@ -795,7 +795,7 @@ describe("chat defaults module", () => {
     // Actually chat-db.ts usually returns number for boolean columns if not mapped.
     // But let's assume the getter does what it says. If strictly mapped:
     // checking functionality directly via re-render check:
-    expect(lastMenu.text).toContain("External On");
+    expect(lastMenu.text).toContain("other groups On");
 
     // 3. Set Rate Limit to 5
     ctx.callbackQuery.data = "chat_defaults_set_join_rate_5";
@@ -832,8 +832,8 @@ describe("chat defaults module", () => {
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.join_notifications_external).toBeNull();
     expect(settingsClear?.join_notifications_per_minute).toBeNull();
-    expect(lastMenu.text).toContain("External Off"); // back to default
-    expect(lastMenu.text).toContain("Disabled"); // back to default
+    expect(lastMenu.text).toContain("other groups Off"); // back to default
+    expect(lastMenu.text).toContain("Join notifications: Off"); // back to default
   });
 
   test("video settings flow updates database and UI", async () => {
@@ -1020,7 +1020,7 @@ describe("chat defaults module", () => {
     ctx.callbackQuery.data = "chat_defaults_set_public_game_feed_on";
     await mockBot.dispatch("chat_defaults_set_public_game_feed_on", ctx);
     expect(Boolean(chatDb.getChatGameSettings(99)?.global_public_game_feed)).toBe(true);
-    expect(lastText).toContain("Global public game feed: ✅ Enabled");
+    expect(lastText).toContain("🌐 Public game feed: On");
   });
 
   test("buy alerts can be enabled by an admin and stay off by default", async () => {

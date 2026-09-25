@@ -79,7 +79,9 @@ test("buildWalletCaption formats address and token lines", () => {
       { ticker: "USDC", amount: "10.00", usdValue: "10" },
     ]);
 
-    expect(caption).toContain('Solana Address · <a href="https://solscan.io/account/AbCdEf">🅴</a>');
+    expect(caption).toContain(
+      'Solana address · <a href="https://solscan.io/account/AbCdEf">🔎</a>',
+    );
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: <code>1.234567</code> SOL ($123.46)");
     expect(caption).toContain("TIMBA: <code>123</code> ($6,150)");
@@ -111,7 +113,7 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
     ]);
 
     expect(caption).toContain(
-      'Solana Address · <a href="https://solscan.io/account/ADDR%3C%26%22">🅴</a>',
+      'Solana address · <a href="https://solscan.io/account/ADDR%3C%26%22">🔎</a>',
     );
     expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
     expect(caption).toContain("BAD&lt;&amp;&quot;: <code>5 &amp; rising</code> ($12.34)");

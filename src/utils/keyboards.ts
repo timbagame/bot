@@ -439,7 +439,7 @@ export const createPlayerSelectionKeyboard = (
       ),
     )
     .row()
-    .text("⬅️ Back to Amount", guard(withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId)))
+    .text("← Back to Amount", guard(withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId)))
     .row();
 
   if (hasOverflow()) {
@@ -693,7 +693,7 @@ export const createGameConfirmKeyboard = (
     .text("+50%", safeMinPlayersCallbacks[3]!)
     .text("MAX", safeMinPlayersCallbacks[4]!)
     .row()
-    .text("🔙 Back to Players", backToPlayersCallback)
+    .text("← Back to Players", backToPlayersCallback)
     .row();
 
   return keyboard;

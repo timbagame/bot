@@ -1328,7 +1328,7 @@ const parseActiveGameHeader = (
   const sanitized =
     firstLine
       ?.replace(/<[^>]*>/g, "")
-      .replace(/🅴/g, "")
+      .replace(/🔎|🅴/g, "")
       .trim() ?? "";
   const [left, right] = sanitized.split("•").map((part) => part.trim());
   const gameType = left || "Game";

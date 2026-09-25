@@ -202,9 +202,9 @@ export function buildWalletCaption(
     options.explorerUrl !== undefined
       ? options.explorerUrl
       : NetworkDetector.buildSolscanAccountUrl(walletAddress);
-  const explorerIcon = explorerUrl ? `<a href="${explorerUrl}">🅴</a>` : "🅴";
+  const explorerIcon = explorerUrl ? `<a href="${explorerUrl}">🔎</a>` : "🔎";
 
-  lines.push(`${escapeHtml(options.networkName ?? "Solana")} Address · ${explorerIcon}`);
+  lines.push(`${escapeHtml(options.networkName ?? "Solana")} address · ${explorerIcon}`);
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");

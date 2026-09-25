@@ -8,7 +8,7 @@ import {
 
 test("buildGameHeader formats header line", () => {
   const header = buildGameHeader("🪙 Coinflip", "10.000000", "TIMBA", "@user", 1, 2);
-  expect(header).toContain("🪙 Coinflip 🅴 • 10 TIMBA");
+  expect(header).toContain("🪙 Coinflip 🔎 • 10 TIMBA");
   expect(header).toContain("Creator: @user • 1/2 tickets");
 });
 
@@ -29,7 +29,7 @@ test("buildGameHeader links explorer icon when URL provided", () => {
     "https://solscan.io/account/AbCdEf",
   );
   expect(header).toContain(
-    '🪙 Coinflip <a href="https://solscan.io/account/AbCdEf">🅴</a> • 10 TIMBA',
+    '🪙 Coinflip <a href="https://solscan.io/account/AbCdEf">🔎</a> • 10 TIMBA',
   );
 });
 
@@ -64,7 +64,7 @@ test("buildWinnerPrizeDetails escapes ticker and USD without a tap-to-copy hint"
 test("buildGameHeader escapes ticker markup", () => {
   const maliciousTicker = "<script>alert(1)</script>";
   const header = buildGameHeader("🪙 Coinflip", "10.000000", maliciousTicker, "@user", 1, 2);
-  expect(header).toContain("🪙 Coinflip 🅴 • 10");
+  expect(header).toContain("🪙 Coinflip 🔎 • 10");
   expect(header).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
   expect(header).not.toContain("<script>alert(1)</script>");
 });
