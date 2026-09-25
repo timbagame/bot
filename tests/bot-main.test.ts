@@ -75,32 +75,40 @@ describe("Bot Main Entry Point Tests", () => {
         expect.arrayContaining([
           {
             command: "faucet",
-            description: "Create a first-come token faucet",
-          },
-          {
-            command: "rain",
-            description: "Create a first-come token faucet",
-          },
-          {
-            command: "default",
-            description: "Configure chat defaults",
-          },
-          {
-            command: "config",
-            description: "Configure chat defaults",
-          },
-          {
-            command: "configs",
-            description: "Configure chat defaults",
+            description: "Drop tokens to the first people who claim",
           },
           {
             command: "settings",
-            description: "Configure chat defaults",
+            description: "Chat settings (token, games, alerts)",
           },
         ]),
       );
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);
       expect(commands.some(({ command }) => command === "finance")).toBe(false);
+      expect(commands.some(({ command }) => command === "oracle")).toBe(false);
+    });
+
+    test("lists only primary command names in a stable order", () => {
+      const names = botModule.__test_getRegisteredBotCommands().map(({ command }) => command);
+      for (const alias of ["balance", "cf", "ga", "rain", "wh", "lb", "gb", "default", "config"]) {
+        expect(names).not.toContain(alias);
+      }
+      expect(names[0]).toBe("start");
+      expect(names.at(-1)).toBe("help");
+      expect(names.indexOf("deposit")).toBeLessThan(names.indexOf("coinflip"));
+    });
+
+    test("scopes chat-type specific commands", () => {
+      const privateNames = botModule
+        .__test_getRegisteredBotCommands("private")
+        .map(({ command }) => command);
+      const groupNames = botModule
+        .__test_getRegisteredBotCommands("group")
+        .map(({ command }) => command);
+      expect(privateNames).toContain("deposit");
+      expect(privateNames).not.toContain("leaderboard");
+      expect(groupNames).toContain("leaderboard");
+      expect(groupNames).not.toContain("deposit");
     });
   });
 

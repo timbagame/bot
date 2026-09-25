@@ -3478,22 +3478,53 @@ const registerCaseInsensitiveCommand =
   ) =>
   (handler: (ctx: Context) => Promise<unknown> | unknown): void => {
     const commands = Array.isArray(command) ? command : [command];
-    for (const commandName of commands) {
+    for (const [index, commandName] of commands.entries()) {
       caseInsensitiveCommands.command(commandName, description, handler);
-      if (showInMenu) {
+      // Only the primary name is listed in the Telegram menu; aliases stay usable but hidden.
+      if (showInMenu && index === 0) {
         botMenuCommandNames.add(commandName);
       }
     }
   };
 
-registerCaseInsensitiveCommand("deposit", "💰 Deposit funds")(lightningDeposits.open);
+registerCaseInsensitiveCommand("deposit", "Add funds to your wallet")(lightningDeposits.open);
 
-const getBotMenuCommands = () => [
-  ...caseInsensitiveCommands
+/** Menu order, grouped wallet → games → info → settings. */
+const BOT_MENU_ORDER = [
+  "start",
+  "deposit",
+  "withdraw",
+  "tip",
+  "coinflip",
+  "giveaway",
+  "faucet",
+  "active",
+  "public",
+  "games",
+  "leaderboard",
+  "globalboard",
+  "settings",
+  "help",
+];
+const PRIVATE_ONLY_MENU_COMMANDS = new Set(["deposit"]);
+const GROUP_ONLY_MENU_COMMANDS = new Set(["leaderboard"]);
+
+const menuRank = (command: string): number => {
+  const index = BOT_MENU_ORDER.indexOf(command);
+  return index === -1 ? BOT_MENU_ORDER.length : index;
+};
+
+const getBotMenuCommands = (scope: "all" | "private" | "group" = "all") =>
+  caseInsensitiveCommands
     .toElementals("default")
     .filter(({ command }) => botMenuCommandNames.has(command))
-    .map(({ command, description }) => ({ command, description })),
-];
+    .filter(({ command }) => {
+      if (scope === "private") return !GROUP_ONLY_MENU_COMMANDS.has(command);
+      if (scope === "group") return !PRIVATE_ONLY_MENU_COMMANDS.has(command);
+      return true;
+    })
+    .map(({ command, description }) => ({ command, description }))
+    .sort((a, b) => menuRank(a.command) - menuRank(b.command));
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
 
@@ -3536,7 +3567,7 @@ bot.use(caseInsensitiveCommands);
 
 registerCaseInsensitiveCommand(
   ["start", "balance"],
-  "Open your wallet and show balances",
+  "Open your wallet",
 )(async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
@@ -3561,7 +3592,7 @@ registerCaseInsensitiveCommand(
 
 registerCaseInsensitiveCommand(
   ["coinflip", "cf"],
-  "Create a coinflip game",
+  "Start a coinflip",
 )(async (ctx) => {
   try {
     await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
@@ -3573,7 +3604,7 @@ registerCaseInsensitiveCommand(
 
 registerCaseInsensitiveCommand(
   ["giveaway", "ga"],
-  "Create a random giveaway",
+  "Start a giveaway",
 )(async (ctx) => {
   await handleGiveawayCommand(ctx as Context & { message?: any });
 });
@@ -3610,7 +3641,7 @@ faucetModule.registerCallbacks();
 
 registerCaseInsensitiveCommand(
   ["faucet", "rain"],
-  "Create a first-come token faucet",
+  "Drop tokens to the first people who claim",
 )(async (ctx: Context) => {
   await faucetModule.handleCommand(ctx);
 });
@@ -3621,7 +3652,7 @@ registerCaseInsensitiveCommand(
 
 registerCaseInsensitiveCommand(
   ["withdraw", "wh"],
-  "Withdraw tokens from your bot wallet",
+  "Send tokens to another wallet",
 )(async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "withdraw command");
   if (telegramId == null) {
@@ -4036,7 +4067,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   }
 };
 
-registerCaseInsensitiveCommand("tip", "Tip another Telegram user")(handleTipCommand);
+registerCaseInsensitiveCommand("tip", "Tip someone in this chat")(handleTipCommand);
 
 export const __test_handleTipCommand = handleTipCommand;
 
@@ -4068,8 +4099,8 @@ export const __test_clearTransactionCache = (): void => {
 // ================================
 
 registerCaseInsensitiveCommand(
-  ["default", "config", "configs", "settings"],
-  "Configure chat defaults",
+  ["settings", "default", "config", "configs"],
+  "Chat settings (token, games, alerts)",
 )(async (ctx: Context) => {
   if (!ctx.from || !ctx.chat) return;
 
@@ -4083,49 +4114,37 @@ registerCaseInsensitiveCommand(
 
 registerCaseInsensitiveCommand(
   "help",
-  "Show available commands",
+  "How to use the bot",
 )(async (ctx: Context) => {
   const helpSections = [
-    "<b>📝 Available Commands:</b>",
+    "<b>🎲 How to use the bot</b>",
     "",
-    "<b>💰 Wallet Commands:</b>",
-    "/start, /balance - Show your wallet address and balances",
-    "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN|USD] - Withdraw tokens to external wallet",
-    "/wh &lt;address&gt; &lt;amount&gt; [TOKEN|USD] - Shorthand for withdraw command",
-    "/tip @username &lt;amount&gt; [TOKEN|USD] - Reply to a message or include @username to tip",
+    "<b>🎮 Games</b>",
+    "/coinflip &lt;amount&gt; [token] [players] — Start a coinflip · /cf",
+    "/giveaway &lt;amount&gt; [token] [players] — Start a giveaway · /ga",
+    "/faucet &lt;amount&gt; [token] [users] — First come, first served drop · /rain",
+    "/active — Games in progress",
+    "/public — Browse open public games",
+    "/games — Your recent games",
+    "/leaderboard — Top players in this group · /lb",
+    "/globalboard — Top players everywhere · /gb",
     "",
-    "<b>🎮 Game Commands:</b>",
-    "/coinflip &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
-    "/cf &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
-
-    "/giveaway &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
-    "/ga &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
-    "/faucet &lt;amount&gt; [USD|TOKEN] [users] - First-come token distribution",
-    "/rain &lt;amount&gt; [USD|TOKEN] [users] - Shorthand for faucet command",
-
-    "/active - Show active games in this chat",
-    "/public - Show all active public games",
-    "/games - Show your recent games",
-    "/leaderboard - Show top 10 players in this group (groups only)",
-    "/lb - Shorthand for leaderboard command",
-    "/globalboard - Show global leaderboard",
-    "/gb - Shorthand for globalboard command",
+    "<b>💰 Wallet</b>",
+    "/start — Open your wallet · /balance",
+    "/deposit — Add funds (private chat)",
+    "/withdraw &lt;address&gt; &lt;amount&gt; [token] — Send to another wallet · /wh",
+    "/tip @user &lt;amount&gt; [token] — Tip someone, or reply to their message",
     "",
-    "<b>🪙 Token Management:</b>",
-    "/default, /config, /configs, /settings - View chat defaults (token, players, privacy, media, timeout, buy alerts)",
+    "<b>⚙️ Chat</b>",
+    "/settings — Default token, players, privacy, media, timeout and buy alerts (group admins) · /config",
+    "/oracle — Fees and game limits",
     "",
-    "<b>🔧 Utility Commands:</b>",
-    "/oracle - Check Oracle configuration",
+    "<b>💡 Amounts</b>",
+    "• Add a token after the amount: <code>/cf 100 TIMBA 2</code>",
+    "• Bet in USD: <code>/cf 12 USD</code> or <code>/cf $10 WBTC</code>",
+    "• Works for tips and withdrawals too: <code>/tip @user $5 SOL</code>",
     "",
-    "<b>ℹ️ Important:</b> ",
-    "• Your player balance account will be automatically initialized when needed",
-    "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
-    "• Use USD in the token slot to auto-convert: /cf 12 USD",
-    "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
-    "• Works for tips/withdrawals too: /tip @user $10 WBTC or /withdraw &lt;addr&gt; 10 USD",
-    "• Group admins can set chat defaults (token, limits, privacy, media, timeout, buy alerts) via /default, /config, /configs, or /settings",
-
-    "• Contact bot administrator to add support for new SPL tokens",
+    "<i>Need another SPL token? Ask the bot admin.</i>",
   ];
 
   await ctx.reply(helpSections.join("\n"), {
@@ -4165,7 +4184,7 @@ const handleActiveCommand = async (ctx: Context) => {
   }
 };
 
-registerCaseInsensitiveCommand("active", "Show your active games")(handleActiveCommand);
+registerCaseInsensitiveCommand("active", "Games in progress")(handleActiveCommand);
 
 const handlePublicCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "public command");
@@ -4184,12 +4203,12 @@ const handlePublicCommand = async (ctx: Context) => {
   }
 };
 
-registerCaseInsensitiveCommand("public", "Show active public games")(handlePublicCommand);
+registerCaseInsensitiveCommand("public", "Browse open public games")(handlePublicCommand);
 export const __test_handlePublicCommand = handlePublicCommand;
 
 registerCaseInsensitiveCommand(
   "games",
-  "Show your recent games",
+  "Your recent games",
 )(async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(ctx, "games command");
   if (telegramId == null) {
@@ -4533,7 +4552,7 @@ const resolveLeaderboardPlayers = async (
 
 registerCaseInsensitiveCommand(
   ["leaderboard", "lb"],
-  "Show this group's leaderboard",
+  "Top players in this group",
 )(async (ctx: Context) => {
   if (!isGroupChat(ctx)) {
     return ctx.reply("❌ Leaderboard is only available in group chats.");
@@ -4656,7 +4675,7 @@ registerCaseInsensitiveCommand(
 
 registerCaseInsensitiveCommand(
   ["globalboard", "gb"],
-  "Show the global leaderboard",
+  "Top players everywhere",
 )(async (ctx: Context) => {
   try {
     console.log("🌐 Generating global leaderboard");
@@ -4797,33 +4816,32 @@ bot.callbackQuery(
   ),
 );
 
-registerCaseInsensitiveCommand(
-  "oracle",
-  "Show oracle configuration",
-)(async (ctx: Context) => {
-  try {
-    const oraclePda = await PDAManager.getOraclePDA(program.programId);
-    const oracleAccount = await program.account.oracle.fetch(oraclePda);
+registerCaseInsensitiveCommand("oracle", "Fees and game limits", { showInMenu: false })(
+  async (ctx: Context) => {
+    try {
+      const oraclePda = await PDAManager.getOraclePDA(program.programId);
+      const oracleAccount = await program.account.oracle.fetch(oraclePda);
 
-    const response = [
-      "🔮 <b>Oracle Configuration</b>",
-      "",
-      `Operator: <code>${oracleAccount.operator.toString()}</code>`,
-      `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${formatDuration(Number(oracleAccount.minTimeout))}`,
-      `Max Timeout: ${formatDuration(Number(oracleAccount.maxTimeout))}`,
-      `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
-    ].join("\n");
+      const response = [
+        "🔮 <b>Oracle Configuration</b>",
+        "",
+        `Operator: <code>${oracleAccount.operator.toString()}</code>`,
+        `Fee Percentage: ${oracleAccount.feePercentage}%`,
+        `Min Timeout: ${formatDuration(Number(oracleAccount.minTimeout))}`,
+        `Max Timeout: ${formatDuration(Number(oracleAccount.maxTimeout))}`,
+        `Max Tickets: ${oracleAccount.maxTickets}`,
+        `Oracle Buffer Time: ${formatDuration(Number(oracleAccount.oracleBufferTime))}`,
+      ].join("\n");
 
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error) {
-    await handleCommandError(ctx, error, "oracle");
-  }
-});
+      await ctx.reply(response, {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    } catch (error) {
+      await handleCommandError(ctx, error, "oracle");
+    }
+  },
+);
 
 const handlePlayerEvent = async (
   event: PlayerEvent,
@@ -6363,6 +6381,12 @@ if (process.env.NODE_ENV !== "test") {
 
       try {
         await bot.api.setMyCommands(getBotMenuCommands());
+        await bot.api.setMyCommands(getBotMenuCommands("private"), {
+          scope: { type: "all_private_chats" },
+        });
+        await bot.api.setMyCommands(getBotMenuCommands("group"), {
+          scope: { type: "all_group_chats" },
+        });
         console.log("Registered bot commands in the Telegram command menu");
       } catch (error) {
         console.error("Failed to register bot commands in the Telegram command menu:", error);

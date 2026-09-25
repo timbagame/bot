@@ -33,22 +33,29 @@ src/
 
 ## 🔧 Commands
 
-### Basic Commands
+The Telegram `/` menu lists only primary command names, in a fixed order. Aliases (`/balance`, `/cf`, `/ga`, `/rain`, `/wh`, `/lb`, `/gb`, `/default`, `/config`, `/configs`) still work but are hidden. Private chats omit `/leaderboard`; groups omit `/deposit`.
 
-- `/start`, `/balance` - Show wallet address and balances
-- `/help` - Display all available commands
-- `/oracle` - Show the current oracle configuration
+### Wallet
 
-### Game Commands
-
-- `/coinflip <amount> [maxPlayers]` - Create a coinflip game
-- `/giveaway <amount> [maxPlayers]` - Create a giveaway game
-
-### Wallet Commands
-
-- `/withdraw <address> <amount>` - Withdraw tokens to external wallet
-- `/tip @username <amount>` - Tip tokens by replying or tagging a user
+- `/start` (`/balance`) - Open your wallet
+- `/deposit` - Add funds (private chat only)
+- `/withdraw <address> <amount> [token]` (`/wh`) - Send tokens to another wallet
+- `/tip @username <amount> [token]` - Tip by tagging or replying to a user
 - **Private Key** in the wallet menu - Reveal the current user's wallet private key after a short-lived private-chat confirmation; the key message is deleted after one minute
+
+### Games
+
+- `/coinflip <amount> [token] [players]` (`/cf`) - Create a coinflip game
+- `/giveaway <amount> [token] [players]` (`/ga`) - Create a giveaway game
+- `/faucet <amount> [token] [users]` (`/rain`) - First-come token drop
+- `/active`, `/public`, `/games` - Active, public, and recent games
+- `/leaderboard` (`/lb`), `/globalboard` (`/gb`) - Group and global leaderboards
+
+### Chat and info
+
+- `/settings` (`/default`, `/config`, `/configs`) - Chat defaults: token, players, privacy, media, timeout, notifications, buy alerts
+- `/help` - Command guide
+- `/oracle` - Fees and game limits (not listed in the menu)
 
 ### Operator Commands
 
