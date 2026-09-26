@@ -1821,6 +1821,12 @@ export const __test_resetGameMessageUpdateDebounceMs = (): void => {
   gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
 };
 
+export const __test_clearPendingGameMessageUpdates = (): void => {
+  for (const gameAddress of [...pendingGameMessageUpdates.keys()]) {
+    cancelPendingGameMessageUpdate(gameAddress);
+  }
+};
+
 // ================================
 // JOIN NOTIFICATION RATE LIMITING
 // ================================
@@ -3111,7 +3117,9 @@ const gameCallbacksModule = createGameCallbacksModule({
   bot,
   wallet,
   getGameManager: () => gameManager,
-  gameDb,
+  get gameDb() {
+    return gameDb;
+  },
   wrapCallbackHandler,
   withCreatorContext,
   withCreatorSessionContext,
@@ -3202,7 +3210,9 @@ const buyAlertService = createBuyAlertService({
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
   chatDb,
-  gameDb,
+  get gameDb() {
+    return gameDb;
+  },
   getTokenManager: () => tokenManager,
   getGameManager: () => gameManager,
   wrapCallbackHandler,

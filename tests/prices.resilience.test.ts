@@ -8,6 +8,12 @@ import {
   __test_resetPriceCache,
 } from "../src/utils/prices";
 import { WSOL_MINT } from "../src/utils/token-registry";
+import * as pricesModuleForReset from "../src/utils/prices";
+
+function freshPricesModule(): typeof pricesModuleForReset {
+  pricesModuleForReset.__test_resetPriceCache();
+  return pricesModuleForReset;
+}
 
 const originalEnv = process.env["PRICES_ENABLED"];
 const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
@@ -254,7 +260,7 @@ describe("price utilities resilience", () => {
     const previousTimeout = process.env["PRICES_TIMEOUT_MS"];
     process.env["PRICES_TIMEOUT_MS"] = "0";
 
-    const module = await import(`../src/utils/prices.ts?timeout=${Date.now()}`);
+    const module = freshPricesModule();
 
     let calls = 0;
     const fetchImpl = (async (url: string) => {

@@ -7,6 +7,7 @@ import {
   LAMPORTS_PER_SOL,
   GAME_EXPIRATION_BUFFER_TIME,
   applyOracleBufferTime,
+  parsePositiveDuration,
 } from "../src/utils/constants";
 
 const originalMinSolForTx = MIN_SOL_FOR_TX;
@@ -65,13 +66,22 @@ describe("dynamic constants", () => {
     expect(GAME_EXPIRATION_BUFFER_TIME).toBe(0);
   });
 
-  test("parsePositiveDuration clamps invalid env values via dynamic import", async () => {
-    process.env["PRICES_CACHE_TTL_MS"] = "-50";
+  test("parsePositiveDuration falls back for invalid env values", () => {
+    const key = "TEST_PARSE_POSITIVE_DURATION";
     try {
-      const module = await import(`../src/utils/constants.ts?test=${Date.now()}`);
-      expect(module.PRICES_CACHE_TTL_MS).toBe(60_000);
+      delete process.env[key];
+      expect(parsePositiveDuration(key, 60_000)).toBe(60_000);
+
+      process.env[key] = "-50";
+      expect(parsePositiveDuration(key, 60_000)).toBe(60_000);
+
+      process.env[key] = "not-a-number";
+      expect(parsePositiveDuration(key, 60_000)).toBe(60_000);
+
+      process.env[key] = "1500";
+      expect(parsePositiveDuration(key, 60_000)).toBe(1500);
     } finally {
-      delete process.env["PRICES_CACHE_TTL_MS"];
+      delete process.env[key];
     }
   });
 });

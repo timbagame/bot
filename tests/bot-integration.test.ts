@@ -222,19 +222,16 @@ describe("Bot Integration Tests", () => {
         .fill(null)
         .map((_, i) => BigInt(123456789 + i));
 
-      const startTime = Date.now();
-
-      // Test concurrent keypair generation
-      const keypairs = await Promise.all(
-        userIds.map(async (userId) => Promise.resolve(await wallet.getKeyPair(userId))),
+      // CPU scheduling varies across CI runners and coverage builds. Assert
+      // deterministic, distinct wallets and stable concurrent cache reads.
+      const keypairs = await Promise.all(userIds.map((userId) => wallet.getKeyPair(userId)));
+      const addresses = keypairs.map((keypair) => keypair.publicKey.toBase58());
+      expect(new Set(addresses).size).toBe(userIds.length);
+      const repeated = await Promise.all(userIds.map((userId) => wallet.getKeyPair(userId)));
+      expect(repeated.map((keypair) => keypair.publicKey.toBase58())).toEqual(addresses);
+      expect(repeated.map((keypair) => [...keypair.secretKey])).toEqual(
+        keypairs.map((keypair) => [...keypair.secretKey]),
       );
-
-      const duration = Date.now() - startTime;
-      const threshold = (globalThis as any).__coverage__ ? 800 : 600;
-
-      expect(duration).toBeLessThan(threshold); // Allow extra time when coverage instrumentation is enabled
-      expect(keypairs).toHaveLength(10);
-      expect(keypairs[0]?.publicKey.toBase58()).toBeTruthy();
     });
   });
 

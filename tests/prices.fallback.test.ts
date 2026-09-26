@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { WSOL_MINT } from "../src/utils/token-registry";
+import * as pricesModuleForReset from "../src/utils/prices";
+
+function freshPricesModule(): typeof pricesModuleForReset {
+  pricesModuleForReset.__test_resetPriceCache();
+  return pricesModuleForReset;
+}
 
 const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
 describe("price utilities fallbacks", () => {
   test("withTimeout rejects long fetches and returns zero", async () => {
     process.env["PRICES_TIMEOUT_MS"] = "1";
-    const module = await import(`../src/utils/prices.ts?timeout=${Date.now()}`);
+    const module = freshPricesModule();
     try {
       const slowFetch = (async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -41,7 +47,7 @@ describe("price utilities fallbacks", () => {
       } as any;
     }) as any;
 
-    const module = await import(`../src/utils/prices.ts?cap=${Date.now()}`);
+    const module = freshPricesModule();
     const price = await module.getPriceUSD(
       "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
       fetchImpl,
@@ -59,7 +65,7 @@ describe("price utilities fallbacks", () => {
       } as any;
     }) as any;
 
-    const module = await import(`../src/utils/prices.ts?sol=${Date.now()}`);
+    const module = freshPricesModule();
     const price = await module.getPriceUSD(
       "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
       fetchImpl,
@@ -74,7 +80,7 @@ describe("price utilities fallbacks", () => {
         return { data: {} };
       },
     })) as any;
-    const module = await import(`../src/utils/prices.ts?null=${Date.now()}`);
+    const module = freshPricesModule();
     const result = await module.resolveTokenPriceUSD({
       tokenMint: "invalid",
       fetchImpl,
@@ -83,7 +89,7 @@ describe("price utilities fallbacks", () => {
   });
 
   test("getPriceUSD ignores non-mint inputs", async () => {
-    const module = await import(`../src/utils/prices.ts?solmint=${Date.now()}`);
+    const module = freshPricesModule();
     let fetchCalls = 0;
     const fetchImpl = (async () => {
       fetchCalls += 1;

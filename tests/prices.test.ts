@@ -1,6 +1,12 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { getPriceUSD, __test_resetPriceCache } from "../src/utils/prices";
 import { WSOL_MINT } from "../src/utils/token-registry";
+import * as pricesModuleForReset from "../src/utils/prices";
+
+function freshPricesModule(): typeof pricesModuleForReset {
+  pricesModuleForReset.__test_resetPriceCache();
+  return pricesModuleForReset;
+}
 
 afterEach(() => {
   __test_resetPriceCache();
@@ -89,7 +95,7 @@ describe("prices util", () => {
     process.env["PRICES_CACHE_TTL_MS"] = "0";
 
     try {
-      const module = await import(`../src/utils/prices?ttl=${Date.now()}`);
+      const module = freshPricesModule();
       const price = await module.getPriceUSD(WSOL_MINT, jupOkFetch(9.99) as any);
       expect(price).toBe(9.99);
     } finally {
