@@ -83,6 +83,13 @@ import {
 import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
+  SWAP_QUOTE_RETRY_PREFIX,
+  buildSwapProviderRetryKeyboard,
+  buildSwapProviderSlowMessage,
+  createSwapQuoteRetryStore,
+  isSwapProviderUnavailableError,
+} from "./utils/swap/provider-retry";
+import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
   buildEmptyGlobalLeaderboardMessage,
@@ -5874,6 +5881,24 @@ const showSwapQuoteAndConfirmation = async (
   overrides.fromDecimals = overrides.fromDecimals ?? source.decimals;
   const userId = telegramId || getTelegramId(ctx);
   const cancelCallback = `swap_to_${fromTokenIdentifier}_${toToken}`;
+  const retryOverrides = { ...overrides };
+
+  const renderSwapQuoteError = async (error: unknown) => {
+    if (!isSwapProviderUnavailableError(error)) {
+      return await renderTradeQuoteError({ error, retryCallback: cancelCallback });
+    }
+    const retryCallback = swapQuoteRetryStore.save({
+      userId: userId.toString(),
+      fromTokenIdentifier,
+      toToken,
+      amount,
+      overrides: retryOverrides,
+    });
+    return {
+      text: buildSwapProviderSlowMessage({ amount, fromTicker: fromToken, toTicker: toToken }),
+      keyboard: buildSwapProviderRetryKeyboard(retryCallback, cancelCallback),
+    };
+  };
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -5946,23 +5971,51 @@ const showSwapQuoteAndConfirmation = async (
           cancelCallback,
         }),
       onError: async (error) => {
-        const { text, keyboard } = await renderTradeQuoteError({
-          error,
-          retryCallback: cancelCallback,
-        });
-        await respondWithMenu(ctx, { text, keyboard });
+        await respondWithMenu(ctx, await renderSwapQuoteError(error));
       },
       quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = await renderTradeQuoteError({
-      error,
-      retryCallback: cancelCallback,
-    });
-    await respondWithMenu(ctx, { text, keyboard });
+    await respondWithMenu(ctx, await renderSwapQuoteError(error));
   }
 };
+
+const swapQuoteRetryStore = createSwapQuoteRetryStore();
+
+export const __test_swapQuoteRetryStore = swapQuoteRetryStore;
+
+// One-tap retry after a provider timeout: re-runs the same quote (pair, amount
+// and token overrides) for the user who asked for it.
+registerCallbackPrefixHandler(
+  SWAP_QUOTE_RETRY_PREFIX,
+  async (ctx, { payload }) => {
+    const request = swapQuoteRetryStore.get(payload);
+    if (!request) {
+      await safeAnswerCallbackQuery(ctx, "⌛ This quote expired. Pick the amount again.");
+      return;
+    }
+    if (getTelegramIdString(ctx) !== request.userId) {
+      await safeAnswerCallbackQuery(ctx, "❌ This quote belongs to someone else");
+      return;
+    }
+
+    await answerCallbackWithGrace(
+      ctx,
+      () =>
+        showSwapQuoteAndConfirmation(
+          ctx,
+          request.fromTokenIdentifier,
+          request.toToken,
+          request.amount,
+          BigInt(request.userId),
+          { ...request.overrides },
+        ),
+      { pendingText: "⏳ Getting a quote…" },
+    );
+  },
+  { logLabel: "swap_retry", errorAck: "❌ Error retrying quote" },
+);
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
