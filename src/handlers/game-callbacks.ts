@@ -39,6 +39,11 @@ import {
   determineFractionDigits,
   toTitleCase,
 } from "./game-callbacks/ui-builders";
+import {
+  buildRestoredConfirmMessage,
+  restoreConfirmMessage,
+  snapshotConfirmMessage,
+} from "./game-callbacks/confirm-restore";
 import { respondWithMenu } from "../utils/menu-response";
 import {
   getRequiredTelegramIdForContext,
@@ -1389,6 +1394,9 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             return;
           }
           let createdGameAddress: string | undefined;
+          // Put the confirm card back when creation fails or is interrupted, so
+          // "Creating game…" never stays on screen without a way forward.
+          let restoreConfirmCard: ((notice: string) => Promise<boolean>) | undefined;
           try {
             const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
             if (!payload) {
@@ -1450,6 +1458,16 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             let confirmMessageMissing = false;
             const confirmationFallbackReplyTo =
               ctx.callbackQuery?.message?.reply_to_message?.message_id;
+            const confirmSnapshot = snapshotConfirmMessage(ctx.callbackQuery?.message);
+            const confirmData = ctx.callbackQuery?.data;
+            restoreConfirmCard = async (notice: string) => {
+              if (!chatId || !messageId || confirmMessageMissing) return false;
+              return restoreConfirmMessage(
+                ctx.api,
+                { chatId, messageId },
+                buildRestoredConfirmMessage(confirmSnapshot, notice, confirmData),
+              );
+            };
             deps.pendingGameCreations.add(creationKey);
 
             try {
@@ -1551,6 +1569,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                     : isActiveGameLimit
                       ? "❌ You have too many active games. Finish or cancel one and try again."
                       : "❌ Failed to create game. Please try again.";
+
+                if (await restoreConfirmCard(displayText)) {
+                  return;
+                }
 
                 await respondWithMenu(
                   ctx,
@@ -1669,6 +1691,13 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
             } catch (answerError) {
               console.error("Failed to answer callback after error:", answerError);
+            }
+
+            if (
+              restoreConfirmCard &&
+              (await restoreConfirmCard("❌ Game creation was interrupted. Please try again."))
+            ) {
+              return;
             }
 
             try {

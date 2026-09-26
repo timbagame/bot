@@ -339,3 +339,168 @@ test("confirm_game clears pending state and surfaces limit errors", async () => 
   expect(JSON.stringify(errorEdit)).not.toContain(limitMessage);
   expect(botModule.__test_getPendingGameCreations().size).toBe(0);
 }, 15000);
+
+const confirmCardMessage = (messageId: number, chatId: number) => ({
+  message_id: messageId,
+  date: Math.floor(Date.now() / 1000),
+  chat: { id: chatId, type: "private" },
+  text: "🎮 Coinflip\nAmount: 4 SOL",
+  entities: [{ type: "bold", offset: 3, length: 8 }],
+  reply_markup: {
+    inline_keyboard: [[{ text: "✅ Create Game", callback_data: "cg|placeholder" }]],
+  },
+});
+
+test.each([
+  ["fails", async () => ({ success: false, error: "simulation failed" })],
+  [
+    "is interrupted",
+    async () => {
+      throw new Error("socket hang up");
+    },
+  ],
+])(
+  "confirm_game restores the confirm card when creation %s",
+  async (label, createGame) => {
+    const interrupted = label === "is interrupted";
+    const userId = interrupted ? 7501 : 7500;
+    const chatId = 8500;
+    const messageId = interrupted ? 95 : 94;
+
+    upsertGameSetupSession(`${chatId}_${messageId}`, {
+      waitingFor: "setup",
+      gameType: "coinflip",
+      userBalance: 20,
+      messageId,
+      chatId,
+      amount: "4",
+      creatorId: String(userId),
+      tokenMint: "So11111111111111111111111111111111111111112",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+    });
+
+    const editCalls: any[] = [];
+    const sendCalls: any[] = [];
+    apiHandlers["editMessageText"] = async (payload: any) => {
+      editCalls.push(payload);
+      return { ok: true, result: true };
+    };
+    apiHandlers["sendMessage"] = async (payload: any) => {
+      sendCalls.push(payload);
+      return { ok: true, result: { message_id: 3000, ...payload } };
+    };
+
+    botModule.__test_setGameManager({
+      createGame,
+      createGameMessage: async () => {},
+      updateGameMessageFromData: async () => {},
+    } as any);
+
+    const confirmPayload =
+      encodeGameConfirmPayload({
+        gameType: "coinflip",
+        amount: "4",
+        players: 2,
+        timeoutSeconds: 3600,
+        minPlayers: 2,
+        isPrivate: true,
+        creatorId: String(userId),
+      }) ?? "";
+
+    const message = confirmCardMessage(messageId, chatId);
+    await bot.handleUpdate({
+      update_id: interrupted ? 5 : 4,
+      callback_query: {
+        id: `cb-restore-${messageId}`,
+        from: { id: userId } as any,
+        message: message as any,
+        data: confirmPayload,
+      },
+    } as any);
+
+    expect(editCalls.length).toBe(2);
+    expect(editCalls[0].text).toBe("⏳ Creating game…");
+    const notice = interrupted
+      ? "❌ Game creation was interrupted. Please try again."
+      : "❌ Failed to create game. Please try again.";
+    const restored = editCalls[1];
+    expect(restored.text).toBe(`${notice}\n\n${message.text}`);
+    expect(restored.entities).toEqual([
+      { type: "bold", offset: 0, length: notice.length },
+      { type: "bold", offset: notice.length + 2 + 3, length: 8 },
+    ]);
+    expect(restored.reply_markup).toEqual(message.reply_markup);
+    expect(sendCalls.length).toBe(0);
+    expect(botModule.__test_getPendingGameCreations().size).toBe(0);
+  },
+  15000,
+);
+
+test("confirm_game falls back to a reply when the confirm card cannot be restored", async () => {
+  const userId = 7600;
+  const chatId = 8600;
+  const messageId = 96;
+
+  upsertGameSetupSession(`${chatId}_${messageId}`, {
+    waitingFor: "setup",
+    gameType: "coinflip",
+    userBalance: 20,
+    messageId,
+    chatId,
+    amount: "5",
+    creatorId: String(userId),
+    tokenMint: "So11111111111111111111111111111111111111112",
+    tokenTicker: "SOL",
+    tokenDecimals: 9,
+  });
+
+  const editCalls: any[] = [];
+  const sendCalls: any[] = [];
+  apiHandlers["editMessageText"] = async (payload: any) => {
+    editCalls.push(payload);
+    if (editCalls.length > 1) {
+      throw Object.assign(new Error("Bad Request: chat not found"), {
+        description: "Bad Request: chat not found",
+      });
+    }
+    return { ok: true, result: true };
+  };
+  apiHandlers["sendMessage"] = async (payload: any) => {
+    sendCalls.push(payload);
+    return { ok: true, result: { message_id: 3100, ...payload } };
+  };
+
+  botModule.__test_setGameManager({
+    createGame: async () => {
+      throw new Error("socket hang up");
+    },
+    createGameMessage: async () => {},
+    updateGameMessageFromData: async () => {},
+  } as any);
+
+  const confirmPayload =
+    encodeGameConfirmPayload({
+      gameType: "coinflip",
+      amount: "5",
+      players: 2,
+      timeoutSeconds: 3600,
+      minPlayers: 2,
+      isPrivate: true,
+      creatorId: String(userId),
+    }) ?? "";
+
+  await bot.handleUpdate({
+    update_id: 6,
+    callback_query: {
+      id: "cb-restore-fallback",
+      from: { id: userId } as any,
+      message: confirmCardMessage(messageId, chatId) as any,
+      data: confirmPayload,
+    },
+  } as any);
+
+  expect(editCalls.length).toBe(2);
+  expect(sendCalls.length).toBe(1);
+  expect(sendCalls[0].text).toBe("❌ Failed to create game. Please try again.");
+}, 15000);
