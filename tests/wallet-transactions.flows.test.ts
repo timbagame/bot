@@ -14,10 +14,13 @@ import {
   sendText,
   stub,
   texts,
+  useBotHarness,
   wallet,
 } from "./helpers/bot-harness";
 import { WSOL_MINT } from "../src/utils/constants";
 import { clearAllInputSessions } from "../src/utils/user-state";
+
+useBotHarness();
 
 // Each test uses a fresh user so the per-user wallet RPC budget never runs out.
 let USER = 71_000;
@@ -28,25 +31,42 @@ const LAMPORTS = 1_000_000_000;
 let recipient: string;
 let transfers: Array<{ kind: string; args: unknown[] }>;
 
+let walletTokens: Array<{
+  mint: string;
+  ticker: string;
+  balance: number;
+  decimals: number;
+  rawBalance: string;
+}> = [];
+
 const seedWallet = (
   overrides: { solBalance?: number; tokenBalance?: number; wsol?: number } = {},
 ) => {
+  const tokenBalance = overrides.tokenBalance ?? 2_500_000;
+  walletTokens = [
+    {
+      mint: TOKEN_MINT,
+      ticker: "USDT",
+      balance: tokenBalance,
+      decimals: 6,
+      rawBalance: String(tokenBalance),
+    },
+    ...(overrides.wsol
+      ? [
+          {
+            mint: WSOL_MINT,
+            ticker: "WSOL",
+            balance: overrides.wsol,
+            decimals: 9,
+            rawBalance: String(overrides.wsol),
+          },
+        ]
+      : []),
+  ];
   botModule.__test_clearWalletCache(BigInt(USER));
   botModule.__test_setWalletCache(BigInt(USER), {
     solBalance: overrides.solBalance ?? 5 * LAMPORTS,
-    nativeSolBalance: overrides.solBalance ?? 5 * LAMPORTS,
-    wsolBalance: overrides.wsol ?? 0,
-    tokenBalances: [
-      {
-        mint: TOKEN_MINT,
-        ticker: "USDT",
-        balance: overrides.tokenBalance ?? 2_500_000,
-        decimals: 6,
-      },
-      ...(overrides.wsol
-        ? [{ mint: WSOL_MINT, ticker: "WSOL", balance: overrides.wsol, decimals: 9 }]
-        : []),
-    ],
+    tokenBalances: walletTokens,
   });
 };
 
@@ -61,6 +81,8 @@ beforeEach(() => {
   clearAllInputSessions();
   transfers = [];
   seedWallet();
+  // Other suites replace wallet methods on the shared singleton; pin the ones these flows read.
+  stub(wallet, "getAllWalletTokenBalances", async () => walletTokens);
   stub(wallet, "getBalance", async () => 5 * LAMPORTS);
   stub(wallet, "getTokenBalance", async () => 0);
   stub(wallet, "confirmTransaction", async (signature: string) => {

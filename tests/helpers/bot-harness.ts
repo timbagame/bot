@@ -9,13 +9,13 @@ process.env.MNEMONIC =
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
 process.env.NODE_ENV = "test";
 
-export type ApiCall = { method: string; payload: any };
+export type ApiCall = { method: string; payload: any; result?: any };
 
 export const botModule = await import("../../src/bot");
 export const bot: any = botModule.bot;
 export const wallet: any = botModule.wallet;
 
-bot.botInfo = {
+const BOT_INFO = {
   id: 424_242,
   is_bot: true,
   first_name: "test-bot",
@@ -30,11 +30,20 @@ let nextMessageId = 500_000;
 let updateId = 9_000_000;
 const methodOverrides = new Map<string, (payload: any) => unknown>();
 
-bot.api.config.use(async (_prev: unknown, method: string, payload: any) => {
-  calls.push({ method, payload });
+const transformer = async (_prev: unknown, method: string, payload: any) => {
+  const call: ApiCall = { method, payload };
+  calls.push(call);
+  const response = await respond(method, payload);
+  call.result = response.result;
+  return response;
+};
+
+const respond = async (method: string, payload: any): Promise<any> => {
   const override = methodOverrides.get(method);
   if (override) {
-    return { ok: true, result: await override(payload) };
+    const result = await override(payload);
+    if (result && typeof result === "object" && (result as any).ok === false) return result;
+    return { ok: true, result };
   }
   if (method.startsWith("send") || method === "copyMessage") {
     return {
@@ -65,11 +74,34 @@ bot.api.config.use(async (_prev: unknown, method: string, payload: any) => {
     return { ok: true, result: { id: payload.chat_id, type: "supergroup", title: "Group" } };
   }
   return { ok: true, result: true };
-});
+};
+
+/** Message id of a recorded send (or the edited message's id). */
+export const messageIdOf = (call: ApiCall | undefined): number =>
+  call?.result?.message_id ?? call?.payload?.message_id;
+
+/**
+ * Install the recorder as the outermost API transformer. Call it at the top of
+ * every test file that uses this harness: other suites install their own
+ * transformers on the shared bot, and the last one installed wins.
+ */
+export const useBotHarness = () => {
+  bot.botInfo = { ...BOT_INFO };
+  bot.api.config.use(transformer);
+};
 
 /** Make the next calls to `method` return `result(payload)` (or throw from it). */
 export const overrideApiMethod = (method: string, result: (payload: any) => unknown) => {
   methodOverrides.set(method, result);
+};
+
+/** Make `method` fail the way Telegram does (the bot sees a GrammyError). */
+export const failApiMethod = (method: string, description: string, errorCode = 400) => {
+  methodOverrides.set(method, () => ({ ok: false, error_code: errorCode, description }));
+};
+
+export const clearApiOverride = (method: string) => {
+  methodOverrides.delete(method);
 };
 
 export const resetCalls = () => {
