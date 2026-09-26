@@ -177,6 +177,31 @@ export type ActiveGameListRow = {
   minTickets?: number;
 };
 
+export type JoinGameResult = {
+  success: boolean;
+  error?: string;
+  isRoll?: boolean;
+  /** Game account read right after a successful join, when available. */
+  gameAccount?: any;
+  ticketsCount?: number;
+  maxTickets?: number;
+};
+
+type TerminalGameMessageUpdate = {
+  status: "Completed";
+  winnerAddress?: string;
+  totalPot?: number;
+  winnerSignature?: string;
+};
+
+// Parallel Telegram edits per game update (one per chat that shows the game).
+const GAME_MESSAGE_EDIT_CONCURRENCY = 4;
+
+export type GameMessageUpdateOptions = {
+  /** Freshly fetched game account; skips the lookup while formatting an active game. */
+  gameAccount?: any;
+};
+
 export type PublicGamesFilter = {
   gameType?: "coinflip" | "giveaway";
   ticker?: string;
@@ -1398,8 +1423,15 @@ export class GameManager {
   // PLAYER UTILITIES
   // ================================
 
-  /** Check if a player is in a game via database records */
-  private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
+  /**
+   * Check if a player is in a game via database records, then the on-chain
+   * participant list. Pass an already-fetched game account to skip the lookup.
+   */
+  private async isPlayerInGame(
+    gamePda: PublicKey,
+    playerPubkey: PublicKey,
+    knownGameAccount?: any,
+  ): Promise<boolean> {
     const gameAddress = gamePda.toBase58();
     const playerPubkeyStr = playerPubkey.toBase58();
 
@@ -1426,12 +1458,14 @@ export class GameManager {
     }
 
     try {
-      const accountInterface = this.program.account.game as any;
-      const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
-
-      const gameAccount = fetchNullable
-        ? await fetchNullable(gamePda)
-        : await accountInterface.fetch(gamePda);
+      let gameAccount = knownGameAccount;
+      if (gameAccount === undefined) {
+        const accountInterface = this.program.account.game as any;
+        const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
+        gameAccount = fetchNullable
+          ? await fetchNullable(gamePda)
+          : await accountInterface.fetch(gamePda);
+      }
 
       if (!gameAccount) {
         return false;
@@ -3325,6 +3359,7 @@ export class GameManager {
     winnerSignature?: string,
     updateGeneration?: number,
     updateRequest?: GameMessageUpdateRequest,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const generation = updateGeneration ?? this.nextGameMessageUpdateGeneration(gameAddress);
     const latestGeneration = this.gameMessageUpdateGenerations.get(gameAddress) ?? 0;
@@ -3357,6 +3392,7 @@ export class GameManager {
         winnerSignature,
         generation,
         request,
+        updateOptions,
       ),
     );
   }
@@ -3374,6 +3410,7 @@ export class GameManager {
     winnerSignature?: string,
     updateGeneration?: number,
     updateRequest?: GameMessageUpdateRequest,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const request = updateRequest ?? {
       status,
@@ -3441,7 +3478,7 @@ export class GameManager {
         winnerAddress,
         totalPot,
         winnerSignature,
-        { priceHint },
+        { priceHint, gameAccount: updateOptions?.gameAccount },
       );
 
       const terminalBeforeDispatch = this.getPersistedTerminalUpdate(
@@ -3483,7 +3520,15 @@ export class GameManager {
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
 
-      for (const gameMessage of messageMap.values()) {
+      // Edit every chat's copy in parallel (bounded) instead of one after another.
+      // A terminal update or a newer generation found mid-way stops the remaining
+      // edits; the terminal redraw then runs once for all chats.
+      let terminalRedirect: TerminalGameMessageUpdate | null = null;
+      let superseded = false;
+      const updateTarget = async (gameMessage: GameMessage): Promise<void> => {
+        if (terminalRedirect || superseded) {
+          return;
+        }
         const latestTerminal = this.getPersistedTerminalUpdate(
           gameAddress,
           status,
@@ -3492,24 +3537,12 @@ export class GameManager {
           winnerSignature,
         );
         if (latestTerminal && status.toLowerCase() !== "completed") {
-          await this.updateGameMessageInternal(
-            ctx,
-            gameAddress,
-            gameType,
-            amount,
-            creatorUsername,
-            latestTerminal.status,
-            tokenTicker,
-            latestTerminal.winnerAddress,
-            latestTerminal.totalPot,
-            latestTerminal.winnerSignature,
-            updateGeneration,
-            request,
-          );
+          terminalRedirect ??= latestTerminal;
           return;
         }
 
         if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
+          superseded = true;
           return;
         }
 
@@ -3538,24 +3571,12 @@ export class GameManager {
           winnerSignature,
         );
         if (terminalAfterPayload && status.toLowerCase() !== "completed") {
-          await this.updateGameMessageInternal(
-            ctx,
-            gameAddress,
-            gameType,
-            amount,
-            creatorUsername,
-            terminalAfterPayload.status,
-            tokenTicker,
-            terminalAfterPayload.winnerAddress,
-            terminalAfterPayload.totalPot,
-            terminalAfterPayload.winnerSignature,
-            updateGeneration,
-            request,
-          );
+          terminalRedirect ??= terminalAfterPayload;
           return;
         }
 
         if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
+          superseded = true;
           return;
         }
         const winnerMedia = payload.media;
@@ -3661,13 +3682,13 @@ export class GameManager {
                   };
 
               if (queuedEditResult.skipped || !queuedEditResult.result) {
-                continue;
+                return;
               }
 
               const { usedFallback, skipped } = queuedEditResult.result;
 
               if (skipped) {
-                continue;
+                return;
               }
 
               if (!usedFallback) {
@@ -3680,7 +3701,7 @@ export class GameManager {
                 this.activeGameMessages.set(gameAddress, current);
               }
 
-              continue;
+              return;
             } catch (mediaError) {
               // If we get here, something unexpected happened
               const recreated = await recreateMissingMessage(mediaError);
@@ -3690,7 +3711,7 @@ export class GameManager {
                   mediaError,
                 );
               }
-              continue;
+              return;
             }
           }
 
@@ -3738,7 +3759,7 @@ export class GameManager {
               });
 
               if (skipped) {
-                continue;
+                return;
               }
 
               if (!usedFallback) {
@@ -3751,7 +3772,7 @@ export class GameManager {
                 this.activeGameMessages.set(gameAddress, current);
               }
 
-              continue;
+              return;
             } catch (captionError) {
               // If we get here, something unexpected happened
               const recreated = await recreateMissingMessage(captionError);
@@ -3761,7 +3782,7 @@ export class GameManager {
                   captionError,
                 );
               }
-              continue;
+              return;
             }
           }
 
@@ -3799,11 +3820,11 @@ export class GameManager {
 
           if (textUsedFallback) {
             // Text failed but caption worked - already marked usesVideo: true
-            continue;
+            return;
           }
 
           if (skipped) {
-            continue;
+            return;
           }
         } catch (error) {
           if (messageTextValue && isMessageMissing(error)) {
@@ -3811,7 +3832,7 @@ export class GameManager {
             // We use a composite key for the lock to avoid blocking updates to other chats
             const lockKey = `${gameAddress}:${gameMessage.chatId}`;
             if (this.messageRecreationLocks.has(lockKey)) {
-              continue;
+              return;
             }
 
             this.messageRecreationLocks.add(lockKey);
@@ -3825,10 +3846,34 @@ export class GameManager {
             } finally {
               this.messageRecreationLocks.delete(lockKey);
             }
-            continue;
+            return;
           }
           console.error(`Error in updateGameMessage for chat ${gameMessage.chatId}:`, error);
         }
+      };
+
+      await mapWithConcurrency(
+        Array.from(messageMap.values()),
+        GAME_MESSAGE_EDIT_CONCURRENCY,
+        updateTarget,
+      );
+
+      const redirect = terminalRedirect as TerminalGameMessageUpdate | null;
+      if (redirect) {
+        await this.updateGameMessageInternal(
+          ctx,
+          gameAddress,
+          gameType,
+          amount,
+          creatorUsername,
+          redirect.status,
+          tokenTicker,
+          redirect.winnerAddress,
+          redirect.totalPot,
+          redirect.winnerSignature,
+          updateGeneration,
+          request,
+        );
       }
     } catch (error) {
       console.error("Error in updateGameMessage (preparation):", error);
@@ -3846,6 +3891,7 @@ export class GameManager {
     winnerAddress?: string,
     totalPot?: number,
     winnerSignature?: string,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const updateGeneration = this.nextGameMessageUpdateGeneration(gameAddress);
     const request: GameMessageUpdateRequest = {
@@ -3903,6 +3949,7 @@ export class GameManager {
         effectiveWinnerSignature,
         updateGeneration,
         request,
+        terminalStatus ? undefined : updateOptions,
       );
     } catch (error) {
       console.error(`Error updating game message for ${gameAddress}:`, error);
@@ -5043,7 +5090,7 @@ export class GameManager {
     telegramId: bigint,
     chatId?: number,
     displayName?: string | null,
-  ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
+  ): Promise<JoinGameResult> {
     try {
       const gamePda = new PublicKey(gameAddress);
       const playerKp = await this.wallet.getKeyPair(telegramId);
@@ -5097,8 +5144,8 @@ export class GameManager {
         throw fetchError;
       }
 
-      // Check if player already in game
-      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
+      // Check if player already in game (reuses the account fetched above)
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey, gameAccount);
 
       if (isInGame) {
         return { success: false, error: "You have already joined this game!" };
@@ -5112,13 +5159,15 @@ export class GameManager {
       // This prevents the confusing "Attempt to debit an account but found no record of a prior credit" error
       const currentGameType = Object.keys(gameAccount.gameType)[0];
       const gameAmount = Number(gameAccount.ticketAmount);
-      const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
-      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
-
-      let [tokenBalance, solBalance] = await Promise.all([
+      // Independent reads: token metadata, fee reserve and both balances load together.
+      const [metadata, minSolBuffer, initialTokenBalance, initialSolBalance] = await Promise.all([
+        this.wallet.getTokenMetadata(gameData.token_mint),
+        this.feeBudget.getGameSafetyBufferLamports(),
         this.wallet.getTokenBalance(telegramId, gameData.token_mint),
         this.wallet.getBalance(telegramId),
       ]);
+      let tokenBalance = initialTokenBalance;
+      let solBalance = initialSolBalance;
 
       const normalizedTicker = gameData.token_ticker?.toUpperCase?.() ?? "";
       const isSolBackedGame =
@@ -5412,8 +5461,13 @@ export class GameManager {
         };
       }
 
+      this.invalidatePublicGamesCache();
+
+      // The post-join account is returned so callers can show the ticket count and
+      // redraw the game message without fetching it again.
+      let updatedGameAccount: any;
       try {
-        const updatedGameAccount = await this.program.account.game.fetch(gamePda);
+        updatedGameAccount = await this.program.account.game.fetch(gamePda);
         const ticketsCount = Number(updatedGameAccount.ticketsCount ?? 0);
         const maxTickets = Number(updatedGameAccount.maxTickets ?? 0);
         const requestCompletion = this.oracleClient.requestGameCompletion;
@@ -5432,7 +5486,14 @@ export class GameManager {
         );
       }
 
-      return { success: true };
+      return updatedGameAccount
+        ? {
+            success: true,
+            gameAccount: updatedGameAccount,
+            ticketsCount: Number(updatedGameAccount.ticketsCount ?? 0),
+            maxTickets: Number(updatedGameAccount.maxTickets ?? 0),
+          }
+        : { success: true };
     } catch (error: any) {
       console.error(`Error joining game ${gameAddress}:`, error);
       try {

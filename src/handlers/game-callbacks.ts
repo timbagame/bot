@@ -433,17 +433,27 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         return;
       }
 
-      await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
-
-      const program = deps.getProgram();
-      const updatedGameAccount = await program.account.game.fetch(gamePda);
-      const ticketCount = updatedGameAccount.ticketsCount;
-      const maxTickets = updatedGameAccount.maxTickets;
+      // joinGame hands back the post-join account; fetch only if it could not.
+      const updatedGameAccount =
+        result.gameAccount ?? (await deps.getProgram().account.game.fetch(gamePda));
+      const ticketCount = result.ticketsCount ?? Number(updatedGameAccount.ticketsCount ?? 0);
+      const maxTickets = result.maxTickets ?? Number(updatedGameAccount.maxTickets ?? 0);
+      // Answer the tap first: the toast should not wait for every chat's message edit.
       await answerJoinCallbackOnce(
         ctx,
         game.game_address,
         telegramIdStr,
         `✅ Joined! (${ticketCount}/${maxTickets})`,
+      );
+
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        game.game_address,
+        "Active",
+        undefined,
+        undefined,
+        undefined,
+        { gameAccount: updatedGameAccount },
       );
     } catch (error) {
       if (isMissingAccountError(error)) {
@@ -479,10 +489,19 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
     try {
       const program = deps.getProgram();
-      await program.account.game.fetch(gamePda);
+      // One fetch: it detects a closed game and feeds the redraw.
+      const gameAccount = await program.account.game.fetch(gamePda);
 
       const gameManager = getGameManager();
-      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        gameAddress,
+        "Active",
+        undefined,
+        undefined,
+        undefined,
+        { gameAccount },
+      );
 
       await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
     } catch (error) {
