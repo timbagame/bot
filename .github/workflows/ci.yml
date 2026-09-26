@@ -21,8 +21,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  validate:
-    name: Validate
+  checks:
+    name: Static checks
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,17 +48,45 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun x tsc -p tsconfig.json --noEmit
-      - name: Tests (contract v0.3.0)
-        env:
-          CONTRACT_VERSION: 0.3.0
-        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage/v03
-      - name: Tests (contract v0.2.0)
-        env:
-          CONTRACT_VERSION: 0.2.0
-        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage/v02
 
-      - name: Test coverage gate
-        run: bun test scripts/check-coverage.test.ts
+  validate:
+    name: Validate
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Restore Bun cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-install-${{ runner.os }}-${{ hashFiles('bun.lock', 'package.json') }}
+          restore-keys: |
+            bun-install-${{ runner.os }}-
+      - name: Install dependencies
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: bun install --frozen-lockfile
+      # Both contract versions run at once: each bun test process is mostly
+      # single-threaded and uses its own temp BOT_DB_DIR (tests/setup-env.ts).
+      # scripts/check-coverage.test.ts is part of these runs.
+      - name: Tests (contract v0.3.0 and v0.2.0)
+        shell: bash
+        run: |
+          run_tests() {
+            CONTRACT_VERSION="$1" bun test --coverage --coverage-reporter=lcov \
+              --coverage-dir="coverage/$2" > "test-$2.log" 2>&1
+          }
+          run_tests 0.3.0 v03 & pid_v03=$!
+          run_tests 0.2.0 v02 & pid_v02=$!
+          status_v03=0; wait "$pid_v03" || status_v03=$?
+          status_v02=0; wait "$pid_v02" || status_v02=$?
+          echo "===== Tests (contract v0.3.0): exit ${status_v03} ====="
+          cat test-v03.log
+          echo "===== Tests (contract v0.2.0): exit ${status_v02} ====="
+          cat test-v02.log
+          [[ "$status_v03" == 0 && "$status_v02" == 0 ]]
       - name: Enforce 95% line coverage
         run: bun run scripts/check-coverage.ts coverage-scope.json coverage/v03/lcov.info coverage/v02/lcov.info
       - name: Upload coverage
@@ -72,7 +100,7 @@ jobs:
   publish:
     name: Publish OCI image
     if: github.event_name != 'pull_request'
-    needs: validate
+    needs: [checks, validate]
     runs-on: ubuntu-26.04
     permissions:
       contents: read

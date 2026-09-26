@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from "bun:test";
+import { describe, beforeEach, expect, test, vi } from "bun:test";
 import { Keypair } from "#solana";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
@@ -8,6 +8,7 @@ import * as priceService from "../src/utils/price-service";
 import { __test_clearPriceServiceCache } from "../src/utils/price-service";
 import { createWalletStub, resetTokenManagerState } from "./helpers/fixtures";
 import { contractCapabilities } from "../src/utils/contract-idl";
+import { resetTestDatabase } from "./helpers/database";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -786,4 +787,46 @@ test("getSupportedGameTokens does not include dynamically discovered tokens", as
   // But it should NOT appear in supported game tokens
   const supported = tm.getSupportedGameTokens();
   expect(supported.some((t) => t.mint === discoveredMint)).toBe(false);
+});
+
+describe("TokenManager with fresh chat and token databases", () => {
+  beforeEach(() => {
+    resetTestDatabase("chat-settings.sqlite");
+    resetTestDatabase("tokens.sqlite");
+    ChatDatabase.resetForTesting();
+    TokenDatabase.resetForTesting();
+    TokenManager.resetForTesting();
+  });
+
+  function makeWalletStub() {
+    return {
+      getTokenMetadata: async (_mint: string) => ({ decimals: 6 }),
+      formatTokenBalance: (amount: number, decimals: number) => {
+        const v = amount / Math.pow(10, decimals);
+        return v
+          .toFixed(6)
+          .replace(/\.0+$/, "")
+          .replace(/(\.\d*?)0+$/, "$1");
+      },
+      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+      getConnection: () => ({}) as any,
+    } as any;
+  }
+
+  test("addToken registers token and appears in approved tokens list", async () => {
+    const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+    const ok = await tm.addToken("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC");
+    expect(ok).toBe(true);
+
+    const list = tm.getAllKnownTokensWithMetadata();
+    expect(list.length).toBe(1);
+    expect(list[0]!.token_ticker).toBe("USDC");
+  });
+
+  test("getAllChatTokenConfigs returns stored chat defaults", () => {
+    const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+    tm.setChatDefaultToken(123, "MINT", "TOK", "setter");
+    const configs = tm.getAllChatTokenConfigs();
+    expect(configs.some((cfg) => cfg.chat_id === 123 && cfg.token_ticker === "TOK")).toBe(true);
+  });
 });

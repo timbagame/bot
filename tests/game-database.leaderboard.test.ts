@@ -9,7 +9,7 @@ describe("GameDatabase Leaderboard", () => {
     gameDb = GameDatabase.getInstance();
   });
 
-  test("should aggregate leaderboard stats across multiple tokens", async () => {
+  test("aggregates leaderboard stats across multiple tokens", async () => {
     const chatId = 12345;
     const playerId = "111";
     const playerPk = "PK111";
@@ -47,7 +47,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.totalVolume).toBe(expectedTotalVolume);
   });
 
-  test("should calculate win rate correctly and round to 1 decimal", async () => {
+  test("calculates win rate correctly and rounds to 1 decimal", async () => {
     const chatId = 12347; // Different chat ID
     const playerId = "222"; // Different player ID
     const playerPk = "PK222";
@@ -105,7 +105,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.winRate).toBe(33.3); // Should be rounded to 1 decimal
   });
 
-  test("should handle players with no victories", async () => {
+  test("handles players with no victories", async () => {
     const chatId = 12348; // Different chat ID
     const playerId = "333"; // Different player ID
     const playerPk = "PK333";
@@ -136,7 +136,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.winRate).toBe(0);
   });
 
-  test("should exclude cancelled games from leaderboard aggregates", () => {
+  test("excludes cancelled games from leaderboard aggregates", () => {
     const chatId = 77701;
     const playerId = "444";
     const playerPk = "PK444";
@@ -163,7 +163,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats).toBeUndefined();
   });
 
-  test("should ignore cancelled volume while retaining completed wins", () => {
+  test("ignores cancelled volume while retaining completed wins", () => {
     const chatId = 77702;
     const playerId = "555";
     const playerPk = "PK555";
@@ -209,7 +209,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.totalVolume).toBe(5_000_000);
   });
 
-  test("should calculate net amount per token (positive for wins, negative for losses)", () => {
+  test("calculates net amount per token (positive for wins, negative for losses)", () => {
     const chatId = 88801;
     const playerId = "NET1";
     const playerPk = "PKNET1";
@@ -261,7 +261,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
   });
 
-  test("should track net amounts per token separately for multi-token games", () => {
+  test("tracks net amounts per token separately for multi-token games", () => {
     const chatId = 88802;
     const playerId = "NET2";
     const playerPk = "PKNET2";
@@ -330,7 +330,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.netAmountByToken["SOL"]).toBe(500_000_000);
   });
 
-  test("should exclude giveaway games from leaderboard stats", () => {
+  test("excludes giveaway games from leaderboard stats", () => {
     const chatId = 88803;
     const playerId = "GIVEAWAY_TEST";
     const playerPk = "PKGIVEAWAY";
@@ -380,7 +380,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
   });
 
-  test("should not show players who only played giveaways", () => {
+  test("does not show players who only played giveaways", () => {
     const chatId = 88804;
     const giveawayOnlyPlayer = "GIVEAWAY_ONLY";
     const giveawayOnlyPk = "PKGIVEAWAY_ONLY";
@@ -409,7 +409,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats).toBeUndefined();
   });
 
-  test("should respect limit parameter and return at most N*3 players (for USD re-sorting)", () => {
+  test("respects limit parameter and returns at most N*3 players (for USD re-sorting)", () => {
     const chatId = 88805;
 
     // Create 20 players with games (more than any reasonable limit*3)
@@ -448,7 +448,7 @@ describe("GameDatabase Leaderboard", () => {
     }
   });
 
-  test("should calculate correct net profit for multi-player games using total_amount", () => {
+  test("calculates correct net profit for multi-player games using total_amount", () => {
     const chatId = 99901;
     const ticketAmount = 1_000;
     const creatorId = "MP_CREATOR";
@@ -493,7 +493,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(p2Stats!.netAmountByToken["SOL"]).toBe(-1000);
   });
 
-  test("should fallback to assumed 2-player profit for legacy games without total_amount", () => {
+  test("falls back to assumed 2-player profit for legacy games without total_amount", () => {
     const chatId = 99902;
     const ticketAmount = 500;
     const creatorId = "LEGACY_CREATOR";

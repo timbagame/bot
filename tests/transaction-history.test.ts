@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   TransactionHistory,
@@ -15,7 +15,7 @@ describe("TransactionHistory", () => {
     TransactionHistory.resetForTesting();
   });
 
-  it("initializes schema with updated_at column", () => {
+  test("initializes schema with updated_at column", () => {
     const txDb = TransactionHistory.getInstance();
     // Force DB creation and schema init
     expect(txDb).toBeDefined();
@@ -30,7 +30,7 @@ describe("TransactionHistory", () => {
     expect(colNames.has("updated_at")).toBeTrue();
   });
 
-  it("inserts and updates transactions", () => {
+  test("inserts and updates transactions", () => {
     const txDb = TransactionHistory.getInstance();
 
     const rec: TransactionRecord = createTransactionRecord(
@@ -60,7 +60,7 @@ describe("TransactionHistory", () => {
     expect(row.block_height).toBe(999);
   });
 
-  it("aggregates traded and referral fee mints", () => {
+  test("aggregates traded and referral fee mints", () => {
     const txDb = TransactionHistory.getInstance();
     txDb.recordSwap({
       signature: "swap-1",
@@ -117,7 +117,7 @@ describe("TransactionHistory", () => {
     ]);
   });
 
-  it("stores finance events once in the append-only ledger", () => {
+  test("stores finance events once in the append-only ledger", () => {
     const txDb = TransactionHistory.getInstance();
     const financeEvent = {
       eventId: "program:sig-finance:game:game-1",
@@ -142,7 +142,7 @@ describe("TransactionHistory", () => {
     ).toHaveLength(1);
   });
 
-  it("persists resumable finance backfill cursors and progress", () => {
+  test("persists resumable finance backfill cursors and progress", () => {
     const txDb = TransactionHistory.getInstance();
     txDb.ensureFinanceBackfillSource({
       sourceKey: "program:test",
@@ -175,5 +175,76 @@ describe("TransactionHistory", () => {
       processedTransactions: 2,
       lastError: null,
     });
+  });
+});
+
+describe("TransactionHistory query helpers", () => {
+  beforeEach(() => {
+    resetTestDatabase("transaction-history.sqlite");
+    TransactionHistory.resetForTesting();
+  });
+
+  test("TransactionHistory: query helpers and cleanup", () => {
+    const db = TransactionHistory.getInstance();
+    const now = Date.now();
+
+    // Insert mixed transactions
+    const base = {
+      user: "userA",
+      signature: (s: string) => `${s}-${Math.random().toString(36).slice(2, 8)}`,
+    };
+
+    const tx1 = createTransactionRecord(
+      base.user,
+      "BUY",
+      base.signature("sig1"),
+      "SOL",
+      "PUMP",
+      "1",
+      "100",
+      "SUCCESS",
+    );
+    tx1.timestamp = now - 1000;
+    const tx2 = createTransactionRecord(
+      base.user,
+      "SELL",
+      base.signature("sig2"),
+      "PUMP",
+      "SOL",
+      "50",
+      "0.5",
+      "FAILED",
+    );
+    tx2.timestamp = now - 500;
+    const tx3 = createTransactionRecord(
+      base.user,
+      "SWAP",
+      base.signature("sig3"),
+      "SOL",
+      "USDC",
+      "0.1",
+      "15",
+      "SUCCESS",
+    );
+    tx3.timestamp = now;
+
+    db.addTransaction(tx1);
+    db.addTransaction(tx2);
+    db.addTransaction(tx3);
+
+    // Filters
+    const byType = db.getUserHistoryByType(base.user, "BUY", 5);
+    expect(byType.length).toBe(1);
+    expect(byType[0]!.transaction_type).toBe("BUY");
+
+    const recent = db.getRecentTransactions(5);
+    expect(recent.length).toBe(2); // two SUCCESS
+
+    const count = db.getUserTransactionCount(base.user);
+    expect(count).toBe(3);
+
+    // Cleanup: set a far-future keep window to avoid deletions
+    const removedNone = db.cleanOldTransactions(3650);
+    expect(removedNone).toBe(0);
   });
 });

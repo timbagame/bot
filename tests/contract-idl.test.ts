@@ -1,8 +1,8 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { getContractIdl, parseContractVersion } from "../src/utils/contract-idl";
 
 describe("contract ABI", () => {
-  it("uses the v0.3 game-vault account lists", () => {
+  test("uses the v0.3 game-vault account lists", () => {
     const v030 = getContractIdl("0.3.0");
     const accounts = (instructionName: string) => {
       const instruction = v030.instructions.find(
@@ -46,7 +46,7 @@ describe("contract ABI", () => {
     ]);
   });
 
-  it("keeps the v0.2 GameToken account lists", () => {
+  test("keeps the v0.2 GameToken account lists", () => {
     const v020 = getContractIdl("0.2.0");
     const accounts = (instructionName: string) => {
       const instruction = v020.instructions.find(
@@ -63,7 +63,7 @@ describe("contract ABI", () => {
     expect(v020.accounts.map(({ name }: { name: string }) => name)).toContain("GameToken");
   });
 
-  it("defaults deployment selection to v0.2.0", () => {
+  test("defaults deployment selection to v0.2.0", () => {
     expect(parseContractVersion(undefined)).toBe("0.2.0");
     expect(parseContractVersion("0.3.0")).toBe("0.3.0");
     expect(() => parseContractVersion("0.4.0")).toThrow(
@@ -71,7 +71,7 @@ describe("contract ABI", () => {
     );
   });
 
-  it("does not expose v0.2 GameToken administration", () => {
+  test("does not expose v0.2 GameToken administration", () => {
     const v030 = getContractIdl("0.3.0");
     const instructionNames = v030.instructions.map(({ name }: { name: string }) => name);
     expect(instructionNames).not.toContain("withdraw_token_fee");
@@ -79,7 +79,7 @@ describe("contract ABI", () => {
     expect(v030.accounts.map(({ name }: { name: string }) => name)).not.toContain("GameToken");
   });
 
-  it("loads the canonical participant layout", () => {
+  test("loads the canonical participant layout", () => {
     const game = getContractIdl("0.3.0").types.find((value: any) => value.name === "Game") as any;
     expect(game.type.fields.at(-1)).toMatchObject({
       name: "participants",

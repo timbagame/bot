@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Connection, PublicKey } from "#solana";
 import {
   TOKEN_2022_PROGRAM_ID,
@@ -10,6 +10,14 @@ import {
 import { WalletManager, type WalletTokenCensus } from "../src/utils/wallet";
 import type { TokenDatabase } from "../src/utils/token-database";
 import { TOKEN_DISCOVERY_COOLDOWN_MS } from "../src/utils/constants";
+import { stubInstantTimers } from "./helpers/timers";
+
+// Retry/backoff/poll sleeps are not under test here; run them instantly.
+let instantTimers: ReturnType<typeof stubInstantTimers>;
+beforeEach(() => {
+  instantTimers = stubInstantTimers();
+});
+afterEach(() => instantTimers.restore());
 
 type MockAccountEntry = {
   owner: PublicKey;

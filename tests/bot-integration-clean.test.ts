@@ -40,7 +40,7 @@ describe("Bot Integration Tests", () => {
   });
 
   describe("Database Integration", () => {
-    test("should persist and retrieve game state", async () => {
+    test("persists and retrieves game state", async () => {
       // Create unique game address to avoid constraint violations
       const uniqueGameAddress = `test-game-${Date.now()}-${Math.random()}`;
 
@@ -78,7 +78,7 @@ describe("Bot Integration Tests", () => {
       expect(retrieved?.token_ticker).toBe("SOL");
     });
 
-    test("should handle chat configuration persistence", async () => {
+    test("handles chat configuration persistence", async () => {
       const chatConfig = {
         chat_id: 123456789,
         token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -102,7 +102,7 @@ describe("Bot Integration Tests", () => {
   });
 
   describe("Wallet Integration", () => {
-    test("should generate consistent keypairs from mnemonic", async () => {
+    test("generates consistent keypairs from mnemonic", async () => {
       const keypair1 = await wallet.getKeyPair(123456789n);
       const keypair2 = await wallet.getKeyPair(123456789n);
 
@@ -110,7 +110,7 @@ describe("Bot Integration Tests", () => {
       expect(keypair1.publicKey.toBase58()).toBe(keypair2.publicKey.toBase58());
     });
 
-    test("should handle token metadata retrieval", async () => {
+    test("handles token metadata retrieval", async () => {
       // Test with known token (USDC)
       const metadata = await wallet.getTokenMetadata(
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -120,7 +120,7 @@ describe("Bot Integration Tests", () => {
   });
 
   describe("Token Manager Integration", () => {
-    test("should validate token mint addresses", async () => {
+    test("validates token mint addresses", async () => {
       const validMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // USDC
       const invalidMint = "invalid-mint-address";
 
@@ -131,7 +131,7 @@ describe("Bot Integration Tests", () => {
       expect(invalidResult).toBe(false);
     });
 
-    test("should parse amount strings correctly", async () => {
+    test("parses amount strings correctly", async () => {
       const chatId = 123456789;
 
       // Test parsing - TIMBA might not be available in test environment
@@ -152,7 +152,7 @@ describe("Bot Integration Tests", () => {
   });
 
   describe("Performance and Load Testing", () => {
-    test("should handle large game lists efficiently", async () => {
+    test("handles large game lists efficiently", async () => {
       // Create many games with unique addresses
       const timestamp = Date.now();
       const games = Array(50)
@@ -201,7 +201,7 @@ describe("Bot Integration Tests", () => {
       expect(activeGames.length).toBeGreaterThan(20);
     });
 
-    test("should handle concurrent wallet operations", async () => {
+    test("handles concurrent wallet operations", async () => {
       const userIds = Array(10)
         .fill(null)
         .map((_, i) => BigInt(123456789 + i));
@@ -222,7 +222,7 @@ describe("Bot Integration Tests", () => {
   });
 
   describe("Error Recovery", () => {
-    test("should handle database errors gracefully", async () => {
+    test("handles database errors gracefully", async () => {
       // Test with invalid data - use unique address to avoid constraint issues
       const invalidGameData = {
         game_address: `invalid-game-${Date.now()}`, // Still invalid but unique
@@ -253,7 +253,7 @@ describe("Bot Integration Tests", () => {
       }).not.toThrow();
     });
 
-    test("should handle network timeouts in wallet operations", async () => {
+    test("handles network timeouts in wallet operations", async () => {
       // Test wallet operation with potential network issues
       const userId = 123456789n;
 

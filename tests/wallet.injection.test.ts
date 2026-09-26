@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
 import { Keypair, PublicKey } from "#solana";
 import {
@@ -8,6 +8,14 @@ import {
   TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddress,
 } from "#token";
+import { stubInstantTimers } from "./helpers/timers";
+
+// Retry/backoff/poll sleeps are not under test here; run them instantly.
+let instantTimers: ReturnType<typeof stubInstantTimers>;
+beforeEach(() => {
+  instantTimers = stubInstantTimers();
+});
+afterEach(() => instantTimers.restore());
 
 // Minimal Response-like factory
 const makeResponse = (ok: boolean, status: number, body: any) => ({

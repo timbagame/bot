@@ -151,8 +151,9 @@ test("JupiterClient does not invent payerApplied from request parameters", async
 });
 
 test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
-  const circular: any = { signature: "derp" };
-  circular.self = circular;
+  // BigInt makes JSON.stringify throw immediately. (A cyclic object also throws,
+  // but Bun's indented stringify takes seconds to detect the cycle.)
+  const unserializable = { signature: "derp", slot: 1n };
   const client = new JupiterClient(
     "https://api.jup.ag",
     async () =>
@@ -160,7 +161,7 @@ test("Jupiter executeOrder surfaces stringify failures without crashing", async 
         ok: true,
         status: 200,
         statusText: "OK",
-        json: async () => circular,
+        json: async () => unserializable,
       }) as any,
   );
 
