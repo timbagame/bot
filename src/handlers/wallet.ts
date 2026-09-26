@@ -13,9 +13,130 @@ import {
   getTelegramId,
   getRequiredTelegramIdForContext,
   safeAnswerCallbackQuery,
+  answerCallbackWithGrace,
 } from "../utils/context-helpers";
 import { RateLimitExceededError } from "../utils/rate-limiter";
-import { isBotInitiationForbidden } from "../utils/telegram-errors";
+import {
+  isBotInitiationForbidden,
+  isMessageNotModified,
+  isMissingEditableContent,
+  isRateLimited,
+} from "../utils/telegram-errors";
+
+type WalletPageView = {
+  solBalance: number;
+  tokenBalances: Array<{
+    mint: string;
+    ticker: string;
+    balance: number;
+    decimals: number;
+    decimalBalance?: number;
+    rawBalance?: string;
+  }>;
+  page: number;
+  pageCount: number;
+  fetchedAt?: number;
+};
+
+const WALLET_PAGE_SIZE = 8;
+/** Cached balances younger than this are shown without a background refresh. */
+export const WALLET_BACKGROUND_REFRESH_MIN_AGE_MS = 5_000;
+/** A refresh re-renders unchanged balances once the shown age reaches this. */
+export const WALLET_STALE_LABEL_REFRESH_MS = 30_000;
+
+const walletBalancesFingerprint = (data: WalletPageView): string =>
+  JSON.stringify([
+    data.solBalance,
+    data.page,
+    data.pageCount,
+    data.tokenBalances.map((token) => [token.mint, token.rawBalance ?? token.balance]),
+  ]);
+
+type WalletMessageTarget = { chatId: number; messageId: number; preferCaption: boolean };
+
+const messageHasCaption = (message: any): boolean =>
+  Boolean(
+    message?.photo ||
+    message?.video ||
+    message?.animation ||
+    message?.document ||
+    message?.caption !== undefined,
+  );
+
+/** Works out which message the wallet was just rendered into. */
+const resolveWalletMessageTarget = (ctx: any, sent: any): WalletMessageTarget | null => {
+  const result = sent?.result;
+  if (result && typeof result.messageId === "number" && typeof result.chatId === "number") {
+    const callbackMessage = ctx?.callbackQuery?.message;
+    const editedCallbackMessage =
+      !result.respondedWithReply && callbackMessage?.message_id === result.messageId;
+    return {
+      chatId: result.chatId,
+      messageId: result.messageId,
+      preferCaption: editedCallbackMessage && messageHasCaption(callbackMessage),
+    };
+  }
+  if (result && typeof result.message_id === "number" && typeof result.chat?.id === "number") {
+    return {
+      chatId: result.chat.id,
+      messageId: result.message_id,
+      preferCaption: Boolean(sent?.usedVideo) || messageHasCaption(result),
+    };
+  }
+  const callbackMessage = ctx?.callbackQuery?.message;
+  if (
+    callbackMessage &&
+    typeof callbackMessage.message_id === "number" &&
+    typeof callbackMessage.chat?.id === "number"
+  ) {
+    return {
+      chatId: callbackMessage.chat.id,
+      messageId: callbackMessage.message_id,
+      preferCaption: Boolean(sent?.usedVideo) || messageHasCaption(callbackMessage),
+    };
+  }
+  return null;
+};
+
+/**
+ * Edits the wallet message in place. Never replies: a background refresh must
+ * not add messages. "Not modified" and rate limits are expected and ignored.
+ */
+const editWalletMessage = async (
+  ctx: any,
+  target: WalletMessageTarget,
+  caption: string,
+  keyboard: InlineKeyboard,
+): Promise<void> => {
+  const editCaption = () =>
+    ctx.api.editMessageCaption(target.chatId, target.messageId, {
+      caption,
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
+  const editText = () =>
+    ctx.api.editMessageText(target.chatId, target.messageId, caption, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+      link_preview_options: { is_disabled: true },
+    });
+  const attempts = target.preferCaption ? [editCaption, editText] : [editText, editCaption];
+
+  for (const attempt of attempts) {
+    try {
+      await attempt();
+      return;
+    } catch (error) {
+      if (isMessageNotModified(error) || isRateLimited(error)) {
+        return;
+      }
+      if (!isMissingEditableContent(error)) {
+        console.warn("Background wallet refresh could not edit the wallet message:", error);
+        return;
+      }
+    }
+  }
+};
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -38,19 +159,19 @@ export type ShowWalletUIDeps = {
     telegramId: bigint,
     page: number,
     pageSize: number,
-  ) => Promise<{
-    solBalance: number;
-    tokenBalances: Array<{
-      mint: string;
-      ticker: string;
-      balance: number;
-      decimals: number;
-      decimalBalance?: number;
-      rawBalance?: string;
-    }>;
-    page: number;
-    pageCount: number;
-  }>;
+  ) => Promise<WalletPageView>;
+  /** Last fetched page, shown immediately while a fresh fetch runs in the background. */
+  peekWalletPageData?: (
+    telegramId: bigint,
+    page: number,
+    pageSize: number,
+  ) => { data: WalletPageView; fetchedAt: number } | undefined;
+  /**
+   * Returns a check that stays true until another button press lands on the
+   * message, so background edits never overwrite a menu the user moved to.
+   */
+  captureMessageView?: (chatId: number | string, messageId: number) => () => boolean;
+  now?: () => number;
   fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
   buildWalletCaption: (
     walletAddress: string,
@@ -185,15 +306,10 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     }
   };
 
-  try {
-    const pageSize = 8;
-    const pageData = getWalletPageData
-      ? await getWalletPageData(telegramId, requestedPage, pageSize)
-      : await getCachedWalletData(telegramId).then((balances) => ({
-          ...balances,
-          page: 0,
-          pageCount: Math.max(1, Math.ceil(balances.tokenBalances.length / pageSize)),
-        }));
+  const now = deps.now ?? Date.now;
+  const pageSize = WALLET_PAGE_SIZE;
+
+  const renderWalletCaption = async (pageData: WalletPageView, updatedAt: number) => {
     const { solBalance, tokenBalances } = pageData;
     const tokenLines = await buildWalletTokenLines({
       solBalanceLamports: solBalance,
@@ -207,13 +323,71 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       holdMarks,
     });
 
-    const pageCount = pageData.pageCount;
-    const page = pageData.page;
-    pagination = { page, pageCount };
-    const caption = buildWalletCaption(walletAddress, tokenLines, {
+    pagination = { page: pageData.page, pageCount: pageData.pageCount };
+    return buildWalletCaption(walletAddress, tokenLines, {
       page: 0,
       pageSize: pageSize + 1,
+      updatedAt,
+      now: now(),
     });
+  };
+
+  const fetchWalletPage = async (): Promise<WalletPageView> =>
+    getWalletPageData
+      ? await getWalletPageData(telegramId, requestedPage, pageSize)
+      : await getCachedWalletData(telegramId).then((balances) => ({
+          ...balances,
+          page: 0,
+          pageCount: Math.max(1, Math.ceil(balances.tokenBalances.length / pageSize)),
+        }));
+
+  // Stale-while-revalidate: show the last fetched page at once, then refresh it
+  // in the background. Refresh and /balance clear this cache, so they always
+  // fetch fresh balances.
+  const cached = getWalletPageData
+    ? deps.peekWalletPageData?.(telegramId, requestedPage, pageSize)
+    : undefined;
+
+  try {
+    if (cached) {
+      const cachedCaption = await renderWalletCaption(cached.data, cached.fetchedAt);
+      const sent = await sendWalletContent(cachedCaption);
+      if (!sent || (ctx as any).__walletDmForbidden) {
+        return;
+      }
+
+      if (now() - cached.fetchedAt >= WALLET_BACKGROUND_REFRESH_MIN_AGE_MS) {
+        const target = resolveWalletMessageTarget(ctx, sent);
+        const isStillCurrent = target
+          ? (deps.captureMessageView?.(target.chatId, target.messageId) ?? (() => true))
+          : () => false;
+        const shownAgeMs = now() - cached.fetchedAt;
+
+        (ctx as any).__walletBackgroundRefresh = (async () => {
+          try {
+            const fresh = await fetchWalletPage();
+            const changed =
+              walletBalancesFingerprint(fresh) !== walletBalancesFingerprint(cached.data);
+            if (!target || (!changed && shownAgeMs < WALLET_STALE_LABEL_REFRESH_MS)) {
+              return;
+            }
+            const freshCaption = await renderWalletCaption(fresh, fresh.fetchedAt ?? now());
+            if (!isStillCurrent()) {
+              return;
+            }
+            await editWalletMessage(ctx, target, freshCaption, getWalletKeyboard());
+          } catch (error) {
+            if (!(error instanceof RateLimitExceededError)) {
+              console.warn(`Background wallet refresh failed for ${telegramId.toString()}:`, error);
+            }
+          }
+        })();
+      }
+      return;
+    }
+
+    const pageData = await fetchWalletPage();
+    const caption = await renderWalletCaption(pageData, pageData.fetchedAt ?? now());
 
     await sendWalletContent(caption);
     if ((ctx as any).__walletDmForbidden) {
@@ -269,38 +443,34 @@ export type WalletHandlersDeps = {
 // Loading the wallet waits on RPC balances, token metadata and prices. Telegram
 // keeps the button spinner until the callback is answered, so answer silently if
 // the work is still running after a short grace period. Fast results and errors
-// still answer normally, so error toasts keep working in the common case.
-const WALLET_CALLBACK_GRACE_MS = 350;
-
+// still answer normally, so error toasts keep working in the common case; late
+// errors are posted as a reply instead of a dropped toast.
 async function runWithEarlyCallbackAnswer(
   ctx: any,
   work: () => Promise<void>,
   errorLabel: string,
   errorText: string,
 ): Promise<void> {
-  let answeredEarly = false;
-  const timer = setTimeout(() => {
-    answeredEarly = true;
-    void safeAnswerCallbackQuery(ctx);
-  }, WALLET_CALLBACK_GRACE_MS);
-
-  try {
-    await work();
-    clearTimeout(timer);
-    if (!answeredEarly) await safeAnswerCallbackQuery(ctx);
-  } catch (error) {
-    clearTimeout(timer);
-    console.error(errorLabel, error);
-    if (!answeredEarly) {
-      await safeAnswerCallbackQuery(ctx, errorText);
-      return;
-    }
-    try {
-      await ctx.reply(errorText);
-    } catch {
-      // Nothing else to surface the error on.
-    }
-  }
+  await answerCallbackWithGrace(
+    ctx,
+    async () => {
+      try {
+        await work();
+      } catch (error) {
+        console.error(errorLabel, error);
+        await safeAnswerCallbackQuery(ctx, errorText);
+      }
+    },
+    {
+      onLateAnswer: async (text) => {
+        try {
+          await ctx.reply(text);
+        } catch {
+          // Nothing else to surface the error on.
+        }
+      },
+    },
+  );
 }
 
 export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
