@@ -1,6 +1,14 @@
-import { describe, test, expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Connection, Keypair, TransactionInstruction } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
+import { stubInstantTimers } from "./helpers/timers";
+
+// Retry/backoff/poll sleeps are not under test here; run them instantly.
+let instantTimers: ReturnType<typeof stubInstantTimers>;
+beforeEach(() => {
+  instantTimers = stubInstantTimers();
+});
+afterEach(() => instantTimers.restore());
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";

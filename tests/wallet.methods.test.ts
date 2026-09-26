@@ -1,8 +1,16 @@
-import { expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, expect, test, vi } from "bun:test";
 import { Buffer } from "buffer";
 import { Connection, Keypair, PublicKey, SystemProgram, TransactionInstruction } from "#solana";
 import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID } from "#token";
+import { stubInstantTimers } from "./helpers/timers";
+
+// Retry/backoff/poll sleeps are not under test here; run them instantly.
+let instantTimers: ReturnType<typeof stubInstantTimers>;
+beforeEach(() => {
+  instantTimers = stubInstantTimers();
+});
+afterEach(() => instantTimers.restore());
 
 class ConnFailTime implements Partial<Connection> {
   async getSlot(_cfg?: any): Promise<bigint> {
