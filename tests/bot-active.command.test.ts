@@ -466,7 +466,14 @@ describe("/public command pagination", () => {
     const mockGames = Array.from({ length: 7 }, (_, i) => createMockGame(i + 1));
 
     const stubGameManager = {
-      getAllActivePublicGames: vi.fn(async () => mockGames),
+      getActivePublicGamesPage: vi.fn(async (_ctx: any, options: any) => ({
+        games: mockGames.slice(
+          options.page * options.pageSize,
+          (options.page + 1) * options.pageSize,
+        ),
+        totalGames: mockGames.length,
+        page: options.page,
+      })),
     } as any;
 
     botModule.__test_setGameManager(stubGameManager);
@@ -505,7 +512,14 @@ describe("/public command pagination", () => {
     const mockGames = Array.from({ length: 4 }, (_, i) => createMockGame(i + 1));
 
     const stubGameManager = {
-      getAllActivePublicGames: vi.fn(async () => mockGames),
+      getActivePublicGamesPage: vi.fn(async (_ctx: any, options: any) => ({
+        games: mockGames.slice(
+          options.page * options.pageSize,
+          (options.page + 1) * options.pageSize,
+        ),
+        totalGames: mockGames.length,
+        page: options.page,
+      })),
     } as any;
 
     botModule.__test_setGameManager(stubGameManager);

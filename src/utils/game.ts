@@ -168,6 +168,37 @@ const resolveGameMedia = (
 
 const GAME_STATE_RECOVERY_DELAYS_MS = [1_000, 5_000, 15_000] as const;
 
+export type ActiveGameListRow = {
+  messageText: string;
+  keyboard: any[];
+  gameAddress: string;
+  currentTickets?: number;
+  maxTickets?: number;
+  minTickets?: number;
+};
+
+export type PublicGamesFilter = {
+  gameType?: "coinflip" | "giveaway";
+  ticker?: string;
+};
+
+type PublicGameEntry = {
+  account: any;
+  gameData: {
+    game_address: string;
+    game_type: string;
+    amount: number;
+    token_mint: string;
+    token_ticker: string;
+    status: string;
+    winner_address: undefined;
+  };
+};
+
+// Short enough that a newly created game shows up almost immediately, long enough
+// that paging through /public does not rescan the whole program.
+const PUBLIC_GAMES_CACHE_TTL_MS = 8_000;
+
 type GameMessageUpdateRequest = {
   status: string;
   winnerAddress?: string;
@@ -526,6 +557,8 @@ export class GameManager {
   private readonly gamePriceCache =
     createExpiringCache<CachedPriceLookup>(TOKEN_PRICE_CACHE_TTL_MS);
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
+  private publicGamesCache: { entries: PublicGameEntry[]; expiresAt: number } | null = null;
+  private publicGamesInFlight: Promise<PublicGameEntry[]> | null = null;
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
   private constructor(
@@ -6430,29 +6463,53 @@ export class GameManager {
     return keyboard;
   }
 
+  /**
+   * Batch-load game accounts with one getMultipleAccounts call per 100 addresses.
+   * Addresses the batch could not answer are left out of the map so callers can
+   * fall back to a single lookup; absent accounts map to null.
+   */
+  private async fetchGameAccountsBatch(addresses: string[]): Promise<Map<string, any | null>> {
+    const accounts = new Map<string, any | null>();
+    const accountApi = this.program.account.game as any;
+    if (addresses.length === 0 || typeof accountApi?.fetchMultiple !== "function") {
+      return accounts;
+    }
+
+    const valid: Array<{ address: string; pda: PublicKey }> = [];
+    for (const address of new Set(addresses)) {
+      try {
+        valid.push({ address, pda: new PublicKey(address) });
+      } catch {
+        // Invalid addresses are reported by the per-game path.
+      }
+    }
+    if (valid.length === 0) {
+      return accounts;
+    }
+
+    try {
+      const fetched: Array<any | null> = await accountApi.fetchMultiple(
+        valid.map((entry) => entry.pda),
+      );
+      valid.forEach((entry, index) => {
+        accounts.set(entry.address, fetched[index] ?? null);
+      });
+    } catch (error) {
+      console.warn("Batch game account lookup failed; falling back to single lookups:", error);
+    }
+    return accounts;
+  }
+
   private async formatActiveGamesList(
     ctx: Context,
     activeGamesData: any[],
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
-    type ActiveGameRow = {
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    };
+  ): Promise<ActiveGameListRow[]> {
+    const needsFetch = activeGamesData
+      .filter((gameData) => gameData?.game_address && gameData.game_account === undefined)
+      .map((gameData) => String(gameData.game_address));
+    const prefetched = await this.fetchGameAccountsBatch(needsFetch);
 
-    const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
+    const formattedGames: Array<ActiveGameListRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
           if (!gameData?.game_address) {
@@ -6467,14 +6524,21 @@ export class GameManager {
             return null;
           }
 
-          const accountApi = this.program.account.game as any;
-          const onChainGame = accountApi.fetchNullable
-            ? await accountApi.fetchNullable(gamePda)
-            : await accountApi.fetch(gamePda).catch((error: unknown) => {
-                const message = error instanceof Error ? error.message : String(error);
-                if (message.includes("does not exist")) return null;
-                throw error;
-              });
+          let onChainGame: any;
+          if (gameData.game_account !== undefined) {
+            onChainGame = gameData.game_account;
+          } else if (prefetched.has(gameData.game_address)) {
+            onChainGame = prefetched.get(gameData.game_address);
+          } else {
+            const accountApi = this.program.account.game as any;
+            onChainGame = accountApi.fetchNullable
+              ? await accountApi.fetchNullable(gamePda)
+              : await accountApi.fetch(gamePda).catch((error: unknown) => {
+                  const message = error instanceof Error ? error.message : String(error);
+                  if (message.includes("does not exist")) return null;
+                  throw error;
+                });
+          }
           if (!onChainGame) {
             console.warn(`Omitting stale active game ${gameData.game_address}; account is absent`);
             return null;
@@ -6521,53 +6585,65 @@ export class GameManager {
       }),
     );
 
-    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
+    return formattedGames.filter((game): game is ActiveGameListRow => game !== null);
   }
 
-  public async getChatActiveGames(
-    ctx: Context,
-    chatId: number,
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  public async getChatActiveGames(ctx: Context, chatId: number): Promise<ActiveGameListRow[]> {
     const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
-  public async getUserActiveGames(
-    ctx: Context,
-    telegramId: bigint,
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  public async getUserActiveGames(ctx: Context, telegramId: bigint): Promise<ActiveGameListRow[]> {
     const activeGamesData = this.gameDb.getActiveGames(telegramId.toString());
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
-  public async getAllActivePublicGames(ctx: Context): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  /**
+   * Load every open public game with one getProgramAccounts call. The sorted list
+   * (with decoded accounts) is cached briefly so page taps and repeated /public
+   * commands do not rescan the program.
+   */
+  private async loadActivePublicGameEntries(): Promise<PublicGameEntry[]> {
+    const now = Date.now();
+    const cached = this.publicGamesCache;
+    let entries: PublicGameEntry[];
+    if (cached && cached.expiresAt > now) {
+      entries = cached.entries;
+    } else {
+      if (!this.publicGamesInFlight) {
+        this.publicGamesInFlight = this.fetchActivePublicGameEntries()
+          .then((fetched) => {
+            this.publicGamesCache = {
+              entries: fetched,
+              expiresAt: Date.now() + PUBLIC_GAMES_CACHE_TTL_MS,
+            };
+            return fetched;
+          })
+          .finally(() => {
+            this.publicGamesInFlight = null;
+          });
+      }
+      entries = await this.publicGamesInFlight;
+    }
+
+    // Games can expire while the list is cached.
+    return entries.filter((entry) => !GameManager.isPublicEntryExpired(entry.account));
+  }
+
+  /** Drop the cached /public list, e.g. after a game is created, joined or closed. */
+  public invalidatePublicGamesCache(): void {
+    this.publicGamesCache = null;
+  }
+
+  private static isPublicEntryExpired(account: any): boolean {
+    const createdAt = Number(account?.createdAt ?? 0);
+    const timeout = Number(account?.timeout ?? 0);
+    const hasTiming =
+      Number.isFinite(createdAt) && createdAt > 0 && Number.isFinite(timeout) && timeout > 0;
+    return hasTiming && GameManager.isExpired(account);
+  }
+
+  private async fetchActivePublicGameEntries(): Promise<PublicGameEntry[]> {
     // Fetch all games from the blockchain
     const allGames = await this.program.account.game.all();
 
@@ -6575,17 +6651,7 @@ export class GameManager {
     const publicGames = allGames.filter((game) => {
       const account = game.account as any;
       if (account?.isPrivate) return false;
-
-      const createdAt = Number(account?.createdAt ?? 0);
-      const timeout = Number(account?.timeout ?? 0);
-      const hasTiming =
-        Number.isFinite(createdAt) && createdAt > 0 && Number.isFinite(timeout) && timeout > 0;
-
-      if (hasTiming && GameManager.isExpired(account)) {
-        return false;
-      }
-
-      return true;
+      return !GameManager.isPublicEntryExpired(account);
     });
 
     const getExpiryTimestamp = (account: any): number => {
@@ -6610,37 +6676,91 @@ export class GameManager {
       return leftCreatedAt - rightCreatedAt;
     });
 
-    // Map to GameData-like structure
-    const activeGamesData = await Promise.all(
+    // Resolve each distinct mint's ticker once instead of once per game.
+    const tickerByMint = new Map<string, Promise<string>>();
+    const resolveTicker = (tokenMint: string): Promise<string> => {
+      let pending = tickerByMint.get(tokenMint);
+      if (!pending) {
+        pending = this.wallet
+          .getTokenMetadata(tokenMint)
+          .then((metadata) => metadata?.symbol || DEFAULT_TOKEN_TICKER)
+          .catch(() => DEFAULT_TOKEN_TICKER);
+        tickerByMint.set(tokenMint, pending);
+      }
+      return pending;
+    };
+
+    return Promise.all(
       publicGames.map(async (game) => {
         const account = game.account;
         const gameType = this.getGameType(account);
         const tokenMint = account.tokenMint.toBase58();
         const amount = this.getDisplayAmountFromAccount(account, gameType);
-
-        let tokenTicker = DEFAULT_TOKEN_TICKER;
-        try {
-          const metadata = await this.wallet.getTokenMetadata(tokenMint);
-          if (metadata?.symbol) {
-            tokenTicker = metadata.symbol;
-          }
-        } catch (e) {
-          // Ignore metadata fetch errors
-        }
+        const tokenTicker = await resolveTicker(tokenMint);
 
         return {
-          game_address: game.publicKey.toBase58(),
-          game_type: gameType,
-          amount,
-          token_mint: tokenMint,
-          token_ticker: tokenTicker,
-          status: "active", // Assumed active if account exists
-          winner_address: undefined, // Not in Game account
+          account,
+          gameData: {
+            game_address: game.publicKey.toBase58(),
+            game_type: gameType,
+            amount,
+            token_mint: tokenMint,
+            token_ticker: tokenTicker,
+            status: "active", // Assumed active if account exists
+            winner_address: undefined, // Not in Game account
+          },
         };
       }),
     );
+  }
 
-    return this.formatActiveGamesList(ctx, activeGamesData);
+  private static matchesPublicGamesFilter(
+    entry: PublicGameEntry,
+    filter: PublicGamesFilter | undefined,
+  ): boolean {
+    if (!filter) return true;
+    if (filter.gameType && entry.gameData.game_type !== filter.gameType) return false;
+    if (filter.ticker) {
+      const ticker = String(entry.gameData.token_ticker ?? "").toUpperCase();
+      if (ticker !== filter.ticker.toUpperCase()) return false;
+    }
+    return true;
+  }
+
+  public async getAllActivePublicGames(
+    ctx: Context,
+    filter?: PublicGamesFilter,
+  ): Promise<ActiveGameListRow[]> {
+    const entries = (await this.loadActivePublicGameEntries()).filter((entry) =>
+      GameManager.matchesPublicGamesFilter(entry, filter),
+    );
+    return this.formatActiveGamesList(
+      ctx,
+      entries.map((entry) => ({ ...entry.gameData, game_account: entry.account })),
+    );
+  }
+
+  /**
+   * Format only the requested page of public games. The page is clamped to the
+   * available range; `totalGames` counts every matching game.
+   */
+  public async getActivePublicGamesPage(
+    ctx: Context,
+    options: { page: number; pageSize: number; filter?: PublicGamesFilter },
+  ): Promise<{ games: ActiveGameListRow[]; totalGames: number; page: number }> {
+    const entries = (await this.loadActivePublicGameEntries()).filter((entry) =>
+      GameManager.matchesPublicGamesFilter(entry, options.filter),
+    );
+    const pageSize = Math.max(1, Math.trunc(options.pageSize));
+    const totalGames = entries.length;
+    const lastPage = Math.max(0, Math.ceil(totalGames / pageSize) - 1);
+    const page = Math.min(Math.max(0, Math.trunc(options.page)), lastPage);
+    const pageEntries = entries.slice(page * pageSize, (page + 1) * pageSize);
+    const games = await this.formatActiveGamesList(
+      ctx,
+      pageEntries.map((entry) => ({ ...entry.gameData, game_account: entry.account })),
+    );
+    return { games, totalGames, page };
   }
 
   private async hydrateGameDataFromChain(

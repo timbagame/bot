@@ -25,7 +25,7 @@ import { isMissingAccountError } from "./utils/account-errors";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
-import { GameManager, type GamesTab } from "./utils/game";
+import { GameManager, type GamesTab, type PublicGamesFilter } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
 import {
@@ -1402,6 +1402,8 @@ type PaginationOptions = {
   page: number;
   totalGames: number;
   callbackPrefix: string;
+  /** Appended after the page number, e.g. an encoded /public filter. */
+  callbackSuffix?: string;
 };
 
 const buildActiveGamesKeyboard = (
@@ -1442,7 +1444,7 @@ const buildActiveGamesKeyboard = (
       if (pagination.page > 0) {
         navRow.push({
           text: "← Prev",
-          callback_data: `${pagination.callbackPrefix}${pagination.page - 1}`,
+          callback_data: `${pagination.callbackPrefix}${pagination.page - 1}${pagination.callbackSuffix ?? ""}`,
         });
       }
 
@@ -1454,7 +1456,7 @@ const buildActiveGamesKeyboard = (
       if (pagination.page < totalPages - 1) {
         navRow.push({
           text: "Next →",
-          callback_data: `${pagination.callbackPrefix}${pagination.page + 1}`,
+          callback_data: `${pagination.callbackPrefix}${pagination.page + 1}${pagination.callbackSuffix ?? ""}`,
         });
       }
 
@@ -1464,6 +1466,91 @@ const buildActiveGamesKeyboard = (
 
   return inlineKeyboard;
 };
+
+const normalizeActiveListings = (games: ActiveGameListing[]): ActiveGameListing[] =>
+  games.map((game) => ({
+    ...game,
+    keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+  }));
+
+// /public filters: `/public coinflip`, `/public giveaway`, `/public TIMBA`, or both.
+const PUBLIC_FILTER_GAME_TYPES: Record<string, NonNullable<PublicGamesFilter["gameType"]>> = {
+  coinflip: "coinflip",
+  flip: "coinflip",
+  cf: "coinflip",
+  giveaway: "giveaway",
+  give: "giveaway",
+  ga: "giveaway",
+};
+const PUBLIC_FILTER_TICKER_PATTERN = /^[A-Z0-9._-]{1,16}$/;
+const PUBLIC_FILTER_USAGE =
+  "Usage: <code>/public [coinflip|giveaway] [TICKER]</code>\nExample: <code>/public coinflip TIMBA</code>";
+// Keeps callback data well inside Telegram's 64-byte limit:
+// "public_page:" (12) + page (<=4) + ":giveaway" (9) + ":" + ticker (<=16) = 42 bytes.
+const PUBLIC_PAGE_CALLBACK_PATTERN =
+  /^public_page:(\d{1,4})(?::(coinflip|giveaway|\*):([A-Z0-9._-]{1,16}|\*))?$/;
+
+/** Parse /public arguments. Returns undefined for no filter and null for invalid input. */
+const parsePublicGamesFilter = (args: string[]): PublicGamesFilter | undefined | null => {
+  if (args.length === 0) return undefined;
+  if (args.length > 2) return null;
+  const filter: PublicGamesFilter = {};
+  for (const rawArg of args) {
+    const arg = rawArg.trim();
+    const gameType = PUBLIC_FILTER_GAME_TYPES[arg.toLowerCase()];
+    if (gameType) {
+      if (filter.gameType) return null;
+      filter.gameType = gameType;
+      continue;
+    }
+    const ticker = arg.replace(/^\$/, "").toUpperCase();
+    if (filter.ticker || !PUBLIC_FILTER_TICKER_PATTERN.test(ticker)) return null;
+    filter.ticker = ticker;
+  }
+  return filter;
+};
+
+const encodePublicFilterSuffix = (filter: PublicGamesFilter | undefined): string =>
+  filter && (filter.gameType || filter.ticker)
+    ? `:${filter.gameType ?? "*"}:${filter.ticker ?? "*"}`
+    : "";
+
+const parsePublicPageCallbackData = (
+  data: string | undefined,
+): { page: number; filter: PublicGamesFilter | undefined } | null => {
+  const match = data?.match(PUBLIC_PAGE_CALLBACK_PATTERN);
+  if (!match || !match[1]) return null;
+  const page = parseInt(match[1], 10);
+  const gameType =
+    match[2] && match[2] !== "*" ? (match[2] as PublicGamesFilter["gameType"]) : undefined;
+  const ticker = match[3] && match[3] !== "*" ? match[3] : undefined;
+  return { page, filter: gameType || ticker ? { gameType, ticker } : undefined };
+};
+
+const describePublicFilter = (filter: PublicGamesFilter): string =>
+  [
+    filter.gameType ? filter.gameType.charAt(0).toUpperCase() + filter.gameType.slice(1) : null,
+    filter.ticker ?? null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" • ");
+
+const buildPublicGamesSummary = (
+  totalGames: number,
+  page: number,
+  filter: PublicGamesFilter | undefined,
+  bold: boolean,
+): string => {
+  const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+  const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
+  const filterInfo = filter ? ` • ${escapeHtml(describePublicFilter(filter))}` : "";
+  const title = `Active Public Games (${totalGames})`;
+  return `🌐 ${bold ? `<b>${title}</b>` : title}${filterInfo}${pageInfo}`;
+};
+
+export const __test_parsePublicGamesFilter = parsePublicGamesFilter;
+export const __test_parsePublicPageCallbackData = parsePublicPageCallbackData;
+export const __test_encodePublicFilterSuffix = encodePublicFilterSuffix;
 
 const replyWithActiveGamesMenu = async (
   ctx: Context,
@@ -4127,7 +4214,7 @@ registerCaseInsensitiveCommand(
     "/giveaway &lt;amount&gt; [token] [players]: Start a giveaway (or /ga)",
     "/faucet &lt;amount&gt; [token] [users]: First come, first served drop (or /rain)",
     "/active: Games in progress",
-    "/public: Browse open public games",
+    "/public [coinflip|giveaway] [TICKER]: Browse open public games",
     "/games: Your recent games",
     "/leaderboard: Top players in this group (or /lb)",
     "/globalboard: Top players everywhere (or /gb)",
@@ -4195,11 +4282,43 @@ const handlePublicCommand = async (ctx: Context) => {
     return;
   }
 
+  const args = ctx.message?.text?.trim().split(/\s+/).slice(1) ?? [];
+  const filter = parsePublicGamesFilter(args);
+  if (filter === null) {
+    await ctx.reply(PUBLIC_FILTER_USAGE, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id,
+    });
+    return;
+  }
+
   try {
-    await replyWithActiveGamesMenu(ctx, await gameManager.getAllActivePublicGames(ctx), {
-      emptyText: "No active public games found.",
-      title: "🌐 Active Public Games",
-      callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+    const { games, totalGames } = await gameManager.getActivePublicGamesPage(ctx, {
+      page: 0,
+      pageSize: ACTIVE_GAMES_PER_PAGE,
+      filter,
+    });
+    if (totalGames === 0 || games.length === 0) {
+      await ctx.reply(
+        filter
+          ? `No active public games match ${describePublicFilter(filter)}.`
+          : "No active public games found.",
+        { reply_to_message_id: ctx.message?.message_id },
+      );
+      return;
+    }
+
+    await ctx.reply(buildPublicGamesSummary(totalGames, 0, filter, false), {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: buildActiveGamesKeyboard(normalizeActiveListings(games), {
+          page: 0,
+          totalGames,
+          callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+          callbackSuffix: encodePublicFilterSuffix(filter),
+        }),
+      },
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "public");
@@ -4415,49 +4534,53 @@ bot.callbackQuery(/^active_page:(\d+)$/, handleActivePageCallback);
 export const __test_handleActivePageCallback = handleActivePageCallback;
 
 // Pagination callback for /public command
-bot.callbackQuery(/^public_page:(\d+)$/, async (ctx: Context) => {
+const handlePublicPageCallback = async (ctx: Context) => {
   try {
-    const match = ctx.callbackQuery?.data?.match(/^public_page:(\d+)$/);
-    if (!match || !match[1]) {
+    const parsed = parsePublicPageCallbackData(ctx.callbackQuery?.data);
+    if (!parsed) {
       await safeAnswerCallbackQuery(ctx, "Invalid page request.");
       return;
     }
-    const page = parseInt(match[1], 10);
+    const { filter } = parsed;
+    // Answer right away so the button stops spinning while the page is built.
+    await safeAnswerCallbackQuery(ctx, `Page ${parsed.page + 1}`);
 
-    const publicActiveGames = await gameManager.getAllActivePublicGames(ctx);
-    const normalizedGames: ActiveGameListing[] = publicActiveGames.map((game) => ({
-      ...game,
-      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
-    }));
+    const { games, totalGames, page } = await gameManager.getActivePublicGamesPage(ctx, {
+      page: parsed.page,
+      pageSize: ACTIVE_GAMES_PER_PAGE,
+      filter,
+    });
 
-    const totalGames = normalizedGames.length;
-    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
-
-    if (page < 0 || page >= totalPages) {
-      await safeAnswerCallbackQuery(ctx, "Invalid page.");
+    if (totalGames === 0 || games.length === 0) {
+      await ctx.editMessageText(
+        filter
+          ? `No active public games match ${describePublicFilter(filter)}.`
+          : "No active public games found.",
+      );
       return;
     }
 
-    const start = page * ACTIVE_GAMES_PER_PAGE;
-    const pageGames = normalizedGames.slice(start, start + ACTIVE_GAMES_PER_PAGE);
-
-    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+    const inlineKeyboard = buildActiveGamesKeyboard(normalizeActiveListings(games), {
       page,
       totalGames,
       callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+      callbackSuffix: encodePublicFilterSuffix(filter),
     });
-    const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
-    const summaryText = `🌐 <b>Active Public Games (${totalGames})</b>${pageInfo}`;
 
-    await ctx.editMessageText(summaryText, {
+    await ctx.editMessageText(buildPublicGamesSummary(totalGames, page, filter, true), {
       parse_mode: "HTML",
       reply_markup: { inline_keyboard: inlineKeyboard },
     });
-    await safeAnswerCallbackQuery(ctx, `Page ${page + 1}`);
   } catch (error) {
+    if (isMessageNotModified(error)) {
+      return;
+    }
     await handleCallbackErrorSafe(ctx, error, "public page navigation");
   }
-});
+};
+
+bot.callbackQuery(PUBLIC_PAGE_CALLBACK_PATTERN, handlePublicPageCallback);
+export const __test_handlePublicPageCallback = handlePublicPageCallback;
 
 const LEADERBOARD_PLAYER_LIMIT = 5;
 

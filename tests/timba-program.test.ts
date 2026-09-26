@@ -141,4 +141,53 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
     data[0] = data[0]! ^ 0xff;
     await expect(program.account.oracle.fetch(address)).rejects.toThrow("discriminator");
   });
+
+  test("fetchMultiple batches lookups in chunks of 100 and maps missing accounts to null", async () => {
+    const version030 = contractVersion === "0.3.0";
+    const programId = new PublicKey(
+      version030 ? TIMBA_PROGRAM_ADDRESS_V030 : TIMBA_PROGRAM_ADDRESS_V020,
+    );
+    const operator = await publicKey();
+    const encoded = (version030 ? getOracleEncoderV030() : getOracleEncoderV020()).encode({
+      operator: operator.toBase58(),
+      feePercentage: 1,
+      oracleBufferTime: 60n,
+      maxTickets: 100,
+      maxTimeout: 3_600n,
+      minTimeout: 60n,
+    });
+    const addresses = await Promise.all(Array.from({ length: 101 }, () => publicKey()));
+    const chunkSizes: number[] = [];
+    const connection = {
+      getMultipleAccountsInfo: async (keys: PublicKey[]) => {
+        chunkSizes.push(keys.length);
+        return keys.map((key) =>
+          key.equals(addresses[1]!)
+            ? null
+            : { data: Uint8Array.from(encoded), executable: false, lamports: 1n, owner: programId },
+        );
+      },
+    } as unknown as Connection;
+    const program = createTimbaProgram(connection);
+
+    const results = await program.account.oracle.fetchMultiple(addresses);
+    expect(chunkSizes).toEqual([100, 1]);
+    expect(results).toHaveLength(101);
+    expect(results[0]?.operator.toBase58()).toBe(operator.toBase58());
+    expect(results[1]).toBeNull();
+    expect(await program.account.oracle.fetchMultiple([])).toEqual([]);
+    if (version030) {
+      // Game-token accounts do not exist in 0.3.0; the batch helper short-circuits.
+      expect(await program.account.gameToken.fetchMultiple([addresses[0]!])).toEqual([null]);
+    }
+
+    const foreign = createTimbaProgram({
+      getMultipleAccountsInfo: async () => [
+        { data: Uint8Array.from(encoded), executable: false, lamports: 1n, owner: operator },
+      ],
+    } as unknown as Connection);
+    await expect(foreign.account.oracle.fetchMultiple([addresses[0]!])).rejects.toThrow(
+      "is not owned",
+    );
+  });
 });
