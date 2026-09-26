@@ -308,3 +308,111 @@ describe("wallet menu hold-mark prune", () => {
     expect(store.get("W", TIMBA)).toBeCloseTo(0.00000551069, 12);
   });
 });
+
+describe("wallet page seeds the action-menu snapshot", () => {
+  const token = (mint: string, ticker: string, balance = 5) => ({
+    mint,
+    ticker,
+    balance,
+    decimals: 0,
+    rawBalance: String(balance),
+    lamports: BigInt(balance),
+    formattedBalance: String(balance),
+    decimalBalance: balance,
+    truncated: false,
+  });
+  const knownTokens = [
+    { token_mint: "mint-b", token_ticker: "BBB", decimals: 0 },
+    { token_mint: "mint-a", token_ticker: "AAA", decimals: 0 },
+  ];
+  const createPageModule = (page: any) => {
+    let fullFetches = 0;
+    const { wallet, state } = createStubWallet({
+      getWalletTokenBalancePage: async () => page,
+      getAllWalletTokenBalances: async () => {
+        fullFetches += 1;
+        return [];
+      },
+    });
+    const module = createWalletMenuModule({
+      bot: stubBot as any,
+      wallet,
+      getTokenManager: () => ({ getAllKnownTokensWithMetadata: () => knownTokens }) as any,
+      wrapCallbackHandler: (fn: any) => fn,
+      rpcRateLimiter: { limiter: stubLimiter as any },
+      holdMarks: createMemoryHoldMarkStore(),
+    });
+    return { module, state, getFullFetches: () => fullFetches };
+  };
+
+  test("a single complete page of known tokens is reused by the next action menu", async () => {
+    const { module, state, getFullFetches } = createPageModule({
+      tokenBalances: [token("mint-b", "BBB"), token("mint-a", "AAA")],
+      page: 0,
+      pageCount: 1,
+      heldMints: ["mint-b", "mint-a"],
+      complete: true,
+    });
+
+    await module.getWalletPageData(1n, 0, 8);
+    const snapshot = await module.getCachedWalletData(1n);
+
+    expect(getFullFetches()).toBe(0);
+    expect(state.balanceCalls).toBe(1);
+    expect(snapshot.solBalance).toBe(1000);
+    expect(snapshot.tokenBalances.map((entry) => entry.ticker)).toEqual(["AAA", "BBB"]);
+  });
+
+  test("multi-page, incomplete or unknown-token pages still trigger a full fetch", async () => {
+    const pages = [
+      {
+        tokenBalances: [token("mint-a", "AAA")],
+        page: 0,
+        pageCount: 2,
+        heldMints: ["mint-a", "mint-b"],
+        complete: true,
+      },
+      {
+        tokenBalances: [token("mint-a", "AAA")],
+        page: 0,
+        pageCount: 1,
+        heldMints: ["mint-a"],
+        complete: false,
+      },
+      {
+        tokenBalances: [token("mint-x", "NEW")],
+        page: 0,
+        pageCount: 1,
+        heldMints: ["mint-x"],
+        complete: true,
+      },
+    ];
+    for (const page of pages) {
+      const { module, getFullFetches } = createPageModule(page);
+      await module.getWalletPageData(1n, 0, 8);
+      await module.getCachedWalletData(1n);
+      expect(getFullFetches()).toBe(1);
+    }
+  });
+
+  test("a cache clear during the page fetch prevents seeding", async () => {
+    const holder: { module?: any } = {};
+    const { wallet } = createStubWallet({
+      getWalletTokenBalancePage: async () => {
+        await holder.module.clearWalletCache(1n);
+        return { tokenBalances: [], page: 0, pageCount: 1, heldMints: [], complete: true };
+      },
+    });
+    const module = createModule(wallet, { holdMarks: createMemoryHoldMarkStore() });
+    holder.module = module;
+    const originalNow = Date.now;
+    let tick = originalNow();
+    Date.now = () => tick++;
+    try {
+      await module.getWalletPageData(1n, 0, 8);
+    } finally {
+      Date.now = originalNow;
+    }
+    expect(module.__test_getWalletSnapshotCacheKeys()).toEqual([]);
+  });
+});

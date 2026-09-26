@@ -144,6 +144,12 @@ export const __test_resetJupiterQuoteExpirationMs = (): void => {
   jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 };
 
+// After the setup transaction confirms, poll this often (up to the timeout) for the
+// new token accounts instead of always sleeping the full timeout.
+const TOKEN_ACCOUNT_VISIBILITY_POLL_MS = 250;
+const TOKEN_ACCOUNT_VISIBILITY_TIMEOUT_MS = 2_000;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export class SwapManager {
   private jupiterClient: JupiterClient;
   private connection: Connection;
@@ -153,6 +159,7 @@ export class SwapManager {
   private readonly quoteCache = new SwapQuoteCache();
   private readonly swapService: SwapService;
   private readonly validatedBuildFeeAccounts = new Set<string>();
+  private sleep: (ms: number) => Promise<void> = sleep;
 
   constructor(connection: Connection, wallet: WalletManager, feeBudget?: FeeBudgetProvider) {
     this.connection = connection;
@@ -997,10 +1004,12 @@ export class SwapManager {
     const { userKeypair } = request;
 
     // First, create token accounts if they don't exist
+    const createdAccounts: PublicKey[] = [];
     const setupInstructions = await this.createTokenAccountsIfNeeded(
       userKeypair,
       quote.inputMint,
       quote.outputMint,
+      createdAccounts,
     );
 
     // If we need to create token accounts, do that first
@@ -1013,8 +1022,8 @@ export class SwapManager {
       );
       console.log(`Token accounts created: ${setupTxid}`);
 
-      // Wait a bit for the accounts to be created
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Give RPC nodes a moment to serve the new accounts before Jupiter builds the swap.
+      await this.waitForTokenAccounts(createdAccounts);
     }
 
     const cachedIntegrator = quote.integrator ?? null;
@@ -1255,10 +1264,43 @@ export class SwapManager {
   /**
    * Create token accounts if they don't exist
    */
+  /**
+   * Poll until freshly created token accounts are readable at "confirmed", up to
+   * the old fixed 2s pause. Without addresses to check, wait the full pause.
+   */
+  private async waitForTokenAccounts(addresses: PublicKey[]): Promise<void> {
+    const deadline = Date.now() + TOKEN_ACCOUNT_VISIBILITY_TIMEOUT_MS;
+    if (addresses.length === 0) {
+      await this.sleep(TOKEN_ACCOUNT_VISIBILITY_TIMEOUT_MS);
+      return;
+    }
+
+    const connection = this.wallet.getConnection?.() ?? this.connection;
+    while (Date.now() < deadline) {
+      try {
+        const infos = await connection.getMultipleAccountsInfo(addresses, "confirmed");
+        if (infos.every((info) => info !== null)) {
+          return;
+        }
+      } catch (error) {
+        console.warn("Token account visibility check failed; retrying:", error);
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        break;
+      }
+      await this.sleep(Math.min(TOKEN_ACCOUNT_VISIBILITY_POLL_MS, remaining));
+    }
+    console.warn(
+      `Created token accounts not visible after ${TOKEN_ACCOUNT_VISIBILITY_TIMEOUT_MS}ms; continuing`,
+    );
+  }
+
   private async createTokenAccountsIfNeeded(
     userKeypair: Keypair,
     inputMint: string,
     outputMint: string,
+    createdAccounts: PublicKey[] = [],
   ): Promise<TransactionInstruction[]> {
     const instructions: TransactionInstruction[] = [];
 
@@ -1278,6 +1320,7 @@ export class SwapManager {
           })`,
         );
         instructions.push(...inputSetup.instructions);
+        createdAccounts.push(inputSetup.address);
       }
     }
 
@@ -1297,6 +1340,7 @@ export class SwapManager {
           })`,
         );
         instructions.push(...outputSetup.instructions);
+        createdAccounts.push(outputSetup.address);
       }
     }
 

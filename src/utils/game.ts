@@ -168,6 +168,62 @@ const resolveGameMedia = (
 
 const GAME_STATE_RECOVERY_DELAYS_MS = [1_000, 5_000, 15_000] as const;
 
+export type ActiveGameListRow = {
+  messageText: string;
+  keyboard: any[];
+  gameAddress: string;
+  currentTickets?: number;
+  maxTickets?: number;
+  minTickets?: number;
+};
+
+export type JoinGameResult = {
+  success: boolean;
+  error?: string;
+  isRoll?: boolean;
+  /** Game account read right after a successful join, when available. */
+  gameAccount?: any;
+  ticketsCount?: number;
+  maxTickets?: number;
+};
+
+type TerminalGameMessageUpdate = {
+  status: "Completed";
+  winnerAddress?: string;
+  totalPot?: number;
+  winnerSignature?: string;
+};
+
+// Parallel Telegram edits per game update (one per chat that shows the game).
+const GAME_MESSAGE_EDIT_CONCURRENCY = 4;
+
+export type GameMessageUpdateOptions = {
+  /** Freshly fetched game account; skips the lookup while formatting an active game. */
+  gameAccount?: any;
+};
+
+export type PublicGamesFilter = {
+  gameType?: "coinflip" | "giveaway";
+  ticker?: string;
+};
+
+type PublicGameEntry = {
+  account: any;
+  gameData: {
+    game_address: string;
+    game_type: string;
+    amount: number;
+    token_mint: string;
+    token_ticker: string;
+    status: string;
+    winner_address: undefined;
+  };
+};
+
+// Short enough that a newly created game shows up almost immediately, long enough
+// that paging through /public does not rescan the whole program.
+const PUBLIC_GAMES_CACHE_TTL_MS = 8_000;
+
 type GameMessageUpdateRequest = {
   status: string;
   winnerAddress?: string;
@@ -526,6 +582,8 @@ export class GameManager {
   private readonly gamePriceCache =
     createExpiringCache<CachedPriceLookup>(TOKEN_PRICE_CACHE_TTL_MS);
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
+  private publicGamesCache: { entries: PublicGameEntry[]; expiresAt: number } | null = null;
+  private publicGamesInFlight: Promise<PublicGameEntry[]> | null = null;
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
   private constructor(
@@ -1365,8 +1423,15 @@ export class GameManager {
   // PLAYER UTILITIES
   // ================================
 
-  /** Check if a player is in a game via database records */
-  private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
+  /**
+   * Check if a player is in a game via database records, then the on-chain
+   * participant list. Pass an already-fetched game account to skip the lookup.
+   */
+  private async isPlayerInGame(
+    gamePda: PublicKey,
+    playerPubkey: PublicKey,
+    knownGameAccount?: any,
+  ): Promise<boolean> {
     const gameAddress = gamePda.toBase58();
     const playerPubkeyStr = playerPubkey.toBase58();
 
@@ -1393,12 +1458,14 @@ export class GameManager {
     }
 
     try {
-      const accountInterface = this.program.account.game as any;
-      const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
-
-      const gameAccount = fetchNullable
-        ? await fetchNullable(gamePda)
-        : await accountInterface.fetch(gamePda);
+      let gameAccount = knownGameAccount;
+      if (gameAccount === undefined) {
+        const accountInterface = this.program.account.game as any;
+        const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
+        gameAccount = fetchNullable
+          ? await fetchNullable(gamePda)
+          : await accountInterface.fetch(gamePda);
+      }
 
       if (!gameAccount) {
         return false;
@@ -3292,6 +3359,7 @@ export class GameManager {
     winnerSignature?: string,
     updateGeneration?: number,
     updateRequest?: GameMessageUpdateRequest,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const generation = updateGeneration ?? this.nextGameMessageUpdateGeneration(gameAddress);
     const latestGeneration = this.gameMessageUpdateGenerations.get(gameAddress) ?? 0;
@@ -3324,6 +3392,7 @@ export class GameManager {
         winnerSignature,
         generation,
         request,
+        updateOptions,
       ),
     );
   }
@@ -3341,6 +3410,7 @@ export class GameManager {
     winnerSignature?: string,
     updateGeneration?: number,
     updateRequest?: GameMessageUpdateRequest,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const request = updateRequest ?? {
       status,
@@ -3408,7 +3478,7 @@ export class GameManager {
         winnerAddress,
         totalPot,
         winnerSignature,
-        { priceHint },
+        { priceHint, gameAccount: updateOptions?.gameAccount },
       );
 
       const terminalBeforeDispatch = this.getPersistedTerminalUpdate(
@@ -3450,7 +3520,15 @@ export class GameManager {
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
 
-      for (const gameMessage of messageMap.values()) {
+      // Edit every chat's copy in parallel (bounded) instead of one after another.
+      // A terminal update or a newer generation found mid-way stops the remaining
+      // edits; the terminal redraw then runs once for all chats.
+      let terminalRedirect: TerminalGameMessageUpdate | null = null;
+      let superseded = false;
+      const updateTarget = async (gameMessage: GameMessage): Promise<void> => {
+        if (terminalRedirect || superseded) {
+          return;
+        }
         const latestTerminal = this.getPersistedTerminalUpdate(
           gameAddress,
           status,
@@ -3459,24 +3537,12 @@ export class GameManager {
           winnerSignature,
         );
         if (latestTerminal && status.toLowerCase() !== "completed") {
-          await this.updateGameMessageInternal(
-            ctx,
-            gameAddress,
-            gameType,
-            amount,
-            creatorUsername,
-            latestTerminal.status,
-            tokenTicker,
-            latestTerminal.winnerAddress,
-            latestTerminal.totalPot,
-            latestTerminal.winnerSignature,
-            updateGeneration,
-            request,
-          );
+          terminalRedirect ??= latestTerminal;
           return;
         }
 
         if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
+          superseded = true;
           return;
         }
 
@@ -3505,24 +3571,12 @@ export class GameManager {
           winnerSignature,
         );
         if (terminalAfterPayload && status.toLowerCase() !== "completed") {
-          await this.updateGameMessageInternal(
-            ctx,
-            gameAddress,
-            gameType,
-            amount,
-            creatorUsername,
-            terminalAfterPayload.status,
-            tokenTicker,
-            terminalAfterPayload.winnerAddress,
-            terminalAfterPayload.totalPot,
-            terminalAfterPayload.winnerSignature,
-            updateGeneration,
-            request,
-          );
+          terminalRedirect ??= terminalAfterPayload;
           return;
         }
 
         if (this.isSupersededActiveGameMessageUpdate(gameAddress, request, updateGeneration)) {
+          superseded = true;
           return;
         }
         const winnerMedia = payload.media;
@@ -3628,13 +3682,13 @@ export class GameManager {
                   };
 
               if (queuedEditResult.skipped || !queuedEditResult.result) {
-                continue;
+                return;
               }
 
               const { usedFallback, skipped } = queuedEditResult.result;
 
               if (skipped) {
-                continue;
+                return;
               }
 
               if (!usedFallback) {
@@ -3647,7 +3701,7 @@ export class GameManager {
                 this.activeGameMessages.set(gameAddress, current);
               }
 
-              continue;
+              return;
             } catch (mediaError) {
               // If we get here, something unexpected happened
               const recreated = await recreateMissingMessage(mediaError);
@@ -3657,7 +3711,7 @@ export class GameManager {
                   mediaError,
                 );
               }
-              continue;
+              return;
             }
           }
 
@@ -3705,7 +3759,7 @@ export class GameManager {
               });
 
               if (skipped) {
-                continue;
+                return;
               }
 
               if (!usedFallback) {
@@ -3718,7 +3772,7 @@ export class GameManager {
                 this.activeGameMessages.set(gameAddress, current);
               }
 
-              continue;
+              return;
             } catch (captionError) {
               // If we get here, something unexpected happened
               const recreated = await recreateMissingMessage(captionError);
@@ -3728,7 +3782,7 @@ export class GameManager {
                   captionError,
                 );
               }
-              continue;
+              return;
             }
           }
 
@@ -3766,11 +3820,11 @@ export class GameManager {
 
           if (textUsedFallback) {
             // Text failed but caption worked - already marked usesVideo: true
-            continue;
+            return;
           }
 
           if (skipped) {
-            continue;
+            return;
           }
         } catch (error) {
           if (messageTextValue && isMessageMissing(error)) {
@@ -3778,7 +3832,7 @@ export class GameManager {
             // We use a composite key for the lock to avoid blocking updates to other chats
             const lockKey = `${gameAddress}:${gameMessage.chatId}`;
             if (this.messageRecreationLocks.has(lockKey)) {
-              continue;
+              return;
             }
 
             this.messageRecreationLocks.add(lockKey);
@@ -3792,10 +3846,34 @@ export class GameManager {
             } finally {
               this.messageRecreationLocks.delete(lockKey);
             }
-            continue;
+            return;
           }
           console.error(`Error in updateGameMessage for chat ${gameMessage.chatId}:`, error);
         }
+      };
+
+      await mapWithConcurrency(
+        Array.from(messageMap.values()),
+        GAME_MESSAGE_EDIT_CONCURRENCY,
+        updateTarget,
+      );
+
+      const redirect = terminalRedirect as TerminalGameMessageUpdate | null;
+      if (redirect) {
+        await this.updateGameMessageInternal(
+          ctx,
+          gameAddress,
+          gameType,
+          amount,
+          creatorUsername,
+          redirect.status,
+          tokenTicker,
+          redirect.winnerAddress,
+          redirect.totalPot,
+          redirect.winnerSignature,
+          updateGeneration,
+          request,
+        );
       }
     } catch (error) {
       console.error("Error in updateGameMessage (preparation):", error);
@@ -3813,6 +3891,7 @@ export class GameManager {
     winnerAddress?: string,
     totalPot?: number,
     winnerSignature?: string,
+    updateOptions?: GameMessageUpdateOptions,
   ): Promise<void> {
     const updateGeneration = this.nextGameMessageUpdateGeneration(gameAddress);
     const request: GameMessageUpdateRequest = {
@@ -3870,6 +3949,7 @@ export class GameManager {
         effectiveWinnerSignature,
         updateGeneration,
         request,
+        terminalStatus ? undefined : updateOptions,
       );
     } catch (error) {
       console.error(`Error updating game message for ${gameAddress}:`, error);
@@ -5010,7 +5090,7 @@ export class GameManager {
     telegramId: bigint,
     chatId?: number,
     displayName?: string | null,
-  ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
+  ): Promise<JoinGameResult> {
     try {
       const gamePda = new PublicKey(gameAddress);
       const playerKp = await this.wallet.getKeyPair(telegramId);
@@ -5064,8 +5144,8 @@ export class GameManager {
         throw fetchError;
       }
 
-      // Check if player already in game
-      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
+      // Check if player already in game (reuses the account fetched above)
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey, gameAccount);
 
       if (isInGame) {
         return { success: false, error: "You have already joined this game!" };
@@ -5079,13 +5159,15 @@ export class GameManager {
       // This prevents the confusing "Attempt to debit an account but found no record of a prior credit" error
       const currentGameType = Object.keys(gameAccount.gameType)[0];
       const gameAmount = Number(gameAccount.ticketAmount);
-      const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
-      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
-
-      let [tokenBalance, solBalance] = await Promise.all([
+      // Independent reads: token metadata, fee reserve and both balances load together.
+      const [metadata, minSolBuffer, initialTokenBalance, initialSolBalance] = await Promise.all([
+        this.wallet.getTokenMetadata(gameData.token_mint),
+        this.feeBudget.getGameSafetyBufferLamports(),
         this.wallet.getTokenBalance(telegramId, gameData.token_mint),
         this.wallet.getBalance(telegramId),
       ]);
+      let tokenBalance = initialTokenBalance;
+      let solBalance = initialSolBalance;
 
       const normalizedTicker = gameData.token_ticker?.toUpperCase?.() ?? "";
       const isSolBackedGame =
@@ -5379,8 +5461,13 @@ export class GameManager {
         };
       }
 
+      this.invalidatePublicGamesCache();
+
+      // The post-join account is returned so callers can show the ticket count and
+      // redraw the game message without fetching it again.
+      let updatedGameAccount: any;
       try {
-        const updatedGameAccount = await this.program.account.game.fetch(gamePda);
+        updatedGameAccount = await this.program.account.game.fetch(gamePda);
         const ticketsCount = Number(updatedGameAccount.ticketsCount ?? 0);
         const maxTickets = Number(updatedGameAccount.maxTickets ?? 0);
         const requestCompletion = this.oracleClient.requestGameCompletion;
@@ -5399,7 +5486,14 @@ export class GameManager {
         );
       }
 
-      return { success: true };
+      return updatedGameAccount
+        ? {
+            success: true,
+            gameAccount: updatedGameAccount,
+            ticketsCount: Number(updatedGameAccount.ticketsCount ?? 0),
+            maxTickets: Number(updatedGameAccount.maxTickets ?? 0),
+          }
+        : { success: true };
     } catch (error: any) {
       console.error(`Error joining game ${gameAddress}:`, error);
       try {
@@ -6430,29 +6524,53 @@ export class GameManager {
     return keyboard;
   }
 
+  /**
+   * Batch-load game accounts with one getMultipleAccounts call per 100 addresses.
+   * Addresses the batch could not answer are left out of the map so callers can
+   * fall back to a single lookup; absent accounts map to null.
+   */
+  private async fetchGameAccountsBatch(addresses: string[]): Promise<Map<string, any | null>> {
+    const accounts = new Map<string, any | null>();
+    const accountApi = this.program.account.game as any;
+    if (addresses.length === 0 || typeof accountApi?.fetchMultiple !== "function") {
+      return accounts;
+    }
+
+    const valid: Array<{ address: string; pda: PublicKey }> = [];
+    for (const address of new Set(addresses)) {
+      try {
+        valid.push({ address, pda: new PublicKey(address) });
+      } catch {
+        // Invalid addresses are reported by the per-game path.
+      }
+    }
+    if (valid.length === 0) {
+      return accounts;
+    }
+
+    try {
+      const fetched: Array<any | null> = await accountApi.fetchMultiple(
+        valid.map((entry) => entry.pda),
+      );
+      valid.forEach((entry, index) => {
+        accounts.set(entry.address, fetched[index] ?? null);
+      });
+    } catch (error) {
+      console.warn("Batch game account lookup failed; falling back to single lookups:", error);
+    }
+    return accounts;
+  }
+
   private async formatActiveGamesList(
     ctx: Context,
     activeGamesData: any[],
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
-    type ActiveGameRow = {
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    };
+  ): Promise<ActiveGameListRow[]> {
+    const needsFetch = activeGamesData
+      .filter((gameData) => gameData?.game_address && gameData.game_account === undefined)
+      .map((gameData) => String(gameData.game_address));
+    const prefetched = await this.fetchGameAccountsBatch(needsFetch);
 
-    const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
+    const formattedGames: Array<ActiveGameListRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
           if (!gameData?.game_address) {
@@ -6467,14 +6585,21 @@ export class GameManager {
             return null;
           }
 
-          const accountApi = this.program.account.game as any;
-          const onChainGame = accountApi.fetchNullable
-            ? await accountApi.fetchNullable(gamePda)
-            : await accountApi.fetch(gamePda).catch((error: unknown) => {
-                const message = error instanceof Error ? error.message : String(error);
-                if (message.includes("does not exist")) return null;
-                throw error;
-              });
+          let onChainGame: any;
+          if (gameData.game_account !== undefined) {
+            onChainGame = gameData.game_account;
+          } else if (prefetched.has(gameData.game_address)) {
+            onChainGame = prefetched.get(gameData.game_address);
+          } else {
+            const accountApi = this.program.account.game as any;
+            onChainGame = accountApi.fetchNullable
+              ? await accountApi.fetchNullable(gamePda)
+              : await accountApi.fetch(gamePda).catch((error: unknown) => {
+                  const message = error instanceof Error ? error.message : String(error);
+                  if (message.includes("does not exist")) return null;
+                  throw error;
+                });
+          }
           if (!onChainGame) {
             console.warn(`Omitting stale active game ${gameData.game_address}; account is absent`);
             return null;
@@ -6521,53 +6646,65 @@ export class GameManager {
       }),
     );
 
-    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
+    return formattedGames.filter((game): game is ActiveGameListRow => game !== null);
   }
 
-  public async getChatActiveGames(
-    ctx: Context,
-    chatId: number,
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  public async getChatActiveGames(ctx: Context, chatId: number): Promise<ActiveGameListRow[]> {
     const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
-  public async getUserActiveGames(
-    ctx: Context,
-    telegramId: bigint,
-  ): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  public async getUserActiveGames(ctx: Context, telegramId: bigint): Promise<ActiveGameListRow[]> {
     const activeGamesData = this.gameDb.getActiveGames(telegramId.toString());
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
-  public async getAllActivePublicGames(ctx: Context): Promise<
-    Array<{
-      messageText: string;
-      keyboard: any[];
-      gameAddress: string;
-      currentTickets?: number;
-      maxTickets?: number;
-      minTickets?: number;
-    }>
-  > {
+  /**
+   * Load every open public game with one getProgramAccounts call. The sorted list
+   * (with decoded accounts) is cached briefly so page taps and repeated /public
+   * commands do not rescan the program.
+   */
+  private async loadActivePublicGameEntries(): Promise<PublicGameEntry[]> {
+    const now = Date.now();
+    const cached = this.publicGamesCache;
+    let entries: PublicGameEntry[];
+    if (cached && cached.expiresAt > now) {
+      entries = cached.entries;
+    } else {
+      if (!this.publicGamesInFlight) {
+        this.publicGamesInFlight = this.fetchActivePublicGameEntries()
+          .then((fetched) => {
+            this.publicGamesCache = {
+              entries: fetched,
+              expiresAt: Date.now() + PUBLIC_GAMES_CACHE_TTL_MS,
+            };
+            return fetched;
+          })
+          .finally(() => {
+            this.publicGamesInFlight = null;
+          });
+      }
+      entries = await this.publicGamesInFlight;
+    }
+
+    // Games can expire while the list is cached.
+    return entries.filter((entry) => !GameManager.isPublicEntryExpired(entry.account));
+  }
+
+  /** Drop the cached /public list, e.g. after a game is created, joined or closed. */
+  public invalidatePublicGamesCache(): void {
+    this.publicGamesCache = null;
+  }
+
+  private static isPublicEntryExpired(account: any): boolean {
+    const createdAt = Number(account?.createdAt ?? 0);
+    const timeout = Number(account?.timeout ?? 0);
+    const hasTiming =
+      Number.isFinite(createdAt) && createdAt > 0 && Number.isFinite(timeout) && timeout > 0;
+    return hasTiming && GameManager.isExpired(account);
+  }
+
+  private async fetchActivePublicGameEntries(): Promise<PublicGameEntry[]> {
     // Fetch all games from the blockchain
     const allGames = await this.program.account.game.all();
 
@@ -6575,17 +6712,7 @@ export class GameManager {
     const publicGames = allGames.filter((game) => {
       const account = game.account as any;
       if (account?.isPrivate) return false;
-
-      const createdAt = Number(account?.createdAt ?? 0);
-      const timeout = Number(account?.timeout ?? 0);
-      const hasTiming =
-        Number.isFinite(createdAt) && createdAt > 0 && Number.isFinite(timeout) && timeout > 0;
-
-      if (hasTiming && GameManager.isExpired(account)) {
-        return false;
-      }
-
-      return true;
+      return !GameManager.isPublicEntryExpired(account);
     });
 
     const getExpiryTimestamp = (account: any): number => {
@@ -6610,37 +6737,91 @@ export class GameManager {
       return leftCreatedAt - rightCreatedAt;
     });
 
-    // Map to GameData-like structure
-    const activeGamesData = await Promise.all(
+    // Resolve each distinct mint's ticker once instead of once per game.
+    const tickerByMint = new Map<string, Promise<string>>();
+    const resolveTicker = (tokenMint: string): Promise<string> => {
+      let pending = tickerByMint.get(tokenMint);
+      if (!pending) {
+        pending = this.wallet
+          .getTokenMetadata(tokenMint)
+          .then((metadata) => metadata?.symbol || DEFAULT_TOKEN_TICKER)
+          .catch(() => DEFAULT_TOKEN_TICKER);
+        tickerByMint.set(tokenMint, pending);
+      }
+      return pending;
+    };
+
+    return Promise.all(
       publicGames.map(async (game) => {
         const account = game.account;
         const gameType = this.getGameType(account);
         const tokenMint = account.tokenMint.toBase58();
         const amount = this.getDisplayAmountFromAccount(account, gameType);
-
-        let tokenTicker = DEFAULT_TOKEN_TICKER;
-        try {
-          const metadata = await this.wallet.getTokenMetadata(tokenMint);
-          if (metadata?.symbol) {
-            tokenTicker = metadata.symbol;
-          }
-        } catch (e) {
-          // Ignore metadata fetch errors
-        }
+        const tokenTicker = await resolveTicker(tokenMint);
 
         return {
-          game_address: game.publicKey.toBase58(),
-          game_type: gameType,
-          amount,
-          token_mint: tokenMint,
-          token_ticker: tokenTicker,
-          status: "active", // Assumed active if account exists
-          winner_address: undefined, // Not in Game account
+          account,
+          gameData: {
+            game_address: game.publicKey.toBase58(),
+            game_type: gameType,
+            amount,
+            token_mint: tokenMint,
+            token_ticker: tokenTicker,
+            status: "active", // Assumed active if account exists
+            winner_address: undefined, // Not in Game account
+          },
         };
       }),
     );
+  }
 
-    return this.formatActiveGamesList(ctx, activeGamesData);
+  private static matchesPublicGamesFilter(
+    entry: PublicGameEntry,
+    filter: PublicGamesFilter | undefined,
+  ): boolean {
+    if (!filter) return true;
+    if (filter.gameType && entry.gameData.game_type !== filter.gameType) return false;
+    if (filter.ticker) {
+      const ticker = String(entry.gameData.token_ticker ?? "").toUpperCase();
+      if (ticker !== filter.ticker.toUpperCase()) return false;
+    }
+    return true;
+  }
+
+  public async getAllActivePublicGames(
+    ctx: Context,
+    filter?: PublicGamesFilter,
+  ): Promise<ActiveGameListRow[]> {
+    const entries = (await this.loadActivePublicGameEntries()).filter((entry) =>
+      GameManager.matchesPublicGamesFilter(entry, filter),
+    );
+    return this.formatActiveGamesList(
+      ctx,
+      entries.map((entry) => ({ ...entry.gameData, game_account: entry.account })),
+    );
+  }
+
+  /**
+   * Format only the requested page of public games. The page is clamped to the
+   * available range; `totalGames` counts every matching game.
+   */
+  public async getActivePublicGamesPage(
+    ctx: Context,
+    options: { page: number; pageSize: number; filter?: PublicGamesFilter },
+  ): Promise<{ games: ActiveGameListRow[]; totalGames: number; page: number }> {
+    const entries = (await this.loadActivePublicGameEntries()).filter((entry) =>
+      GameManager.matchesPublicGamesFilter(entry, options.filter),
+    );
+    const pageSize = Math.max(1, Math.trunc(options.pageSize));
+    const totalGames = entries.length;
+    const lastPage = Math.max(0, Math.ceil(totalGames / pageSize) - 1);
+    const page = Math.min(Math.max(0, Math.trunc(options.page)), lastPage);
+    const pageEntries = entries.slice(page * pageSize, (page + 1) * pageSize);
+    const games = await this.formatActiveGamesList(
+      ctx,
+      pageEntries.map((entry) => ({ ...entry.gameData, game_account: entry.account })),
+    );
+    return { games, totalGames, page };
   }
 
   private async hydrateGameDataFromChain(
