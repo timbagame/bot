@@ -73,7 +73,6 @@ import {
   TOKEN_DISCOVERY_COOLDOWN_MS,
   WALLET_RPC_CACHE_TTL_MS,
   TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS,
-  USER_SOL_MAX_BUFFER_LAMPORTS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { isMissingAccountError } from "./account-errors";
@@ -3134,7 +3133,18 @@ export class WalletManager {
     if (!Number.isSafeInteger(nativeBalance) || nativeBalance < 0) {
       throw new Error("Unable to determine native SOL balance for unwrap fees.");
     }
-    const adminTopUpLamports = Math.max(0, USER_SOL_MAX_BUFFER_LAMPORTS - nativeBalance);
+    const userPaidPlan = await this.buildUnwrapWsolPlan({
+      owner: userKeypair.publicKey,
+      payer: userKeypair,
+      amountLamports,
+    });
+    const userPaidFee = await this.estimateFee(userKeypair.publicKey, userPaidPlan.instructions, {
+      allowFallback: false,
+    });
+    if (!Number.isSafeInteger(userPaidFee) || userPaidFee < 0) {
+      throw new Error("Unable to determine the user-paid unwrap fee.");
+    }
+    const adminTopUpLamports = Math.max(0, userPaidFee - nativeBalance);
     const operatorKeypair = adminTopUpLamports > 0 ? await this.getOperatorKeypair() : undefined;
 
     const result = await this.unwrapSolWithKeypair({

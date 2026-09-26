@@ -119,6 +119,36 @@ describe("Telegram unwrap sponsorship", () => {
     expect(fixture.submissions[0]!.signers).toEqual([fixture.operator, fixture.user]);
   });
 
+  for (const balance of [499_999n, 5_000n]) {
+    test(`a wallet with ${balance} native lamports can unwrap dust without sponsorship`, async () => {
+      const fixture = await prepare(balance);
+      await confirmSwap(1);
+      expect(answers()).toContain("✅ Unwrapped WSOL to SOL");
+      expect(fixture.operatorLoads()).toBe(0);
+      expect(fixture.submissions).toHaveLength(1);
+      expect(fixture.submissions[0]!.signers).toEqual([fixture.user]);
+    });
+  }
+
+  test("a native balance just below the actual fee requests sponsorship", async () => {
+    const fixture = await prepare(4_999n);
+    await confirmSwap(fullBalance);
+    expect(answers()).toContain("✅ Unwrapped WSOL to SOL");
+    expect(fixture.operatorLoads()).toBe(1);
+    expect(fixture.submissions[0]!.signers).toEqual([fixture.operator, fixture.user]);
+  });
+
+  test("a failed fee estimate reports an error without submitting a transaction", async () => {
+    const fixture = await prepare(5_000n);
+    stub(wallet, "estimateFee", async () => {
+      throw new Error("RPC returned no transaction fee estimate.");
+    });
+    await confirmSwap(fullBalance);
+    expect(answers()).toContain("❌ Unwrap failed");
+    expect(fixture.operatorLoads()).toBe(0);
+    expect(fixture.submissions).toHaveLength(0);
+  });
+
   test("a missing sponsor reports an error without sending a user-paid transaction", async () => {
     const fixture = await prepare(0n);
     stub(wallet, "getOperatorKeypair", async () => {
