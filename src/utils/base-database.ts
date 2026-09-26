@@ -1,4 +1,4 @@
-import type { Changes, SQLQueryBindings } from "bun:sqlite";
+import type { Changes, SQLQueryBindings, Statement } from "bun:sqlite";
 import { Database } from "bun:sqlite";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -25,10 +25,13 @@ export function resolveDatabaseFilename(filename: string): string {
 /**
  * Shared SQLite database base class
  */
+const MAX_CACHED_STATEMENTS = 256;
+
 export abstract class BaseDatabase {
   protected db: Database;
   private readonly name: string;
   private readonly filename: string;
+  private readonly statements = new Map<string, Statement>();
 
   protected constructor(filename: string, initStatements: string[], name: string) {
     const resolvedFilename = resolveDatabaseFilename(filename);
@@ -37,6 +40,13 @@ export abstract class BaseDatabase {
     this.db = new Database(resolvedFilename, { create: true });
 
     try {
+      // WAL + synchronous=NORMAL turns each write from a blocking journal fsync on
+      // the event loop into an append, and busy_timeout avoids SQLITE_BUSY errors
+      // when admin scripts touch the same file.
+      this.db.run("PRAGMA journal_mode = WAL");
+      this.db.run("PRAGMA synchronous = NORMAL");
+      this.db.run("PRAGMA busy_timeout = 5000");
+
       for (const stmt of initStatements) {
         this.db.run(stmt);
       }
@@ -46,13 +56,26 @@ export abstract class BaseDatabase {
     }
   }
 
+  private prepare(sql: string): Statement {
+    const cached = this.statements.get(sql);
+    if (cached) return cached;
+
+    if (this.statements.size >= MAX_CACHED_STATEMENTS) {
+      for (const statement of this.statements.values()) statement.finalize();
+      this.statements.clear();
+    }
+    const statement = this.db.prepare(sql);
+    this.statements.set(sql, statement);
+    return statement;
+  }
+
   protected run(
     sql: string,
     params: SQLQueryBindings | SQLQueryBindings[] = [],
     operation: string = "running statement",
   ): Changes {
     try {
-      const stmt = this.db.prepare(sql);
+      const stmt = this.prepare(sql);
       const normalizedParams = this.normalizeParams(params);
       return stmt.run(...(normalizedParams as any));
     } catch (error) {
@@ -66,7 +89,7 @@ export abstract class BaseDatabase {
     operation: string = "executing query",
   ): T | null {
     try {
-      const stmt = this.db.prepare(sql);
+      const stmt = this.prepare(sql);
       const normalizedParams = this.normalizeParams(params);
       const result = stmt.get(...(normalizedParams as any)) as T | undefined;
       return result ?? null;
@@ -81,7 +104,7 @@ export abstract class BaseDatabase {
     operation: string = "executing query",
   ): T[] {
     try {
-      const stmt = this.db.prepare(sql);
+      const stmt = this.prepare(sql);
       const normalizedParams = this.normalizeParams(params);
       return stmt.all(...(normalizedParams as any)) as T[];
     } catch (error) {
@@ -200,7 +223,9 @@ export function createDatabaseSingleton<T extends BaseDatabase>(
         try {
           const fullPath = resolveDatabaseFilename(cachedFilename);
           if (fullPath && fullPath !== ":memory:" && !fullPath.startsWith("file:")) {
-            rmSync(fullPath, { force: true });
+            for (const suffix of ["", "-wal", "-shm"]) {
+              rmSync(`${fullPath}${suffix}`, { force: true });
+            }
           }
         } catch (error) {
           // Ignore cleanup errors, similar to resetTestDatabase behavior

@@ -1,4 +1,5 @@
 import { RpcRetryLaterError } from "./rpc-request-budget";
+import { mapWithConcurrency } from "./concurrency";
 import {
   getCreationRecoveryDelay,
   withCreationRebroadcast,
@@ -337,35 +338,6 @@ const coerceLamportValue = (value: unknown): bigint | null => {
   }
 
   return null;
-};
-
-const mapWithConcurrency = async <TItem, TResult>(
-  items: TItem[],
-  limit: number,
-  mapper: (item: TItem, index: number) => Promise<TResult>,
-): Promise<TResult[]> => {
-  if (items.length === 0) {
-    return [];
-  }
-
-  const safeLimit = Number.isFinite(limit) ? Math.trunc(limit) : 0;
-  const workerCount = Math.max(1, Math.min(items.length, safeLimit || 1));
-  const results = new Array<TResult>(items.length);
-  let nextIndex = 0;
-
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= items.length) {
-        return;
-      }
-      results[index] = await mapper(items[index]!, index);
-    }
-  });
-
-  await Promise.all(workers);
-  return results;
 };
 
 const logAndFormatError = async (
@@ -1118,7 +1090,15 @@ export class GameManager {
       return;
     }
 
+    // This runs on every update from a user with a username; skip the SQLite
+    // write when this process already stored the same mapping in both directions.
+    const alreadyStored =
+      this.usernameHints.get(trimmedId) === trimmedUsername &&
+      this.normalizedUsernameToIdCache.get(normalized) === trimmedId;
     this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
+    if (alreadyStored) {
+      return;
+    }
     this.usernameHints.set(trimmedId, trimmedUsername);
     this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
   }

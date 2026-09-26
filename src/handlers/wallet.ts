@@ -266,26 +266,63 @@ export type WalletHandlersDeps = {
   createSettingsKeyboard: () => InlineKeyboard;
 };
 
-export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
+// Loading the wallet waits on RPC balances, token metadata and prices. Telegram
+// keeps the button spinner until the callback is answered, so answer silently if
+// the work is still running after a short grace period. Fast results and errors
+// still answer normally, so error toasts keep working in the common case.
+const WALLET_CALLBACK_GRACE_MS = 350;
+
+async function runWithEarlyCallbackAnswer(
+  ctx: any,
+  work: () => Promise<void>,
+  errorLabel: string,
+  errorText: string,
+): Promise<void> {
+  let answeredEarly = false;
+  const timer = setTimeout(() => {
+    answeredEarly = true;
+    void safeAnswerCallbackQuery(ctx);
+  }, WALLET_CALLBACK_GRACE_MS);
+
   try {
-    await deps.showWalletUI(ctx);
-    await safeAnswerCallbackQuery(ctx);
+    await work();
+    clearTimeout(timer);
+    if (!answeredEarly) await safeAnswerCallbackQuery(ctx);
   } catch (error) {
-    console.error("❌ Error in main_wallet:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading wallet menu");
+    clearTimeout(timer);
+    console.error(errorLabel, error);
+    if (!answeredEarly) {
+      await safeAnswerCallbackQuery(ctx, errorText);
+      return;
+    }
+    try {
+      await ctx.reply(errorText);
+    } catch {
+      // Nothing else to surface the error on.
+    }
   }
 }
 
+export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
+  await runWithEarlyCallbackAnswer(
+    ctx,
+    () => deps.showWalletUI(ctx),
+    "❌ Error in main_wallet:",
+    "❌ Error loading wallet menu",
+  );
+}
+
 export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
-  try {
-    const id = getTelegramId(ctx);
-    await deps.clearWalletCache(id);
-    await deps.showWalletUI(ctx);
-    await safeAnswerCallbackQuery(ctx);
-  } catch (error) {
-    console.error("Error in wallet_refresh:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error refreshing wallet");
-  }
+  await runWithEarlyCallbackAnswer(
+    ctx,
+    async () => {
+      const id = getTelegramId(ctx);
+      await deps.clearWalletCache(id);
+      await deps.showWalletUI(ctx);
+    },
+    "Error in wallet_refresh:",
+    "❌ Error refreshing wallet",
+  );
 }
 
 export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {

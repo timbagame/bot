@@ -240,20 +240,23 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       const fetchStart = Date.now();
       enforceWalletBudget(telegramId);
       try {
-        const nativeSolBalance = await wallet.getBalance(telegramId, {
-          allowStaleOnError,
-        });
         let tokenCensus: WalletTokenCensus = {
           complete: false,
           heldMints: [],
           scannedMints: [],
         };
-        const tokenBalances = await wallet.getAllWalletTokenBalances(telegramId, knownTokens, {
-          allowStaleOnError,
-          onCensus: (census) => {
-            tokenCensus = census;
-          },
-        });
+        // Independent RPC reads: run them together instead of paying two round trips.
+        const [nativeSolBalance, tokenBalances] = await Promise.all([
+          wallet.getBalance(telegramId, {
+            allowStaleOnError,
+          }),
+          wallet.getAllWalletTokenBalances(telegramId, knownTokens, {
+            allowStaleOnError,
+            onCensus: (census) => {
+              tokenCensus = census;
+            },
+          }),
+        ]);
 
         const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
         const wsolBalance = wsolToken?.balance ?? 0;

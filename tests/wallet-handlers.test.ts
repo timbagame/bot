@@ -134,4 +134,38 @@ describe("wallet handlers", () => {
     const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
     expect(String(answer[1])).toContain("Error loading settings");
   });
+
+  test("onMainWallet answers the callback before a slow wallet load finishes", async () => {
+    const ctx: any = makeCtx();
+    let answeredWhileLoading = false;
+    const deps = {
+      showWalletUI: async () => {
+        await Bun.sleep(450);
+        answeredWhileLoading = ctx.__calls.some((c: any[]) => c[0] === "answer");
+      },
+      clearWalletCache: (_: any) => {},
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
+    };
+    await onMainWallet(ctx, deps);
+    expect(answeredWhileLoading).toBe(true);
+    expect(ctx.__calls.filter((c: any[]) => c[0] === "answer")).toHaveLength(1);
+  });
+
+  test("onMainWallet replies with the error when a slow load fails after answering", async () => {
+    const ctx: any = makeCtx();
+    const deps = {
+      showWalletUI: async () => {
+        await Bun.sleep(450);
+        throw new Error("slow boom");
+      },
+      clearWalletCache: (_: any) => {},
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
+    };
+    await onMainWallet(ctx, deps);
+    const answers = ctx.__calls.filter((c: any[]) => c[0] === "answer");
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toHaveLength(1);
+    const reply = ctx.__calls.find((c: any[]) => c[0] === "reply");
+    expect(String(reply[1])).toContain("Error loading wallet menu");
+  });
 });

@@ -1394,6 +1394,28 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
             const maxPlayers = Math.max(players, gameType === "coinflip" ? 2 : 1);
 
+            // Validate before touching the confirm message: once the callback is
+            // answered below, a second answer with this error would be dropped.
+            const decimals = tokenContext.tokenDecimals;
+            const amountFixed = amount.toFixed(decimals);
+            const [wholePart = "0", fractionalPartRaw = ""] = amountFixed.split(".");
+            const fractionalPart = fractionalPartRaw.padEnd(decimals, "0").slice(0, decimals);
+            let amountRawBigInt: bigint | null = null;
+            try {
+              amountRawBigInt =
+                BigInt(wholePart) * 10n ** BigInt(decimals) + BigInt(fractionalPart || "0");
+            } catch {
+              // toFixed returns exponent notation for very large amounts.
+            }
+            if (amountRawBigInt === null || amountRawBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+              await safeAnswerCallbackQuery(
+                ctx,
+                "Amount is too large; please enter a smaller value.",
+              );
+              return;
+            }
+            const amountRaw = Number(amountRawBigInt);
+
             const creationKey = `${creatorId}_${gameType}`;
             if (deps.pendingGameCreations.has(creationKey)) {
               await safeAnswerCallbackQuery(ctx, "Please wait...");
@@ -1434,20 +1456,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
               await safeAnswerCallbackQuery(ctx);
 
-              const decimals = tokenContext.tokenDecimals;
-              const amountFixed = amount.toFixed(decimals);
-              const [wholePart = "0", fractionalPartRaw = ""] = amountFixed.split(".");
-              const fractionalPart = fractionalPartRaw.padEnd(decimals, "0").slice(0, decimals);
-              const amountRawBigInt =
-                BigInt(wholePart) * 10n ** BigInt(decimals) + BigInt(fractionalPart || "0");
-              if (amountRawBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-                await safeAnswerCallbackQuery(
-                  ctx,
-                  "Amount is too large; please enter a smaller value.",
-                );
-                return;
-              }
-              const amountRaw = Number(amountRawBigInt);
               const gameData = {
                 amount: amountRaw,
                 isSol: false,

@@ -1720,6 +1720,11 @@ export class GameDatabase extends BaseDatabase {
           "adding display_name column to player_mappings",
         );
       }
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_player_mappings_telegram_id ON player_mappings (telegram_id)",
+        [],
+        "creating player_mappings telegram_id index",
+      );
     } catch (error) {
       console.error("Failed to ensure player_mappings schema:", error);
     }
@@ -3098,6 +3103,28 @@ export class GameDatabase extends BaseDatabase {
         [chatId, telegramId, isMember ? 1 : 0, Date.now()],
         "saving membership cache",
       );
+    } catch (error) {
+      console.error("Error saving membership cache:", error);
+    }
+  }
+
+  public saveMembershipCacheBatch(
+    chatId: number,
+    entries: Array<{ telegramId: string; isMember: boolean }>,
+  ): void {
+    try {
+      const checkedAt = Date.now();
+      const save = this.db.transaction(() => {
+        for (const { telegramId, isMember } of entries) {
+          this.run(
+            `INSERT OR REPLACE INTO chat_membership_cache (chat_id, telegram_id, is_member, checked_at)
+             VALUES (?, ?, ?, ?)`,
+            [chatId, telegramId, isMember ? 1 : 0, checkedAt],
+            "saving membership cache",
+          );
+        }
+      });
+      save();
     } catch (error) {
       console.error("Error saving membership cache:", error);
     }
