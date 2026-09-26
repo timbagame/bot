@@ -111,41 +111,19 @@ export class SwapService {
     }
 
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
-    let rentRebateLamports = 0n;
-
     const shouldIncludeWrapRentBuffer = async (): Promise<boolean> => {
+      // Partial unwraps close the WSOL account before recreating it, so the
+      // returned rent can fund that instruction. It cannot pay the upfront fee.
+      if (!isSyntheticSolWrap) return false;
       try {
         const wsolAta = await getAssociatedTokenAddress(
           new PublicKey(WSOL_MINT),
           userKeypair.publicKey,
         );
-
-        if (isSyntheticSolWrap) {
-          await getAccount(this.wallet.getConnection(), wsolAta);
-          return false;
-        }
-
-        if (!isSyntheticSolUnwrap) {
-          return false;
-        }
-
-        const account = await getAccount(this.wallet.getConnection(), wsolAta);
-        const currentBalance = BigInt(account.amount);
-        if (!quote.inputAmountRaw) {
-          return false;
-        }
-
-        rentRebateLamports = BigInt(account.rentExemptReserve ?? 0n);
-
-        const willLeaveRemainingBalance = BigInt(quote.inputAmountRaw) < currentBalance;
-
-        if (!willLeaveRemainingBalance) {
-          return false;
-        }
-
-        return true;
+        await getAccount(this.wallet.getConnection(), wsolAta);
+        return false;
       } catch {
-        return isSyntheticSolWrap;
+        return true;
       }
     };
 
@@ -175,7 +153,7 @@ export class SwapService {
       return 0n;
     }
 
-    const leftover = BigInt(userBalance) + rentRebateLamports - amountLamports;
+    const leftover = BigInt(userBalance) - amountLamports;
     const requiredLeftoverBig = BigInt(requiredLamports);
 
     if (leftover >= requiredLeftoverBig) {
