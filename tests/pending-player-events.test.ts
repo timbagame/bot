@@ -29,6 +29,7 @@ describe("Pending player events", async () => {
     };
 
     botModule.__test_clearPendingPlayerEvents();
+    botModule.__test_clearPendingGameMessageUpdates();
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "<script>alert(1)</script>",
@@ -50,6 +51,7 @@ describe("Pending player events", async () => {
     const module = await botModulePromise;
     (module.bot.api as any).sendMessage = originalSendMessage;
     module.__test_clearPendingPlayerEvents();
+    module.__test_clearPendingGameMessageUpdates();
     module.__test_resetGameMessageUpdateDebounceMs?.();
     module.__test_resetChatDatabase?.();
     module.__test_resetGameDatabase?.();
@@ -192,7 +194,7 @@ describe("Pending player events", async () => {
   });
 
   test("player event message updates are coalesced per game", async () => {
-    const isolatedModule = await import(`../src/bot?debounce-test=${Date.now()}`);
+    const isolatedModule = botModule;
 
     const target = { chatId: 77, messageId: 301 };
     const player = (await Keypair.generate()).publicKey;
@@ -242,7 +244,7 @@ describe("Pending player events", async () => {
   });
 
   test("game message updates retry after Telegram rate limits", async () => {
-    const isolatedModule = await import(`../src/bot?rate-limit-test=${Date.now()}`);
+    const isolatedModule = botModule;
 
     const target = { chatId: 77, messageId: 301 };
     const player = (await Keypair.generate()).publicKey;

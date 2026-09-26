@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { PublicKey, SystemProgram } from "#solana";
-import { FeeBudgetManager } from "../src/utils/fee-budget";
+import { FeeBudgetManager, loadFeeBudgetConfigFromEnv } from "../src/utils/fee-budget";
 
 const envBackup: Record<string, string | undefined> = {
   FEE_SINGLE_TX_MULTIPLIER: process.env["FEE_SINGLE_TX_MULTIPLIER"],
@@ -24,13 +24,15 @@ describe("fee budget environment parsing", () => {
     process.env["FEE_WRAP_BUFFER_MULTIPLIER"] = "-2";
     process.env["FEE_CACHE_TTL_MS"] = "0";
 
-    const module = await import(`../src/utils/fee-budget.ts?env=${Date.now()}`);
-    const manager: any = module.FeeBudgetManager.createForTest({
-      rpcEndpoint: "http://localhost:8899",
-      getLatestBlockhash: async () => ({ blockhash: "x", lastValidBlockHeight: 1 }),
-      getFeeForMessage: async () => 1,
-      getRecentPrioritizationFees: async () => [],
-    } as any);
+    const manager: any = FeeBudgetManager.createForTest(
+      {
+        rpcEndpoint: "http://localhost:8899",
+        getLatestBlockhash: async () => ({ blockhash: "x", lastValidBlockHeight: 1 }),
+        getFeeForMessage: async () => 1,
+        getRecentPrioritizationFees: async () => [],
+      } as any,
+      loadFeeBudgetConfigFromEnv(),
+    );
 
     expect(manager.config.singleTxMultiplier).toBe(2);
     expect(manager.config.wrapBufferMultiplier).toBe(1);

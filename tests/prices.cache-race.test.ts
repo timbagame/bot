@@ -1,4 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
+import * as pricesModuleForReset from "../src/utils/prices";
+
+function freshPricesModule(): typeof pricesModuleForReset {
+  pricesModuleForReset.__test_resetPriceCache();
+  return pricesModuleForReset;
+}
+
 
 const ORIGINAL_TTL = process.env["PRICES_CACHE_TTL_MS"];
 const ORIGINAL_ENABLED = process.env["PRICES_ENABLED"];
@@ -8,7 +15,7 @@ test("getPriceUSD retains resolved price when TTL expires during fetch", async (
   process.env["PRICES_ENABLED"] = "true";
 
   const symbol = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
-  const pricesModule = await import(`../src/utils/prices?ttlRace=${Date.now()}`);
+  const pricesModule = freshPricesModule();
 
   let calls = 0;
   const fetchImpl = (async (_url: string) => {

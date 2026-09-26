@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { lamports } from "@solana/kit";
 import type { Connection } from "#solana";
-import { FeeBudgetManager } from "../src/utils/fee-budget";
+import { FeeBudgetManager, loadFeeBudgetConfigFromEnv } from "../src/utils/fee-budget";
 
 const createConnectionStub = (
   overrides: Partial<Connection> & { rpcEndpoint?: string } = {},
@@ -41,9 +41,10 @@ describe("FeeBudgetManager", () => {
     process.env["FEE_CACHE_TTL_MS"] = "0";
 
     try {
-      const module = await import(`../src/utils/fee-budget?ttl=${Date.now()}`);
-      const FreshManager = module.FeeBudgetManager;
-      const manager = FreshManager.createForTest(createConnectionStub());
+      const manager = FeeBudgetManager.createForTest(
+        createConnectionStub(),
+        loadFeeBudgetConfigFromEnv(),
+      );
       expect((manager as any).config.cacheTtlMs).toBeGreaterThan(0);
     } finally {
       if (originalTtl === undefined) {

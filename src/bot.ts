@@ -1821,6 +1821,12 @@ export const __test_resetGameMessageUpdateDebounceMs = (): void => {
   gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
 };
 
+export const __test_clearPendingGameMessageUpdates = (): void => {
+  for (const gameAddress of [...pendingGameMessageUpdates.keys()]) {
+    cancelPendingGameMessageUpdate(gameAddress);
+  }
+};
+
 // ================================
 // JOIN NOTIFICATION RATE LIMITING
 // ================================
