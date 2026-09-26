@@ -10,7 +10,7 @@ import {
   type RecoveryRpc,
   type CreationProofProgress,
 } from "./game-creation-recovery";
-import { mnemonicToSeedSync } from "bip39";
+import { mnemonicToSeed } from "bip39";
 import bs58 from "bs58";
 import {
   assertIsFullySignedTransaction,
@@ -358,6 +358,7 @@ export class WalletManager {
 
   // Simplified caching
   private keypairCache = new KeypairCache();
+  private keypairDerivations = new Map<string, Promise<Keypair>>();
   private tokenMetadataCache: ExpiringCache<{
     decimals: number;
     symbol?: string;
@@ -739,12 +740,23 @@ export class WalletManager {
       return cached;
     }
 
-    const seed = mnemonicToSeedSync(this.mnemonic, cacheKey);
-    const keypair = await Keypair.fromSeed(seed.subarray(0, 32));
-    const concurrent = this.keypairCache.get(cacheKey);
-    if (concurrent) return concurrent;
-    this.keypairCache.set(cacheKey, keypair);
-    return keypair;
+    // PBKDF2 (2048 rounds) runs asynchronously so a cold derivation does not block
+    // the event loop; concurrent requests for the same user share one derivation.
+    let pending = this.keypairDerivations.get(cacheKey);
+    if (!pending) {
+      pending = (async () => {
+        const seed = await mnemonicToSeed(this.mnemonic, cacheKey);
+        const keypair = await Keypair.fromSeed(seed.subarray(0, 32));
+        const concurrent = this.keypairCache.get(cacheKey);
+        if (concurrent) return concurrent;
+        this.keypairCache.set(cacheKey, keypair);
+        return keypair;
+      })().finally(() => {
+        this.keypairDerivations.delete(cacheKey);
+      });
+      this.keypairDerivations.set(cacheKey, pending);
+    }
+    return pending;
   }
 
   public async getOperatorKeypair(): Promise<Keypair> {

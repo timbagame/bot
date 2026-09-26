@@ -114,3 +114,25 @@ describe("WalletManager.getBlockchainTime cache", () => {
     expect(slotCalls).toBe(2);
   });
 });
+
+describe("WalletManager.getKeyPair async derivation", () => {
+  test("derives the same keypair as the synchronous BIP39 seed and shares in-flight work", async () => {
+    const { mnemonicToSeedSync } = await import("bip39");
+    const { Keypair } = await import("#solana");
+    const manager = WalletManager.createForTest(mnemonic, {
+      connection: {} as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    const pending = [manager.getKeyPair(4242n), manager.getKeyPair(4242n)];
+    expect((manager as any).keypairDerivations.size).toBe(1);
+    const [first, second] = (await Promise.all(pending)) as [any, any];
+    expect(first).toBe(second);
+    expect((manager as any).keypairDerivations.size).toBe(0);
+
+    const expected = await Keypair.fromSeed(mnemonicToSeedSync(mnemonic, "4242").subarray(0, 32));
+    expect(first.publicKey.toBase58()).toBe(expected.publicKey.toBase58());
+    expect(await manager.getKeyPair(4242n)).toBe(first);
+  });
+});
