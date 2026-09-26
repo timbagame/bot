@@ -201,6 +201,22 @@ type WalletDeps = {
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
+// Name/symbol metadata (Metaplex account, Token-2022 extension, off-chain JSON) rarely
+// changes; keep complete results for hours and retry incomplete ones sooner.
+const FULL_TOKEN_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PARTIAL_TOKEN_METADATA_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type FullTokenMetadata = { decimals: number; symbol?: string; name?: string };
+
+/** True when a known token already carries a display ticker, so metadata need not be loaded. */
+const hasRealTicker = (token: KnownTokenDefinition | undefined, mint: string): boolean => {
+  const ticker = token?.token_ticker?.trim().toUpperCase();
+  if (!ticker || ticker === "UNKNOWN" || ticker === mint.toUpperCase()) {
+    return false;
+  }
+  // TokenManager stores TOKEN_<MINT> when registration could not resolve a symbol.
+  return !ticker.startsWith("TOKEN_");
+};
 const TOKEN_METADATA_LOOKUP_TIMEOUT_MS = 5_000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -368,6 +384,10 @@ export class WalletManager {
   private walletTokenBalanceCache =
     createExpiringCache<WalletTokenBalance[]>(WALLET_RPC_CACHE_TTL_MS);
   private walletCacheListeners = new Set<(telegramId: bigint | number | string) => void>();
+  private fullTokenMetadataCache = createExpiringCache<FullTokenMetadata>(
+    FULL_TOKEN_METADATA_CACHE_TTL_MS,
+  );
+  private fullTokenMetadataInFlight = new Map<string, Promise<FullTokenMetadata>>();
 
   public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
     this.keypairCache = new KeypairCache(
@@ -975,7 +995,11 @@ export class WalletManager {
       }
 
       const metadataLoader = this.createMetadataLoader();
-      await metadataLoader.prefetch(metadataPrefetchMints);
+      await metadataLoader.prefetch(
+        [...metadataPrefetchMints].filter(
+          (mint) => mint !== WSOL_MINT && !hasRealTicker(knownTokensMap.get(mint), mint),
+        ),
+      );
 
       const results: WalletTokenBalance[] = [];
       for (const account of parsedAccounts) {
@@ -1094,7 +1118,11 @@ export class WalletManager {
     const page = Math.min(Math.max(0, Math.trunc(requestedPage)), pageCount - 1);
     const selected = rawBalances.slice(page * normalizedPageSize, (page + 1) * normalizedPageSize);
     const metadataLoader = this.createMetadataLoader();
-    await metadataLoader.prefetch(selected.map((entry) => entry.mint));
+    await metadataLoader.prefetch(
+      selected
+        .map((entry) => entry.mint)
+        .filter((mint) => mint !== WSOL_MINT && !hasRealTicker(knownByMint.get(mint), mint)),
+    );
 
     const tokenBalances: WalletTokenBalance[] = [];
     for (const entry of selected) {
@@ -1508,11 +1536,14 @@ export class WalletManager {
     }
 
     let finalTicker = knownToken.token_ticker;
-    const metadata = await metadataLoader.load(mint);
     if (mint === WSOL_MINT) {
       finalTicker = "WSOL";
-    } else if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
-      finalTicker = sanitizeTokenSymbol(metadata.symbol, mint);
+    } else if (!hasRealTicker(knownToken, mint)) {
+      // Only tokens without a usable ticker need their metadata loaded.
+      const metadata = await metadataLoader.load(mint);
+      if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
+        finalTicker = sanitizeTokenSymbol(metadata.symbol, mint);
+      }
     }
 
     return {
@@ -1572,9 +1603,34 @@ export class WalletManager {
     this.notifyWalletCacheCleared(telegramId);
   }
 
-  public async getFullTokenMetadata(
-    tokenMint: string,
-  ): Promise<{ decimals: number; symbol?: string; name?: string }> {
+  public async getFullTokenMetadata(tokenMint: string): Promise<FullTokenMetadata> {
+    const cached = this.fullTokenMetadataCache.get(tokenMint);
+    if (cached) {
+      return { ...cached };
+    }
+
+    let pending = this.fullTokenMetadataInFlight.get(tokenMint);
+    if (!pending) {
+      pending = this.loadFullTokenMetadata(tokenMint)
+        .then((metadata) => {
+          this.fullTokenMetadataCache.setWithTTL(
+            tokenMint,
+            metadata,
+            metadata.symbol
+              ? FULL_TOKEN_METADATA_CACHE_TTL_MS
+              : PARTIAL_TOKEN_METADATA_CACHE_TTL_MS,
+          );
+          return metadata;
+        })
+        .finally(() => {
+          this.fullTokenMetadataInFlight.delete(tokenMint);
+        });
+      this.fullTokenMetadataInFlight.set(tokenMint, pending);
+    }
+    return { ...(await pending) };
+  }
+
+  private async loadFullTokenMetadata(tokenMint: string): Promise<FullTokenMetadata> {
     let decimalsCache: number | null = null;
     const getDecimals = async (): Promise<number | null> => {
       if (decimalsCache !== null) {

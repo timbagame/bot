@@ -294,7 +294,14 @@ describe("WalletManager.getAllWalletTokenBalances", () => {
       decimals: 6,
     });
 
-    const known = [{ token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 }];
+    // A placeholder ticker still needs metadata; real tickers skip the lookup.
+    const known = [
+      {
+        token_mint: mint.toBase58(),
+        token_ticker: `TOKEN_${mint.toBase58().toUpperCase()}`,
+        decimals: 6,
+      },
+    ];
 
     let invocations = 0;
     let failures = 0;
