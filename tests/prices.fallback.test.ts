@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { WSOL_MINT } from "../src/utils/token-registry";
+import { PRICES_TIMEOUT_MS } from "../src/utils/constants";
+import type { FetchLike } from "../src/types";
 import * as pricesModuleForReset from "../src/utils/prices";
 
 function freshPricesModule(): typeof pricesModuleForReset {
@@ -7,35 +9,38 @@ function freshPricesModule(): typeof pricesModuleForReset {
   return pricesModuleForReset;
 }
 
-const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
-
 describe("price utilities fallbacks", () => {
-  test("withTimeout rejects long fetches and returns zero", async () => {
-    process.env["PRICES_TIMEOUT_MS"] = "1";
-    const module = freshPricesModule();
-    try {
-      const slowFetch = (async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return {
-          ok: true,
-          async json() {
-            return { data: {} };
-          },
-        } as any;
-      }) as any;
+  test(
+    "aborts a stalled price fetch and returns zero",
+    async () => {
+      const module = freshPricesModule();
+      let aborted = false;
+      const slowFetch: FetchLike = async (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("price fetch must receive a cancellation signal"));
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(new DOMException("request aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+
       const price = await module.getPriceUSD(
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         slowFetch,
       );
+      expect(aborted).toBe(true);
       expect(price).toBe(0);
-    } finally {
-      if (originalTimeout === undefined) {
-        delete process.env["PRICES_TIMEOUT_MS"];
-      } else {
-        process.env["PRICES_TIMEOUT_MS"] = originalTimeout;
-      }
-    }
-  });
+    },
+    PRICES_TIMEOUT_MS + 1_000,
+  );
 
   test("returns zero when Jupiter fails to respond (market cap scenario)", async () => {
     const fetchImpl = (async (_url: string) => {
