@@ -1,7 +1,7 @@
 /**
  * Tests for safeAnswerCallbackQuery rate limiting and throttling integration
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   safeAnswerCallbackQuery,
   safeAnswerCallbackQueryThrottled,
@@ -22,7 +22,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
   });
 
   describe("rate limit tracking", () => {
-    it("skips callback answer when chat is rate limited", async () => {
+    test("skips callback answer when chat is rate limited", async () => {
       const rateLimiter = getRateLimiter();
       rateLimiter.recordRateLimit(30, 12345); // Rate limit chat 12345 for 30s
 
@@ -54,7 +54,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
       }
     });
 
-    it("records rate limit when 429 error is received", async () => {
+    test("records rate limit when 429 error is received", async () => {
       const rateLimiter = getRateLimiter();
 
       const ctx = {
@@ -86,7 +86,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
       }
     });
 
-    it("proceeds when chat is not rate limited", async () => {
+    test("proceeds when chat is not rate limited", async () => {
       const answerCalls: any[] = [];
       const ctx = {
         chat: { id: 77777 },
@@ -103,7 +103,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
   });
 
   describe("callback expired error handling", () => {
-    it("handles query is too old gracefully", async () => {
+    test("handles query is too old gracefully", async () => {
       const ctx = {
         chat: { id: 111 },
         callbackQuery: { id: "old_cb" },
@@ -126,7 +126,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
       }
     });
 
-    it("handles query_id_invalid gracefully", async () => {
+    test("handles query_id_invalid gracefully", async () => {
       const ctx = {
         chat: { id: 222 },
         callbackQuery: { id: "invalid_cb" },
@@ -150,7 +150,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
   });
 
   describe("queue integration", () => {
-    it("uses queue when useQueue option is true and queue is initialized", async () => {
+    test("uses queue when useQueue option is true and queue is initialized", async () => {
       const queuedItems: Array<{
         id: string;
         text?: string;
@@ -179,7 +179,7 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
       expect(queuedItems[0]).toEqual({ id: "queue_cb", text: "Queued message" });
     });
 
-    it("falls back to direct call when queue is not initialized", async () => {
+    test("falls back to direct call when queue is not initialized", async () => {
       __test_resetGlobals(); // Ensure queue is not initialized
 
       const answerCalls: any[] = [];
@@ -207,7 +207,7 @@ describe("safeAnswerCallbackQueryThrottled", () => {
     __test_resetGlobals();
   });
 
-  it("uses the queue automatically", async () => {
+  test("uses the queue automatically", async () => {
     const queuedItems: Array<{ id: string; text?: string }> = [];
 
     initCallbackQueue(async (id, text) => {
@@ -235,7 +235,7 @@ describe("safeAnswerCallbackQueryThrottled", () => {
     });
   });
 
-  it("falls back to direct when queue not initialized", async () => {
+  test("falls back to direct when queue not initialized", async () => {
     __test_resetGlobals();
 
     const answerCalls: any[] = [];
@@ -258,7 +258,7 @@ describe("rate limiter state persistence across calls", () => {
     __test_resetGlobals();
   });
 
-  it("maintains rate limit state across multiple calls", async () => {
+  test("maintains rate limit state across multiple calls", async () => {
     // First call triggers 429
     const ctx1 = {
       chat: { id: 888 },
@@ -297,7 +297,7 @@ describe("rate limiter state persistence across calls", () => {
     }
   });
 
-  it("different chats have independent rate limits", async () => {
+  test("different chats have independent rate limits", async () => {
     // Rate limit chat 1000
     getRateLimiter().recordRateLimit(30, 1000);
 

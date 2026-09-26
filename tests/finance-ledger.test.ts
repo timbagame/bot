@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { PublicKey } from "#solana";
 import { FinanceLedgerService, referralDeltaFromTransaction } from "../src/services/finance-ledger";
 
@@ -21,14 +21,14 @@ const transaction = (pre: string, post: string, legacy = false) =>
   }) as any;
 
 describe("Jupiter referral ledger", () => {
-  it("reads earned fees from versioned-transaction token deltas", () => {
+  test("reads earned fees from versioned-transaction token deltas", () => {
     expect(referralDeltaFromTransaction(transaction("100", "125"), ACCOUNT.toBase58())).toEqual({
       mint: MINT,
       delta: 25n,
     });
   });
 
-  it("reads claims as negative deltas in legacy transactions", () => {
+  test("reads claims as negative deltas in legacy transactions", () => {
     expect(referralDeltaFromTransaction(transaction("125", "0", true), ACCOUNT.toBase58())).toEqual(
       { mint: MINT, delta: -125n },
     );
@@ -100,7 +100,7 @@ describe("incremental finance backfill", () => {
     getReferralTokenAccountsV2: async () => ({ tokenAccounts: [], token2022Accounts: [] }),
   } as any;
 
-  it("persists a cursor after every transaction", async () => {
+  test("persists a cursor after every transaction", async () => {
     const history = createHistory();
     const connection = {
       getSignaturesForAddress: async () => [
@@ -132,7 +132,7 @@ describe("incremental finance backfill", () => {
     expect(history.events).toHaveLength(2);
   });
 
-  it("keeps completed transaction progress when a later request is rate-limited", async () => {
+  test("keeps completed transaction progress when a later request is rate-limited", async () => {
     const history = createHistory();
     const connection = {
       getSignaturesForAddress: async () => [
@@ -161,7 +161,7 @@ describe("incremental finance backfill", () => {
     expect(history.errors.at(-1)).toContain("429 Too Many Requests");
   });
 
-  it("advances past program txs when current IDL throws on legacy event layouts", async () => {
+  test("advances past program txs when current IDL throws on legacy event layouts", async () => {
     const programSource = {
       ...source,
       sourceKey: `program:${OTHER.toBase58()}`,

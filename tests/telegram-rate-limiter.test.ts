@@ -1,7 +1,7 @@
 /**
  * Tests for Telegram Rate Limiter utilities
  */
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import {
   TelegramRateLimiter,
   CallbackAnswerQueue,
@@ -24,24 +24,24 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("isLimited", () => {
-    it("returns false when no limit is set", () => {
+    test("returns false when no limit is set", () => {
       expect(limiter.isLimited(123)).toBe(false);
       expect(limiter.isLimited()).toBe(false);
     });
 
-    it("returns true when chat is rate limited", () => {
+    test("returns true when chat is rate limited", () => {
       limiter.recordRateLimit(5, 123);
       expect(limiter.isLimited(123)).toBe(true);
       expect(limiter.isLimited(456)).toBe(false);
     });
 
-    it("returns true when globally rate limited", () => {
+    test("returns true when globally rate limited", () => {
       limiter.recordRateLimit(5);
       expect(limiter.isLimited(123)).toBe(true);
       expect(limiter.isLimited()).toBe(true);
     });
 
-    it("returns false after limit expires", async () => {
+    test("returns false after limit expires", async () => {
       limiter.recordRateLimit(0.01, 123); // 10ms
       expect(limiter.isLimited(123)).toBe(true);
       await new Promise((r) => setTimeout(r, 15));
@@ -50,11 +50,11 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("getWaitTimeMs", () => {
-    it("returns 0 when no limit", () => {
+    test("returns 0 when no limit", () => {
       expect(limiter.getWaitTimeMs(123)).toBe(0);
     });
 
-    it("returns remaining time when limited", () => {
+    test("returns remaining time when limited", () => {
       limiter.recordRateLimit(1, 123);
       const wait = limiter.getWaitTimeMs(123);
       expect(wait).toBeGreaterThan(900);
@@ -63,13 +63,13 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("recordRateLimit", () => {
-    it("records per-chat limit", () => {
+    test("records per-chat limit", () => {
       limiter.recordRateLimit(2, 123);
       expect(limiter.isLimited(123)).toBe(true);
       expect(limiter.isLimited(456)).toBe(false);
     });
 
-    it("records global limit without chatId", () => {
+    test("records global limit without chatId", () => {
       limiter.recordRateLimit(2);
       expect(limiter.isLimited(123)).toBe(true);
       expect(limiter.isLimited()).toBe(true);
@@ -77,13 +77,13 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("clearLimit", () => {
-    it("clears per-chat limit", () => {
+    test("clears per-chat limit", () => {
       limiter.recordRateLimit(5, 123);
       limiter.clearLimit(123);
       expect(limiter.isLimited(123)).toBe(false);
     });
 
-    it("clears global limit", () => {
+    test("clears global limit", () => {
       limiter.recordRateLimit(5);
       limiter.clearLimit();
       expect(limiter.isLimited()).toBe(false);
@@ -91,7 +91,7 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("clearAll", () => {
-    it("clears all limits", () => {
+    test("clears all limits", () => {
       limiter.recordRateLimit(5, 123);
       limiter.recordRateLimit(5, 456);
       limiter.recordRateLimit(5);
@@ -103,19 +103,19 @@ describe("TelegramRateLimiter", () => {
   });
 
   describe("throttle", () => {
-    it("executes immediately when not limited", async () => {
+    test("executes immediately when not limited", async () => {
       const result = await limiter.throttle(123, async () => "success");
       expect(result).toBe("success");
     });
 
-    it("throws when limit exceeds maxWait", async () => {
+    test("throws when limit exceeds maxWait", async () => {
       limiter.recordRateLimit(10, 123);
       await expect(limiter.throttle(123, async () => "success", { maxWait: 100 })).rejects.toThrow(
         /exceeds max wait/,
       );
     });
 
-    it("waits when limited but within maxWait", async () => {
+    test("waits when limited but within maxWait", async () => {
       limiter.recordRateLimit(0.05, 123); // 50ms
       const start = Date.now();
       const result = await limiter.throttle(123, async () => "success", {
@@ -143,14 +143,14 @@ describe("CallbackAnswerQueue", () => {
     });
   });
 
-  it("processes enqueued callbacks", async () => {
+  test("processes enqueued callbacks", async () => {
     queue.enqueue("cb1", "Hello");
     await new Promise((r) => setTimeout(r, 50));
     expect(answerCalls).toHaveLength(1);
     expect(answerCalls[0]).toEqual({ id: "cb1", text: "Hello", showAlert: undefined });
   });
 
-  it("throttles between callbacks", async () => {
+  test("throttles between callbacks", async () => {
     queue.enqueue("cb1", "First");
     queue.enqueue("cb2", "Second");
     queue.enqueue("cb3", "Third");
@@ -158,7 +158,7 @@ describe("CallbackAnswerQueue", () => {
     expect(answerCalls).toHaveLength(3);
   });
 
-  it("drops oldest when queue is full", () => {
+  test("drops oldest when queue is full", () => {
     for (let i = 0; i < 10; i++) {
       queue.enqueue(`cb${i}`, `msg${i}`);
     }
@@ -166,14 +166,14 @@ describe("CallbackAnswerQueue", () => {
     expect(queue.length).toBeLessThanOrEqual(5);
   });
 
-  it("clears the queue", () => {
+  test("clears the queue", () => {
     queue.enqueue("cb1", "test");
     queue.clear();
     expect(queue.length).toBe(0);
     expect(queue.isProcessing).toBe(false);
   });
 
-  it("handles callback answer errors gracefully", async () => {
+  test("handles callback answer errors gracefully", async () => {
     let callCount = 0;
     const errorQueue = new CallbackAnswerQueue({
       answerFn: async () => {
@@ -189,7 +189,7 @@ describe("CallbackAnswerQueue", () => {
     // Should not throw, just log warning
   });
 
-  it("ignores callback expired errors silently", async () => {
+  test("ignores callback expired errors silently", async () => {
     let callCount = 0;
     const errorQueue = new CallbackAnswerQueue({
       answerFn: async () => {
@@ -213,13 +213,13 @@ describe("GameOperationQueue", () => {
     __test_resetGlobals();
   });
 
-  it("executes operations immediately when no lock", async () => {
+  test("executes operations immediately when no lock", async () => {
     const result = await queue.withLock("game1", "test op", async () => "success");
     expect(result).toBe("success");
     expect(queue.isLocked("game1")).toBe(false);
   });
 
-  it("serializes operations on the same game", async () => {
+  test("serializes operations on the same game", async () => {
     const order: number[] = [];
 
     const op1 = queue.withLock("game1", "op1", async () => {
@@ -239,7 +239,7 @@ describe("GameOperationQueue", () => {
     expect(order).toEqual([1, 2]); // Must be in order
   });
 
-  it("allows parallel operations on different games", async () => {
+  test("allows parallel operations on different games", async () => {
     const order: string[] = [];
 
     const op1 = queue.withLock("game1", "op1", async () => {
@@ -257,7 +257,7 @@ describe("GameOperationQueue", () => {
     expect(order[1]).toBe("game1");
   });
 
-  it("releases lock after error", async () => {
+  test("releases lock after error", async () => {
     try {
       await queue.withLock("game1", "error op", async () => {
         throw new Error("Test error");
@@ -268,7 +268,7 @@ describe("GameOperationQueue", () => {
     expect(queue.isLocked("game1")).toBe(false);
   });
 
-  it("reports active locks count", async () => {
+  test("reports active locks count", async () => {
     expect(queue.activeLocks).toBe(0);
 
     const op = queue.withLock("game1", "count op", async () => {
@@ -283,7 +283,7 @@ describe("GameOperationQueue", () => {
     expect(queue.activeLocks).toBe(0);
   });
 
-  it("clears all locks", async () => {
+  test("clears all locks", async () => {
     const op1 = queue.withLock("game1", "clear op1", async () => {
       await new Promise((r) => setTimeout(r, 100));
     });
@@ -299,7 +299,7 @@ describe("GameOperationQueue", () => {
     await Promise.all([op1, op2]);
   });
 
-  it("times out stuck operations", async () => {
+  test("times out stuck operations", async () => {
     const fastQueue = new GameOperationQueue({ timeoutMs: 50 });
 
     let completed = false;
@@ -319,7 +319,7 @@ describe("GameOperationQueue", () => {
 });
 
 describe("createNextGuard", () => {
-  it("calls next once", async () => {
+  test("calls next once", async () => {
     let callCount = 0;
     const next = async () => {
       callCount++;
@@ -330,7 +330,7 @@ describe("createNextGuard", () => {
     expect(callCount).toBe(1);
   });
 
-  it("ignores duplicate calls", async () => {
+  test("ignores duplicate calls", async () => {
     let callCount = 0;
     const next = async () => {
       callCount++;
@@ -343,7 +343,7 @@ describe("createNextGuard", () => {
     expect(callCount).toBe(1);
   });
 
-  it("logs warning on duplicate call", async () => {
+  test("logs warning on duplicate call", async () => {
     const warnings: string[] = [];
     const originalWarn = console.warn;
     console.warn = (...args) => warnings.push(args.join(" "));
@@ -363,65 +363,65 @@ describe("createNextGuard", () => {
 
 describe("Error helpers", () => {
   describe("isCallbackExpiredError", () => {
-    it("returns true for query_id_invalid", () => {
+    test("returns true for query_id_invalid", () => {
       expect(isCallbackExpiredError(new Error("query_id_invalid"))).toBe(true);
     });
 
-    it("returns true for query is too old", () => {
+    test("returns true for query is too old", () => {
       expect(isCallbackExpiredError(new Error("Query is too old"))).toBe(true);
     });
 
-    it("returns true for callback query expired", () => {
+    test("returns true for callback query expired", () => {
       expect(isCallbackExpiredError(new Error("callback query expired"))).toBe(true);
     });
 
-    it("returns false for other errors", () => {
+    test("returns false for other errors", () => {
       expect(isCallbackExpiredError(new Error("some other error"))).toBe(false);
     });
 
-    it("returns false for non-Error objects", () => {
+    test("returns false for non-Error objects", () => {
       expect(isCallbackExpiredError("string error")).toBe(false);
       expect(isCallbackExpiredError(null)).toBe(false);
     });
   });
 
   describe("isRateLimitError", () => {
-    it("returns true for 429 in message", () => {
+    test("returns true for 429 in message", () => {
       expect(isRateLimitError(new Error("Error 429"))).toBe(true);
     });
 
-    it("returns true for Too Many Requests", () => {
+    test("returns true for Too Many Requests", () => {
       expect(isRateLimitError(new Error("Too Many Requests"))).toBe(true);
     });
 
-    it("returns true for error_code 429", () => {
+    test("returns true for error_code 429", () => {
       const error = new Error("Rate limited") as any;
       error.error_code = 429;
       expect(isRateLimitError(error)).toBe(true);
     });
 
-    it("returns false for other errors", () => {
+    test("returns false for other errors", () => {
       expect(isRateLimitError(new Error("Not found"))).toBe(false);
     });
   });
 
   describe("extractRetryAfter", () => {
-    it("extracts from message pattern", () => {
+    test("extracts from message pattern", () => {
       expect(extractRetryAfter(new Error("retry after 30"))).toBe(30);
       expect(extractRetryAfter(new Error("Retry After 45"))).toBe(45);
     });
 
-    it("extracts from parameters object", () => {
+    test("extracts from parameters object", () => {
       const error = new Error("Rate limited") as any;
       error.parameters = { retry_after: 25 };
       expect(extractRetryAfter(error)).toBe(25);
     });
 
-    it("returns null when not found", () => {
+    test("returns null when not found", () => {
       expect(extractRetryAfter(new Error("No retry info"))).toBe(null);
     });
 
-    it("returns null for non-Error objects", () => {
+    test("returns null for non-Error objects", () => {
       expect(extractRetryAfter("string")).toBe(null);
     });
   });
@@ -432,13 +432,13 @@ describe("Singleton getters", () => {
     __test_resetGlobals();
   });
 
-  it("getRateLimiter returns same instance", () => {
+  test("getRateLimiter returns same instance", () => {
     const limiter1 = getRateLimiter();
     const limiter2 = getRateLimiter();
     expect(limiter1).toBe(limiter2);
   });
 
-  it("getGameOperationQueue returns same instance", () => {
+  test("getGameOperationQueue returns same instance", () => {
     const queue1 = getGameOperationQueue();
     const queue2 = getGameOperationQueue();
     expect(queue1).toBe(queue2);

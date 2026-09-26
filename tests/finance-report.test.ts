@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { buildFinanceReport, resolveFinanceWindow } from "../src/services/finance-report";
 import {
   createFinanceHandlers,
@@ -42,7 +42,7 @@ const metadata = async (mint: string) =>
 const price = async (mint: string) => (mint === TIMBA ? 0.01 : mint === SOL ? 100 : 1);
 
 describe("finance configuration", () => {
-  it("keeps finance access and expenses in code", () => {
+  test("keeps finance access and expenses in code", () => {
     expect([...FINANCE_ADMIN_TELEGRAM_IDS]).toEqual(["5162530"]);
     expect(FINANCE_MONTHLY_EXPENSES).toEqual([
       { category: "hosting", description: "DigitalOcean VPS", amountUsd: 7 },
@@ -51,7 +51,7 @@ describe("finance configuration", () => {
     expect(FINANCE_CONTRACT_RENT_LAMPORTS).toBe(2_437_788_720n);
   });
 
-  it("offers rolling 7, 30, and 90 day windows", () => {
+  test("offers rolling 7, 30, and 90 day windows", () => {
     expect(resolveFinanceWindow("7d", NOW).label).toBe("Last 7 days");
     expect(resolveFinanceWindow("30d", NOW).monthlyExpenseFactor).toBe(1);
     expect(resolveFinanceWindow("90d", NOW)).toMatchObject({
@@ -62,7 +62,7 @@ describe("finance configuration", () => {
 });
 
 describe("finance report", () => {
-  it("separates earned, claimed, and currently claimable fees", async () => {
+  test("separates earned, claimed, and currently claimable fees", async () => {
     const report = await buildFinanceReport("30d", {
       now: NOW,
       financeEvents: [
@@ -120,7 +120,7 @@ describe("finance report", () => {
     ).toContain("backfill 1/4 sources, 30 transactions indexed; retrying after an RPC error");
   });
 
-  it("subtracts only unreimbursed sponsored transaction costs", async () => {
+  test("subtracts only unreimbursed sponsored transaction costs", async () => {
     const report = await buildFinanceReport("30d", {
       now: NOW,
       financeEvents: [],
@@ -170,7 +170,7 @@ describe("finance authorization", () => {
     monthlyExpenses: [],
   });
 
-  it("silently rejects non-admins and group chats", async () => {
+  test("silently rejects non-admins and group chats", async () => {
     const handlers = createFinanceHandlers(makeDependencies());
     let replies = 0;
     await handlers.handleCommand({
@@ -186,7 +186,7 @@ describe("finance authorization", () => {
     expect(replies).toBe(0);
   });
 
-  it("returns the report to an allowlisted private-chat admin", async () => {
+  test("returns the report to an allowlisted private-chat admin", async () => {
     const backgroundTasks: Promise<void>[] = [];
     const handlers = createFinanceHandlers({
       ...makeDependencies(),
@@ -207,7 +207,7 @@ describe("finance authorization", () => {
     expect(message).toContain("Timba Finance");
   });
 
-  it("returns after acknowledging while report assembly continues in the background", async () => {
+  test("returns after acknowledging while report assembly continues in the background", async () => {
     const order: string[] = [];
     const backgroundTasks: Promise<void>[] = [];
     let finishSync!: () => void;
@@ -245,7 +245,7 @@ describe("finance authorization", () => {
     await Promise.all(backgroundTasks);
   });
 
-  it("does not start a second background report for the same admin", async () => {
+  test("does not start a second background report for the same admin", async () => {
     const backgroundTasks: Promise<void>[] = [];
     const replies: string[] = [];
     let finishSync!: () => void;

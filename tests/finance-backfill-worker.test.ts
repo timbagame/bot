@@ -1,17 +1,17 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   FinanceBackfillWorker,
   financeBackfillRetryDelay,
 } from "../src/services/finance-backfill-worker";
 
 describe("finance backfill worker", () => {
-  it("caps exponential retry delays", () => {
+  test("caps exponential retry delays", () => {
     expect(financeBackfillRetryDelay(1, 1_000, 8_000)).toBe(1_000);
     expect(financeBackfillRetryDelay(3, 1_000, 8_000)).toBe(4_000);
     expect(financeBackfillRetryDelay(8, 1_000, 8_000)).toBe(8_000);
   });
 
-  it("exposes a single batch run for deterministic execution", async () => {
+  test("exposes a single batch run for deterministic execution", async () => {
     const result = {
       complete: false,
       processedTransactions: 10,
