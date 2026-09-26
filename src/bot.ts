@@ -114,6 +114,7 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  answerCallbackWithGrace,
   requireTelegramId,
   getRequiredTelegramIdForContext,
   resolveTelegramIdOrRespond,
@@ -4300,7 +4301,7 @@ const handleGamesTabCallback = async (ctx: Context) => {
 // Tab/pagination callback for /games command
 bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx: Context) => {
   try {
-    await handleGamesTabCallback(ctx);
+    await answerCallbackWithGrace(ctx, () => handleGamesTabCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games tab");
   }
@@ -4309,44 +4310,46 @@ bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx
 // Refresh callback for /games command
 bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
   try {
-    const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
-    if (!match || !match[1]) {
-      await safeAnswerCallbackQuery(ctx, "Invalid request.");
-      return;
-    }
-
-    const ownerId = match[1];
-    const callerId = ctx.from?.id?.toString();
-    if (callerId !== ownerId) {
-      await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
-      return;
-    }
-
-    const telegramId = BigInt(ownerId);
-    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "Player";
-
-    const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
-    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
-
-    try {
-      await ctx.editMessageText(messageText, {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: keyboard },
-        link_preview_options: { is_disabled: true },
-      });
-    } catch (editError) {
-      if (!isMessageNotModified(editError)) {
-        throw editError;
-      }
-    }
-    await safeAnswerCallbackQuery(ctx, "Refreshed!");
+    await answerCallbackWithGrace(ctx, () => handleGamesRefreshCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games refresh");
   }
 });
+
+const handleGamesRefreshCallback = async (ctx: Context): Promise<void> => {
+  const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
+  if (!match || !match[1]) {
+    await safeAnswerCallbackQuery(ctx, "Invalid request.");
+    return;
+  }
+
+  const ownerId = match[1];
+  const callerId = ctx.from?.id?.toString();
+  if (callerId !== ownerId) {
+    await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
+    return;
+  }
+
+  const telegramId = BigInt(ownerId);
+  const result = await gameManager.getUserGamesHistory(ctx, telegramId);
+  const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "Player";
+
+  const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
+  const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
+
+  try {
+    await ctx.editMessageText(messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (editError) {
+    if (!isMessageNotModified(editError)) {
+      throw editError;
+    }
+  }
+  await safeAnswerCallbackQuery(ctx, "Refreshed!");
+};
 
 export const __test_handleActiveCommand = handleActiveCommand;
 export const __test_handleGamesTabCallback = handleGamesTabCallback;
@@ -5733,11 +5736,16 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      await showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
-        toMint: quoteOverrides.toMint,
-        toDecimals: quoteOverrides.toDecimals,
-      });
-      await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
+      // The quote screen shows its own progress; the toast only covers slow starts.
+      await answerCallbackWithGrace(
+        ctx,
+        () =>
+          showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
+            toMint: quoteOverrides.toMint,
+            toDecimals: quoteOverrides.toDecimals,
+          }),
+        { pendingText: "⏳ Getting a quote…" },
+      );
     } catch (error) {
       console.error("Error in swap amount selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");

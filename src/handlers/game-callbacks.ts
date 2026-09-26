@@ -46,6 +46,8 @@ import {
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
   containsBalanceInfo,
+  answerCallbackWithGrace,
+  replyToCallbackMessage,
 } from "../utils/context-helpers";
 import { formatTokenDisplay, formatUsdValue } from "../utils/format-amount";
 import {
@@ -104,6 +106,20 @@ export type GameCallbacksModule = {
   __test_handleJoinGame: HandleJoinGameFn;
   __test_handleGenericGameCallback: (ctx: Context, next: NextFunction) => Promise<void>;
 };
+
+export const JOIN_PENDING_TOAST = "⏳ Joining…";
+
+/**
+ * After the "Joining…" toast, a join result can no longer be shown as a toast.
+ * Success is visible on the refreshed game card; anything else is posted as a
+ * quiet reply so the player learns why they are not on the card.
+ */
+const replyWithLateJoinFailure =
+  (ctx: Context) =>
+  async (text: string): Promise<void> => {
+    if (text.startsWith("✅")) return;
+    await replyToCallbackMessage(ctx, text);
+  };
 
 const NON_GAME_CALLBACK_NAMES = [
   "main_wallet",
@@ -870,10 +886,17 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
       switch (action) {
         case "join":
-          await handleJoinGame(ctx, gamePda, telegramId, game);
+          // Joining signs and confirms a transaction. Show progress if it is
+          // not done quickly; the updated game card then shows the result.
+          await answerCallbackWithGrace(ctx, () => handleJoinGame(ctx, gamePda, telegramId, game), {
+            pendingText: JOIN_PENDING_TOAST,
+            onLateAnswer: replyWithLateJoinFailure(ctx),
+          });
           break;
         case "refresh":
-          await handleRefreshGameCallback(ctx, gamePda, gameAddress);
+          await answerCallbackWithGrace(ctx, () =>
+            handleRefreshGameCallback(ctx, gamePda, gameAddress),
+          );
           break;
         default:
           await next();
