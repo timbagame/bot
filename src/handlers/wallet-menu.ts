@@ -358,7 +358,52 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     walletRpcCacheTtlMs = WALLET_RPC_CACHE_TTL_MS;
   };
 
+  /**
+   * When one wallet page already holds every token (all known to the bot), store it
+   * as the full snapshot so an action menu opened right after reuses it instead
+   * of reading the same balances again.
+   */
+  const seedSnapshotFromPage = (
+    telegramId: bigint,
+    fetchStart: number,
+    solBalance: number,
+    tokenPage: Awaited<ReturnType<WalletManager["getWalletTokenBalancePage"]>>,
+    knownTokens: WalletBalancesSnapshot["knownTokens"],
+  ) => {
+    const heldMints = tokenPage.heldMints ?? [];
+    const knownMints = new Set(knownTokens.map((token) => token.token_mint));
+    const coversWholeWallet =
+      tokenPage.complete === true &&
+      tokenPage.pageCount <= 1 &&
+      tokenPage.tokenBalances.length === heldMints.length &&
+      tokenPage.tokenBalances.every((token) => knownMints.has(token.mint));
+    if (!coversWholeWallet) {
+      return;
+    }
+
+    const cacheKey = getCacheKey(telegramId);
+    if ((cacheInvalidations.get(cacheKey) ?? 0) >= fetchStart) {
+      return;
+    }
+    // Match getAllWalletTokenBalances ordering.
+    const tokenBalances = tokenPage.tokenBalances
+      .map((token) => ({ ...token }))
+      .sort((left, right) => left.ticker.localeCompare(right.ticker));
+    const wsolBalance = tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
+    walletSnapshotCache.set(cacheKey, {
+      snapshot: {
+        solBalance,
+        nativeSolBalance: solBalance,
+        wsolBalance,
+        tokenBalances,
+        knownTokens,
+      },
+      expiresAt: Date.now() + walletRpcCacheTtlMs,
+    });
+  };
+
   const getWalletPageData = async (telegramId: bigint, page: number, pageSize: number) => {
+    const fetchStart = Date.now();
     enforceWalletBudget(telegramId);
     const tokenManager = getTokenManager();
     const knownTokens = tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
@@ -371,6 +416,7 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       heldMints: tokenPage.heldMints ?? [],
       scannedMints: tokenPage.heldMints ?? [],
     });
+    seedSnapshotFromPage(telegramId, fetchStart, solBalance, tokenPage, knownTokens);
     return { solBalance, ...tokenPage };
   };
 
