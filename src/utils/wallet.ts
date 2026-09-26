@@ -10,7 +10,7 @@ import {
   type RecoveryRpc,
   type CreationProofProgress,
 } from "./game-creation-recovery";
-import { mnemonicToSeedSync } from "bip39";
+import { mnemonicToSeed } from "bip39";
 import bs58 from "bs58";
 import {
   assertIsFullySignedTransaction,
@@ -61,6 +61,8 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
+  WALLET_THROTTLE_MAX_KEYS,
+  BLOCKCHAIN_TIME_CACHE_MS,
   BLOCKHASH_CACHE_DURATION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
@@ -199,6 +201,22 @@ type WalletDeps = {
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
+// Name/symbol metadata (Metaplex account, Token-2022 extension, off-chain JSON) rarely
+// changes; keep complete results for hours and retry incomplete ones sooner.
+const FULL_TOKEN_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PARTIAL_TOKEN_METADATA_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type FullTokenMetadata = { decimals: number; symbol?: string; name?: string };
+
+/** True when a known token already carries a display ticker, so metadata need not be loaded. */
+const hasRealTicker = (token: KnownTokenDefinition | undefined, mint: string): boolean => {
+  const ticker = token?.token_ticker?.trim().toUpperCase();
+  if (!ticker || ticker === "UNKNOWN" || ticker === mint.toUpperCase()) {
+    return false;
+  }
+  // TokenManager stores TOKEN_<MINT> when registration could not resolve a symbol.
+  return !ticker.startsWith("TOKEN_");
+};
 const TOKEN_METADATA_LOOKUP_TIMEOUT_MS = 5_000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -330,12 +348,17 @@ export class WalletManager {
     mint: string,
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private operatorKeypair: Keypair | null = null;
-  private lastCallTime: number = 0;
+  // Per-key rate limiting: one entry per wallet (or system resource), so one user's
+  // reads or a background job never delay another user's requests.
+  private readonly lastCallTimeByKey = new Map<string, number>();
+  private blockchainTimeCache: { blockTime: number; fetchedAtMs: number } | null = null;
+  private blockchainTimeInFlight: Promise<number> | null = null;
   private tokenDb: TokenDatabase;
   private sendGameTransaction: (rpcUrl: string, txBase64: string) => Promise<string>;
 
   // Simplified caching
   private keypairCache = new KeypairCache();
+  private keypairDerivations = new Map<string, Promise<Keypair>>();
   private tokenMetadataCache: ExpiringCache<{
     decimals: number;
     symbol?: string;
@@ -362,6 +385,10 @@ export class WalletManager {
   private walletTokenBalanceCache =
     createExpiringCache<WalletTokenBalance[]>(WALLET_RPC_CACHE_TTL_MS);
   private walletCacheListeners = new Set<(telegramId: bigint | number | string) => void>();
+  private fullTokenMetadataCache = createExpiringCache<FullTokenMetadata>(
+    FULL_TOKEN_METADATA_CACHE_TTL_MS,
+  );
+  private fullTokenMetadataInFlight = new Map<string, Promise<FullTokenMetadata>>();
 
   public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
     this.keypairCache = new KeypairCache(
@@ -540,13 +567,35 @@ export class WalletManager {
     WalletManager.instance = undefined as any;
   }
 
-  private async throttle(): Promise<void> {
-    const now = this.timeNow ? this.timeNow() : Date.now();
-    const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
+  private currentTimeMs(): number {
+    return this.timeNow ? this.timeNow() : Date.now();
+  }
+
+  /**
+   * Space RPC calls for the same key (a wallet address or a system resource) at
+   * least WALLET_RATE_LIMIT_MS apart. Different keys never wait on each other.
+   */
+  private async throttle(key: string): Promise<void> {
+    const now = this.currentTimeMs();
+    const lastCallTime = this.lastCallTimeByKey.get(key) ?? 0;
+    const timeToWait = WALLET_RATE_LIMIT_MS - (now - lastCallTime);
     if (timeToWait > 0) {
       await this.sleep(timeToWait);
     }
-    this.lastCallTime = this.timeNow ? this.timeNow() : Date.now();
+    const calledAt = this.currentTimeMs();
+    // Re-insert so the map stays ordered by last use, oldest first.
+    this.lastCallTimeByKey.delete(key);
+    this.lastCallTimeByKey.set(key, calledAt);
+    if (this.lastCallTimeByKey.size > WALLET_THROTTLE_MAX_KEYS) {
+      for (const [staleKey, staleAt] of this.lastCallTimeByKey) {
+        if (calledAt - staleAt < WALLET_RATE_LIMIT_MS) break;
+        this.lastCallTimeByKey.delete(staleKey);
+      }
+    }
+  }
+
+  private walletThrottleKey(address: PublicKey | string): string {
+    return `wallet:${typeof address === "string" ? address : address.toBase58()}`;
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -691,12 +740,23 @@ export class WalletManager {
       return cached;
     }
 
-    const seed = mnemonicToSeedSync(this.mnemonic, cacheKey);
-    const keypair = await Keypair.fromSeed(seed.subarray(0, 32));
-    const concurrent = this.keypairCache.get(cacheKey);
-    if (concurrent) return concurrent;
-    this.keypairCache.set(cacheKey, keypair);
-    return keypair;
+    // PBKDF2 (2048 rounds) runs asynchronously so a cold derivation does not block
+    // the event loop; concurrent requests for the same user share one derivation.
+    let pending = this.keypairDerivations.get(cacheKey);
+    if (!pending) {
+      pending = (async () => {
+        const seed = await mnemonicToSeed(this.mnemonic, cacheKey);
+        const keypair = await Keypair.fromSeed(seed.subarray(0, 32));
+        const concurrent = this.keypairCache.get(cacheKey);
+        if (concurrent) return concurrent;
+        this.keypairCache.set(cacheKey, keypair);
+        return keypair;
+      })().finally(() => {
+        this.keypairDerivations.delete(cacheKey);
+      });
+      this.keypairDerivations.set(cacheKey, pending);
+    }
+    return pending;
   }
 
   public async getOperatorKeypair(): Promise<Keypair> {
@@ -762,8 +822,8 @@ export class WalletManager {
       }
     }
 
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
 
     try {
       const lamports = Number(await this.connection.getBalance(pubkey));
@@ -790,8 +850,8 @@ export class WalletManager {
     tokenMint: string,
     options: { createIfMissing?: boolean; throwOnError?: boolean } = {},
   ): Promise<number> {
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
     const mintPubkey = new PublicKey(tokenMint);
     const programDetection = await this.resolveTokenProgram(mintPubkey);
     if (!programDetection) {
@@ -880,8 +940,8 @@ export class WalletManager {
       }
     }
 
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
 
     const reportCensus = (census: WalletTokenCensus) => {
       options.onCensus?.(census);
@@ -947,7 +1007,11 @@ export class WalletManager {
       }
 
       const metadataLoader = this.createMetadataLoader();
-      await metadataLoader.prefetch(metadataPrefetchMints);
+      await metadataLoader.prefetch(
+        [...metadataPrefetchMints].filter(
+          (mint) => mint !== WSOL_MINT && !hasRealTicker(knownTokensMap.get(mint), mint),
+        ),
+      );
 
       const results: WalletTokenBalance[] = [];
       for (const account of parsedAccounts) {
@@ -1010,8 +1074,8 @@ export class WalletManager {
     requestedPage: number,
     pageSize: number,
   ): Promise<WalletTokenBalancePage> {
-    await this.throttle();
     const owner = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(owner));
     const [splAccounts, token2022Accounts] = await Promise.all([
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
@@ -1066,7 +1130,11 @@ export class WalletManager {
     const page = Math.min(Math.max(0, Math.trunc(requestedPage)), pageCount - 1);
     const selected = rawBalances.slice(page * normalizedPageSize, (page + 1) * normalizedPageSize);
     const metadataLoader = this.createMetadataLoader();
-    await metadataLoader.prefetch(selected.map((entry) => entry.mint));
+    await metadataLoader.prefetch(
+      selected
+        .map((entry) => entry.mint)
+        .filter((mint) => mint !== WSOL_MINT && !hasRealTicker(knownByMint.get(mint), mint)),
+    );
 
     const tokenBalances: WalletTokenBalance[] = [];
     for (const entry of selected) {
@@ -1480,11 +1548,14 @@ export class WalletManager {
     }
 
     let finalTicker = knownToken.token_ticker;
-    const metadata = await metadataLoader.load(mint);
     if (mint === WSOL_MINT) {
       finalTicker = "WSOL";
-    } else if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
-      finalTicker = sanitizeTokenSymbol(metadata.symbol, mint);
+    } else if (!hasRealTicker(knownToken, mint)) {
+      // Only tokens without a usable ticker need their metadata loaded.
+      const metadata = await metadataLoader.load(mint);
+      if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
+        finalTicker = sanitizeTokenSymbol(metadata.symbol, mint);
+      }
     }
 
     return {
@@ -1544,9 +1615,34 @@ export class WalletManager {
     this.notifyWalletCacheCleared(telegramId);
   }
 
-  public async getFullTokenMetadata(
-    tokenMint: string,
-  ): Promise<{ decimals: number; symbol?: string; name?: string }> {
+  public async getFullTokenMetadata(tokenMint: string): Promise<FullTokenMetadata> {
+    const cached = this.fullTokenMetadataCache.get(tokenMint);
+    if (cached) {
+      return { ...cached };
+    }
+
+    let pending = this.fullTokenMetadataInFlight.get(tokenMint);
+    if (!pending) {
+      pending = this.loadFullTokenMetadata(tokenMint)
+        .then((metadata) => {
+          this.fullTokenMetadataCache.setWithTTL(
+            tokenMint,
+            metadata,
+            metadata.symbol
+              ? FULL_TOKEN_METADATA_CACHE_TTL_MS
+              : PARTIAL_TOKEN_METADATA_CACHE_TTL_MS,
+          );
+          return metadata;
+        })
+        .finally(() => {
+          this.fullTokenMetadataInFlight.delete(tokenMint);
+        });
+      this.fullTokenMetadataInFlight.set(tokenMint, pending);
+    }
+    return { ...(await pending) };
+  }
+
+  private async loadFullTokenMetadata(tokenMint: string): Promise<FullTokenMetadata> {
     let decimalsCache: number | null = null;
     const getDecimals = async (): Promise<number | null> => {
       if (decimalsCache !== null) {
@@ -1654,7 +1750,7 @@ export class WalletManager {
         mintAddress: tokenMint,
         fetch: this.fetchFn as any,
         getDecimals: async () => {
-          await this.throttle();
+          await this.throttle(`mint:${tokenMint}`);
           return await this.fetchMintDecimals(tokenMint);
         },
         defaultDecimals: 6,
@@ -1741,7 +1837,7 @@ export class WalletManager {
     const instructions: TransactionInstruction[] = [];
 
     try {
-      await this.throttle();
+      await this.throttle(this.walletThrottleKey(owner));
       const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
       if (!accountInfo) {
         instructions.push(
@@ -1821,7 +1917,7 @@ export class WalletManager {
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(wsolMint, owner, false, TOKEN_PROGRAM_ID);
 
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(owner));
     let accountInfo;
     try {
       accountInfo = await getAccount(this.connection, wsolAta, "confirmed", TOKEN_PROGRAM_ID);
@@ -2483,7 +2579,8 @@ export class WalletManager {
     signers: Keypair[],
     options: { onPrepared?: PreparedTransactionCallback } = {},
   ): Promise<string> {
-    await this.throttle();
+    const feePayer = signers[0];
+    await this.throttle(feePayer ? this.walletThrottleKey(feePayer.publicKey) : "system");
 
     if (signers.length === 0) {
       throw new Error("No signers provided");
@@ -2831,7 +2928,7 @@ export class WalletManager {
 
     const allowFallback = options.allowFallback ?? true;
 
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(payer));
     try {
       const latestBlockhash = await this.getLatestBlockhash();
       const message = new TransactionMessage({
@@ -2863,7 +2960,7 @@ export class WalletManager {
     serializedTxBase64: string,
     signer: Keypair,
   ): Promise<string> {
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(signer.publicKey));
 
     try {
       // Deserialize the transaction
@@ -2940,15 +3037,40 @@ export class WalletManager {
   // UTILITY METHODS
   // ================================
 
+  /**
+   * Current cluster time in seconds. One slot/blockTime read is shared for a few
+   * seconds (advanced by the local clock), so formatting many games or scanning
+   * for expired ones costs one lookup instead of one per game.
+   */
   public async getBlockchainTime(): Promise<number> {
+    const now = this.currentTimeMs();
+    const cached = this.blockchainTimeCache;
+    if (
+      cached &&
+      now - cached.fetchedAtMs >= 0 &&
+      now - cached.fetchedAtMs < BLOCKCHAIN_TIME_CACHE_MS
+    ) {
+      return cached.blockTime + Math.floor((now - cached.fetchedAtMs) / 1000);
+    }
+
+    if (!this.blockchainTimeInFlight) {
+      this.blockchainTimeInFlight = this.fetchBlockchainTime().finally(() => {
+        this.blockchainTimeInFlight = null;
+      });
+    }
+    return this.blockchainTimeInFlight;
+  }
+
+  private async fetchBlockchainTime(): Promise<number> {
     try {
-      await this.throttle();
       const slot = await this.connection.getSlot();
       const blockTime = await this.connection.getBlockTime(slot);
       if (!blockTime) {
         throw new Error("Could not get blockchain time");
       }
-      return Number(blockTime);
+      const normalized = Number(blockTime);
+      this.blockchainTimeCache = { blockTime: normalized, fetchedAtMs: this.currentTimeMs() };
+      return normalized;
     } catch (error) {
       console.warn("Falling back to system time:", error);
       return Math.floor(Date.now() / 1000);
@@ -2971,7 +3093,7 @@ export class WalletManager {
       };
     }
 
-    await this.throttle();
+    await this.throttle("blockhash");
     const result = await this.connection.getLatestBlockhash("confirmed");
     const normalized = {
       blockhash: String(result.blockhash),

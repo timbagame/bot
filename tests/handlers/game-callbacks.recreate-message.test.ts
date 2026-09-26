@@ -201,3 +201,83 @@ describe("Game Join Message Recreation", () => {
     expect(JSON.stringify((ctx.api.answerCallbackQuery as any).mock.calls)).not.toContain(opaque);
   });
 });
+
+describe("Join and refresh fetch reuse", () => {
+  const joinGame = async (joinResult: any) => {
+    const { module, gameManager } = makeDeps();
+    const ctx = makeCtx("@joiner");
+    const order: string[] = [];
+    ctx.api.answerCallbackQuery = vi.fn(async () => {
+      order.push("answer");
+    });
+    (gameManager.updateGameMessageFromData as any).mockImplementation(async () => {
+      order.push("update");
+    });
+    (gameManager.joinGame as any).mockResolvedValue(joinResult);
+    const activeMap = new Map([[1, { messageId: 5, chatId: 1 }]]);
+    (gameManager.getActiveGameMessages as any).mockReturnValue(activeMap);
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 77n, {
+      game_address: "game-join-perf",
+      status: "active",
+      amount: 10,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
+    return { ctx, gameManager, order };
+  };
+
+  test("answers the join toast before redrawing and reuses the returned account", async () => {
+    const account = { ticketsCount: 3, maxTickets: 4 };
+    const { ctx, gameManager, order } = await joinGame({
+      success: true,
+      gameAccount: account,
+      ticketsCount: 3,
+      maxTickets: 4,
+    });
+
+    expect(order).toEqual(["answer", "update"]);
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", { text: "✅ Joined! (3/4)" });
+    expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(
+      ctx,
+      "game-join-perf",
+      "Active",
+      undefined,
+      undefined,
+      undefined,
+      { gameAccount: account },
+    );
+  });
+
+  test("falls back to one fetch when joinGame returns no account", async () => {
+    const { ctx, gameManager } = await joinGame({ success: true });
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", { text: "✅ Joined! (1/2)" });
+    expect((gameManager.updateGameMessageFromData as any).mock.calls[0][6]).toEqual({
+      gameAccount: { ticketsCount: 1, maxTickets: 2 },
+    });
+  });
+
+  test("refresh fetches the game once and passes it to the redraw", async () => {
+    const { module, gameManager } = makeDeps();
+    const gameAddress = (await Keypair.generate()).publicKey.toBase58();
+    const ctx: any = {
+      ...makeCtx("@refresher"),
+      from: { id: 55, username: "refresher", first_name: "R" },
+      callbackQuery: { id: "q", data: `refresh_${gameAddress}` },
+    };
+    await module.__test_handleGenericGameCallback(ctx as Context, async () => {});
+
+    expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(
+      ctx,
+      gameAddress,
+      "Active",
+      undefined,
+      undefined,
+      undefined,
+      { gameAccount: { ticketsCount: 1, maxTickets: 2 } },
+    );
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", {
+      text: "Game status refreshed!",
+    });
+  });
+});

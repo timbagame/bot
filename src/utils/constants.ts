@@ -126,6 +126,10 @@ export const TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS = parsePositiveDuration(
 // ================================
 
 export const WALLET_RATE_LIMIT_MS = 500;
+// Upper bound on remembered throttle keys (one per recently active wallet).
+export const WALLET_THROTTLE_MAX_KEYS = 5_000;
+// How long one slot/blockTime read is reused for expiry math.
+export const BLOCKCHAIN_TIME_CACHE_MS = 5_000;
 export const USER_WALLET_RPC_WINDOW_MS = parsePositiveDuration("USER_WALLET_RPC_WINDOW_MS", 30_000);
 export const USER_WALLET_RPC_MAX_CALLS = parsePositiveInteger("USER_WALLET_RPC_MAX_CALLS", 6);
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;

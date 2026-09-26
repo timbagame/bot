@@ -39,6 +39,11 @@ import {
   determineFractionDigits,
   toTitleCase,
 } from "./game-callbacks/ui-builders";
+import {
+  buildRestoredConfirmMessage,
+  restoreConfirmMessage,
+  snapshotConfirmMessage,
+} from "./game-callbacks/confirm-restore";
 import { respondWithMenu } from "../utils/menu-response";
 import {
   getRequiredTelegramIdForContext,
@@ -46,6 +51,8 @@ import {
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
   containsBalanceInfo,
+  answerCallbackWithGrace,
+  replyToCallbackMessage,
 } from "../utils/context-helpers";
 import { formatTokenDisplay, formatUsdValue } from "../utils/format-amount";
 import {
@@ -104,6 +111,20 @@ export type GameCallbacksModule = {
   __test_handleJoinGame: HandleJoinGameFn;
   __test_handleGenericGameCallback: (ctx: Context, next: NextFunction) => Promise<void>;
 };
+
+export const JOIN_PENDING_TOAST = "⏳ Joining…";
+
+/**
+ * After the "Joining…" toast, a join result can no longer be shown as a toast.
+ * Success is visible on the refreshed game card; anything else is posted as a
+ * quiet reply so the player learns why they are not on the card.
+ */
+const replyWithLateJoinFailure =
+  (ctx: Context) =>
+  async (text: string): Promise<void> => {
+    if (text.startsWith("✅")) return;
+    await replyToCallbackMessage(ctx, text);
+  };
 
 const NON_GAME_CALLBACK_NAMES = [
   "main_wallet",
@@ -433,17 +454,27 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         return;
       }
 
-      await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
-
-      const program = deps.getProgram();
-      const updatedGameAccount = await program.account.game.fetch(gamePda);
-      const ticketCount = updatedGameAccount.ticketsCount;
-      const maxTickets = updatedGameAccount.maxTickets;
+      // joinGame hands back the post-join account; fetch only if it could not.
+      const updatedGameAccount =
+        result.gameAccount ?? (await deps.getProgram().account.game.fetch(gamePda));
+      const ticketCount = result.ticketsCount ?? Number(updatedGameAccount.ticketsCount ?? 0);
+      const maxTickets = result.maxTickets ?? Number(updatedGameAccount.maxTickets ?? 0);
+      // Answer the tap first: the toast should not wait for every chat's message edit.
       await answerJoinCallbackOnce(
         ctx,
         game.game_address,
         telegramIdStr,
         `✅ Joined! (${ticketCount}/${maxTickets})`,
+      );
+
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        game.game_address,
+        "Active",
+        undefined,
+        undefined,
+        undefined,
+        { gameAccount: updatedGameAccount },
       );
     } catch (error) {
       if (isMissingAccountError(error)) {
@@ -479,10 +510,19 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
     try {
       const program = deps.getProgram();
-      await program.account.game.fetch(gamePda);
+      // One fetch: it detects a closed game and feeds the redraw.
+      const gameAccount = await program.account.game.fetch(gamePda);
 
       const gameManager = getGameManager();
-      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        gameAddress,
+        "Active",
+        undefined,
+        undefined,
+        undefined,
+        { gameAccount },
+      );
 
       await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
     } catch (error) {
@@ -870,10 +910,17 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
 
       switch (action) {
         case "join":
-          await handleJoinGame(ctx, gamePda, telegramId, game);
+          // Joining signs and confirms a transaction. Show progress if it is
+          // not done quickly; the updated game card then shows the result.
+          await answerCallbackWithGrace(ctx, () => handleJoinGame(ctx, gamePda, telegramId, game), {
+            pendingText: JOIN_PENDING_TOAST,
+            onLateAnswer: replyWithLateJoinFailure(ctx),
+          });
           break;
         case "refresh":
-          await handleRefreshGameCallback(ctx, gamePda, gameAddress);
+          await answerCallbackWithGrace(ctx, () =>
+            handleRefreshGameCallback(ctx, gamePda, gameAddress),
+          );
           break;
         default:
           await next();
@@ -1366,6 +1413,9 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             return;
           }
           let createdGameAddress: string | undefined;
+          // Put the confirm card back when creation fails or is interrupted, so
+          // "Creating game…" never stays on screen without a way forward.
+          let restoreConfirmCard: ((notice: string) => Promise<boolean>) | undefined;
           try {
             const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
             if (!payload) {
@@ -1427,6 +1477,16 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             let confirmMessageMissing = false;
             const confirmationFallbackReplyTo =
               ctx.callbackQuery?.message?.reply_to_message?.message_id;
+            const confirmSnapshot = snapshotConfirmMessage(ctx.callbackQuery?.message);
+            const confirmData = ctx.callbackQuery?.data;
+            restoreConfirmCard = async (notice: string) => {
+              if (!chatId || !messageId || confirmMessageMissing) return false;
+              return restoreConfirmMessage(
+                ctx.api,
+                { chatId, messageId },
+                buildRestoredConfirmMessage(confirmSnapshot, notice, confirmData),
+              );
+            };
             deps.pendingGameCreations.add(creationKey);
 
             try {
@@ -1528,6 +1588,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                     : isActiveGameLimit
                       ? "❌ You have too many active games. Finish or cancel one and try again."
                       : "❌ Failed to create game. Please try again.";
+
+                if (await restoreConfirmCard(displayText)) {
+                  return;
+                }
 
                 await respondWithMenu(
                   ctx,
@@ -1646,6 +1710,13 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
             } catch (answerError) {
               console.error("Failed to answer callback after error:", answerError);
+            }
+
+            if (
+              restoreConfirmCard &&
+              (await restoreConfirmCard("❌ Game creation was interrupted. Please try again."))
+            ) {
+              return;
             }
 
             try {

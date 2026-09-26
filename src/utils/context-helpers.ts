@@ -228,10 +228,130 @@ export const categorizeError = (error: any): CallbackError => {
   };
 };
 
+// ================================
+// CALLBACK ANSWER GRACE PERIOD
+// ================================
+
+/** How long a callback may run before Telegram's button spinner is answered early. */
+export const CALLBACK_ANSWER_GRACE_MS = 350;
+
+const CALLBACK_GRACE_KEY = "__callbackAnswerGrace";
+
+type CallbackGraceState = {
+  answered: boolean;
+  answeredEarly: boolean;
+  onLateAnswer?: (text: string) => Promise<unknown> | unknown;
+};
+
+const getCallbackGraceState = (ctx: any): CallbackGraceState | undefined => {
+  const state = ctx?.[CALLBACK_GRACE_KEY];
+  return state && typeof state === "object" ? (state as CallbackGraceState) : undefined;
+};
+
+export type AnswerCallbackWithGraceOptions = {
+  /** Delay before answering early. Defaults to {@link CALLBACK_ANSWER_GRACE_MS}. */
+  graceMs?: number;
+  /** Toast shown when the work outlives the grace period. Silent when omitted. */
+  pendingText?: string;
+  /**
+   * Receives texted answers issued after the early answer, which Telegram would
+   * otherwise drop. Use it to surface failures another way (e.g. a reply).
+   */
+  onLateAnswer?: (text: string) => Promise<unknown> | unknown;
+};
+
+/**
+ * Runs slow callback work while keeping the button responsive.
+ *
+ * Fast work answers the callback itself as usual. When the work is still running
+ * after the grace period, the callback is answered once with `pendingText` (or
+ * silently) and later `safeAnswerCallbackQuery` calls on the same context are
+ * routed to `onLateAnswer` instead of hitting Telegram a second time. When the
+ * work finishes without answering, the callback is answered silently so the
+ * spinner never lingers. Errors propagate unchanged so existing handlers keep
+ * reporting them.
+ */
+export const answerCallbackWithGrace = async <T>(
+  ctx: any,
+  work: () => Promise<T>,
+  options: AnswerCallbackWithGraceOptions = {},
+): Promise<T> => {
+  if (!ctx || getCallbackGraceState(ctx)) {
+    return await work();
+  }
+
+  const state: CallbackGraceState = {
+    answered: false,
+    answeredEarly: false,
+    onLateAnswer: options.onLateAnswer,
+  };
+  ctx[CALLBACK_GRACE_KEY] = state;
+
+  const timer = setTimeout(
+    () => {
+      if (state.answered) return;
+      state.answered = true;
+      state.answeredEarly = true;
+      void answerCallbackQueryNow(ctx, options.pendingText);
+    },
+    Math.max(0, options.graceMs ?? CALLBACK_ANSWER_GRACE_MS),
+  );
+
+  try {
+    const result = await work();
+    clearTimeout(timer);
+    if (!state.answered) {
+      state.answered = true;
+      await answerCallbackQueryNow(ctx);
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * Posts `text` as a quiet reply to the message that owns the callback button.
+ * Intended as an `onLateAnswer` fallback for results that no longer fit in a toast.
+ */
+export const replyToCallbackMessage = async (ctx: any, text: string): Promise<void> => {
+  if (typeof ctx?.reply !== "function") return;
+  const messageId = ctx?.callbackQuery?.message?.message_id;
+  await ctx.reply(text, {
+    disable_notification: true,
+    ...(typeof messageId === "number" ? { reply_to_message_id: messageId } : {}),
+  });
+};
+
 /**
  * Safe callback query answering with fallback
  */
 export const safeAnswerCallbackQuery = async (
+  ctx: any,
+  text?: string,
+  options: { useQueue?: boolean } = {},
+): Promise<void> => {
+  const grace = getCallbackGraceState(ctx);
+  if (grace) {
+    if (grace.answeredEarly) {
+      // Telegram accepts one answer per callback. The grace timer already used
+      // it, so hand texted results to the caller's fallback instead.
+      if (typeof text === "string" && text.length > 0 && grace.onLateAnswer) {
+        try {
+          await grace.onLateAnswer(text);
+        } catch (error) {
+          console.warn("Failed to deliver late callback answer:", error);
+        }
+      }
+      return;
+    }
+    grace.answered = true;
+  }
+
+  await answerCallbackQueryNow(ctx, text, options);
+};
+
+const answerCallbackQueryNow = async (
   ctx: any,
   text?: string,
   options: { useQueue?: boolean } = {},

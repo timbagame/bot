@@ -21,11 +21,11 @@ import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
-import { isMissingAccountError } from "./utils/account-errors";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
-import { GameManager, type GamesTab } from "./utils/game";
+import { GameManager, type GamesTab, type PublicGamesFilter } from "./utils/game";
+import { createExpiredGameScanner } from "./bot/expired-game-scan";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
 import {
@@ -83,6 +83,13 @@ import {
 import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
+  SWAP_QUOTE_RETRY_PREFIX,
+  buildSwapProviderRetryKeyboard,
+  buildSwapProviderSlowMessage,
+  createSwapQuoteRetryStore,
+  isSwapProviderUnavailableError,
+} from "./utils/swap/provider-retry";
+import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
   buildEmptyGlobalLeaderboardMessage,
@@ -99,7 +106,6 @@ import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
-  GameData,
   PlayerData,
   GameCompletedEvent,
   GameInitializedEvent,
@@ -114,6 +120,7 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  answerCallbackWithGrace,
   requireTelegramId,
   getRequiredTelegramIdForContext,
   resolveTelegramIdOrRespond,
@@ -150,6 +157,9 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { createAdminStatusCommand } from "./handlers/admin-status";
+import { DEFAULT_MAINNET_ENDPOINT, parseRpcEndpointList } from "./utils/rpc-endpoints";
+import { getCallbackQueue, getGameOperationQueue } from "./utils/telegram-rate-limiter";
 import { createFaucetModule } from "./handlers/faucet";
 import { FinanceLedgerService } from "./services/finance-ledger";
 import { FinanceBackfillWorker } from "./services/finance-backfill-worker";
@@ -1402,6 +1412,8 @@ type PaginationOptions = {
   page: number;
   totalGames: number;
   callbackPrefix: string;
+  /** Appended after the page number, e.g. an encoded /public filter. */
+  callbackSuffix?: string;
 };
 
 const buildActiveGamesKeyboard = (
@@ -1442,7 +1454,7 @@ const buildActiveGamesKeyboard = (
       if (pagination.page > 0) {
         navRow.push({
           text: "← Prev",
-          callback_data: `${pagination.callbackPrefix}${pagination.page - 1}`,
+          callback_data: `${pagination.callbackPrefix}${pagination.page - 1}${pagination.callbackSuffix ?? ""}`,
         });
       }
 
@@ -1454,7 +1466,7 @@ const buildActiveGamesKeyboard = (
       if (pagination.page < totalPages - 1) {
         navRow.push({
           text: "Next →",
-          callback_data: `${pagination.callbackPrefix}${pagination.page + 1}`,
+          callback_data: `${pagination.callbackPrefix}${pagination.page + 1}${pagination.callbackSuffix ?? ""}`,
         });
       }
 
@@ -1464,6 +1476,91 @@ const buildActiveGamesKeyboard = (
 
   return inlineKeyboard;
 };
+
+const normalizeActiveListings = (games: ActiveGameListing[]): ActiveGameListing[] =>
+  games.map((game) => ({
+    ...game,
+    keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+  }));
+
+// /public filters: `/public coinflip`, `/public giveaway`, `/public TIMBA`, or both.
+const PUBLIC_FILTER_GAME_TYPES: Record<string, NonNullable<PublicGamesFilter["gameType"]>> = {
+  coinflip: "coinflip",
+  flip: "coinflip",
+  cf: "coinflip",
+  giveaway: "giveaway",
+  give: "giveaway",
+  ga: "giveaway",
+};
+const PUBLIC_FILTER_TICKER_PATTERN = /^[A-Z0-9._-]{1,16}$/;
+const PUBLIC_FILTER_USAGE =
+  "Usage: <code>/public [coinflip|giveaway] [TICKER]</code>\nExample: <code>/public coinflip TIMBA</code>";
+// Keeps callback data well inside Telegram's 64-byte limit:
+// "public_page:" (12) + page (<=4) + ":giveaway" (9) + ":" + ticker (<=16) = 42 bytes.
+const PUBLIC_PAGE_CALLBACK_PATTERN =
+  /^public_page:(\d{1,4})(?::(coinflip|giveaway|\*):([A-Z0-9._-]{1,16}|\*))?$/;
+
+/** Parse /public arguments. Returns undefined for no filter and null for invalid input. */
+const parsePublicGamesFilter = (args: string[]): PublicGamesFilter | undefined | null => {
+  if (args.length === 0) return undefined;
+  if (args.length > 2) return null;
+  const filter: PublicGamesFilter = {};
+  for (const rawArg of args) {
+    const arg = rawArg.trim();
+    const gameType = PUBLIC_FILTER_GAME_TYPES[arg.toLowerCase()];
+    if (gameType) {
+      if (filter.gameType) return null;
+      filter.gameType = gameType;
+      continue;
+    }
+    const ticker = arg.replace(/^\$/, "").toUpperCase();
+    if (filter.ticker || !PUBLIC_FILTER_TICKER_PATTERN.test(ticker)) return null;
+    filter.ticker = ticker;
+  }
+  return filter;
+};
+
+const encodePublicFilterSuffix = (filter: PublicGamesFilter | undefined): string =>
+  filter && (filter.gameType || filter.ticker)
+    ? `:${filter.gameType ?? "*"}:${filter.ticker ?? "*"}`
+    : "";
+
+const parsePublicPageCallbackData = (
+  data: string | undefined,
+): { page: number; filter: PublicGamesFilter | undefined } | null => {
+  const match = data?.match(PUBLIC_PAGE_CALLBACK_PATTERN);
+  if (!match || !match[1]) return null;
+  const page = parseInt(match[1], 10);
+  const gameType =
+    match[2] && match[2] !== "*" ? (match[2] as PublicGamesFilter["gameType"]) : undefined;
+  const ticker = match[3] && match[3] !== "*" ? match[3] : undefined;
+  return { page, filter: gameType || ticker ? { gameType, ticker } : undefined };
+};
+
+const describePublicFilter = (filter: PublicGamesFilter): string =>
+  [
+    filter.gameType ? filter.gameType.charAt(0).toUpperCase() + filter.gameType.slice(1) : null,
+    filter.ticker ?? null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" • ");
+
+const buildPublicGamesSummary = (
+  totalGames: number,
+  page: number,
+  filter: PublicGamesFilter | undefined,
+  bold: boolean,
+): string => {
+  const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+  const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
+  const filterInfo = filter ? ` • ${escapeHtml(describePublicFilter(filter))}` : "";
+  const title = `Active Public Games (${totalGames})`;
+  return `🌐 ${bold ? `<b>${title}</b>` : title}${filterInfo}${pageInfo}`;
+};
+
+export const __test_parsePublicGamesFilter = parsePublicGamesFilter;
+export const __test_parsePublicPageCallbackData = parsePublicPageCallbackData;
+export const __test_encodePublicFilterSuffix = encodePublicFilterSuffix;
 
 const replyWithActiveGamesMenu = async (
   ctx: Context,
@@ -4127,7 +4224,7 @@ registerCaseInsensitiveCommand(
     "/giveaway &lt;amount&gt; [token] [players]: Start a giveaway (or /ga)",
     "/faucet &lt;amount&gt; [token] [users]: First come, first served drop (or /rain)",
     "/active: Games in progress",
-    "/public: Browse open public games",
+    "/public [coinflip|giveaway] [TICKER]: Browse open public games",
     "/games: Your recent games",
     "/leaderboard: Top players in this group (or /lb)",
     "/globalboard: Top players everywhere (or /gb)",
@@ -4195,11 +4292,43 @@ const handlePublicCommand = async (ctx: Context) => {
     return;
   }
 
+  const args = ctx.message?.text?.trim().split(/\s+/).slice(1) ?? [];
+  const filter = parsePublicGamesFilter(args);
+  if (filter === null) {
+    await ctx.reply(PUBLIC_FILTER_USAGE, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id,
+    });
+    return;
+  }
+
   try {
-    await replyWithActiveGamesMenu(ctx, await gameManager.getAllActivePublicGames(ctx), {
-      emptyText: "No active public games found.",
-      title: "🌐 Active Public Games",
-      callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+    const { games, totalGames } = await gameManager.getActivePublicGamesPage(ctx, {
+      page: 0,
+      pageSize: ACTIVE_GAMES_PER_PAGE,
+      filter,
+    });
+    if (totalGames === 0 || games.length === 0) {
+      await ctx.reply(
+        filter
+          ? `No active public games match ${describePublicFilter(filter)}.`
+          : "No active public games found.",
+        { reply_to_message_id: ctx.message?.message_id },
+      );
+      return;
+    }
+
+    await ctx.reply(buildPublicGamesSummary(totalGames, 0, filter, false), {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: buildActiveGamesKeyboard(normalizeActiveListings(games), {
+          page: 0,
+          totalGames,
+          callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+          callbackSuffix: encodePublicFilterSuffix(filter),
+        }),
+      },
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "public");
@@ -4300,7 +4429,7 @@ const handleGamesTabCallback = async (ctx: Context) => {
 // Tab/pagination callback for /games command
 bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx: Context) => {
   try {
-    await handleGamesTabCallback(ctx);
+    await answerCallbackWithGrace(ctx, () => handleGamesTabCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games tab");
   }
@@ -4309,44 +4438,46 @@ bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx
 // Refresh callback for /games command
 bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
   try {
-    const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
-    if (!match || !match[1]) {
-      await safeAnswerCallbackQuery(ctx, "Invalid request.");
-      return;
-    }
-
-    const ownerId = match[1];
-    const callerId = ctx.from?.id?.toString();
-    if (callerId !== ownerId) {
-      await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
-      return;
-    }
-
-    const telegramId = BigInt(ownerId);
-    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "Player";
-
-    const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
-    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
-
-    try {
-      await ctx.editMessageText(messageText, {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: keyboard },
-        link_preview_options: { is_disabled: true },
-      });
-    } catch (editError) {
-      if (!isMessageNotModified(editError)) {
-        throw editError;
-      }
-    }
-    await safeAnswerCallbackQuery(ctx, "Refreshed!");
+    await answerCallbackWithGrace(ctx, () => handleGamesRefreshCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games refresh");
   }
 });
+
+const handleGamesRefreshCallback = async (ctx: Context): Promise<void> => {
+  const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
+  if (!match || !match[1]) {
+    await safeAnswerCallbackQuery(ctx, "Invalid request.");
+    return;
+  }
+
+  const ownerId = match[1];
+  const callerId = ctx.from?.id?.toString();
+  if (callerId !== ownerId) {
+    await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
+    return;
+  }
+
+  const telegramId = BigInt(ownerId);
+  const result = await gameManager.getUserGamesHistory(ctx, telegramId);
+  const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "Player";
+
+  const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
+  const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
+
+  try {
+    await ctx.editMessageText(messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (editError) {
+    if (!isMessageNotModified(editError)) {
+      throw editError;
+    }
+  }
+  await safeAnswerCallbackQuery(ctx, "Refreshed!");
+};
 
 export const __test_handleActiveCommand = handleActiveCommand;
 export const __test_handleGamesTabCallback = handleGamesTabCallback;
@@ -4415,49 +4546,53 @@ bot.callbackQuery(/^active_page:(\d+)$/, handleActivePageCallback);
 export const __test_handleActivePageCallback = handleActivePageCallback;
 
 // Pagination callback for /public command
-bot.callbackQuery(/^public_page:(\d+)$/, async (ctx: Context) => {
+const handlePublicPageCallback = async (ctx: Context) => {
   try {
-    const match = ctx.callbackQuery?.data?.match(/^public_page:(\d+)$/);
-    if (!match || !match[1]) {
+    const parsed = parsePublicPageCallbackData(ctx.callbackQuery?.data);
+    if (!parsed) {
       await safeAnswerCallbackQuery(ctx, "Invalid page request.");
       return;
     }
-    const page = parseInt(match[1], 10);
+    const { filter } = parsed;
+    // Answer right away so the button stops spinning while the page is built.
+    await safeAnswerCallbackQuery(ctx, `Page ${parsed.page + 1}`);
 
-    const publicActiveGames = await gameManager.getAllActivePublicGames(ctx);
-    const normalizedGames: ActiveGameListing[] = publicActiveGames.map((game) => ({
-      ...game,
-      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
-    }));
+    const { games, totalGames, page } = await gameManager.getActivePublicGamesPage(ctx, {
+      page: parsed.page,
+      pageSize: ACTIVE_GAMES_PER_PAGE,
+      filter,
+    });
 
-    const totalGames = normalizedGames.length;
-    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
-
-    if (page < 0 || page >= totalPages) {
-      await safeAnswerCallbackQuery(ctx, "Invalid page.");
+    if (totalGames === 0 || games.length === 0) {
+      await ctx.editMessageText(
+        filter
+          ? `No active public games match ${describePublicFilter(filter)}.`
+          : "No active public games found.",
+      );
       return;
     }
 
-    const start = page * ACTIVE_GAMES_PER_PAGE;
-    const pageGames = normalizedGames.slice(start, start + ACTIVE_GAMES_PER_PAGE);
-
-    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+    const inlineKeyboard = buildActiveGamesKeyboard(normalizeActiveListings(games), {
       page,
       totalGames,
       callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+      callbackSuffix: encodePublicFilterSuffix(filter),
     });
-    const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
-    const summaryText = `🌐 <b>Active Public Games (${totalGames})</b>${pageInfo}`;
 
-    await ctx.editMessageText(summaryText, {
+    await ctx.editMessageText(buildPublicGamesSummary(totalGames, page, filter, true), {
       parse_mode: "HTML",
       reply_markup: { inline_keyboard: inlineKeyboard },
     });
-    await safeAnswerCallbackQuery(ctx, `Page ${page + 1}`);
   } catch (error) {
+    if (isMessageNotModified(error)) {
+      return;
+    }
     await handleCallbackErrorSafe(ctx, error, "public page navigation");
   }
-});
+};
+
+bot.callbackQuery(PUBLIC_PAGE_CALLBACK_PATTERN, handlePublicPageCallback);
+export const __test_handlePublicPageCallback = handlePublicPageCallback;
 
 const LEADERBOARD_PLAYER_LIMIT = 5;
 
@@ -4830,6 +4965,38 @@ bot.callbackQuery(
     },
     { action: "finance report", errorAck: "Unable to load finance report" },
   ),
+);
+
+const adminStatusCommand = createAdminStatusCommand({
+  getRpcEndpoints: () => {
+    const active = wallet.getConnection()?.rpcEndpoint;
+    let configured: string[] = [];
+    try {
+      configured = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
+        fallback: DEFAULT_MAINNET_ENDPOINT,
+      });
+    } catch (error) {
+      console.warn("Unable to parse SOLANA_NETWORK for /status:", error);
+    }
+    return active && !configured.includes(active) ? [active, ...configured] : configured;
+  },
+  getActiveRpcEndpoint: () => wallet.getConnection()?.rpcEndpoint,
+  getCallbackQueue: () => getCallbackQueue(),
+  getActiveGameLocks: () => getGameOperationQueue().activeLocks,
+  getPendingCreations: () => gameDb.getPendingGameCreationAuditRecords(),
+});
+
+export const __test_adminStatusCommand = adminStatusCommand;
+
+// Admin-only health check. Hidden from the command menu; non-admins get no reply.
+registerCaseInsensitiveCommand("status", "Bot health for admins", { showInMenu: false })(
+  async (ctx: Context) => {
+    try {
+      await adminStatusCommand.handle(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "status");
+    }
+  },
 );
 
 registerCaseInsensitiveCommand("oracle", "Fees and game limits", { showInMenu: false })(
@@ -5733,11 +5900,16 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      await showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
-        toMint: quoteOverrides.toMint,
-        toDecimals: quoteOverrides.toDecimals,
-      });
-      await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
+      // The quote screen shows its own progress; the toast only covers slow starts.
+      await answerCallbackWithGrace(
+        ctx,
+        () =>
+          showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
+            toMint: quoteOverrides.toMint,
+            toDecimals: quoteOverrides.toDecimals,
+          }),
+        { pendingText: "⏳ Getting a quote…" },
+      );
     } catch (error) {
       console.error("Error in swap amount selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
@@ -5866,6 +6038,24 @@ const showSwapQuoteAndConfirmation = async (
   overrides.fromDecimals = overrides.fromDecimals ?? source.decimals;
   const userId = telegramId || getTelegramId(ctx);
   const cancelCallback = `swap_to_${fromTokenIdentifier}_${toToken}`;
+  const retryOverrides = { ...overrides };
+
+  const renderSwapQuoteError = async (error: unknown) => {
+    if (!isSwapProviderUnavailableError(error)) {
+      return await renderTradeQuoteError({ error, retryCallback: cancelCallback });
+    }
+    const retryCallback = swapQuoteRetryStore.save({
+      userId: userId.toString(),
+      fromTokenIdentifier,
+      toToken,
+      amount,
+      overrides: retryOverrides,
+    });
+    return {
+      text: buildSwapProviderSlowMessage({ amount, fromTicker: fromToken, toTicker: toToken }),
+      keyboard: buildSwapProviderRetryKeyboard(retryCallback, cancelCallback),
+    };
+  };
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -5938,23 +6128,51 @@ const showSwapQuoteAndConfirmation = async (
           cancelCallback,
         }),
       onError: async (error) => {
-        const { text, keyboard } = await renderTradeQuoteError({
-          error,
-          retryCallback: cancelCallback,
-        });
-        await respondWithMenu(ctx, { text, keyboard });
+        await respondWithMenu(ctx, await renderSwapQuoteError(error));
       },
       quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = await renderTradeQuoteError({
-      error,
-      retryCallback: cancelCallback,
-    });
-    await respondWithMenu(ctx, { text, keyboard });
+    await respondWithMenu(ctx, await renderSwapQuoteError(error));
   }
 };
+
+const swapQuoteRetryStore = createSwapQuoteRetryStore();
+
+export const __test_swapQuoteRetryStore = swapQuoteRetryStore;
+
+// One-tap retry after a provider timeout: re-runs the same quote (pair, amount
+// and token overrides) for the user who asked for it.
+registerCallbackPrefixHandler(
+  SWAP_QUOTE_RETRY_PREFIX,
+  async (ctx, { payload }) => {
+    const request = swapQuoteRetryStore.get(payload);
+    if (!request) {
+      await safeAnswerCallbackQuery(ctx, "⌛ This quote expired. Pick the amount again.");
+      return;
+    }
+    if (getTelegramIdString(ctx) !== request.userId) {
+      await safeAnswerCallbackQuery(ctx, "❌ This quote belongs to someone else");
+      return;
+    }
+
+    await answerCallbackWithGrace(
+      ctx,
+      () =>
+        showSwapQuoteAndConfirmation(
+          ctx,
+          request.fromTokenIdentifier,
+          request.toToken,
+          request.amount,
+          BigInt(request.userId),
+          { ...request.overrides },
+        ),
+      { pendingText: "⏳ Getting a quote…" },
+    );
+  },
+  { logLabel: "swap_retry", errorAck: "❌ Error retrying quote" },
+);
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -6485,111 +6703,23 @@ if (process.env.NODE_ENV !== "test") {
 
       scheduleDatabaseCleanup();
 
-      /**
-       * Process expired game with cancellation
-       */
-      const processExpiredGame = async (game: any): Promise<void> => {
-        let gamePda: PublicKey;
-        try {
-          gamePda = new PublicKey(game.game_address);
-        } catch (error) {
-          console.error(`❌ Invalid game address in processExpiredGame: ${game.game_address}`);
-          return;
-        }
-        const gameAccount = await program.account.game.fetch(gamePda);
-
-        console.log(
-          `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`,
-        );
-
-        const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
-        if (result) {
-          console.log(`✅ Successfully processed expired game ${game.game_address}`);
-          gameDb.completeGame(game.game_address, "cancelled", Date.now());
-          await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
-        } else {
-          console.log(`ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`);
-        }
-      };
-
-      /**
-       * Check if game is expired
-       */
-      const isGameExpired = async (gameAccount: any): Promise<boolean> => {
-        const blockTime = await wallet.getBlockchainTime();
-        if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
-          return GameManager.isExpired(gameAccount, blockTime);
-        }
-        return GameManager.isExpired(gameAccount);
-      };
-
-      const MAX_EXPIRING_GAMES_PER_SCAN = 25;
-      // Start periodic check for expired games
-      setInterval(async () => {
-        try {
-          const nowMs = Date.now();
-          const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
-          const processedAddresses: string[] = [];
-          let batchCount = 0;
-          let expiringGames: GameData[] = [];
-
-          do {
-            expiringGames = gameDb.getGamesExpiringBefore(
-              cutoffMs,
-              MAX_EXPIRING_GAMES_PER_SCAN,
-              processedAddresses,
-            );
-
-            if (expiringGames.length === 0) {
-              break;
-            }
-
-            for (const game of expiringGames) {
-              if (!game.game_address) {
-                console.log(`🗑️ Skipping game with null address`);
-                continue;
-              }
-
-              processedAddresses.push(game.game_address);
-
-              if (game.game_address === DEFAULT_NULL_ADDRESS) {
-                console.log(`🗑️ Skipping placeholder game address ${game.game_address}`);
-                await cleanupOrphanedGame(game.game_address);
-                continue;
-              }
-
-              try {
-                let gamePda: PublicKey;
-                try {
-                  gamePda = new PublicKey(game.game_address);
-                } catch (pkError) {
-                  console.log(`🗑️ Skipping game with invalid address format: ${game.game_address}`);
-                  continue;
-                }
-                const gameAccount = await program.account.game.fetch(gamePda);
-
-                if (await isGameExpired(gameAccount)) {
-                  await processExpiredGame(game);
-                }
-              } catch (error: any) {
-                if (
-                  isMissingAccountError(error) ||
-                  (error instanceof Error &&
-                    error.message.includes("Invalid account discriminator"))
-                ) {
-                  await cleanupOrphanedGame(game.game_address);
-                } else {
-                  console.error(`Error processing game ${game.game_address}:`, error);
-                }
-              }
-            }
-
-            batchCount += 1;
-          } while (expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN && batchCount < 10);
-        } catch (error) {
-          console.error("Error in periodic game check:", error);
-        }
-      }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+      // Periodic expired-game sweep: one blockchain-time read per run, batched
+      // account loads, and no overlapping runs.
+      const expiredGameScanner = createExpiredGameScanner({
+        getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
+          gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
+        gameAccounts: () => program.account.game,
+        getBlockchainTime: () => wallet.getBlockchainTime(),
+        isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
+        handleExpiredGame: (gamePda, gameAccount) =>
+          gameManager.handleExpiredGame(gamePda, gameAccount),
+        completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
+        updateGameMessage: (gameAddress, game) =>
+          updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
+        cleanupOrphanedGame,
+        lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
+      });
+      setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
 
       const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
       const internalServer = Bun.serve({

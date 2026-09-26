@@ -18,6 +18,9 @@ import { parseProgramEventLogs } from "./program-event-parser";
 
 type AccountRecord = Record<string, unknown>;
 
+// getMultipleAccounts accepts at most 100 keys per request.
+const MULTIPLE_ACCOUNTS_CHUNK_SIZE = 100;
+
 export class TimbaAccountNotFoundError extends Error {
   public readonly code = "ACCOUNT_NOT_FOUND" as const;
 
@@ -30,6 +33,8 @@ export class TimbaAccountNotFoundError extends Error {
 export interface TimbaAccountClient<T = any> {
   fetch(address: PublicKey): Promise<T>;
   fetchNullable(address: PublicKey): Promise<T | null>;
+  /** Batch lookup: one RPC call per 100 addresses; missing accounts resolve to null. */
+  fetchMultiple(addresses: PublicKey[]): Promise<Array<T | null>>;
   all(): Promise<Array<{ publicKey: PublicKey; account: T }>>;
 }
 
@@ -118,14 +123,33 @@ function accountClient<T>(options: {
     }
     return options.normalize(options.decoder.decode(data));
   };
-  const fetchNullable = async (address: PublicKey): Promise<T | null> => {
-    if (options.supported === false) return null;
-    const info = await options.connection.getAccountInfo(address, "confirmed");
+  const decodeInfo = (
+    address: PublicKey,
+    info: { owner: PublicKey; data: Uint8Array } | null | undefined,
+  ): T | null => {
     if (!info) return null;
     if (!info.owner.equals(options.programId)) {
       throw new Error(`Account ${address.toBase58()} is not owned by the Timba program`);
     }
     return decode(Uint8Array.from(info.data));
+  };
+  const fetchNullable = async (address: PublicKey): Promise<T | null> => {
+    if (options.supported === false) return null;
+    return decodeInfo(address, await options.connection.getAccountInfo(address, "confirmed"));
+  };
+  const fetchMultiple = async (addresses: PublicKey[]): Promise<Array<T | null>> => {
+    if (options.supported === false || addresses.length === 0) {
+      return addresses.map(() => null);
+    }
+    const results: Array<T | null> = [];
+    for (let offset = 0; offset < addresses.length; offset += MULTIPLE_ACCOUNTS_CHUNK_SIZE) {
+      const chunk = addresses.slice(offset, offset + MULTIPLE_ACCOUNTS_CHUNK_SIZE);
+      const infos = await options.connection.getMultipleAccountsInfo(chunk, "confirmed");
+      chunk.forEach((address, index) => {
+        results.push(decodeInfo(address, infos[index] as any));
+      });
+    }
+    return results;
   };
   return {
     fetch: async (address) => {
@@ -134,6 +158,7 @@ function accountClient<T>(options: {
       return account;
     },
     fetchNullable,
+    fetchMultiple,
     all: async () => {
       if (options.supported === false) return [];
       const accounts = await options.connection.getProgramAccounts(options.programId, {

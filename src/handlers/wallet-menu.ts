@@ -60,6 +60,23 @@ export type WalletActionMenuHandlerConfig = {
 
 export type WalletCacheSnapshot = WalletBalancesSnapshot;
 
+export type WalletPageData = {
+  solBalance: number;
+  tokenBalances: WalletTokenBalance[];
+  page: number;
+  pageCount: number;
+  heldMints: string[];
+  complete: boolean;
+  fetchedAt: number;
+};
+
+/** How long a rendered wallet page may be shown from cache while it refreshes. */
+export const WALLET_PAGE_SNAPSHOT_MAX_AGE_MS = 10 * 60_000;
+/** Upper bound on cached wallet pages (one entry per user/endpoint/page). */
+const WALLET_PAGE_SNAPSHOT_MAX_ENTRIES = 5_000;
+/** Upper bound on tracked message activity entries used to guard background edits. */
+const MESSAGE_ACTIVITY_MAX_ENTRIES = 5_000;
+
 type WalletSnapshotSeed = {
   solBalance: number;
   tokenBalances: Array<
@@ -97,15 +114,14 @@ type WalletMenuModule = {
     telegramId: bigint,
     page: number,
     pageSize: number,
-  ) => Promise<{
-    solBalance: number;
-    tokenBalances: WalletTokenBalance[];
-    page: number;
-    pageCount: number;
-    heldMints: string[];
-    complete: boolean;
-  }>;
+  ) => Promise<WalletPageData>;
+  peekWalletPageData: (
+    telegramId: bigint,
+    page: number,
+    pageSize: number,
+  ) => { data: WalletPageData; fetchedAt: number } | undefined;
   clearWalletCache: (telegramId: bigint) => void | Promise<void>;
+  captureMessageView: (chatId: number | string, messageId: number) => () => boolean;
   defaultWalletActionMenuDeps: {
     requireTelegramId: typeof requireTelegramId;
     getWalletAddress: (telegramId: bigint) => string | Promise<string>;
@@ -138,6 +154,28 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   >();
   const pendingWalletFetches = new Map<string, Promise<WalletBalancesSnapshot>>();
   const cacheInvalidations = new Map<string, number>();
+  // Last fetched wallet page per user/endpoint, served instantly on the next
+  // open while a background fetch refreshes it (stale-while-revalidate).
+  const walletPageSnapshots = new Map<string, { data: WalletPageData; fetchedAt: number }>();
+  // Sequence of the latest callback seen per message. A background wallet edit
+  // only lands while no newer button press has claimed the message.
+  const messageActivity = new Map<string, number>();
+  let messageActivitySeq = 0;
+  const getMessageKey = (chatId: number | string, messageId: number) => `${chatId}:${messageId}`;
+  const markMessageActivity = (chatId: number | string, messageId: number) => {
+    const key = getMessageKey(chatId, messageId);
+    messageActivity.delete(key);
+    messageActivity.set(key, ++messageActivitySeq);
+    if (messageActivity.size > MESSAGE_ACTIVITY_MAX_ENTRIES) {
+      const oldest = messageActivity.keys().next().value;
+      if (oldest !== undefined) messageActivity.delete(oldest);
+    }
+  };
+  const captureMessageView = (chatId: number | string, messageId: number) => {
+    const key = getMessageKey(chatId, messageId);
+    const seq = messageActivity.get(key);
+    return () => messageActivity.get(key) === seq;
+  };
 
   const testKnownTokenOverrides = new Map<string, WalletBalancesSnapshot["knownTokens"]>();
   const holdMarks = options.holdMarks ?? createHoldMarksDatabaseStore();
@@ -154,12 +192,22 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     }
   };
 
+  const getPageSnapshotKey = (cacheKey: string, page: number, pageSize: number) =>
+    `${cacheKey}|${page}|${pageSize}`;
+  const deleteWalletPageSnapshots = (cacheKey: string) => {
+    const prefix = `${cacheKey}|`;
+    for (const key of walletPageSnapshots.keys()) {
+      if (key.startsWith(prefix)) walletPageSnapshots.delete(key);
+    }
+  };
+
   const normalizeTelegramId = (value: bigint | number | string): bigint =>
     typeof value === "bigint" ? value : BigInt(value);
 
   const invalidateWalletSnapshot = (telegramId: bigint) => {
     const cacheKey = getCacheKey(telegramId);
     walletSnapshotCache.delete(cacheKey);
+    deleteWalletPageSnapshots(cacheKey);
     pendingWalletFetches.delete(cacheKey);
     testKnownTokenOverrides.delete(telegramId.toString());
     cacheInvalidations.set(cacheKey, Date.now());
@@ -358,7 +406,86 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     walletRpcCacheTtlMs = WALLET_RPC_CACHE_TTL_MS;
   };
 
-  const getWalletPageData = async (telegramId: bigint, page: number, pageSize: number) => {
+  /**
+   * When one wallet page already holds every token (all known to the bot), store it
+   * as the full snapshot so an action menu opened right after reuses it instead
+   * of reading the same balances again.
+   */
+  const seedSnapshotFromPage = (
+    telegramId: bigint,
+    fetchStart: number,
+    solBalance: number,
+    tokenPage: Awaited<ReturnType<WalletManager["getWalletTokenBalancePage"]>>,
+    knownTokens: WalletBalancesSnapshot["knownTokens"],
+  ) => {
+    const heldMints = tokenPage.heldMints ?? [];
+    const knownMints = new Set(knownTokens.map((token) => token.token_mint));
+    const coversWholeWallet =
+      tokenPage.complete === true &&
+      tokenPage.pageCount <= 1 &&
+      tokenPage.tokenBalances.length === heldMints.length &&
+      tokenPage.tokenBalances.every((token) => knownMints.has(token.mint));
+    if (!coversWholeWallet) {
+      return;
+    }
+
+    const cacheKey = getCacheKey(telegramId);
+    if ((cacheInvalidations.get(cacheKey) ?? 0) >= fetchStart) {
+      return;
+    }
+    // Match getAllWalletTokenBalances ordering.
+    const tokenBalances = tokenPage.tokenBalances
+      .map((token) => ({ ...token }))
+      .sort((left, right) => left.ticker.localeCompare(right.ticker));
+    const wsolBalance = tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
+    walletSnapshotCache.set(cacheKey, {
+      snapshot: {
+        solBalance,
+        nativeSolBalance: solBalance,
+        wsolBalance,
+        tokenBalances,
+        knownTokens,
+      },
+      expiresAt: Date.now() + walletRpcCacheTtlMs,
+    });
+  };
+
+  const peekWalletPageData = (telegramId: bigint, page: number, pageSize: number) => {
+    const key = getPageSnapshotKey(getCacheKey(telegramId), page, pageSize);
+    const entry = walletPageSnapshots.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.fetchedAt > WALLET_PAGE_SNAPSHOT_MAX_AGE_MS) {
+      walletPageSnapshots.delete(key);
+      return undefined;
+    }
+    return entry;
+  };
+
+  const storeWalletPageSnapshot = (
+    cacheKey: string,
+    requestedPage: number,
+    pageSize: number,
+    data: WalletPageData,
+    fetchStart: number,
+  ) => {
+    const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
+    if (invalidatedAt >= fetchStart) return;
+    const key = getPageSnapshotKey(cacheKey, requestedPage, pageSize);
+    walletPageSnapshots.delete(key);
+    walletPageSnapshots.set(key, { data, fetchedAt: data.fetchedAt });
+    if (walletPageSnapshots.size > WALLET_PAGE_SNAPSHOT_MAX_ENTRIES) {
+      const oldest = walletPageSnapshots.keys().next().value;
+      if (oldest !== undefined) walletPageSnapshots.delete(oldest);
+    }
+  };
+
+  const getWalletPageData = async (
+    telegramId: bigint,
+    page: number,
+    pageSize: number,
+  ): Promise<WalletPageData> => {
+    const fetchStart = Date.now();
+    const cacheKey = getCacheKey(telegramId);
     enforceWalletBudget(telegramId);
     const tokenManager = getTokenManager();
     const knownTokens = tokenManager ? tokenManager.getAllKnownTokensWithMetadata() : [];
@@ -371,7 +498,10 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       heldMints: tokenPage.heldMints ?? [],
       scannedMints: tokenPage.heldMints ?? [],
     });
-    return { solBalance, ...tokenPage };
+    seedSnapshotFromPage(telegramId, fetchStart, solBalance, tokenPage, knownTokens);
+    const data: WalletPageData = { solBalance, ...tokenPage, fetchedAt: Date.now() };
+    storeWalletPageSnapshot(cacheKey, page, pageSize, data, fetchStart);
+    return data;
   };
 
   const showWalletUI = async (ctx: any) => {
@@ -379,6 +509,8 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
       wallet,
       getCachedWalletData,
       getWalletPageData,
+      peekWalletPageData,
+      captureMessageView,
       fetchPricesUSD: getPricesUSD,
       buildWalletCaption,
       createWalletKeyboard,
@@ -399,6 +531,16 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
   const walletHandlerDeps = createWalletHandlerDeps();
 
   const registerWalletMenuHandlers = () => {
+    if (typeof (bot as any).use === "function") {
+      bot.use(async (ctx, next) => {
+        const message = ctx.callbackQuery?.message;
+        if (message && typeof message.message_id === "number" && message.chat) {
+          markMessageActivity(message.chat.id, message.message_id);
+        }
+        await next();
+      });
+    }
+
     bot.callbackQuery("main_wallet", async (ctx) => {
       await onMainWallet(ctx as any, walletHandlerDeps);
     });
@@ -516,7 +658,9 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
     registerWalletActionMenuHandler,
     getCachedWalletData,
     getWalletPageData,
+    peekWalletPageData,
     clearWalletCache,
+    captureMessageView,
     defaultWalletActionMenuDeps,
     showWalletUI,
     __test_getWalletSnapshotCacheKeys: getWalletSnapshotCacheKeys,
