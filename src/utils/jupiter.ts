@@ -5,6 +5,12 @@ import { WSOL_MINT } from "./token-registry";
 import { MIN_JUPITER_SWAP_FEE_BPS } from "./admin-payer-surcharge";
 import type { FetchLike } from "../types";
 
+// Updates are sequentialized per user, so a hung request would block every later
+// update from that user. Order execution is left without a timeout on purpose:
+// aborting it would not stop a swap that may still land.
+const JUPITER_QUOTE_TIMEOUT_MS = 10_000;
+const JUPITER_TOKEN_SEARCH_TIMEOUT_MS = 5_000;
+
 // ================================
 // JUPITER TYPES
 // ================================
@@ -492,6 +498,7 @@ export class JupiterClient {
           Accept: "application/json",
           ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
         },
+        signal: AbortSignal.timeout(JUPITER_QUOTE_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -664,6 +671,7 @@ export class JupiterClient {
           Accept: "application/json",
           ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
         },
+        signal: AbortSignal.timeout(JUPITER_QUOTE_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -910,6 +918,7 @@ export async function fetchJupiterTokenMetadata(
         Accept: "application/json",
         ...(apiKey ? { "x-api-key": apiKey } : {}),
       },
+      signal: AbortSignal.timeout(JUPITER_TOKEN_SEARCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

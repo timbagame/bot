@@ -1,6 +1,7 @@
 import { registerLightningDeposits } from "./handlers/lightning";
 import { resolveChatDefaultPlayers } from "./utils/chat-settings";
 import { resolveAdvancedOptions } from "./utils/game-settings";
+import { mapWithConcurrency } from "./utils/concurrency";
 import { registerEvmBot } from "./evm/bot";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
@@ -2921,9 +2922,11 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
 
 export const __test_getSequentializationKey = getSequentializationKey;
 
-bot.use(sequentialize(getSequentializationKey));
-// Drop stale updates to avoid reacting to old messages/callbacks
+// Drop stale updates to avoid reacting to old messages/callbacks. This runs before
+// sequentialize so the age check reflects when Telegram delivered the update, not
+// how long it waited behind a slow handler for the same user.
 bot.use(recentUpdateGuard);
+bot.use(sequentialize(getSequentializationKey));
 
 // ================================
 // UTILITY FUNCTIONS
@@ -4588,6 +4591,7 @@ registerCaseInsensitiveCommand(
 
     // Filter to only include actual group members (with caching)
     const MEMBERSHIP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+    const LEADERBOARD_MEMBERSHIP_CONCURRENCY = 8;
     const telegramIds = allPlayersUnfiltered.map((p) => p.telegramId);
 
     // Check cache first for all players
@@ -4606,9 +4610,13 @@ registerCaseInsensitiveCommand(
       `📊 Membership cache: ${cachedMemberships.size} cached, ${playersNeedingCheck.length} need API check`,
     );
 
-    // Check membership via API for uncached players
-    const membershipChecks = await Promise.all(
-      playersNeedingCheck.map(async (player) => {
+    // Check membership via API for uncached players. Bounded concurrency keeps a
+    // large leaderboard from bursting into Telegram rate limits (which auto-retry
+    // would turn into a reply delayed by up to a minute).
+    const membershipChecks = await mapWithConcurrency(
+      playersNeedingCheck,
+      LEADERBOARD_MEMBERSHIP_CONCURRENCY,
+      async (player) => {
         try {
           const member = await ctx.api.getChatMember(chatId, Number(player.telegramId));
           // member, administrator, creator are valid members; left, kicked, restricted (without is_member) are not
@@ -4616,31 +4624,39 @@ registerCaseInsensitiveCommand(
             ["member", "administrator", "creator"].includes(member.status) ||
             (member.status === "restricted" && member.is_member);
 
-          // Save to cache
-          gameDb.saveMembershipCache(chatId, player.telegramId, isMember);
-
-          return { player, isMember };
+          return { player, isMember, cacheable: true };
         } catch (error) {
           // If we can't check membership (e.g., user never interacted with bot), exclude them
           console.warn(`Could not check membership for ${player.telegramId}:`, error);
-          // Cache the failure as non-member
-          gameDb.saveMembershipCache(chatId, player.telegramId, false);
-          return { player, isMember: false };
+          // Only cache definitive answers; rate limits and server errors are transient.
+          const errorCode = (error as { error_code?: unknown } | null)?.error_code;
+          return { player, isMember: false, cacheable: errorCode === 400 };
         }
-      }),
+      },
     );
 
+    const freshMemberships = new Map<string, boolean>();
+    for (const { player, isMember } of membershipChecks) {
+      freshMemberships.set(player.telegramId, isMember);
+    }
+    const cacheableChecks = membershipChecks.filter((check) => check.cacheable);
+    if (cacheableChecks.length > 0) {
+      gameDb.saveMembershipCacheBatch(
+        chatId,
+        cacheableChecks.map(({ player, isMember }) => ({
+          telegramId: player.telegramId,
+          isMember,
+        })),
+      );
+    }
+
     // Combine cached results with fresh API results
-    const allPlayers = allPlayersUnfiltered.filter((player) => {
-      // Check if in cache
-      const cachedResult = cachedMemberships.get(player.telegramId);
-      if (cachedResult !== undefined) {
-        return cachedResult;
-      }
-      // Otherwise check fresh results
-      const freshResult = membershipChecks.find((c) => c.player.telegramId === player.telegramId);
-      return freshResult?.isMember ?? false;
-    });
+    const allPlayers = allPlayersUnfiltered.filter(
+      (player) =>
+        cachedMemberships.get(player.telegramId) ??
+        freshMemberships.get(player.telegramId) ??
+        false,
+    );
 
     if (allPlayers.length === 0) {
       return ctx.reply(buildEmptyLeaderboardMessage(), {
