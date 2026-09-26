@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Keypair, SystemProgram, type TransactionInstruction } from "#solana";
+import { Keypair, PublicKey, SystemProgram, type TransactionInstruction } from "#solana";
+import { AccountLayout, TOKEN_PROGRAM_ID } from "#token";
 import { WalletManager } from "../src/utils/wallet";
 import { USER_SOL_MAX_BUFFER_LAMPORTS } from "../src/utils/constants";
+import { WSOL_MINT } from "../src/utils/token-registry";
 import { storePendingTransaction } from "../src/utils/user-state";
 import {
   answers,
@@ -51,7 +53,9 @@ async function prepare(nativeBalance: bigint | number) {
     remainingLamports: fullBalance - (amountLamports ?? fullBalance),
     payerRentLamports: amountLamports !== undefined && amountLamports < fullBalance ? rent : 0,
   }));
-  stub(wallet, "estimateFee", async () => 5_000);
+  stub(wallet, "estimateFee", async (payer: PublicKey) =>
+    payer.equals(operator.publicKey) ? 10_000 : 5_000,
+  );
   stub(
     wallet,
     "sendAndConfirmWithResubmits",
@@ -62,6 +66,32 @@ async function prepare(nativeBalance: bigint | number) {
   );
   stub(wallet, "confirmTransaction", async () => {});
   return { user, operator, submissions, operatorLoads: () => operatorLoads };
+}
+
+async function prepareRealPlan(nativeBalance: bigint, wsolBalance: bigint) {
+  const fixture = await prepare(nativeBalance);
+  const data = Buffer.alloc(AccountLayout.span);
+  AccountLayout.encode(
+    {
+      mint: new PublicKey(WSOL_MINT),
+      owner: fixture.user.publicKey,
+      amount: wsolBalance,
+      state: 1,
+      isNativeOption: 1,
+      isNative: BigInt(rent),
+    },
+    data,
+  );
+  stub(wallet, "buildUnwrapWsolPlan", WalletManager.prototype.buildUnwrapWsolPlan.bind(wallet));
+  stub(wallet, "connection", {
+    getBalance: async () => nativeBalance,
+    getAccountInfo: async () => ({
+      data,
+      owner: TOKEN_PROGRAM_ID,
+      lamports: wsolBalance + BigInt(rent),
+    }),
+  });
+  return fixture;
 }
 
 async function confirmSwap(amount: number) {
@@ -96,7 +126,7 @@ describe("Telegram unwrap sponsorship", () => {
       expect(reimbursement.keys[0]!.pubkey).toEqual(fixture.user.publicKey);
       expect(reimbursement.keys[1]!.pubkey).toEqual(fixture.operator.publicKey);
       expect(Buffer.from(reimbursement.data).readBigUInt64LE(4)).toBe(
-        BigInt(5_000 + (amount < fullBalance ? rent : 0)),
+        BigInt(10_000 + (amount < fullBalance ? rent : 0)),
       );
     });
 
@@ -117,6 +147,37 @@ describe("Telegram unwrap sponsorship", () => {
     expect(answers()).toContain("✅ WSOL unwrapped");
     expect(fixture.submissions).toHaveLength(1);
     expect(fixture.submissions[0]!.signers).toEqual([fixture.operator, fixture.user]);
+  });
+
+  for (const entry of ["swap", "direct"]) {
+    test(`the ${entry} confirmation repays a full dust unwrap fee from released account rent`, async () => {
+      const fixture = await prepareRealPlan(0n, 1n);
+      if (entry === "swap") await confirmSwap(1);
+      else await press("unwrap_confirm", { userId });
+      expect(fixture.submissions).toHaveLength(1);
+      const sent = fixture.submissions[0]!;
+      expect(sent.signers).toEqual([fixture.operator, fixture.user]);
+      expect(sent.instructions).toHaveLength(3); // sync, close, reimburse; no recreated ATA
+      expect(Buffer.from(sent.instructions.at(-1)!.data).readBigUInt64LE(4)).toBe(10_000n);
+    });
+  }
+
+  test("a partial dust unwrap cannot spend the rent needed to recreate the account", async () => {
+    const fixture = await prepareRealPlan(0n, BigInt(fullBalance));
+    await confirmSwap(1);
+    expect(answers()).toContain("❌ Unwrap failed");
+    expect(fixture.submissions).toHaveLength(0);
+  });
+
+  test("a partial unwrap can combine existing native SOL with proceeds to repay the sponsor", async () => {
+    const fixture = await prepareRealPlan(4_999n, BigInt(fullBalance));
+    await confirmSwap(7_000);
+    expect(answers()).toContain("✅ Unwrapped WSOL to SOL");
+    expect(fixture.submissions).toHaveLength(1);
+    expect(fixture.submissions[0]!.signers).toEqual([fixture.operator, fixture.user]);
+    expect(Buffer.from(fixture.submissions[0]!.instructions.at(-1)!.data).readBigUInt64LE(4)).toBe(
+      BigInt(10_000 + rent),
+    );
   });
 
   for (const balance of [499_999n, 5_000n]) {

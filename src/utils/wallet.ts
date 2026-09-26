@@ -1913,6 +1913,7 @@ export class WalletManager {
     unwrapLamports: number;
     remainingLamports: number;
     payerRentLamports: number;
+    releasedRentLamports: number;
   }> {
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(wsolMint, owner, false, TOKEN_PROGRAM_ID);
@@ -1947,12 +1948,12 @@ export class WalletManager {
     }
 
     const remainingLamports = availableLamports - unwrapLamports;
-    const payerRentLamports =
-      remainingLamports > 0 ? Number(accountInfo.rentExemptReserve ?? 0n) : 0;
+    const rentReserveLamports = Number(accountInfo.rentExemptReserve ?? 0n);
 
-    if (!Number.isSafeInteger(payerRentLamports) || payerRentLamports < 0) {
+    if (!Number.isSafeInteger(rentReserveLamports) || rentReserveLamports < 0) {
       throw new Error("WSOL account rent reserve is invalid.");
     }
+    const payerRentLamports = remainingLamports > 0 ? rentReserveLamports : 0;
     if (remainingLamports > 0 && payerRentLamports === 0) {
       throw new Error("WSOL account rent reserve is unavailable for a partial unwrap.");
     }
@@ -1987,6 +1988,7 @@ export class WalletManager {
       unwrapLamports,
       remainingLamports,
       payerRentLamports,
+      releasedRentLamports: remainingLamports === 0 ? rentReserveLamports : 0,
     };
   }
 
@@ -2085,6 +2087,7 @@ export class WalletManager {
       unwrapLamports,
       remainingLamports,
       payerRentLamports,
+      releasedRentLamports = 0,
     } = await this.buildUnwrapWsolPlan({ owner, payer: transactionPayer, amountLamports });
 
     const instructions: TransactionInstruction[] = [...unwrapInstructions];
@@ -2106,8 +2109,20 @@ export class WalletManager {
       if (!Number.isSafeInteger(reimbursementLamports) || reimbursementLamports <= 0) {
         throw new Error("Sponsored WSOL unwrap reimbursement is invalid.");
       }
-      if (unwrapLamports < networkFeeLamports) {
-        throw new Error("WSOL unwrap amount is too small to reimburse the sponsored network fee.");
+      // A full close releases rent in addition to WSOL. A partial close needs
+      // that rent again for its recreated ATA, so only the unwrapped amount is
+      // available toward the network fee. Existing native SOL can cover a gap.
+      const availableProceeds = BigInt(unwrapLamports) + BigInt(releasedRentLamports);
+      if (availableProceeds < BigInt(networkFeeLamports)) {
+        const nativeBalance = Number(await this.connection.getBalance(owner));
+        if (!Number.isSafeInteger(nativeBalance) || nativeBalance < 0) {
+          throw new Error("Unable to determine native SOL balance for unwrap reimbursement.");
+        }
+        if (availableProceeds + BigInt(nativeBalance) < BigInt(networkFeeLamports)) {
+          throw new Error(
+            "Unwrap proceeds and native SOL are insufficient to reimburse the sponsored network fee.",
+          );
+        }
       }
 
       instructions.push(
