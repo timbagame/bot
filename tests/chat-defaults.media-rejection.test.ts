@@ -181,7 +181,7 @@ describe("Chat defaults media rejection", () => {
     // Animation should be processed, not rejected
   });
 
-  test("PDF documents should be rejected", async () => {
+  test("rejects PDF documents", async () => {
     setInputSession("99_11", {
       type: "chat_defaults",
       chatId: 99,
@@ -222,7 +222,7 @@ describe("Chat defaults media rejection", () => {
     }
   });
 
-  test("MP4 sent as document should be rejected even if it's a video", async () => {
+  test("rejects an MP4 sent as a document even though it is a video", async () => {
     setInputSession("99_11", {
       type: "chat_defaults",
       chatId: 99,
