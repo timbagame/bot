@@ -20,6 +20,7 @@ import {
 import { OracleClient } from "../src/utils/oracle";
 import { clearAllGameSetupSessions, getGameSetupSession } from "../src/utils/user-state";
 import * as prices from "../src/utils/prices";
+import { PublicKey } from "@solana/web3.js";
 
 useBotHarness();
 
@@ -55,6 +56,11 @@ beforeEach(() => {
     revision: 1,
     enabled: true,
   })) as any);
+  // Contracts before 0.3.0 read the minimum stake from the on-chain game token account.
+  botModule.__test_setProgram({
+    programId: new PublicKey("11111111111111111111111111111112"),
+    account: { gameToken: { fetch: async () => ({ minAmount: 1_000_000 }) } },
+  } as any);
   botModule.__test_setGameManager({
     hasGameCreationRequest: () => false,
     createGame: async (
@@ -81,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreStubs();
+  botModule.__test_resetProgram();
   clearAllGameSetupSessions();
 });
 

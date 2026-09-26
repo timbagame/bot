@@ -3117,7 +3117,9 @@ const gameCallbacksModule = createGameCallbacksModule({
   bot,
   wallet,
   getGameManager: () => gameManager,
-  gameDb,
+  get gameDb() {
+    return gameDb;
+  },
   wrapCallbackHandler,
   withCreatorContext,
   withCreatorSessionContext,
@@ -3208,7 +3210,9 @@ const buyAlertService = createBuyAlertService({
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
   chatDb,
-  gameDb,
+  get gameDb() {
+    return gameDb;
+  },
   getTokenManager: () => tokenManager,
   getGameManager: () => gameManager,
   wrapCallbackHandler,
