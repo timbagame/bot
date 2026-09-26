@@ -86,6 +86,23 @@ describe("Bot Main Entry Point Tests", () => {
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);
       expect(commands.some(({ command }) => command === "finance")).toBe(false);
       expect(commands.some(({ command }) => command === "oracle")).toBe(false);
+      for (const scope of ["all", "private", "group"] as const) {
+        expect(
+          botModule
+            .__test_getRegisteredBotCommands(scope)
+            .some(({ command }) => command === "status"),
+        ).toBe(false);
+      }
+    });
+
+    test("/status is registered for admins only", () => {
+      const command = botModule.__test_adminStatusCommand;
+      expect(command.isAuthorized({ chat: { type: "private" }, from: { id: 1 } } as any)).toBe(
+        false,
+      );
+      expect(
+        command.isAuthorized({ chat: { type: "private" }, from: { id: 5162530 } } as any),
+      ).toBe(true);
     });
 
     test("lists only primary command names in a stable order", () => {

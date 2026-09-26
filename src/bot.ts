@@ -158,6 +158,9 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { createAdminStatusCommand } from "./handlers/admin-status";
+import { DEFAULT_MAINNET_ENDPOINT, parseRpcEndpointList } from "./utils/rpc-endpoints";
+import { getCallbackQueue, getGameOperationQueue } from "./utils/telegram-rate-limiter";
 import { createFaucetModule } from "./handlers/faucet";
 import { FinanceLedgerService } from "./services/finance-ledger";
 import { FinanceBackfillWorker } from "./services/finance-backfill-worker";
@@ -4840,6 +4843,38 @@ bot.callbackQuery(
     },
     { action: "finance report", errorAck: "Unable to load finance report" },
   ),
+);
+
+const adminStatusCommand = createAdminStatusCommand({
+  getRpcEndpoints: () => {
+    const active = wallet.getConnection()?.rpcEndpoint;
+    let configured: string[] = [];
+    try {
+      configured = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
+        fallback: DEFAULT_MAINNET_ENDPOINT,
+      });
+    } catch (error) {
+      console.warn("Unable to parse SOLANA_NETWORK for /status:", error);
+    }
+    return active && !configured.includes(active) ? [active, ...configured] : configured;
+  },
+  getActiveRpcEndpoint: () => wallet.getConnection()?.rpcEndpoint,
+  getCallbackQueue: () => getCallbackQueue(),
+  getActiveGameLocks: () => getGameOperationQueue().activeLocks,
+  getPendingCreations: () => gameDb.getPendingGameCreationAuditRecords(),
+});
+
+export const __test_adminStatusCommand = adminStatusCommand;
+
+// Admin-only health check. Hidden from the command menu; non-admins get no reply.
+registerCaseInsensitiveCommand("status", "Bot health for admins", { showInMenu: false })(
+  async (ctx: Context) => {
+    try {
+      await adminStatusCommand.handle(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "status");
+    }
+  },
 );
 
 registerCaseInsensitiveCommand("oracle", "Fees and game limits", { showInMenu: false })(
