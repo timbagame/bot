@@ -7,7 +7,6 @@ function freshPricesModule(): typeof pricesModuleForReset {
   return pricesModuleForReset;
 }
 
-
 const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
 describe("price utilities fallbacks", () => {

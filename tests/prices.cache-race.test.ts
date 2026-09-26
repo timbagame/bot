@@ -6,7 +6,6 @@ function freshPricesModule(): typeof pricesModuleForReset {
   return pricesModuleForReset;
 }
 
-
 const ORIGINAL_TTL = process.env["PRICES_CACHE_TTL_MS"];
 const ORIGINAL_ENABLED = process.env["PRICES_ENABLED"];
 

@@ -8,7 +8,6 @@ function freshPricesModule(): typeof pricesModuleForReset {
   return pricesModuleForReset;
 }
 
-
 afterEach(() => {
   __test_resetPriceCache();
 });

@@ -15,7 +15,6 @@ function freshPricesModule(): typeof pricesModuleForReset {
   return pricesModuleForReset;
 }
 
-
 const originalEnv = process.env["PRICES_ENABLED"];
 const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
