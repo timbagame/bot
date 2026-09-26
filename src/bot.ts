@@ -83,6 +83,13 @@ import {
 import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
+  SWAP_QUOTE_RETRY_PREFIX,
+  buildSwapProviderRetryKeyboard,
+  buildSwapProviderSlowMessage,
+  createSwapQuoteRetryStore,
+  isSwapProviderUnavailableError,
+} from "./utils/swap/provider-retry";
+import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
   buildEmptyGlobalLeaderboardMessage,
@@ -113,6 +120,7 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  answerCallbackWithGrace,
   requireTelegramId,
   getRequiredTelegramIdForContext,
   resolveTelegramIdOrRespond,
@@ -149,6 +157,9 @@ import {
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
+import { createAdminStatusCommand } from "./handlers/admin-status";
+import { DEFAULT_MAINNET_ENDPOINT, parseRpcEndpointList } from "./utils/rpc-endpoints";
+import { getCallbackQueue, getGameOperationQueue } from "./utils/telegram-rate-limiter";
 import { createFaucetModule } from "./handlers/faucet";
 import { FinanceLedgerService } from "./services/finance-ledger";
 import { FinanceBackfillWorker } from "./services/finance-backfill-worker";
@@ -4418,7 +4429,7 @@ const handleGamesTabCallback = async (ctx: Context) => {
 // Tab/pagination callback for /games command
 bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx: Context) => {
   try {
-    await handleGamesTabCallback(ctx);
+    await answerCallbackWithGrace(ctx, () => handleGamesTabCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games tab");
   }
@@ -4427,44 +4438,46 @@ bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx
 // Refresh callback for /games command
 bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
   try {
-    const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
-    if (!match || !match[1]) {
-      await safeAnswerCallbackQuery(ctx, "Invalid request.");
-      return;
-    }
-
-    const ownerId = match[1];
-    const callerId = ctx.from?.id?.toString();
-    if (callerId !== ownerId) {
-      await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
-      return;
-    }
-
-    const telegramId = BigInt(ownerId);
-    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "Player";
-
-    const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
-    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
-
-    try {
-      await ctx.editMessageText(messageText, {
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: keyboard },
-        link_preview_options: { is_disabled: true },
-      });
-    } catch (editError) {
-      if (!isMessageNotModified(editError)) {
-        throw editError;
-      }
-    }
-    await safeAnswerCallbackQuery(ctx, "Refreshed!");
+    await answerCallbackWithGrace(ctx, () => handleGamesRefreshCallback(ctx));
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games refresh");
   }
 });
+
+const handleGamesRefreshCallback = async (ctx: Context): Promise<void> => {
+  const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
+  if (!match || !match[1]) {
+    await safeAnswerCallbackQuery(ctx, "Invalid request.");
+    return;
+  }
+
+  const ownerId = match[1];
+  const callerId = ctx.from?.id?.toString();
+  if (callerId !== ownerId) {
+    await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
+    return;
+  }
+
+  const telegramId = BigInt(ownerId);
+  const result = await gameManager.getUserGamesHistory(ctx, telegramId);
+  const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "Player";
+
+  const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
+  const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
+
+  try {
+    await ctx.editMessageText(messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+      link_preview_options: { is_disabled: true },
+    });
+  } catch (editError) {
+    if (!isMessageNotModified(editError)) {
+      throw editError;
+    }
+  }
+  await safeAnswerCallbackQuery(ctx, "Refreshed!");
+};
 
 export const __test_handleActiveCommand = handleActiveCommand;
 export const __test_handleGamesTabCallback = handleGamesTabCallback;
@@ -4952,6 +4965,38 @@ bot.callbackQuery(
     },
     { action: "finance report", errorAck: "Unable to load finance report" },
   ),
+);
+
+const adminStatusCommand = createAdminStatusCommand({
+  getRpcEndpoints: () => {
+    const active = wallet.getConnection()?.rpcEndpoint;
+    let configured: string[] = [];
+    try {
+      configured = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
+        fallback: DEFAULT_MAINNET_ENDPOINT,
+      });
+    } catch (error) {
+      console.warn("Unable to parse SOLANA_NETWORK for /status:", error);
+    }
+    return active && !configured.includes(active) ? [active, ...configured] : configured;
+  },
+  getActiveRpcEndpoint: () => wallet.getConnection()?.rpcEndpoint,
+  getCallbackQueue: () => getCallbackQueue(),
+  getActiveGameLocks: () => getGameOperationQueue().activeLocks,
+  getPendingCreations: () => gameDb.getPendingGameCreationAuditRecords(),
+});
+
+export const __test_adminStatusCommand = adminStatusCommand;
+
+// Admin-only health check. Hidden from the command menu; non-admins get no reply.
+registerCaseInsensitiveCommand("status", "Bot health for admins", { showInMenu: false })(
+  async (ctx: Context) => {
+    try {
+      await adminStatusCommand.handle(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "status");
+    }
+  },
 );
 
 registerCaseInsensitiveCommand("oracle", "Fees and game limits", { showInMenu: false })(
@@ -5855,11 +5900,16 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      await showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
-        toMint: quoteOverrides.toMint,
-        toDecimals: quoteOverrides.toDecimals,
-      });
-      await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
+      // The quote screen shows its own progress; the toast only covers slow starts.
+      await answerCallbackWithGrace(
+        ctx,
+        () =>
+          showSwapQuoteAndConfirmation(ctx, fromToken, displayToToken, amount, telegramId, {
+            toMint: quoteOverrides.toMint,
+            toDecimals: quoteOverrides.toDecimals,
+          }),
+        { pendingText: "⏳ Getting a quote…" },
+      );
     } catch (error) {
       console.error("Error in swap amount selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
@@ -5988,6 +6038,24 @@ const showSwapQuoteAndConfirmation = async (
   overrides.fromDecimals = overrides.fromDecimals ?? source.decimals;
   const userId = telegramId || getTelegramId(ctx);
   const cancelCallback = `swap_to_${fromTokenIdentifier}_${toToken}`;
+  const retryOverrides = { ...overrides };
+
+  const renderSwapQuoteError = async (error: unknown) => {
+    if (!isSwapProviderUnavailableError(error)) {
+      return await renderTradeQuoteError({ error, retryCallback: cancelCallback });
+    }
+    const retryCallback = swapQuoteRetryStore.save({
+      userId: userId.toString(),
+      fromTokenIdentifier,
+      toToken,
+      amount,
+      overrides: retryOverrides,
+    });
+    return {
+      text: buildSwapProviderSlowMessage({ amount, fromTicker: fromToken, toTicker: toToken }),
+      keyboard: buildSwapProviderRetryKeyboard(retryCallback, cancelCallback),
+    };
+  };
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -6060,23 +6128,51 @@ const showSwapQuoteAndConfirmation = async (
           cancelCallback,
         }),
       onError: async (error) => {
-        const { text, keyboard } = await renderTradeQuoteError({
-          error,
-          retryCallback: cancelCallback,
-        });
-        await respondWithMenu(ctx, { text, keyboard });
+        await respondWithMenu(ctx, await renderSwapQuoteError(error));
       },
       quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = await renderTradeQuoteError({
-      error,
-      retryCallback: cancelCallback,
-    });
-    await respondWithMenu(ctx, { text, keyboard });
+    await respondWithMenu(ctx, await renderSwapQuoteError(error));
   }
 };
+
+const swapQuoteRetryStore = createSwapQuoteRetryStore();
+
+export const __test_swapQuoteRetryStore = swapQuoteRetryStore;
+
+// One-tap retry after a provider timeout: re-runs the same quote (pair, amount
+// and token overrides) for the user who asked for it.
+registerCallbackPrefixHandler(
+  SWAP_QUOTE_RETRY_PREFIX,
+  async (ctx, { payload }) => {
+    const request = swapQuoteRetryStore.get(payload);
+    if (!request) {
+      await safeAnswerCallbackQuery(ctx, "⌛ This quote expired. Pick the amount again.");
+      return;
+    }
+    if (getTelegramIdString(ctx) !== request.userId) {
+      await safeAnswerCallbackQuery(ctx, "❌ This quote belongs to someone else");
+      return;
+    }
+
+    await answerCallbackWithGrace(
+      ctx,
+      () =>
+        showSwapQuoteAndConfirmation(
+          ctx,
+          request.fromTokenIdentifier,
+          request.toToken,
+          request.amount,
+          BigInt(request.userId),
+          { ...request.overrides },
+        ),
+      { pendingText: "⏳ Getting a quote…" },
+    );
+  },
+  { logLabel: "swap_retry", errorAck: "❌ Error retrying quote" },
+);
 
 // ================================
 // ERROR HANDLING & BOT STARTUP

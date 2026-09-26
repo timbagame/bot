@@ -20,6 +20,7 @@ import {
 } from "./token-display";
 import { sortTokensByRecognition } from "./verified-token-registry";
 import { applyHoldMarks, type HoldMarkStore } from "../services/hold-marks";
+import { formatDuration } from "./format-time";
 
 export { sanitizeTokenSymbol } from "./token-display";
 
@@ -188,7 +189,26 @@ export type WalletCaptionOptions = {
   explorerUrl?: string | null;
   page?: number;
   pageSize?: number;
+  /** When the balances were fetched (ms epoch). Adds an "Updated …" footer. */
+  updatedAt?: number | null;
+  /** Clock used for the footer; defaults to Date.now(). */
+  now?: number;
 };
+
+/** Balances younger than this read as "just now" instead of a second count. */
+export const WALLET_UPDATED_JUST_NOW_MS = 5_000;
+
+/**
+ * Human label for how old the wallet balances are, e.g. "Updated just now",
+ * "Updated 12s ago", "Updated 3m ago".
+ */
+export function formatWalletUpdatedLabel(updatedAt: number, now: number = Date.now()): string {
+  const ageMs = Math.max(0, now - updatedAt);
+  if (ageMs < WALLET_UPDATED_JUST_NOW_MS) {
+    return "Updated just now";
+  }
+  return `Updated ${formatDuration(Math.floor(ageMs / 1_000))} ago`;
+}
 
 export function buildWalletCaption(
   walletAddress: string,
@@ -208,6 +228,11 @@ export function buildWalletCaption(
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
+
+  const footer =
+    typeof options.updatedAt === "number" && Number.isFinite(options.updatedAt)
+      ? ["", `<i>${escapeHtml(formatWalletUpdatedLabel(options.updatedAt, options.now))}</i>`]
+      : [];
 
   const pageSize = Math.max(1, Math.trunc(options.pageSize ?? 8));
   const pageCount = Math.max(1, Math.ceil(tokenLines.length / pageSize));
@@ -231,11 +256,14 @@ export function buildWalletCaption(
     }
 
     const candidate = parts.join(" ");
-    if ([...lines, candidate].join("\n").length > maxCaptionLength) break;
+    if ([...lines, candidate, ...footer].join("\n").length > maxCaptionLength) break;
     lines.push(candidate);
   }
 
-  return lines.join("\n");
+  if (footer.length > 0 && lines[lines.length - 1] === "") {
+    footer.shift();
+  }
+  return [...lines, ...footer].join("\n");
 }
 
 export type WalletActionMenuTokenBalance = WalletTokenBalance & {
