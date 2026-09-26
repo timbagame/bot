@@ -61,6 +61,8 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
+  WALLET_THROTTLE_MAX_KEYS,
+  BLOCKCHAIN_TIME_CACHE_MS,
   BLOCKHASH_CACHE_DURATION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
@@ -330,7 +332,11 @@ export class WalletManager {
     mint: string,
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private operatorKeypair: Keypair | null = null;
-  private lastCallTime: number = 0;
+  // Per-key rate limiting: one entry per wallet (or system resource), so one user's
+  // reads or a background job never delay another user's requests.
+  private readonly lastCallTimeByKey = new Map<string, number>();
+  private blockchainTimeCache: { blockTime: number; fetchedAtMs: number } | null = null;
+  private blockchainTimeInFlight: Promise<number> | null = null;
   private tokenDb: TokenDatabase;
   private sendGameTransaction: (rpcUrl: string, txBase64: string) => Promise<string>;
 
@@ -540,13 +546,35 @@ export class WalletManager {
     WalletManager.instance = undefined as any;
   }
 
-  private async throttle(): Promise<void> {
-    const now = this.timeNow ? this.timeNow() : Date.now();
-    const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
+  private currentTimeMs(): number {
+    return this.timeNow ? this.timeNow() : Date.now();
+  }
+
+  /**
+   * Space RPC calls for the same key (a wallet address or a system resource) at
+   * least WALLET_RATE_LIMIT_MS apart. Different keys never wait on each other.
+   */
+  private async throttle(key: string): Promise<void> {
+    const now = this.currentTimeMs();
+    const lastCallTime = this.lastCallTimeByKey.get(key) ?? 0;
+    const timeToWait = WALLET_RATE_LIMIT_MS - (now - lastCallTime);
     if (timeToWait > 0) {
       await this.sleep(timeToWait);
     }
-    this.lastCallTime = this.timeNow ? this.timeNow() : Date.now();
+    const calledAt = this.currentTimeMs();
+    // Re-insert so the map stays ordered by last use, oldest first.
+    this.lastCallTimeByKey.delete(key);
+    this.lastCallTimeByKey.set(key, calledAt);
+    if (this.lastCallTimeByKey.size > WALLET_THROTTLE_MAX_KEYS) {
+      for (const [staleKey, staleAt] of this.lastCallTimeByKey) {
+        if (calledAt - staleAt < WALLET_RATE_LIMIT_MS) break;
+        this.lastCallTimeByKey.delete(staleKey);
+      }
+    }
+  }
+
+  private walletThrottleKey(address: PublicKey | string): string {
+    return `wallet:${typeof address === "string" ? address : address.toBase58()}`;
   }
 
   private async sleep(ms: number): Promise<void> {
@@ -762,8 +790,8 @@ export class WalletManager {
       }
     }
 
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
 
     try {
       const lamports = Number(await this.connection.getBalance(pubkey));
@@ -790,8 +818,8 @@ export class WalletManager {
     tokenMint: string,
     options: { createIfMissing?: boolean; throwOnError?: boolean } = {},
   ): Promise<number> {
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
     const mintPubkey = new PublicKey(tokenMint);
     const programDetection = await this.resolveTokenProgram(mintPubkey);
     if (!programDetection) {
@@ -880,8 +908,8 @@ export class WalletManager {
       }
     }
 
-    await this.throttle();
     const pubkey = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(pubkey));
 
     const reportCensus = (census: WalletTokenCensus) => {
       options.onCensus?.(census);
@@ -1010,8 +1038,8 @@ export class WalletManager {
     requestedPage: number,
     pageSize: number,
   ): Promise<WalletTokenBalancePage> {
-    await this.throttle();
     const owner = await this.getPublicKey(telegramId);
+    await this.throttle(this.walletThrottleKey(owner));
     const [splAccounts, token2022Accounts] = await Promise.all([
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
       this.connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
@@ -1654,7 +1682,7 @@ export class WalletManager {
         mintAddress: tokenMint,
         fetch: this.fetchFn as any,
         getDecimals: async () => {
-          await this.throttle();
+          await this.throttle(`mint:${tokenMint}`);
           return await this.fetchMintDecimals(tokenMint);
         },
         defaultDecimals: 6,
@@ -1741,7 +1769,7 @@ export class WalletManager {
     const instructions: TransactionInstruction[] = [];
 
     try {
-      await this.throttle();
+      await this.throttle(this.walletThrottleKey(owner));
       const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
       if (!accountInfo) {
         instructions.push(
@@ -1821,7 +1849,7 @@ export class WalletManager {
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(wsolMint, owner, false, TOKEN_PROGRAM_ID);
 
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(owner));
     let accountInfo;
     try {
       accountInfo = await getAccount(this.connection, wsolAta, "confirmed", TOKEN_PROGRAM_ID);
@@ -2483,7 +2511,8 @@ export class WalletManager {
     signers: Keypair[],
     options: { onPrepared?: PreparedTransactionCallback } = {},
   ): Promise<string> {
-    await this.throttle();
+    const feePayer = signers[0];
+    await this.throttle(feePayer ? this.walletThrottleKey(feePayer.publicKey) : "system");
 
     if (signers.length === 0) {
       throw new Error("No signers provided");
@@ -2831,7 +2860,7 @@ export class WalletManager {
 
     const allowFallback = options.allowFallback ?? true;
 
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(payer));
     try {
       const latestBlockhash = await this.getLatestBlockhash();
       const message = new TransactionMessage({
@@ -2863,7 +2892,7 @@ export class WalletManager {
     serializedTxBase64: string,
     signer: Keypair,
   ): Promise<string> {
-    await this.throttle();
+    await this.throttle(this.walletThrottleKey(signer.publicKey));
 
     try {
       // Deserialize the transaction
@@ -2940,15 +2969,40 @@ export class WalletManager {
   // UTILITY METHODS
   // ================================
 
+  /**
+   * Current cluster time in seconds. One slot/blockTime read is shared for a few
+   * seconds (advanced by the local clock), so formatting many games or scanning
+   * for expired ones costs one lookup instead of one per game.
+   */
   public async getBlockchainTime(): Promise<number> {
+    const now = this.currentTimeMs();
+    const cached = this.blockchainTimeCache;
+    if (
+      cached &&
+      now - cached.fetchedAtMs >= 0 &&
+      now - cached.fetchedAtMs < BLOCKCHAIN_TIME_CACHE_MS
+    ) {
+      return cached.blockTime + Math.floor((now - cached.fetchedAtMs) / 1000);
+    }
+
+    if (!this.blockchainTimeInFlight) {
+      this.blockchainTimeInFlight = this.fetchBlockchainTime().finally(() => {
+        this.blockchainTimeInFlight = null;
+      });
+    }
+    return this.blockchainTimeInFlight;
+  }
+
+  private async fetchBlockchainTime(): Promise<number> {
     try {
-      await this.throttle();
       const slot = await this.connection.getSlot();
       const blockTime = await this.connection.getBlockTime(slot);
       if (!blockTime) {
         throw new Error("Could not get blockchain time");
       }
-      return Number(blockTime);
+      const normalized = Number(blockTime);
+      this.blockchainTimeCache = { blockTime: normalized, fetchedAtMs: this.currentTimeMs() };
+      return normalized;
     } catch (error) {
       console.warn("Falling back to system time:", error);
       return Math.floor(Date.now() / 1000);
@@ -2971,7 +3025,7 @@ export class WalletManager {
       };
     }
 
-    await this.throttle();
+    await this.throttle("blockhash");
     const result = await this.connection.getLatestBlockhash("confirmed");
     const normalized = {
       blockhash: String(result.blockhash),
