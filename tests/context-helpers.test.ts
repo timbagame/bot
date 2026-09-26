@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test, beforeAll } from "bun:test";
 import {
   categorizeError,
   getTelegramId,
@@ -7,6 +7,8 @@ import {
   getRequiredTelegramIdForContext,
   MISSING_TELEGRAM_ID_MESSAGE,
   createMessageEditAdapter,
+  handleCallbackErrorSafe,
+  safeAnswerCallbackQuery,
 } from "../src/utils/context-helpers";
 import { truncateMessage } from "../src/utils/errors";
 
@@ -155,4 +157,208 @@ test("createMessageEditAdapter reuses API with pinned targets", async () => {
   expect(adapter.chat?.id).toBe(333);
   expect(adapter.__editAdapterTarget).toEqual({ chatId: 333, messageId: 222 });
   expect(adapter.from).toEqual({ id: 555 });
+});
+
+test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no direct method", async () => {
+  let answered = false;
+  const ctx: any = {
+    callbackQuery: { id: "cb-xyz" },
+    api: {
+      answerCallbackQuery: async (id: string, opts: { text: string }) => {
+        answered = id === "cb-xyz" && typeof opts.text === "string" && opts.text.length > 0;
+      },
+    },
+  };
+
+  await safeAnswerCallbackQuery(ctx, "sample message");
+  expect(answered).toBe(true);
+});
+
+test("safeAnswerCallbackQuery exits early when callback id missing", async () => {
+  let called = false;
+  const ctx: any = {
+    callbackQuery: {},
+    api: {
+      answerCallbackQuery: async () => {
+        called = true;
+      },
+    },
+  };
+
+  await expect(safeAnswerCallbackQuery(ctx, "ignored")).resolves.toBeUndefined();
+  expect(called).toBe(false);
+});
+
+test("safeAnswerCallbackQuery suppresses stale direct callback errors", async () => {
+  let fallbackCalled = false;
+  const err: any = new Error("query is too old");
+  err.description = "query is too old";
+  err.error_code = 400;
+
+  const ctx: any = {
+    callbackQuery: { id: "cb-123" },
+    answerCallbackQuery: async () => {
+      throw err;
+    },
+    api: {
+      answerCallbackQuery: async () => {
+        fallbackCalled = true;
+      },
+    },
+  };
+
+  await expect(safeAnswerCallbackQuery(ctx, "stale")).resolves.toBeUndefined();
+  expect(fallbackCalled).toBe(false);
+});
+
+test("truncateMessage honors important prefix and first sentence", () => {
+  const msg =
+    "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
+  const truncated = truncateMessage(msg, {
+    maxLength: 60,
+    preserveSentences: true,
+    wordBoundary: true,
+  });
+  // Should keep just the first sentence due to important prefix
+  expect(truncated).toBe("❌ Failure: Something bad happened.");
+});
+
+test("handleCallbackErrorSafe responds with account not found message", async () => {
+  let answeredText: string | undefined;
+  const ctx: any = {
+    answerCallbackQuery: async (text: string) => {
+      answeredText = text;
+    },
+  };
+
+  const error = new Error("Account does not exist");
+
+  await handleCallbackErrorSafe(ctx, error, "test action");
+
+  expect(answeredText).toBe("This game is no longer active!");
+});
+
+describe("handleCallbackErrorSafe with a minimal environment", () => {
+  beforeAll(() => {
+    // Minimal env so dynamic imports in handler are safe
+    process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+    process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
+    process.env.MNEMONIC =
+      process.env.MNEMONIC ||
+      "test walk nut penalty hip pave soap entry language right filter choice";
+  });
+
+  test("handleCallbackErrorSafe: account not found shortcut", async () => {
+    const calls: string[] = [];
+    const ctx = {
+      answerCallbackQuery: async (text: string) => {
+        calls.push(text);
+      },
+    } as any;
+
+    await handleCallbackErrorSafe(ctx, new Error("Account does not exist"), "join");
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toContain("no longer active");
+  });
+
+  test("handleCallbackErrorSafe: formats generic errors via utilities", async () => {
+    const calls: string[] = [];
+    const ctx = {
+      answerCallbackQuery: async (text: string) => {
+        calls.push(text);
+      },
+    } as any;
+
+    await handleCallbackErrorSafe(
+      ctx,
+      new Error("simulation failed: custom program error: 0x1"),
+      "swap",
+      { maxLength: 200 },
+    );
+
+    expect(calls.length).toBe(1);
+    // Default formatter in errors.ts for simulation/custom program errors
+    expect(calls[0]).toContain("Transaction failed");
+  });
+
+  test("handleCallbackErrorSafe uses Telegram API fallback when direct helper missing", async () => {
+    const answered: { id: string; text: string }[] = [];
+    const originalError = console.error;
+
+    try {
+      console.error = () => {};
+      const ctx = {
+        api: {
+          answerCallbackQuery: async (id: string, opts: { text: string }) => {
+            answered.push({ id, text: opts.text });
+          },
+        },
+        callbackQuery: { id: "cb-123" },
+      };
+
+      await handleCallbackErrorSafe(
+        ctx,
+        new Error(
+          "Unhandled failure that should be relayed back to the user with truncation safeguards in place.",
+        ),
+        "fallback",
+        { maxLength: 60 },
+      );
+
+      expect(answered.length).toBe(1);
+      const firstCall = answered[0];
+      expect(firstCall).toBeDefined();
+      expect(firstCall!.id).toBe("cb-123");
+      expect(firstCall!.text.length).toBeGreaterThan(0);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("handleCallbackErrorSafe logs a warning when no callback answer is possible", async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    const originalError = console.error;
+
+    try {
+      console.warn = (...args: any[]) => warnings.push(args.join(" "));
+      console.error = () => {};
+
+      await handleCallbackErrorSafe(
+        {},
+        new Error("Generic failure that should trigger a warning path"),
+        "missing-context",
+        { maxLength: 30 },
+      );
+
+      expect(warnings.some((msg) => msg.includes("Unable to answer callback query"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+      console.error = originalError;
+    }
+  });
+
+  test("handleCallbackErrorSafe swallows failures thrown while answering callback", async () => {
+    const errorLogs: string[] = [];
+    const originalError = console.error;
+    let attempts = 0;
+
+    try {
+      console.error = (...args: any[]) => errorLogs.push(args.join(" "));
+      const ctx = {
+        answerCallbackQuery: async () => {
+          attempts += 1;
+          throw new Error("telegram down");
+        },
+      } as any;
+
+      await handleCallbackErrorSafe(ctx, new Error("Unexpected runtime failure"), "answer-error");
+
+      expect(attempts).toBe(1);
+      expect(errorLogs.some((msg) => msg.includes("Failed to answer callback query"))).toBe(true);
+    } finally {
+      console.error = originalError;
+    }
+  });
 });
