@@ -39,8 +39,10 @@ type CreateCall = {
 let createCalls: CreateCall[];
 let createResult: any;
 let gameMessages: unknown[][];
+let originalGameManager: typeof botModule.gameManager;
 
 beforeEach(() => {
+  originalGameManager = botModule.gameManager;
   CREATOR += 1;
   resetCalls();
   clearAllGameSetupSessions();
@@ -87,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreStubs();
+  botModule.__test_setGameManager(originalGameManager);
   botModule.__test_resetProgram();
   clearAllGameSetupSessions();
 });
