@@ -21,11 +21,11 @@ import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
-import { isMissingAccountError } from "./utils/account-errors";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
 import { GameManager, type GamesTab, type PublicGamesFilter } from "./utils/game";
+import { createExpiredGameScanner } from "./bot/expired-game-scan";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
 import {
@@ -99,7 +99,6 @@ import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
-  GameData,
   PlayerData,
   GameCompletedEvent,
   GameInitializedEvent,
@@ -6608,111 +6607,23 @@ if (process.env.NODE_ENV !== "test") {
 
       scheduleDatabaseCleanup();
 
-      /**
-       * Process expired game with cancellation
-       */
-      const processExpiredGame = async (game: any): Promise<void> => {
-        let gamePda: PublicKey;
-        try {
-          gamePda = new PublicKey(game.game_address);
-        } catch (error) {
-          console.error(`❌ Invalid game address in processExpiredGame: ${game.game_address}`);
-          return;
-        }
-        const gameAccount = await program.account.game.fetch(gamePda);
-
-        console.log(
-          `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`,
-        );
-
-        const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
-        if (result) {
-          console.log(`✅ Successfully processed expired game ${game.game_address}`);
-          gameDb.completeGame(game.game_address, "cancelled", Date.now());
-          await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
-        } else {
-          console.log(`ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`);
-        }
-      };
-
-      /**
-       * Check if game is expired
-       */
-      const isGameExpired = async (gameAccount: any): Promise<boolean> => {
-        const blockTime = await wallet.getBlockchainTime();
-        if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
-          return GameManager.isExpired(gameAccount, blockTime);
-        }
-        return GameManager.isExpired(gameAccount);
-      };
-
-      const MAX_EXPIRING_GAMES_PER_SCAN = 25;
-      // Start periodic check for expired games
-      setInterval(async () => {
-        try {
-          const nowMs = Date.now();
-          const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
-          const processedAddresses: string[] = [];
-          let batchCount = 0;
-          let expiringGames: GameData[] = [];
-
-          do {
-            expiringGames = gameDb.getGamesExpiringBefore(
-              cutoffMs,
-              MAX_EXPIRING_GAMES_PER_SCAN,
-              processedAddresses,
-            );
-
-            if (expiringGames.length === 0) {
-              break;
-            }
-
-            for (const game of expiringGames) {
-              if (!game.game_address) {
-                console.log(`🗑️ Skipping game with null address`);
-                continue;
-              }
-
-              processedAddresses.push(game.game_address);
-
-              if (game.game_address === DEFAULT_NULL_ADDRESS) {
-                console.log(`🗑️ Skipping placeholder game address ${game.game_address}`);
-                await cleanupOrphanedGame(game.game_address);
-                continue;
-              }
-
-              try {
-                let gamePda: PublicKey;
-                try {
-                  gamePda = new PublicKey(game.game_address);
-                } catch (pkError) {
-                  console.log(`🗑️ Skipping game with invalid address format: ${game.game_address}`);
-                  continue;
-                }
-                const gameAccount = await program.account.game.fetch(gamePda);
-
-                if (await isGameExpired(gameAccount)) {
-                  await processExpiredGame(game);
-                }
-              } catch (error: any) {
-                if (
-                  isMissingAccountError(error) ||
-                  (error instanceof Error &&
-                    error.message.includes("Invalid account discriminator"))
-                ) {
-                  await cleanupOrphanedGame(game.game_address);
-                } else {
-                  console.error(`Error processing game ${game.game_address}:`, error);
-                }
-              }
-            }
-
-            batchCount += 1;
-          } while (expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN && batchCount < 10);
-        } catch (error) {
-          console.error("Error in periodic game check:", error);
-        }
-      }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+      // Periodic expired-game sweep: one blockchain-time read per run, batched
+      // account loads, and no overlapping runs.
+      const expiredGameScanner = createExpiredGameScanner({
+        getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
+          gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
+        gameAccounts: () => program.account.game,
+        getBlockchainTime: () => wallet.getBlockchainTime(),
+        isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
+        handleExpiredGame: (gamePda, gameAccount) =>
+          gameManager.handleExpiredGame(gamePda, gameAccount),
+        completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
+        updateGameMessage: (gameAddress, game) =>
+          updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
+        cleanupOrphanedGame,
+        lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
+      });
+      setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
 
       const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
       const internalServer = Bun.serve({
