@@ -3127,11 +3127,32 @@ export class WalletManager {
     amountLamports?: number,
   ): Promise<{ signature: string; amountLamports: number }> {
     const userKeypair = await this.getKeyPair(telegramId);
+    // Telegram swap and direct-unwrap confirmations both enter here. Check
+    // native SOL before the WSOL close; its future refund cannot pay the fee.
+    const nativeBalance = Number(await this.connection.getBalance(userKeypair.publicKey));
+    if (!Number.isSafeInteger(nativeBalance) || nativeBalance < 0) {
+      throw new Error("Unable to determine native SOL balance for unwrap fees.");
+    }
+    const userPaidPlan = await this.buildUnwrapWsolPlan({
+      owner: userKeypair.publicKey,
+      payer: userKeypair,
+      amountLamports,
+    });
+    const userPaidFee = await this.estimateFee(userKeypair.publicKey, userPaidPlan.instructions, {
+      allowFallback: false,
+    });
+    if (!Number.isSafeInteger(userPaidFee) || userPaidFee < 0) {
+      throw new Error("Unable to determine the user-paid unwrap fee.");
+    }
+    const adminTopUpLamports = Math.max(0, userPaidFee - nativeBalance);
+    const operatorKeypair = adminTopUpLamports > 0 ? await this.getOperatorKeypair() : undefined;
 
     const result = await this.unwrapSolWithKeypair({
       owner: userKeypair.publicKey,
       payer: userKeypair,
       amountLamports,
+      adminTopUpLamports,
+      operatorKeypair,
     });
 
     return {
