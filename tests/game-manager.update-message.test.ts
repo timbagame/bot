@@ -10,11 +10,22 @@ import {
 import { GameManager } from "../src/utils/game";
 
 function ctxStub(
-  options: { failMedia?: any; failCaption?: any; failText?: any; sendMessageResult?: any } = {},
+  options: {
+    failMedia?: any;
+    failCaption?: any;
+    failText?: any;
+    sendMessageResult?: any;
+    failRetire?: any;
+  } = {},
 ) {
   const calls: any[] = [];
   const base = makeCtxStub({
     apiOverrides: {
+      editMessageReplyMarkup: async (...args: any[]) => {
+        calls.push(["retire", ...args]);
+        if (options.failRetire) throw options.failRetire;
+        return true;
+      },
       editMessageCaption: async (...args: any[]) => {
         calls.push(["caption", ...args]);
         if (options.failCaption) {
@@ -267,6 +278,7 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const ctx = ctxStub({
       failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+      failCaption: { description: "Bad Request: there is no caption in the message to edit" },
       failText: { description: "Bad Request: there is no text in the message to edit" },
     });
     const addr = new PublicKey("11111111111111111111111111111115").toBase58();
@@ -287,10 +299,111 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(calls[0][0]).toBe("media");
     expect(calls[1][0]).toBe("text");
     const active = gm.getActiveGameMessages(addr)?.get(1);
-    expect(calls[2][0]).toBe("send");
+    expect(calls[2][0]).toBe("caption");
+    expect(calls[3]).toEqual(["retire", 1, 46, { reply_markup: { inline_keyboard: [] } }]);
+    expect(calls[4][0]).toBe("send");
     expect(active?.messageId).toBe(777);
     expect(saveGameMessage).toHaveBeenCalledWith(addr, 777, 1);
     expect(active?.usesVideo).toBe(false);
+  });
+
+  test("coinflip updates the original caption when only the new media identifier is invalid", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 2,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const saveGameMessage = mock(() => {});
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "coinflip" }, extra: { saveGameMessage } }),
+    );
+    const ctx = ctxStub({
+      failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+      failText: { description: "Bad Request: there is no text in the message to edit" },
+    });
+    const addr = new PublicKey("11111111111111111111111111111115").toBase58();
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Completed",
+      "TOK",
+      "SomeWinner",
+    );
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("media");
+    expect(calls[1][0]).toBe("text");
+    const active = gm.getActiveGameMessages(addr)?.get(1);
+    expect(calls[2][0]).toBe("caption");
+    expect(calls).toHaveLength(3);
+    expect(active?.messageId).toBe(46);
+    expect(active?.usesVideo).toBe(true);
+    expect(saveGameMessage).not.toHaveBeenCalled();
+  });
+
+  test("coinflip does not publish a duplicate when retiring the old keyboard fails", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 2,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const saveGameMessage = mock(() => {});
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "coinflip" }, extra: { saveGameMessage } }),
+    );
+    const ctx = ctxStub({
+      failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+      failRetire: new Error("synthetic keyboard update unavailable"),
+      failCaption: { description: "Bad Request: there is no caption in the message to edit" },
+      failText: { description: "Bad Request: there is no text in the message to edit" },
+    });
+    const addr = new PublicKey("11111111111111111111111111111115").toBase58();
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Completed",
+      "TOK",
+      "SomeWinner",
+    );
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("media");
+    expect(calls[1][0]).toBe("text");
+    const active = gm.getActiveGameMessages(addr)?.get(1);
+    expect(calls[2][0]).toBe("caption");
+    expect(calls[3]).toEqual(["retire", 1, 46, { reply_markup: { inline_keyboard: [] } }]);
+    expect(calls).toHaveLength(4);
+    expect(active?.messageId).toBe(46);
+    expect(active?.usesVideo).toBe(true);
+    expect(saveGameMessage).not.toHaveBeenCalled();
   });
 
   test("recreates missing message and preserves inline keyboard when edit target is gone", async () => {

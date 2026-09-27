@@ -3595,9 +3595,40 @@ export class GameManager {
               reply_markup: inlineKeyboard,
             });
 
-          const recoverMediaAsText = async (textError: unknown): Promise<null> => {
+          let fallbackUsesVideo = false;
+          const recoverMediaAsText = async (
+            textError: unknown,
+            tryCaption = false,
+          ): Promise<null> => {
             if (!isMessageMissing(textError) && !isMissingEditableContent(textError))
               throw textError;
+            if (tryCaption) {
+              try {
+                await ctx.api.editMessageCaption(gameMessage.chatId, gameMessage.messageId, {
+                  caption: payload.text,
+                  parse_mode: "HTML",
+                  reply_markup: inlineKeyboard,
+                });
+                fallbackUsesVideo = true;
+                return null;
+              } catch (captionError) {
+                if (isMessageNotModified(captionError)) {
+                  fallbackUsesVideo = true;
+                  return null;
+                }
+                if (!isRecoverableMediaError(captionError)) throw captionError;
+              }
+            }
+            // Retire the old keyboard before publishing a second card. If Telegram
+            // cannot do that, retain this message for retry instead of abandoning it.
+            try {
+              await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
+                reply_markup: { inline_keyboard: [] },
+              });
+            } catch (retireError) {
+              if (!isMessageMissing(retireError) && !isMessageNotModified(retireError))
+                throw retireError;
+            }
             // Telegram cannot convert a media message into text with an edit.
             // Persist the replacement ID before marking this chat's copy as text.
             const recreated = await this.recreateMissingGameMessage(ctx, gameAddress, {
@@ -3645,7 +3676,7 @@ export class GameManager {
                     try {
                       return await editAsText();
                     } catch (textError) {
-                      return recoverMediaAsText(textError);
+                      return recoverMediaAsText(textError, true);
                     }
                   },
                   logLabel: `game media update (${gameMessage.chatId})`,
@@ -3654,7 +3685,7 @@ export class GameManager {
                       this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                     current.set(gameMessage.chatId, {
                       ...(current.get(gameMessage.chatId) ?? gameMessage),
-                      usesVideo: false,
+                      usesVideo: fallbackUsesVideo,
                     });
                     this.activeGameMessages.set(gameAddress, current);
                   },
@@ -3746,7 +3777,7 @@ export class GameManager {
                     this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                   current.set(gameMessage.chatId, {
                     ...(current.get(gameMessage.chatId) ?? gameMessage),
-                    usesVideo: false,
+                    usesVideo: fallbackUsesVideo,
                   });
                   this.activeGameMessages.set(gameAddress, current);
                 },

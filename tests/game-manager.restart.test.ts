@@ -214,6 +214,7 @@ describe("GameManager restart fallback", () => {
     const ctx = {
       chat: { id: chatId },
       api: {
+        editMessageReplyMarkup: mock(async () => true),
         sendMessage: mock(async () => {
           throw new Error("synthetic delivery failure");
         }),
