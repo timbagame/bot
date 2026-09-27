@@ -126,6 +126,25 @@ const replyWithLateJoinFailure =
     await replyToCallbackMessage(ctx, text);
   };
 
+// Raw join errors can carry internal diagnostics, so users only see a fixed
+// message for each recognised reason.
+const describeJoinFailure = (error: string, tokenTicker: string): string => {
+  if (/already full/i.test(error)) return "This game is already full!";
+  if (/no longer active|not found or has expired/i.test(error)) {
+    return "This game is no longer active!";
+  }
+  if (/still pending/i.test(error)) {
+    return "Your join is still confirming on Solana. Tap Refresh in a moment.";
+  }
+  if (/more to join this game|sol fee|add (?:a small amount of )?sol/i.test(error)) {
+    return "❌ Not enough SOL for network fees to join. Add SOL and try again.";
+  }
+  if (containsBalanceInfo(error) || /not enough|don't have any|below the required/i.test(error)) {
+    return `❌ Not enough ${tokenTicker} to join this game. Check /balance and try again.`;
+  }
+  return "Failed to join game. Please try again.";
+};
+
 const NON_GAME_CALLBACK_NAMES = [
   "main_wallet",
   "wallet_refresh",
@@ -445,11 +464,14 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
           return;
         }
 
+        console.warn(
+          `Join failed for game ${game.game_address} (user ${telegramIdStr}): ${errorMessage || "no reason given"}`,
+        );
         await answerJoinCallbackOnce(
           ctx,
           game.game_address,
           telegramIdStr,
-          "Failed to join game. Please try again.",
+          describeJoinFailure(errorMessage, game.token_ticker || "tokens"),
         );
         return;
       }
