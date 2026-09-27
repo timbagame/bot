@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test, vi } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -87,37 +87,42 @@ test("getKeyPair remains consistent under concurrent cache evictions", async () 
 
 test("getOperatorKeypair throws when file missing", async () => {
   WalletManager.resetForTest();
-  const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
   try {
-    process.chdir(tmpDir);
     const manager = WalletManager.createForTest(mnemonic, {
       connection: {} as any,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
+    vi.spyOn(manager as any, "resolveOperatorKeypairPath").mockReturnValue(
+      join(tmpDir, "missing.json"),
+    );
     await expect(manager.getOperatorKeypair()).rejects.toThrow(/Operator keypair file not found/);
   } finally {
-    process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("getOperatorKeypair surfaces parse failures", async () => {
   WalletManager.resetForTest();
-  const originalCwd = process.cwd();
   const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
   try {
-    process.chdir(tmpDir);
-    writeFileSync(join(tmpDir, "admin-keypair.json"), "not-json", "utf-8");
+    writeFileSync(join(tmpDir, "operator-keypair.json"), "not-json", {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
     const manager = WalletManager.createForTest(mnemonic, {
       connection: {} as any,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    await expect(manager.getOperatorKeypair()).rejects.toThrow(/Failed to load operator keypair/);
+    vi.spyOn(manager as any, "resolveOperatorKeypairPath").mockReturnValue(
+      join(tmpDir, "operator-keypair.json"),
+    );
+    await expect(manager.getOperatorKeypair()).rejects.toMatchObject({
+      cause: expect.any(SyntaxError),
+    });
   } finally {
-    process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });

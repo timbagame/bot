@@ -2,9 +2,13 @@ import { Keypair } from "#solana";
 import { FeeBudgetManager } from "../../src/utils/fee-budget";
 import { wallet } from "../../src/bot";
 
-export const stubWalletConnection = (lamports: number) => {
+export const stubWalletConnection = (lamports: number, rentLamports = 2_039_280) => {
   const original = wallet.getConnection;
-  (wallet as any).getConnection = () => ({ getBalance: async () => lamports });
+  (wallet as any).getConnection = () => ({
+    getBalance: async () => lamports,
+    getAccountInfo: async () => null,
+    getMinimumBalanceForRentExemption: async () => rentLamports,
+  });
   return () => {
     (wallet as any).getConnection = original;
   };

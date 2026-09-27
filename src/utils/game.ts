@@ -58,7 +58,11 @@ import {
   isRecoverableMediaError,
   sendMediaWithFallback,
 } from "./media";
-import { isMessageMissing, isMessageNotModified } from "./telegram-errors";
+import {
+  isMessageMissing,
+  isMessageNotModified,
+  isMissingEditableContent,
+} from "./telegram-errors";
 import { isMissingAccountError } from "./account-errors";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
@@ -1208,13 +1212,13 @@ export class GameManager {
       gameType?: string;
       replyToMessageId?: number;
     },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const fallbackChatId =
       options.chatId ?? ctx.chat?.id ?? this.gameDb.getGame(gameAddress)?.chat_id ?? null;
 
     if (typeof fallbackChatId !== "number" || Number.isNaN(fallbackChatId)) {
       console.warn(`Unable to recreate Telegram message for ${gameAddress}: missing chat id`);
-      return;
+      return false;
     }
 
     // Get the reply_to ID from callback context if not provided
@@ -1270,7 +1274,14 @@ export class GameManager {
       const sentMessage: any = sendResult.result;
       const usesVideo = sendResult.usedVideo;
 
-      this.gameDb.saveGameMessage(gameAddress, sentMessage.message_id, sentMessage.chat.id);
+      try {
+        this.gameDb.saveGameMessage(gameAddress, sentMessage.message_id, sentMessage.chat.id);
+      } catch (persistError) {
+        // The caller keeps the old message ID and retries, so an unpersisted
+        // replacement must not stay visible or every retry adds another card.
+        await this.retireUnpersistedGameMessage(ctx, sentMessage.chat.id, sentMessage.message_id);
+        throw persistError;
+      }
 
       const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
       existing.set(sentMessage.chat.id, {
@@ -1281,8 +1292,36 @@ export class GameManager {
       this.activeGameMessages.set(gameAddress, existing);
 
       this.gameMessageReadyListener?.(gameAddress);
+      return true;
     } catch (sendError) {
       console.error(`Failed to recreate Telegram message for game ${gameAddress}:`, sendError);
+      return false;
+    }
+  }
+
+  private async retireUnpersistedGameMessage(
+    ctx: Context,
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    try {
+      await ctx.api.deleteMessage(chatId, messageId);
+      return;
+    } catch (deleteError) {
+      console.warn(
+        `Failed to delete unpersisted game message ${chatId}:${messageId}:`,
+        deleteError,
+      );
+    }
+    try {
+      await ctx.api.editMessageReplyMarkup(chatId, messageId, {
+        reply_markup: { inline_keyboard: [] },
+      });
+    } catch (retireError) {
+      console.warn(
+        `Failed to retire unpersisted game message ${chatId}:${messageId}:`,
+        retireError,
+      );
     }
   }
 
@@ -3589,6 +3628,51 @@ export class GameManager {
               reply_markup: inlineKeyboard,
             });
 
+          let fallbackUsesVideo = false;
+          const recoverMediaAsText = async (
+            textError: unknown,
+            tryCaption = false,
+          ): Promise<null> => {
+            if (!isMessageMissing(textError) && !isMissingEditableContent(textError))
+              throw textError;
+            if (tryCaption) {
+              try {
+                await ctx.api.editMessageCaption(gameMessage.chatId, gameMessage.messageId, {
+                  caption: payload.text,
+                  parse_mode: "HTML",
+                  reply_markup: inlineKeyboard,
+                });
+                fallbackUsesVideo = true;
+                return null;
+              } catch (captionError) {
+                if (isMessageNotModified(captionError)) {
+                  fallbackUsesVideo = true;
+                  return null;
+                }
+                if (!isRecoverableMediaError(captionError)) throw captionError;
+              }
+            }
+            // Retire the old keyboard before publishing a second card. If Telegram
+            // cannot do that, retain this message for retry instead of abandoning it.
+            try {
+              await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
+                reply_markup: { inline_keyboard: [] },
+              });
+            } catch (retireError) {
+              if (!isMessageMissing(retireError) && !isMessageNotModified(retireError))
+                throw retireError;
+            }
+            // Telegram cannot convert a media message into text with an edit.
+            // Persist the replacement ID before marking this chat's copy as text.
+            const recreated = await this.recreateMissingGameMessage(ctx, gameAddress, {
+              chatId: gameMessage.chatId,
+              messageText: payload.text,
+              inlineKeyboard,
+            });
+            if (!recreated) throw textError;
+            return null;
+          };
+
           const recreateMissingMessage = async (err: unknown): Promise<boolean> => {
             if (!messageTextValue || !isMessageMissing(err)) {
               return false;
@@ -3625,20 +3709,7 @@ export class GameManager {
                     try {
                       return await editAsText();
                     } catch (textError) {
-                      // Both media/caption and text failed - message might be deleted or inaccessible
-                      console.warn(
-                        `Both media and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                        textError,
-                      );
-                      // Mark as not using video since we couldn't edit it
-                      const current =
-                        this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
-                      current.set(gameMessage.chatId, {
-                        ...gameMessage,
-                        usesVideo: false,
-                      });
-                      this.activeGameMessages.set(gameAddress, current);
-                      return null;
+                      return recoverMediaAsText(textError, true);
                     }
                   },
                   logLabel: `game media update (${gameMessage.chatId})`,
@@ -3646,8 +3717,8 @@ export class GameManager {
                     const current =
                       this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                     current.set(gameMessage.chatId, {
-                      ...gameMessage,
-                      usesVideo: false,
+                      ...(current.get(gameMessage.chatId) ?? gameMessage),
+                      usesVideo: fallbackUsesVideo,
                     });
                     this.activeGameMessages.set(gameAddress, current);
                   },
@@ -3730,20 +3801,7 @@ export class GameManager {
                   try {
                     return await editAsText();
                   } catch (textError) {
-                    // Both caption and text failed - message might be deleted or inaccessible
-                    console.warn(
-                      `Both caption and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                      textError,
-                    );
-                    // Mark as not using video since we couldn't edit it
-                    const current =
-                      this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
-                    current.set(gameMessage.chatId, {
-                      ...gameMessage,
-                      usesVideo: false,
-                    });
-                    this.activeGameMessages.set(gameAddress, current);
-                    return null;
+                    return recoverMediaAsText(textError);
                   }
                 },
                 logLabel: `game caption update (${gameMessage.chatId})`,
@@ -3751,8 +3809,8 @@ export class GameManager {
                   const current =
                     this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
                   current.set(gameMessage.chatId, {
-                    ...gameMessage,
-                    usesVideo: false,
+                    ...(current.get(gameMessage.chatId) ?? gameMessage),
+                    usesVideo: fallbackUsesVideo,
                   });
                   this.activeGameMessages.set(gameAddress, current);
                 },
@@ -4163,21 +4221,6 @@ export class GameManager {
         : undefined;
     if (requestKey && this.activeCreationRequestKeys.has(requestKey))
       return { success: false, error: "This game request is already being handled." };
-    if (this.hasGameCreationRequest(telegramId, chatId, options?.replyToMessageId)) {
-      return { success: false, error: "This game request has already been submitted." };
-    }
-    const inFlightCount = this.getInFlightCreations(telegramIdStr);
-    const activeGameCount = this.gameDb.countActiveGamesByCreator(telegramIdStr);
-
-    if (activeGameCount + inFlightCount >= MAX_ACTIVE_GAMES_PER_CREATOR) {
-      return {
-        success: false,
-        error: `Active game limit reached. You currently have ${
-          activeGameCount + inFlightCount
-        } active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
-      };
-    }
-
     const nowMs = Date.now();
     const safeRequestTimestamp = Number.isFinite(requestTimestampMs)
       ? Math.min(nowMs, Math.max(0, Math.trunc(requestTimestampMs)))
@@ -4190,8 +4233,32 @@ export class GameManager {
     );
     const pendingRequestTimestamp = Math.max(safeRequestTimestamp, nowMs);
 
-    const pendingCount = this.prunePendingCreationRequests(telegramIdStr, windowStart);
-    const recentCreationCount = this.gameDb.countRecentGamesByCreator(telegramIdStr, windowStart);
+    let pendingCount: number;
+    let recentCreationCount: number;
+    try {
+      if (this.hasGameCreationRequest(telegramId, chatId, options?.replyToMessageId)) {
+        return { success: false, error: "This game request has already been submitted." };
+      }
+      const inFlightCount = this.getInFlightCreations(telegramIdStr);
+      const activeGameCount = this.gameDb.countActiveGamesByCreator(telegramIdStr);
+
+      if (activeGameCount + inFlightCount >= MAX_ACTIVE_GAMES_PER_CREATOR) {
+        return {
+          success: false,
+          error: `Active game limit reached. You currently have ${
+            activeGameCount + inFlightCount
+          } active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
+        };
+      }
+
+      pendingCount = this.prunePendingCreationRequests(telegramIdStr, windowStart);
+      recentCreationCount = this.gameDb.countRecentGamesByCreator(telegramIdStr, windowStart);
+    } catch (error) {
+      return {
+        success: false,
+        error: await logAndFormatError(error, `checking ${gameType} creation limits`, this.wallet),
+      };
+    }
 
     const totalWindowCreations = pendingCount + recentCreationCount;
 

@@ -355,22 +355,25 @@ test("request receipts survive clearing and do not block other messages or chats
 test("an unrelated pending game does not block a new creation request", async () => {
   const f = await fixture();
   const originalCount = f.db.countActiveGamesByCreator;
+  let reachedCreationChecks = false;
   f.db.countActiveGamesByCreator = () => {
+    reachedCreationChecks = true;
     throw new Error("reached normal creation checks");
   };
   try {
-    await expect(
-      f.manager.createGame(
-        "coinflip",
-        { amount: 1, tokenMint: PublicKey.default.toBase58(), tokenTicker: "TOK", isSol: false },
-        2,
-        2,
-        3600,
-        1n,
-        { replyToMessageId: 101 },
-        42,
-      ),
-    ).rejects.toThrow("reached normal creation checks");
+    const admissionResult = await f.manager.createGame(
+      "coinflip",
+      { amount: 1, tokenMint: PublicKey.default.toBase58(), tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      3600,
+      1n,
+      { replyToMessageId: 101 },
+      42,
+    );
+    expect(reachedCreationChecks).toBe(true);
+    expect(admissionResult.success).toBe(false);
+    expect(admissionResult.error).toBeTruthy();
     (f.db as any).run("INSERT INTO game_creation_requests VALUES (?, ?, ?, ?)", [
       "1",
       42,

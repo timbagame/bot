@@ -55,6 +55,7 @@ export const isBotInitiationForbidden = (error: unknown): boolean => {
 export const isMissingEditableContent = (error: unknown): boolean =>
   matchesAny(error, [
     "there is no text in the message to edit",
+    "message is not a text message",
     "there is no caption in the message to edit",
   ]);
 

@@ -48,6 +48,20 @@ const TRANSIENT_ERROR_TOKENS = [
   "tls",
 ];
 
+/**
+ * RPC URLs often carry provider API keys in the path or query string, so logs
+ * only show the origin.
+ */
+export function redactRpcEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    const hasSecretParts = url.pathname.replace(/\/+$/, "").length > 0 || url.search.length > 0;
+    return hasSecretParts ? `${url.origin}/…` : url.origin;
+  } catch {
+    return "<invalid RPC URL>";
+  }
+}
+
 export function isRetryableRpcError(error: unknown, seen = new Set<unknown>()): boolean {
   if (!error || seen.has(error)) {
     return false;
@@ -161,7 +175,7 @@ export class RpcEndpointManager {
     this.activeIndex = index;
     const nextEndpoint = this.endpoints[index] ?? this.endpoints[0]!;
     this.logger?.info?.(
-      `Switched Solana RPC endpoint to ${nextEndpoint} (commitment=${this.commitment})`,
+      `Switched Solana RPC endpoint to ${redactRpcEndpoint(nextEndpoint)} (commitment=${this.commitment})`,
     );
     this.notifyEndpointChange({
       endpoint: nextEndpoint,
@@ -173,6 +187,8 @@ export class RpcEndpointManager {
 
   private createProxyConnection(): Connection {
     const initialConnection = this.ensureConnection(this.activeIndex);
+    let nextSubscriptionId = 1;
+    const subscriptionOwners = new Map<number, { connection: Connection; nativeId: number }>();
     const handler: ProxyHandler<Connection> = {
       get: (_target, prop, receiver) => {
         if (prop === Symbol.toStringTag) {
@@ -192,6 +208,31 @@ export class RpcEndpointManager {
 
         if (typeof value !== "function") {
           return value;
+        }
+
+        if (typeof prop === "string" && /^on[A-Z]/.test(prop)) {
+          return (...args: unknown[]) => {
+            const owner = this.ensureConnection(this.activeIndex);
+            const nativeId = Reflect.get(owner, prop).apply(owner, args);
+            if (typeof nativeId !== "number") return nativeId;
+            // Different endpoints may reuse the same native ID. Give callers a
+            // stable ID and retain ownership until that listener is removed.
+            const id = nextSubscriptionId++;
+            subscriptionOwners.set(id, { connection: owner, nativeId });
+            return id;
+          };
+        }
+        if (typeof prop === "string" && /^remove.*Listener$/.test(prop)) {
+          return (id: number, ...args: unknown[]) => {
+            const owner = subscriptionOwners.get(id);
+            const connection = owner?.connection ?? this.ensureConnection(this.activeIndex);
+            return Promise.resolve(
+              Reflect.get(connection, prop).apply(connection, [owner?.nativeId ?? id, ...args]),
+            ).then((result) => {
+              subscriptionOwners.delete(id);
+              return result;
+            });
+          };
         }
 
         return (...args: unknown[]) => this.invokeWithFallback(prop, args);
@@ -243,17 +284,26 @@ export class RpcEndpointManager {
         const methodName = typeof prop === "symbol" ? prop.toString() : prop;
         const endpoint = this.endpoints[index];
 
+        const safeEndpoint = endpoint ? redactRpcEndpoint(endpoint) : "unknown endpoint";
+
         if (isRead && isRetryableRpcError(error) && offset === total - 1) break;
-        if (!isRetryableRpcError(error) || total === 1 || offset === total - 1) {
+        if (!isRetryableRpcError(error)) {
+          // The request itself was rejected (for example a skipped slot). The
+          // caller receives the error, so a one-line note is enough here.
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger?.warn?.(`RPC call ${methodName} rejected by ${safeEndpoint}: ${message}`);
+          throw error;
+        }
+        if (total === 1 || offset === total - 1) {
           this.logger?.error?.(
-            `RPC call ${methodName} failed on ${endpoint} without fallback:`,
+            `RPC call ${methodName} failed on ${safeEndpoint} without fallback:`,
             error,
           );
           throw error;
         }
 
         this.logger?.warn?.(
-          `RPC call ${methodName} failed on ${endpoint}; trying next endpoint (${offset + 1}/${total}).`,
+          `RPC call ${methodName} failed on ${safeEndpoint}; trying next endpoint (${offset + 1}/${total}).`,
         );
       }
     }

@@ -200,6 +200,48 @@ describe("Game Join Message Recreation", () => {
     });
     expect(JSON.stringify((ctx.api.answerCallbackQuery as any).mock.calls)).not.toContain(opaque);
   });
+
+  test.each([
+    [
+      "❌ Not enough TIMBA. You have 1,000 but need 55,106. Add more TIMBA or reduce the amount and try again.",
+      "❌ Not enough TOK to join this game. Check /balance and try again.",
+    ],
+    [
+      "❌ You don't have any TIMBA tokens. You need 55,106 TIMBA to join this game. Use /balance to check your address and transfer tokens.",
+      "❌ Not enough TOK to join this game. Check /balance and try again.",
+    ],
+    [
+      "💰 You need about 0.002 SOL more to join this game.\n\nAdd SOL and try again.",
+      "❌ Not enough SOL for network fees to join. Add SOL and try again.",
+    ],
+    [
+      "The available tokens cannot provide enough SOL for fees. Add a small amount of SOL manually and try again.",
+      "❌ Not enough SOL for network fees to join. Add SOL and try again.",
+    ],
+    ["This game is already full!", "This game is already full!"],
+    ["This game is no longer active!", "This game is no longer active!"],
+    [
+      "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
+      "Your join is still confirming on Solana. Tap Refresh in a moment.",
+    ],
+  ])("explains known join failure %#", async (error, expected) => {
+    const { module, gameManager } = makeDeps();
+    const ctx = makeCtx("@joiner");
+    const gamePda = new PublicKey((await Keypair.generate()).publicKey);
+
+    (gameManager.joinGame as any).mockResolvedValue({ success: false, error });
+
+    await module.__test_handleJoinGame(ctx as unknown as Context, gamePda, 456n, {
+      game_address: `game-addr-known-${expected.length}-${error.length}`,
+      status: "active",
+      chat_id: 1,
+      amount: 50,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+    });
+
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", { text: expected });
+  });
 });
 
 describe("Join and refresh fetch reuse", () => {

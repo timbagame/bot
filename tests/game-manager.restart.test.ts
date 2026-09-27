@@ -171,7 +171,7 @@ describe("GameManager restart fallback", () => {
     expect(restoredMap?.get(chatId)?.usesVideo).toBe(false);
   });
 
-  test("updateGameMessage handles gracefully when both caption and text edits fail", async () => {
+  test("updateGameMessage keeps the media ID when replacement delivery also fails", async () => {
     resetGM();
 
     const gameAddress = "Config1111111111111111111111111111111111111";
@@ -199,7 +199,7 @@ describe("GameManager restart fallback", () => {
       getPlayerUsername: () => "user999",
     } as any;
 
-    // Mock Bot Context / API - both caption AND text edits fail (simulating deleted message)
+    // Both editing routes fail and the replacement cannot be delivered.
     const mockEditMessageText = mock(async () => {
       const error = new Error("Bad Request: there is no text in the message to edit");
       (error as any).error_code = 400;
@@ -214,6 +214,10 @@ describe("GameManager restart fallback", () => {
     const ctx = {
       chat: { id: chatId },
       api: {
+        editMessageReplyMarkup: mock(async () => true),
+        sendMessage: mock(async () => {
+          throw new Error("synthetic delivery failure");
+        }),
         editMessageText: mockEditMessageText,
         editMessageCaption: mockEditMessageCaption,
         editMessageMedia: mock(async () => ({})),
@@ -240,9 +244,11 @@ describe("GameManager restart fallback", () => {
     // Then text edit was called as fallback (inside the fallback function)
     expect(mockEditMessageText).toHaveBeenCalled();
 
-    // After both failed, usesVideo should be set to false
+    // Failed delivery must not claim that the old media message became text.
     const restoredMap = gm.getActiveGameMessages(gameAddress);
-    expect(restoredMap?.get(chatId)?.usesVideo).toBe(false);
+    expect(restoredMap?.get(chatId)?.usesVideo).toBe(true);
+    expect(restoredMap?.get(chatId)?.messageId).toBe(messageId);
+    expect(ctx.api.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   test("updateGameMessage falls back from text to caption when message is actually media", async () => {

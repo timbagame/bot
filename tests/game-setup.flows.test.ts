@@ -185,6 +185,26 @@ describe("interactive game setup", () => {
     expect(createCalls).toHaveLength(0);
   });
 
+  test("retired confirmation buttons explain how to restart without changing active setup", async () => {
+    const setupId = await openSetup();
+    const activeSession = getGameSetupSession(`${CHAT}_${setupId}`);
+    if (!activeSession) throw new Error("Expected an active setup session");
+    const session = { ...activeSession };
+    for (const prefix of ["game", "timeout", "visibility", "min_players"]) {
+      resetCalls();
+      await press(`confirm_${prefix}_coinflip_2_2_${CREATOR}`, {
+        ...group(),
+        messageId: setupId,
+      });
+      expect(answers()).toEqual([
+        "This setup uses retired buttons. Start a new game with /coinflip or /giveaway.",
+      ]);
+      expect(createCalls).toHaveLength(0);
+      expect(messageCalls()).toHaveLength(0);
+      expect(getGameSetupSession(`${CHAT}_${setupId}`)).toEqual(session);
+    }
+  });
+
   test("legacy amount and player callbacks still work", async () => {
     const setupId = await openSetup();
     await press(`amount_coinflip_2_${CREATOR}`, { ...group(), messageId: setupId });

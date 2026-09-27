@@ -188,3 +188,11 @@ describe("parseTransactionError guidance", () => {
     expect(msg).not.toContain("SPL Token 2022");
   });
 });
+
+test("timeout errors do not turn a fragment of a long identifier into a transaction link", async () => {
+  const message = await parseTransactionError(
+    new Error(`Transaction confirmation timeout: ${"A".repeat(100)}`),
+  );
+  expect(message).not.toContain("Signature:");
+  expect(message).not.toContain("solscan.io/tx/");
+});

@@ -36,6 +36,17 @@ export const TOKEN_PROGRAM_ID = new PublicKey(TOKEN_PROGRAM_ADDRESS);
 export const TOKEN_2022_PROGRAM_ID = new PublicKey(TOKEN_2022_PROGRAM_ADDRESS);
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
 
+/** Rent for a standard SPL token account, including the WSOL associated account. */
+export async function getMinimumBalanceForRentExemptAccount(
+  connection: Connection,
+): Promise<number> {
+  const lamports = Number(await connection.getMinimumBalanceForRentExemption(AccountLayout.span));
+  if (!Number.isSafeInteger(lamports) || lamports <= 0) {
+    throw new Error("Token account rent reserve unavailable");
+  }
+  return lamports;
+}
+
 export enum AccountState {
   Uninitialized = 0,
   Initialized = 1,

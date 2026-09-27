@@ -8,6 +8,7 @@ import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
   getTokenByMint,
+  getTokenMintAlias,
 } from "./token-registry";
 import { parseDecimalAmount } from "./amount";
 import { escapeHtml } from "./format-amount";
@@ -1141,7 +1142,7 @@ export class TokenManager {
 
     let normalizedMint: string | null;
     try {
-      normalizedMint = new PublicKey(candidate).toBase58();
+      normalizedMint = new PublicKey(getTokenMintAlias(candidate) ?? candidate).toBase58();
     } catch {
       normalizedMint = null;
     }

@@ -20,7 +20,7 @@ const TRANSACTION_EXPIRED_PATTERNS = [
 const SIGNATURE_PATTERNS = [
   /signature ([A-Za-z0-9]{44,})/,
   /Check signature ([A-Za-z0-9]{44,})/,
-  /([A-Za-z0-9]{80,88})/,
+  /\b([A-Za-z0-9]{80,88})\b/,
 ];
 
 export const extractLamportsInfo = (

@@ -158,6 +158,43 @@ function makeWallet(overrides: Record<string, any>) {
 }
 
 describe("GameManager.createGame", () => {
+  for (const failingRead of [
+    "hasGameCreationRequest",
+    "countActiveGamesByCreator",
+    "countRecentGamesByCreator",
+  ]) {
+    test(`reports ${failingRead} database failure without submitting or reserving a request`, async () => {
+      resetGM();
+      const getKeyPair = vi.fn(async () => Keypair.generate());
+      const wallet = makeWallet({ getKeyPair });
+      const db = {
+        hasGameCreationRequest: () => false,
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: () => 0,
+        [failingRead]: () => {
+          throw new Error("synthetic database unavailable");
+        },
+      };
+      const gm = getGameManager(makeProgram(wallet.connection), wallet, db as any);
+      const result = await gm.createGame(
+        "coinflip",
+        { amount: 1000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        60,
+        1n,
+        { replyToMessageId: 3 },
+        2,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+      expect(getKeyPair).not.toHaveBeenCalled();
+      expect((gm as any).getInFlightCreations("1")).toBe(0);
+      expect((gm as any).pendingCreationRequests.size).toBe(0);
+      expect((gm as any).activeCreationRequestKeys.size).toBe(0);
+    });
+  }
+
   test("surface helpful error when SOL auto-wrap cannot proceed", async () => {
     resetGM();
     const wallet = makeWallet({
