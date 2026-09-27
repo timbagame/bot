@@ -159,7 +159,11 @@ import {
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { createFinanceHandlers } from "./handlers/finance";
 import { createAdminStatusCommand } from "./handlers/admin-status";
-import { DEFAULT_MAINNET_ENDPOINT, parseRpcEndpointList } from "./utils/rpc-endpoints";
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  parseRpcEndpointList,
+  redactRpcEndpoint,
+} from "./utils/rpc-endpoints";
 import { getCallbackQueue, getGameOperationQueue } from "./utils/telegram-rate-limiter";
 import { createFaucetModule } from "./handlers/faucet";
 import { FinanceLedgerService } from "./services/finance-ledger";
@@ -2672,16 +2676,16 @@ const attachRpcEndpointFailoverHandler = (): void => {
       }
 
       console.warn(
-        `RPC endpoint changed from ${previousEndpoint} to ${endpoint}; restarting program event listeners.`,
+        `RPC endpoint changed from ${redactRpcEndpoint(previousEndpoint)} to ${redactRpcEndpoint(endpoint)}; restarting program event listeners.`,
       );
 
       const restart = async () => {
         try {
           await registerProgramEventListeners();
-          console.log(`🔁 Re-subscribed event listeners on ${endpoint}`);
+          console.log(`🔁 Re-subscribed event listeners on ${redactRpcEndpoint(endpoint)}`);
         } catch (error) {
           console.error(
-            `❌ Failed to restart program event listeners after switching to ${endpoint}:`,
+            `❌ Failed to restart program event listeners after switching to ${redactRpcEndpoint(endpoint)}:`,
             error,
           );
         }

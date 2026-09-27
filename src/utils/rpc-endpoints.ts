@@ -48,6 +48,20 @@ const TRANSIENT_ERROR_TOKENS = [
   "tls",
 ];
 
+/**
+ * RPC URLs often carry provider API keys in the path or query string, so logs
+ * only show the origin.
+ */
+export function redactRpcEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    const hasSecretParts = url.pathname.replace(/\/+$/, "").length > 0 || url.search.length > 0;
+    return hasSecretParts ? `${url.origin}/…` : url.origin;
+  } catch {
+    return "<invalid RPC URL>";
+  }
+}
+
 export function isRetryableRpcError(error: unknown, seen = new Set<unknown>()): boolean {
   if (!error || seen.has(error)) {
     return false;
@@ -161,7 +175,7 @@ export class RpcEndpointManager {
     this.activeIndex = index;
     const nextEndpoint = this.endpoints[index] ?? this.endpoints[0]!;
     this.logger?.info?.(
-      `Switched Solana RPC endpoint to ${nextEndpoint} (commitment=${this.commitment})`,
+      `Switched Solana RPC endpoint to ${redactRpcEndpoint(nextEndpoint)} (commitment=${this.commitment})`,
     );
     this.notifyEndpointChange({
       endpoint: nextEndpoint,
@@ -270,17 +284,26 @@ export class RpcEndpointManager {
         const methodName = typeof prop === "symbol" ? prop.toString() : prop;
         const endpoint = this.endpoints[index];
 
+        const safeEndpoint = endpoint ? redactRpcEndpoint(endpoint) : "unknown endpoint";
+
         if (isRead && isRetryableRpcError(error) && offset === total - 1) break;
-        if (!isRetryableRpcError(error) || total === 1 || offset === total - 1) {
+        if (!isRetryableRpcError(error)) {
+          // The request itself was rejected (for example a skipped slot). The
+          // caller receives the error, so a one-line note is enough here.
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger?.warn?.(`RPC call ${methodName} rejected by ${safeEndpoint}: ${message}`);
+          throw error;
+        }
+        if (total === 1 || offset === total - 1) {
           this.logger?.error?.(
-            `RPC call ${methodName} failed on ${endpoint} without fallback:`,
+            `RPC call ${methodName} failed on ${safeEndpoint} without fallback:`,
             error,
           );
           throw error;
         }
 
         this.logger?.warn?.(
-          `RPC call ${methodName} failed on ${endpoint}; trying next endpoint (${offset + 1}/${total}).`,
+          `RPC call ${methodName} failed on ${safeEndpoint}; trying next endpoint (${offset + 1}/${total}).`,
         );
       }
     }

@@ -4,6 +4,7 @@ import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
   parseRpcEndpointList,
+  redactRpcEndpoint,
   resolvePrimaryRpcEndpoint,
   type ActiveEndpointChange,
 } from "../src/utils/rpc-endpoints";
@@ -64,7 +65,58 @@ describe("resolvePrimaryRpcEndpoint", () => {
   });
 });
 
+describe("redactRpcEndpoint", () => {
+  test("hides API keys in query strings and paths", () => {
+    expect(redactRpcEndpoint("https://mainnet.helius-rpc.com/?api-key=secret")).toBe(
+      "https://mainnet.helius-rpc.com/…",
+    );
+    expect(redactRpcEndpoint("https://example.quiknode.pro/secret-token/")).toBe(
+      "https://example.quiknode.pro/…",
+    );
+    expect(redactRpcEndpoint(DEFAULT_MAINNET_ENDPOINT)).toBe(DEFAULT_MAINNET_ENDPOINT);
+    expect(redactRpcEndpoint("not a url secret")).toBe("<invalid RPC URL>");
+  });
+});
+
 describe("RpcEndpointManager", () => {
+  test("never logs endpoint secrets and keeps rejected calls to one line", async () => {
+    const endpoints = [
+      "https://rpc-primary.example/?api-key=primary-secret",
+      "https://rpc-secondary.example/secondary-secret",
+    ];
+    const lines: unknown[][] = [];
+    const record = (...args: unknown[]) => lines.push(args);
+    const connectionFactory = (endpoint: string) =>
+      ({
+        getSlot: async () => {
+          if (endpoint === endpoints[0]) {
+            const error = new Error("ECONNRESET: simulated failure");
+            (error as { code?: string }).code = "ECONNRESET";
+            throw error;
+          }
+          return 42n;
+        },
+        getBlockTime: async () => {
+          throw new Error("Block not available for slot 1");
+        },
+      }) as unknown as Connection;
+    const manager = new RpcEndpointManager(endpoints, {
+      commitment: "confirmed",
+      connectionFactory,
+      logger: { info: record, warn: record, error: record },
+    });
+
+    const connection = manager.getConnection();
+    expect(await connection.getSlot()).toBe(42n);
+    await expect(connection.getBlockTime(1)).rejects.toThrow("Block not available");
+
+    const logged = JSON.stringify(lines.map((args) => args.map(String)));
+    expect(logged).not.toContain("secret");
+    expect(lines.at(-1)).toEqual([
+      "RPC call getBlockTime rejected by https://rpc-secondary.example/…: Block not available for slot 1",
+    ]);
+  });
+
   test("switches to secondary endpoint after failure", async () => {
     const endpoints = ["https://rpc-primary", "https://rpc-secondary"];
     const connectionFactory = (endpoint: string, commitment: string) =>
