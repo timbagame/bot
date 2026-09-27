@@ -1274,7 +1274,14 @@ export class GameManager {
       const sentMessage: any = sendResult.result;
       const usesVideo = sendResult.usedVideo;
 
-      this.gameDb.saveGameMessage(gameAddress, sentMessage.message_id, sentMessage.chat.id);
+      try {
+        this.gameDb.saveGameMessage(gameAddress, sentMessage.message_id, sentMessage.chat.id);
+      } catch (persistError) {
+        // The caller keeps the old message ID and retries, so an unpersisted
+        // replacement must not stay visible or every retry adds another card.
+        await this.retireUnpersistedGameMessage(ctx, sentMessage.chat.id, sentMessage.message_id);
+        throw persistError;
+      }
 
       const existing = this.activeGameMessages.get(gameAddress) ?? new Map<number, GameMessage>();
       existing.set(sentMessage.chat.id, {
@@ -1289,6 +1296,32 @@ export class GameManager {
     } catch (sendError) {
       console.error(`Failed to recreate Telegram message for game ${gameAddress}:`, sendError);
       return false;
+    }
+  }
+
+  private async retireUnpersistedGameMessage(
+    ctx: Context,
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    try {
+      await ctx.api.deleteMessage(chatId, messageId);
+      return;
+    } catch (deleteError) {
+      console.warn(
+        `Failed to delete unpersisted game message ${chatId}:${messageId}:`,
+        deleteError,
+      );
+    }
+    try {
+      await ctx.api.editMessageReplyMarkup(chatId, messageId, {
+        reply_markup: { inline_keyboard: [] },
+      });
+    } catch (retireError) {
+      console.warn(
+        `Failed to retire unpersisted game message ${chatId}:${messageId}:`,
+        retireError,
+      );
     }
   }
 

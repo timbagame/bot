@@ -16,11 +16,17 @@ function ctxStub(
     failText?: any;
     sendMessageResult?: any;
     failRetire?: any;
+    failDelete?: any;
   } = {},
 ) {
   const calls: any[] = [];
   const base = makeCtxStub({
     apiOverrides: {
+      deleteMessage: async (...args: any[]) => {
+        calls.push(["delete", ...args]);
+        if (options.failDelete) throw options.failDelete;
+        return true;
+      },
       editMessageReplyMarkup: async (...args: any[]) => {
         calls.push(["retire", ...args]);
         if (options.failRetire) throw options.failRetire;
@@ -405,6 +411,66 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(active?.usesVideo).toBe(true);
     expect(saveGameMessage).not.toHaveBeenCalled();
   });
+
+  for (const failDelete of [undefined, new Error("synthetic delete unavailable")]) {
+    test(`coinflip retires the replacement card when persisting it fails${failDelete ? " (delete fails)" : ""}`, async () => {
+      resetGM();
+      const gameAcc = {
+        ticketsCount: 2,
+        maxTickets: 2,
+        minTickets: 1,
+        totalAmount: 0,
+        createdAt: 1_000_000,
+        timeout: 60,
+        gameType: { coinflip: {} },
+      };
+      const saveGameMessage = mock(() => {
+        throw new Error("synthetic database unavailable");
+      });
+      const gm = GameManager.getInstance(
+        makeProgramStub(gameAcc),
+        makeWalletStub({
+          tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+        }),
+        makeDbStub({ gameOverride: { game_type: "coinflip" }, extra: { saveGameMessage } }),
+      );
+      const ctx = ctxStub({
+        failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+        failCaption: { description: "Bad Request: there is no caption in the message to edit" },
+        failText: { description: "Bad Request: there is no text in the message to edit" },
+        failDelete,
+      });
+      const addr = new PublicKey("11111111111111111111111111111115").toBase58();
+      const msgMap = new Map();
+      msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
+      (gm as any).activeGameMessages.set(addr, msgMap);
+      await gm.updateGameMessage(
+        ctx as any,
+        addr,
+        "coinflip",
+        1_000_000_000,
+        "@creator",
+        "Completed",
+        "TOK",
+        "SomeWinner",
+      );
+      const calls = (ctx as any).__calls;
+      const sendIndex = calls.findIndex((c: any[]) => c[0] === "send");
+      expect(sendIndex).toBeGreaterThan(-1);
+      expect(saveGameMessage).toHaveBeenCalledWith(addr, 777, 1);
+      expect(calls[sendIndex + 1]).toEqual(["delete", 1, 777]);
+      if (failDelete) {
+        expect(calls[sendIndex + 2]).toEqual([
+          "retire",
+          1,
+          777,
+          { reply_markup: { inline_keyboard: [] } },
+        ]);
+      }
+      const active = gm.getActiveGameMessages(addr)?.get(1);
+      expect(active?.messageId).toBe(46);
+    });
+  }
 
   test("recreates missing message and preserves inline keyboard when edit target is gone", async () => {
     resetGM();
