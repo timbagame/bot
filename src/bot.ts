@@ -19,7 +19,11 @@ import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
 import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
-import { getMinimumBalanceForRentExemptAccount } from "#token";
+import {
+  getAccount,
+  getAssociatedTokenAddress,
+  getMinimumBalanceForRentExemptAccount,
+} from "#token";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
@@ -304,6 +308,32 @@ export const __test_setSolWrapRentReserveLamports = (value: number): void => {
   SOL_WRAP_RENT_RESERVE_LAMPORTS = value;
   solWrapRentReserveLastFetched = value > 0 ? Date.now() : 0;
 };
+
+// SwapService only charges wrap rent when getAccount cannot load a valid WSOL
+// token account, so the quote uses the same check. Probe failures reserve rent.
+const hasWsolTokenAccount = async (owner: PublicKey): Promise<boolean> => {
+  try {
+    const wsolAta = await getAssociatedTokenAddress(new PublicKey(WSOL_MINT), owner);
+    await getAccount(wallet.getConnection(), wsolAta);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const resolveSolInputFeeBufferLamports = async (
+  owner: PublicKey,
+  solBalanceLamports: number,
+): Promise<number> => {
+  const rentReserveLamports = (await hasWsolTokenAccount(owner))
+    ? 0
+    : await getSolWrapRentReserveLamports();
+  return clampSolFeeBufferLamports(
+    solBalanceLamports,
+    SOL_FEE_BUFFER_LAMPORTS + rentReserveLamports,
+  );
+};
+export const __test_resolveSolInputFeeBufferLamports = resolveSolInputFeeBufferLamports;
 
 const getSolWrapRentReserveLamports = async (): Promise<number> => {
   const now = Date.now();
@@ -1077,26 +1107,19 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
+  const userKeypair = await wallet.getKeyPair(telegramId);
+
   let solFeeBufferLamports: number | undefined;
   if (shouldApplySolFeeBuffer) {
-    solFeeBufferLamports = SOL_FEE_BUFFER_LAMPORTS;
-
-    if (inputAsset.ticker === "SOL") {
-      const rentReserveLamports = await getSolWrapRentReserveLamports();
-      solFeeBufferLamports = clampSolFeeBufferLamports(
-        snapshot.solBalance,
-        solFeeBufferLamports + rentReserveLamports,
-      );
-    } else {
-      solFeeBufferLamports = Math.max(solFeeBufferLamports, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
-    }
+    solFeeBufferLamports =
+      inputAsset.ticker === "SOL"
+        ? await resolveSolInputFeeBufferLamports(userKeypair.publicKey, snapshot.solBalance)
+        : Math.max(SOL_FEE_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
   }
 
   if (solFeeBufferLamports === undefined && referralConfig && inputAsset.ticker !== "SOL") {
     solFeeBufferLamports = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
   }
-
-  const userKeypair = await wallet.getKeyPair(telegramId);
 
   const shouldProbeGasless = shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
 

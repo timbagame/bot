@@ -16,6 +16,8 @@ function ctxStub(
     failText?: any;
     sendMessageResult?: any;
     failRetire?: any;
+    failRetireMessageIds?: number[];
+    retireErrorsOnce?: Map<number, any>;
     failDelete?: any;
   } = {},
 ) {
@@ -30,6 +32,14 @@ function ctxStub(
       editMessageReplyMarkup: async (...args: any[]) => {
         calls.push(["retire", ...args]);
         if (options.failRetire) throw options.failRetire;
+        if (options.failRetireMessageIds?.includes(args[1])) {
+          throw new Error("synthetic keyboard update unavailable");
+        }
+        const onceError = options.retireErrorsOnce?.get(args[1]);
+        if (onceError) {
+          options.retireErrorsOnce!.delete(args[1]);
+          throw onceError;
+        }
         return true;
       },
       editMessageCaption: async (...args: any[]) => {
@@ -412,8 +422,16 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(saveGameMessage).not.toHaveBeenCalled();
   });
 
-  for (const failDelete of [undefined, new Error("synthetic delete unavailable")]) {
-    test(`coinflip retires the replacement card when persisting it fails${failDelete ? " (delete fails)" : ""}`, async () => {
+  const deleteGone = { description: "Bad Request: message to delete not found" };
+  const notModified = { description: "Bad Request: message is not modified" };
+  for (const [label, failDelete, strandReplacement, originalAlreadyCleared] of [
+    ["", undefined, false, false],
+    [" (delete fails)", new Error("synthetic delete unavailable"), false, false],
+    [" (replacement already gone)", deleteGone, false, false],
+    [" (replacement stranded)", new Error("synthetic delete unavailable"), true, false],
+    [" (original keyboard already cleared)", undefined, false, true],
+  ] as const) {
+    test(`coinflip retires the replacement card when persisting it fails${label}`, async () => {
       resetGM();
       const gameAcc = {
         ticketsCount: 2,
@@ -439,6 +457,12 @@ describe("GameManager.updateGameMessage routing", () => {
         failCaption: { description: "Bad Request: there is no caption in the message to edit" },
         failText: { description: "Bad Request: there is no text in the message to edit" },
         failDelete,
+        failRetireMessageIds: strandReplacement ? [777] : undefined,
+        retireErrorsOnce: originalAlreadyCleared
+          ? new Map([[46, notModified]])
+          : failDelete === deleteGone
+            ? new Map([[777, { description: "Bad Request: message to edit not found" }]])
+            : undefined,
       });
       const addr = new PublicKey("11111111111111111111111111111115").toBase58();
       const msgMap = new Map();
@@ -450,16 +474,15 @@ describe("GameManager.updateGameMessage routing", () => {
         "coinflip",
         1_000_000_000,
         "@creator",
-        "Completed",
+        "Active",
         "TOK",
-        "SomeWinner",
       );
       const calls = (ctx as any).__calls;
       const sendIndex = calls.findIndex((c: any[]) => c[0] === "send");
       expect(sendIndex).toBeGreaterThan(-1);
       expect(saveGameMessage).toHaveBeenCalledWith(addr, 777, 1);
       expect(calls[sendIndex + 1]).toEqual(["delete", 1, 777]);
-      if (failDelete) {
+      if (failDelete && failDelete !== deleteGone) {
         expect(calls[sendIndex + 2]).toEqual([
           "retire",
           1,
@@ -467,6 +490,14 @@ describe("GameManager.updateGameMessage routing", () => {
           { reply_markup: { inline_keyboard: [] } },
         ]);
       }
+      const keyboard = calls[sendIndex][3]?.reply_markup;
+      expect(keyboard?.inline_keyboard?.length).toBeGreaterThan(0);
+      const restores = calls.filter(
+        (c: any[]) => c[0] === "retire" && c[2] === 46 && c[3]?.reply_markup === keyboard,
+      );
+      // The original card stays tracked, so its keyboard comes back unless a
+      // replacement with live controls is still in the chat.
+      expect(restores).toHaveLength(strandReplacement ? 0 : 1);
       const active = gm.getActiveGameMessages(addr)?.get(1);
       expect(active?.messageId).toBe(46);
     });

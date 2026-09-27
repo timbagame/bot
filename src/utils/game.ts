@@ -1211,6 +1211,9 @@ export class GameManager {
       inlineKeyboard?: any;
       gameType?: string;
       replyToMessageId?: number;
+      // Called when a replacement was sent but could be neither persisted nor
+      // retired, so it may still show live controls.
+      onStrandedReplacement?: () => void;
     },
   ): Promise<boolean> {
     const fallbackChatId =
@@ -1279,7 +1282,12 @@ export class GameManager {
       } catch (persistError) {
         // The caller keeps the old message ID and retries, so an unpersisted
         // replacement must not stay visible or every retry adds another card.
-        await this.retireUnpersistedGameMessage(ctx, sentMessage.chat.id, sentMessage.message_id);
+        const retired = await this.retireUnpersistedGameMessage(
+          ctx,
+          sentMessage.chat.id,
+          sentMessage.message_id,
+        );
+        if (!retired) options.onStrandedReplacement?.();
         throw persistError;
       }
 
@@ -1303,11 +1311,12 @@ export class GameManager {
     ctx: Context,
     chatId: number,
     messageId: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await ctx.api.deleteMessage(chatId, messageId);
-      return;
+      return true;
     } catch (deleteError) {
+      if (isMessageMissing(deleteError)) return true;
       console.warn(
         `Failed to delete unpersisted game message ${chatId}:${messageId}:`,
         deleteError,
@@ -1317,12 +1326,16 @@ export class GameManager {
       await ctx.api.editMessageReplyMarkup(chatId, messageId, {
         reply_markup: { inline_keyboard: [] },
       });
+      return true;
     } catch (retireError) {
+      // Gone or already without buttons: nothing live remains.
+      if (isMessageMissing(retireError) || isMessageNotModified(retireError)) return true;
       console.warn(
         `Failed to retire unpersisted game message ${chatId}:${messageId}:`,
         retireError,
       );
     }
+    return false;
   }
 
   private getOraclePda(): Promise<PublicKey> {
@@ -3654,22 +3667,46 @@ export class GameManager {
             }
             // Retire the old keyboard before publishing a second card. If Telegram
             // cannot do that, retain this message for retry instead of abandoning it.
+            let retired = false;
             try {
               await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
                 reply_markup: { inline_keyboard: [] },
               });
+              retired = true;
             } catch (retireError) {
-              if (!isMessageMissing(retireError) && !isMessageNotModified(retireError))
-                throw retireError;
+              // An earlier attempt may already have cleared this keyboard.
+              if (isMessageNotModified(retireError)) retired = true;
+              else if (!isMessageMissing(retireError)) throw retireError;
             }
             // Telegram cannot convert a media message into text with an edit.
             // Persist the replacement ID before marking this chat's copy as text.
+            let replacementStranded = false;
             const recreated = await this.recreateMissingGameMessage(ctx, gameAddress, {
               chatId: gameMessage.chatId,
               messageText: payload.text,
               inlineKeyboard,
+              onStrandedReplacement: () => {
+                replacementStranded = true;
+              },
             });
-            if (!recreated) throw textError;
+            if (!recreated) {
+              // The original card is still the tracked one, so give its
+              // controls back rather than leaving the game without buttons,
+              // unless a replacement with live controls could not be retired.
+              if (retired && inlineKeyboard && !replacementStranded) {
+                try {
+                  await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
+                    reply_markup: inlineKeyboard,
+                  });
+                } catch (restoreError) {
+                  console.warn(
+                    `Failed to restore game keyboard ${gameMessage.chatId}:${gameMessage.messageId}:`,
+                    restoreError,
+                  );
+                }
+              }
+              throw textError;
+            }
             return null;
           };
 

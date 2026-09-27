@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { Keypair } from "#solana";
+import { Keypair, PublicKey, SystemProgram } from "#solana";
 import * as splToken from "#token";
 
 import {
@@ -8,6 +8,9 @@ import {
   __test_setSolWrapRentReserveLamports,
   __test_getSolWrapRentReserveLamports,
   __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer,
+  __test_getSolFeeBufferLamports,
+  __test_setSolFeeBufferLamports,
+  __test_resolveSolInputFeeBufferLamports as resolveSolInputFeeBufferLamports,
   wallet,
 } from "../src/bot";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
@@ -736,6 +739,76 @@ describe("buildAdminIntegratorConfig", () => {
     priceSpy.mockRestore();
     restoreConn();
     restoreAdmin();
+  });
+});
+
+describe("resolveSolInputFeeBufferLamports", () => {
+  const stubAccountInfo = (kind: "token" | "system" | "missing", owner?: any) => {
+    const original = wallet.getConnection;
+    const tokenData = Buffer.alloc(splToken.AccountLayout.span);
+    if (kind === "token") {
+      splToken.AccountLayout.encode(
+        {
+          mint: new PublicKey(WSOL_MINT),
+          owner,
+          amount: 0n,
+          delegateOption: 0,
+          delegate: owner,
+          state: splToken.AccountState.Initialized,
+          isNativeOption: 1,
+          isNative: 2_039_280n,
+          delegatedAmount: 0n,
+          closeAuthorityOption: 0,
+          closeAuthority: owner,
+        } as any,
+        tokenData,
+      );
+    }
+    const accountInfo =
+      kind === "missing"
+        ? null
+        : {
+            data: kind === "token" ? tokenData : Buffer.alloc(0),
+            executable: false,
+            lamports: 2_039_280,
+            owner:
+              kind === "token" ? splToken.TOKEN_PROGRAM_ID : new PublicKey(SystemProgram.programId),
+            rentEpoch: 0,
+          };
+    (wallet as any).getConnection = () => ({
+      getAccountInfo: async () => accountInfo,
+      getMinimumBalanceForRentExemption: async () => 2_039_280,
+    });
+    return () => {
+      (wallet as any).getConnection = original;
+    };
+  };
+
+  test("reserves wrap rent only when the WSOL account is missing", async () => {
+    __test_setSolWrapRentReserveLamports(2_039_280);
+    // Keep the base buffer above the Jupiter minimum so the floor cannot mask rent.
+    const originalBuffer = __test_getSolFeeBufferLamports();
+    __test_setSolFeeBufferLamports(20_000_000);
+    const owner = (await Keypair.generate()).publicKey;
+    const balance = 1_000_000_000;
+
+    try {
+      const bufferFor = async (kind: "token" | "system" | "missing") => {
+        const restore = stubAccountInfo(kind, owner);
+        try {
+          return await resolveSolInputFeeBufferLamports(owner, balance);
+        } finally {
+          restore();
+        }
+      };
+
+      expect(await bufferFor("token")).toBe(20_000_000);
+      expect(await bufferFor("missing")).toBe(22_039_280);
+      // A funded non-token account at the ATA address still needs rent.
+      expect(await bufferFor("system")).toBe(22_039_280);
+    } finally {
+      __test_setSolFeeBufferLamports(originalBuffer);
+    }
   });
 });
 
