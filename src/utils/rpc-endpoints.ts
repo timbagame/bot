@@ -173,6 +173,8 @@ export class RpcEndpointManager {
 
   private createProxyConnection(): Connection {
     const initialConnection = this.ensureConnection(this.activeIndex);
+    let nextSubscriptionId = 1;
+    const subscriptionOwners = new Map<number, { connection: Connection; nativeId: number }>();
     const handler: ProxyHandler<Connection> = {
       get: (_target, prop, receiver) => {
         if (prop === Symbol.toStringTag) {
@@ -187,19 +189,36 @@ export class RpcEndpointManager {
           return this.commitment;
         }
 
-        // Subscription IDs belong to one Connection and registration is synchronous.
-        // Keep that owner stable even when HTTP reads promote another endpoint.
-        if (typeof prop === "string" && /^(on[A-Z]|remove.*Listener$)/.test(prop)) {
-          const subscriptionMethod = Reflect.get(initialConnection, prop);
-          if (typeof subscriptionMethod === "function")
-            return subscriptionMethod.bind(initialConnection);
-        }
-
         const connection = this.ensureConnection(this.activeIndex);
         const value = Reflect.get(connection, prop, receiver);
 
         if (typeof value !== "function") {
           return value;
+        }
+
+        if (typeof prop === "string" && /^on[A-Z]/.test(prop)) {
+          return (...args: unknown[]) => {
+            const owner = this.ensureConnection(this.activeIndex);
+            const nativeId = Reflect.get(owner, prop).apply(owner, args);
+            if (typeof nativeId !== "number") return nativeId;
+            // Different endpoints may reuse the same native ID. Give callers a
+            // stable ID and retain ownership until that listener is removed.
+            const id = nextSubscriptionId++;
+            subscriptionOwners.set(id, { connection: owner, nativeId });
+            return id;
+          };
+        }
+        if (typeof prop === "string" && /^remove.*Listener$/.test(prop)) {
+          return (id: number, ...args: unknown[]) => {
+            const owner = subscriptionOwners.get(id);
+            const connection = owner?.connection ?? this.ensureConnection(this.activeIndex);
+            return Promise.resolve(
+              Reflect.get(connection, prop).apply(connection, [owner?.nativeId ?? id, ...args]),
+            ).then((result) => {
+              subscriptionOwners.delete(id);
+              return result;
+            });
+          };
         }
 
         return (...args: unknown[]) => this.invokeWithFallback(prop, args);
