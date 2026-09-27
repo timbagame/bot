@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { Keypair } from "#solana";
+import { Keypair, PublicKey, SystemProgram } from "#solana";
 import * as splToken from "#token";
 
 import {
@@ -743,10 +743,40 @@ describe("buildAdminIntegratorConfig", () => {
 });
 
 describe("resolveSolInputFeeBufferLamports", () => {
-  const stubAccountInfo = (exists: boolean) => {
+  const stubAccountInfo = (kind: "token" | "system" | "missing", owner?: any) => {
     const original = wallet.getConnection;
+    const tokenData = Buffer.alloc(splToken.AccountLayout.span);
+    if (kind === "token") {
+      splToken.AccountLayout.encode(
+        {
+          mint: new PublicKey(WSOL_MINT),
+          owner,
+          amount: 0n,
+          delegateOption: 0,
+          delegate: owner,
+          state: splToken.AccountState.Initialized,
+          isNativeOption: 1,
+          isNative: 2_039_280n,
+          delegatedAmount: 0n,
+          closeAuthorityOption: 0,
+          closeAuthority: owner,
+        } as any,
+        tokenData,
+      );
+    }
+    const accountInfo =
+      kind === "missing"
+        ? null
+        : {
+            data: kind === "token" ? tokenData : Buffer.alloc(0),
+            executable: false,
+            lamports: 2_039_280,
+            owner:
+              kind === "token" ? splToken.TOKEN_PROGRAM_ID : new PublicKey(SystemProgram.programId),
+            rentEpoch: 0,
+          };
     (wallet as any).getConnection = () => ({
-      getAccountInfo: async () => (exists ? { lamports: 2_039_280 } : null),
+      getAccountInfo: async () => accountInfo,
       getMinimumBalanceForRentExemption: async () => 2_039_280,
     });
     return () => {
@@ -763,16 +793,19 @@ describe("resolveSolInputFeeBufferLamports", () => {
     const balance = 1_000_000_000;
 
     try {
-      let restore = stubAccountInfo(true);
-      const withAccount = await resolveSolInputFeeBufferLamports(owner, balance);
-      restore();
+      const bufferFor = async (kind: "token" | "system" | "missing") => {
+        const restore = stubAccountInfo(kind, owner);
+        try {
+          return await resolveSolInputFeeBufferLamports(owner, balance);
+        } finally {
+          restore();
+        }
+      };
 
-      restore = stubAccountInfo(false);
-      const withoutAccount = await resolveSolInputFeeBufferLamports(owner, balance);
-      restore();
-
-      expect(withAccount).toBe(20_000_000);
-      expect(withoutAccount).toBe(22_039_280);
+      expect(await bufferFor("token")).toBe(20_000_000);
+      expect(await bufferFor("missing")).toBe(22_039_280);
+      // A funded non-token account at the ATA address still needs rent.
+      expect(await bufferFor("system")).toBe(22_039_280);
     } finally {
       __test_setSolFeeBufferLamports(originalBuffer);
     }

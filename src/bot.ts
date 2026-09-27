@@ -19,7 +19,11 @@ import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
 import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
-import { getAssociatedTokenAddress, getMinimumBalanceForRentExemptAccount } from "#token";
+import {
+  getAccount,
+  getAssociatedTokenAddress,
+  getMinimumBalanceForRentExemptAccount,
+} from "#token";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
@@ -305,12 +309,13 @@ export const __test_setSolWrapRentReserveLamports = (value: number): void => {
   solWrapRentReserveLastFetched = value > 0 ? Date.now() : 0;
 };
 
-// SwapService only charges wrap rent when the WSOL account is missing, so the
-// quote must reserve it under the same condition. Probe failures reserve rent.
+// SwapService only charges wrap rent when getAccount cannot load a valid WSOL
+// token account, so the quote uses the same check. Probe failures reserve rent.
 const hasWsolTokenAccount = async (owner: PublicKey): Promise<boolean> => {
   try {
     const wsolAta = await getAssociatedTokenAddress(new PublicKey(WSOL_MINT), owner);
-    return (await wallet.getConnection().getAccountInfo(wsolAta)) !== null;
+    await getAccount(wallet.getConnection(), wsolAta);
+    return true;
   } catch {
     return false;
   }
