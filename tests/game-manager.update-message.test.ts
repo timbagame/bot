@@ -16,6 +16,7 @@ function ctxStub(
     failText?: any;
     sendMessageResult?: any;
     failRetire?: any;
+    failRetireMessageIds?: number[];
     failDelete?: any;
   } = {},
 ) {
@@ -30,6 +31,9 @@ function ctxStub(
       editMessageReplyMarkup: async (...args: any[]) => {
         calls.push(["retire", ...args]);
         if (options.failRetire) throw options.failRetire;
+        if (options.failRetireMessageIds?.includes(args[1])) {
+          throw new Error("synthetic keyboard update unavailable");
+        }
         return true;
       },
       editMessageCaption: async (...args: any[]) => {
@@ -412,8 +416,12 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(saveGameMessage).not.toHaveBeenCalled();
   });
 
-  for (const failDelete of [undefined, new Error("synthetic delete unavailable")]) {
-    test(`coinflip retires the replacement card when persisting it fails${failDelete ? " (delete fails)" : ""}`, async () => {
+  for (const [label, failDelete, strandReplacement] of [
+    ["", undefined, false],
+    [" (delete fails)", new Error("synthetic delete unavailable"), false],
+    [" (replacement stranded)", new Error("synthetic delete unavailable"), true],
+  ] as const) {
+    test(`coinflip retires the replacement card when persisting it fails${label}`, async () => {
       resetGM();
       const gameAcc = {
         ticketsCount: 2,
@@ -439,6 +447,7 @@ describe("GameManager.updateGameMessage routing", () => {
         failCaption: { description: "Bad Request: there is no caption in the message to edit" },
         failText: { description: "Bad Request: there is no text in the message to edit" },
         failDelete,
+        failRetireMessageIds: strandReplacement ? [777] : undefined,
       });
       const addr = new PublicKey("11111111111111111111111111111115").toBase58();
       const msgMap = new Map();
@@ -466,10 +475,14 @@ describe("GameManager.updateGameMessage routing", () => {
           { reply_markup: { inline_keyboard: [] } },
         ]);
       }
-      // The original card stays tracked, so its keyboard comes back.
       const keyboard = calls[sendIndex][3]?.reply_markup;
       expect(keyboard?.inline_keyboard?.length).toBeGreaterThan(0);
-      expect(calls.at(-1)).toEqual(["retire", 1, 46, { reply_markup: keyboard }]);
+      const restores = calls.filter(
+        (c: any[]) => c[0] === "retire" && c[2] === 46 && c[3]?.reply_markup === keyboard,
+      );
+      // The original card stays tracked, so its keyboard comes back unless a
+      // replacement with live controls is still in the chat.
+      expect(restores).toHaveLength(strandReplacement ? 0 : 1);
       const active = gm.getActiveGameMessages(addr)?.get(1);
       expect(active?.messageId).toBe(46);
     });
