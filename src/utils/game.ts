@@ -1316,6 +1316,7 @@ export class GameManager {
       await ctx.api.deleteMessage(chatId, messageId);
       return true;
     } catch (deleteError) {
+      if (isMessageMissing(deleteError)) return true;
       console.warn(
         `Failed to delete unpersisted game message ${chatId}:${messageId}:`,
         deleteError,
@@ -1327,6 +1328,8 @@ export class GameManager {
       });
       return true;
     } catch (retireError) {
+      // Gone or already without buttons: nothing live remains.
+      if (isMessageMissing(retireError) || isMessageNotModified(retireError)) return true;
       console.warn(
         `Failed to retire unpersisted game message ${chatId}:${messageId}:`,
         retireError,
@@ -3671,8 +3674,9 @@ export class GameManager {
               });
               retired = true;
             } catch (retireError) {
-              if (!isMessageMissing(retireError) && !isMessageNotModified(retireError))
-                throw retireError;
+              // An earlier attempt may already have cleared this keyboard.
+              if (isMessageNotModified(retireError)) retired = true;
+              else if (!isMessageMissing(retireError)) throw retireError;
             }
             // Telegram cannot convert a media message into text with an edit.
             // Persist the replacement ID before marking this chat's copy as text.

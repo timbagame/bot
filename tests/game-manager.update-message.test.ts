@@ -17,6 +17,7 @@ function ctxStub(
     sendMessageResult?: any;
     failRetire?: any;
     failRetireMessageIds?: number[];
+    retireErrorsOnce?: Map<number, any>;
     failDelete?: any;
   } = {},
 ) {
@@ -33,6 +34,11 @@ function ctxStub(
         if (options.failRetire) throw options.failRetire;
         if (options.failRetireMessageIds?.includes(args[1])) {
           throw new Error("synthetic keyboard update unavailable");
+        }
+        const onceError = options.retireErrorsOnce?.get(args[1]);
+        if (onceError) {
+          options.retireErrorsOnce!.delete(args[1]);
+          throw onceError;
         }
         return true;
       },
@@ -416,10 +422,14 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(saveGameMessage).not.toHaveBeenCalled();
   });
 
-  for (const [label, failDelete, strandReplacement] of [
-    ["", undefined, false],
-    [" (delete fails)", new Error("synthetic delete unavailable"), false],
-    [" (replacement stranded)", new Error("synthetic delete unavailable"), true],
+  const deleteGone = { description: "Bad Request: message to delete not found" };
+  const notModified = { description: "Bad Request: message is not modified" };
+  for (const [label, failDelete, strandReplacement, originalAlreadyCleared] of [
+    ["", undefined, false, false],
+    [" (delete fails)", new Error("synthetic delete unavailable"), false, false],
+    [" (replacement already gone)", deleteGone, false, false],
+    [" (replacement stranded)", new Error("synthetic delete unavailable"), true, false],
+    [" (original keyboard already cleared)", undefined, false, true],
   ] as const) {
     test(`coinflip retires the replacement card when persisting it fails${label}`, async () => {
       resetGM();
@@ -448,6 +458,11 @@ describe("GameManager.updateGameMessage routing", () => {
         failText: { description: "Bad Request: there is no text in the message to edit" },
         failDelete,
         failRetireMessageIds: strandReplacement ? [777] : undefined,
+        retireErrorsOnce: originalAlreadyCleared
+          ? new Map([[46, notModified]])
+          : failDelete === deleteGone
+            ? new Map([[777, { description: "Bad Request: message to edit not found" }]])
+            : undefined,
       });
       const addr = new PublicKey("11111111111111111111111111111115").toBase58();
       const msgMap = new Map();
@@ -467,7 +482,7 @@ describe("GameManager.updateGameMessage routing", () => {
       expect(sendIndex).toBeGreaterThan(-1);
       expect(saveGameMessage).toHaveBeenCalledWith(addr, 777, 1);
       expect(calls[sendIndex + 1]).toEqual(["delete", 1, 777]);
-      if (failDelete) {
+      if (failDelete && failDelete !== deleteGone) {
         expect(calls[sendIndex + 2]).toEqual([
           "retire",
           1,
