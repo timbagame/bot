@@ -1,5 +1,9 @@
 import { PublicKey, type Keypair } from "#solana";
-import { getAccount, getAssociatedTokenAddress } from "#token";
+import {
+  getAccount,
+  getAssociatedTokenAddress,
+  getMinimumBalanceForRentExemptAccount,
+} from "#token";
 
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../constants";
 import type { IntegratorSwapParams } from "../integrator-fees";
@@ -127,16 +131,21 @@ export class SwapService {
       }
     };
 
-    if (this.feeBudget && (await shouldIncludeWrapRentBuffer())) {
-      const wrapLamports = await this.feeBudget.getWrapFeeBufferLamports().catch(() => 0);
-      const fallbackWrapLamports = this.feeBudget.getDefaultWrapFeeBufferLamports().valueOf();
-
-      const rentFeeLamports = Math.max(wrapLamports, fallbackWrapLamports);
+    if (await shouldIncludeWrapRentBuffer()) {
+      const rentFeeLamports = await getMinimumBalanceForRentExemptAccount(
+        this.wallet.getConnection(),
+      );
+      const wrapLamports = (await this.feeBudget?.getWrapFeeBufferLamports().catch(() => 0)) ?? 0;
+      const fallbackWrapLamports = this.feeBudget?.getDefaultWrapFeeBufferLamports() ?? 0;
+      const signatureFeeLamports = Math.max(wrapLamports, fallbackWrapLamports);
       if (Number.isFinite(rentFeeLamports) && rentFeeLamports > 0) {
         providerCosts = {
           rentFeeLamports: Math.max(providerCosts?.rentFeeLamports ?? 0, rentFeeLamports),
           prioritizationFeeLamports: providerCosts?.prioritizationFeeLamports ?? 0,
-          signatureFeeLamports: providerCosts?.signatureFeeLamports ?? 0,
+          signatureFeeLamports: Math.max(
+            providerCosts?.signatureFeeLamports ?? 0,
+            signatureFeeLamports,
+          ),
         };
       }
     }

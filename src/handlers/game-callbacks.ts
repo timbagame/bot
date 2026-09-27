@@ -983,6 +983,21 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
       deps.wrapCallbackHandler(handleGenericGameCallbackQuery, { action: "generic game callback" }),
     );
 
+    // Pre-compact confirmation keyboards can remain in Telegram history after
+    // their setup session expires. Acknowledge them without reviving stale state.
+    deps.bot.callbackQuery(
+      /^confirm_(?:game|timeout|visibility|min_players)_/,
+      deps.wrapCallbackHandler(
+        async (ctx) => {
+          await safeAnswerCallbackQuery(
+            ctx,
+            "This setup uses retired buttons. Start a new game with /coinflip or /giveaway.",
+          );
+        },
+        { action: "retired game confirmation" },
+      ),
+    );
+
     deps.bot.callbackQuery(
       /^amount_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
       deps.wrapCallbackHandler(

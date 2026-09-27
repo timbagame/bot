@@ -134,9 +134,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
       provider: "wrap",
     } as any;
 
-    await expect(service.ensureUserSolBufferForSwap(quote as any, user)).rejects.toThrow(
-      new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS)),
-    );
+    await expect(service.ensureUserSolBufferForSwap(quote as any, user)).rejects.toThrow(/needs/);
 
     restoreConn();
   });
@@ -161,7 +159,36 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
-  test("adds wrap rent reserve to buffer when provider quote is missing", async () => {
+  test("actual account rent is required even when the fee estimate is small", async () => {
+    const user = await Keypair.generate();
+    const balance = vi.fn().mockResolvedValue(1_600_000);
+    const rent = vi.fn().mockResolvedValue(2_039_280);
+    const getAccountInfo = vi.fn().mockResolvedValue(null);
+    const getRecentPrioritizationFees = vi.fn().mockResolvedValue([]);
+    const connection = {
+      getBalance: balance,
+      getMinimumBalanceForRentExemption: rent,
+      getAccountInfo,
+      getRecentPrioritizationFees,
+    };
+    const localWallet = {
+      getConnection: () => connection,
+      formatSolBalance: wallet.formatSolBalance.bind(wallet),
+    };
+    const actualService = new SwapService(localWallet as any, stubBackend);
+    const quote = {
+      inputMint: "SOL",
+      outputMint: WSOL_MINT,
+      inputAmountRaw: "1000000",
+      provider: "wrap",
+    } as any;
+    await expect(actualService.ensureUserSolBufferForSwap(quote, user)).rejects.toThrow(/needs/);
+    expect(rent).toHaveBeenCalledWith(splToken.AccountLayout.span);
+    balance.mockResolvedValue(10_000_000);
+    await expect(actualService.ensureUserSolBufferForSwap(quote, user)).resolves.toBe(0n);
+  });
+
+  test("adds actual rent and the network fee buffer when provider quote is missing", async () => {
     const user = await Keypair.generate();
     const wrapRentLamports = 2_000_000;
     const amountLamports = 500_000;
@@ -174,7 +201,10 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     const feeSpy = vi.spyOn(FeeBudgetManager, "getInstance").mockReturnValue(feeBudgetMock);
 
     const serviceWithMockBudget = new SwapService(wallet as any, stubBackend);
-    const providerCosts = { rentFeeLamports: wrapRentLamports } as any;
+    const providerCosts = {
+      rentFeeLamports: 2_039_280,
+      signatureFeeLamports: wrapRentLamports,
+    } as any;
     const helperCosts = calculateRouteCosts(providerCosts, {
       paddingRatio: 0.25,
       paddingExtraLamports: 200_000,
@@ -200,7 +230,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
-  test("supplements wrap provider quote without rent using fee budget reserve", async () => {
+  test("supplements wrap provider quote with actual account rent", async () => {
     const user = await Keypair.generate();
     const wrapRentLamports = 2_200_000;
     const amountLamports = 500_000;
@@ -213,7 +243,10 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     const feeSpy = vi.spyOn(FeeBudgetManager, "getInstance").mockReturnValue(feeBudgetMock);
 
     const serviceWithMockBudget = new SwapService(wallet as any, stubBackend);
-    const providerCosts = { rentFeeLamports: wrapRentLamports } as any;
+    const providerCosts = {
+      rentFeeLamports: 2_039_280,
+      signatureFeeLamports: wrapRentLamports,
+    } as any;
     const helperCosts = calculateRouteCosts(providerCosts, {
       paddingRatio: 0.25,
       paddingExtraLamports: 200_000,
@@ -596,7 +629,7 @@ describe("buildAdminIntegratorConfig", () => {
     const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
     const wrapSpy = vi.spyOn(feeBudget, "getWrapFeeBufferLamports").mockResolvedValue(0);
     const defaultSpy = vi.spyOn(feeBudget, "getDefaultWrapFeeBufferLamports").mockReturnValue(0);
-    const restoreConn = stubWalletConnection(1_000_000_000);
+    const restoreConn = stubWalletConnection(1_000_000_000, 0);
     const restoreAdmin = await stubOperatorKeypair();
 
     const configPromise = buildAdminIntegratorConfig({
@@ -619,7 +652,7 @@ describe("buildAdminIntegratorConfig", () => {
     restoreAdmin();
   });
 
-  test("builds admin config when wrap buffer refresh fails but fallback exists", async () => {
+  test("builds admin config from RPC rent even when fee estimates are unavailable", async () => {
     __test_setSolWrapRentReserveLamports(0);
     const restoreConn = stubWalletConnection(1_000_000_000);
     const restoreAdmin = await stubOperatorKeypair();
@@ -645,7 +678,7 @@ describe("buildAdminIntegratorConfig", () => {
     });
 
     expect(config).toBeDefined();
-    expect(__test_getSolWrapRentReserveLamports()).toBeGreaterThan(0);
+    expect(__test_getSolWrapRentReserveLamports()).toBe(2_039_280);
 
     wrapSpy.mockRestore();
     defaultSpy.mockRestore();

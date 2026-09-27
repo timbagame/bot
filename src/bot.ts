@@ -19,6 +19,7 @@ import { TransactionOutcomeUnknownError, WalletManager } from "./utils/wallet";
 import { loadWalletMnemonic } from "./utils/secrets";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import { Connection, PublicKey } from "#solana";
+import { getMinimumBalanceForRentExemptAccount } from "#token";
 import { contractCapabilities, contractVersion } from "./utils/contract-idl";
 import { createTimbaProgram, type TimbaProgram } from "./utils/timba-program";
 import { parseProgramEventLogs, type ProgramEvent } from "./utils/program-event-parser";
@@ -276,7 +277,8 @@ const PRIVATE_KEY_CONFIRM_TTL_MS = 60_000;
 const PRIVATE_KEY_MESSAGE_TTL_MS = 60_000;
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
-let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
+let SOL_WRAP_RENT_RESERVE_LAMPORTS = 0;
+let solWrapRentReserveInFlight: Promise<number> | undefined;
 const SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS = 5 * 60_000;
 let solWrapRentReserveLastFetched = 0;
 const DEFAULT_TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
@@ -296,6 +298,7 @@ export const __test_setSolFeeBufferLamports = (value: number): void => {
 export const __test_getSolWrapRentReserveLamports = (): number => SOL_WRAP_RENT_RESERVE_LAMPORTS;
 export const __test_setSolWrapRentReserveLamports = (value: number): void => {
   SOL_WRAP_RENT_RESERVE_LAMPORTS = value;
+  solWrapRentReserveLastFetched = value > 0 ? Date.now() : 0;
 };
 
 const getSolWrapRentReserveLamports = async (): Promise<number> => {
@@ -309,33 +312,23 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     return SOL_WRAP_RENT_RESERVE_LAMPORTS;
   }
 
-  const fetchOrThrow = async (): Promise<number> => {
-    const value = await feeBudget.getWrapFeeBufferLamports();
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error("wrap rent reserve unavailable");
-    }
-    return value;
-  };
-
-  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
-  const fallbackValid = Number.isFinite(fallback) && fallback > 0;
-
-  try {
-    const fresh = await fetchOrThrow();
-    SOL_WRAP_RENT_RESERVE_LAMPORTS = fresh;
-    solWrapRentReserveLastFetched = now;
-    return fresh;
-  } catch (error) {
-    console.warn("Failed to refresh SOL wrap rent reserve from fee budget:", error);
+  if (!solWrapRentReserveInFlight) {
+    solWrapRentReserveInFlight = getMinimumBalanceForRentExemptAccount(wallet.getConnection())
+      .then((rent) => {
+        SOL_WRAP_RENT_RESERVE_LAMPORTS = rent;
+        solWrapRentReserveLastFetched = Date.now();
+        return rent;
+      })
+      .catch((error) => {
+        throw new Error("Wrap rent reserve unavailable; retry when RPC is available.", {
+          cause: error,
+        });
+      })
+      .finally(() => {
+        solWrapRentReserveInFlight = undefined;
+      });
   }
-
-  if (!fallbackValid) {
-    throw new Error("wrap rent reserve unavailable");
-  }
-
-  SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
-  solWrapRentReserveLastFetched = now;
-  return fallback;
+  return solWrapRentReserveInFlight;
 };
 
 export const __test_refreshSolWrapRentReserveLamports = getSolWrapRentReserveLamports;
@@ -432,16 +425,6 @@ void (async () => {
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
-  }
-
-  try {
-    const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
-    if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
-      SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
-    }
-  } catch (error) {
-    console.warn("Failed to refresh wrap fee buffer during startup, using fallback:", error);
-    SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getDefaultWrapFeeBufferLamports();
   }
 })();
 let chatDb = ChatDatabase.getInstance();
@@ -5579,21 +5562,7 @@ const buildAdminIntegratorConfig = async ({
   solFeeBufferLamports?: number;
 }): Promise<IntegratorSwapParams> => {
   const operatorKeypair = await wallet.getOperatorKeypair();
-  let rentReserveLamports: number;
-  try {
-    rentReserveLamports = await getSolWrapRentReserveLamports();
-  } catch (error) {
-    const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
-    if (!Number.isFinite(fallback) || fallback <= 0) {
-      throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.", {
-        cause: error,
-      });
-    }
-    rentReserveLamports = fallback;
-  }
-  if (!Number.isFinite(rentReserveLamports) || rentReserveLamports <= 0) {
-    throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.");
-  }
+  const rentReserveLamports = await getSolWrapRentReserveLamports();
   const extraAtaLamports = rentReserveLamports;
   const priorityBufferLamports = Math.max(
     200_000,
