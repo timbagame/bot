@@ -187,6 +187,14 @@ export class RpcEndpointManager {
           return this.commitment;
         }
 
+        // Subscription IDs belong to one Connection and registration is synchronous.
+        // Keep that owner stable even when HTTP reads promote another endpoint.
+        if (typeof prop === "string" && /^(on[A-Z]|remove.*Listener$)/.test(prop)) {
+          const subscriptionMethod = Reflect.get(initialConnection, prop);
+          if (typeof subscriptionMethod === "function")
+            return subscriptionMethod.bind(initialConnection);
+        }
+
         const connection = this.ensureConnection(this.activeIndex);
         const value = Reflect.get(connection, prop, receiver);
 

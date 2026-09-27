@@ -205,3 +205,32 @@ describe("Foreground read recovery", () => {
     expect(calls).toBe(1);
   });
 });
+
+test("subscriptions return synchronous IDs and stay with their owner after HTTP failover", async () => {
+  const registrations: string[] = [];
+  const removals: Array<[string, number]> = [];
+  const endpoints: [string, string] = ["https://rpc-primary", "https://rpc-secondary"];
+  const manager = new RpcEndpointManager(endpoints, {
+    connectionFactory: (endpoint, commitment) => {
+      const connection = new FakeConnection(endpoint, commitment, endpoint === endpoints[0]);
+      return Object.assign(connection, {
+        onLogs(this: FakeConnection) {
+          registrations.push(this.rpcEndpoint);
+          return 7;
+        },
+        async removeOnLogsListener(this: FakeConnection, id: number) {
+          removals.push([this.rpcEndpoint, id]);
+        },
+      }) as unknown as Connection;
+    },
+  });
+  const connection = manager.getConnection();
+  const id = connection.onLogs("all", () => {});
+  expect(id).toBe(7);
+  await connection.getSlot();
+  expect(manager.getActiveEndpoint()).toBe(endpoints[1]);
+  await connection.removeOnLogsListener(id);
+  expect(connection.onLogs("all", () => {})).toBe(7);
+  expect(registrations).toEqual([endpoints[0], endpoints[0]]);
+  expect(removals).toEqual([[endpoints[0], 7]]);
+});

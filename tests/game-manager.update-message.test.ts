@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import { PublicKey, Keypair } from "#solana";
 import {
   makeCtxStub,
@@ -243,6 +243,53 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(calls[0][0]).toBe("media");
     expect(calls[1][0]).toBe("text");
     const active = gm.getActiveGameMessages(addr)?.get(1);
+    expect(active?.usesVideo).toBe(false);
+  });
+
+  test("coinflip replaces an uneditable media announcement with a persisted text message", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 2,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const saveGameMessage = mock(() => {});
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "coinflip" }, extra: { saveGameMessage } }),
+    );
+    const ctx = ctxStub({
+      failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+      failText: { description: "Bad Request: there is no text in the message to edit" },
+    });
+    const addr = new PublicKey("11111111111111111111111111111115").toBase58();
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Completed",
+      "TOK",
+      "SomeWinner",
+    );
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("media");
+    expect(calls[1][0]).toBe("text");
+    const active = gm.getActiveGameMessages(addr)?.get(1);
+    expect(calls[2][0]).toBe("send");
+    expect(active?.messageId).toBe(777);
+    expect(saveGameMessage).toHaveBeenCalledWith(addr, 777, 1);
     expect(active?.usesVideo).toBe(false);
   });
 

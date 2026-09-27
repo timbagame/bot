@@ -77,6 +77,16 @@ test("resolveMintForTicker returns default token mint for default ticker", async
   expect(await tm.resolveMintForTicker("def")).toBe("DEFAULT_MINT");
 });
 
+test("BONK resolves without a database entry and does not become a legacy game allowlist token", async () => {
+  const tm = TokenManager.getInstance(await createWalletStub(), "MINT", "TOK");
+  const mint = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
+  expect(await tm.resolveMintForTicker("bonk")).toBe(mint);
+  if (!contractCapabilities.oracleTokenPolicy) {
+    const parsed = await tm.parseAmount(["/cf", "1", "BONK"], 1, 123, "game");
+    expect(parsed).toMatchObject({ success: false, error: "unsupported_token" });
+  }
+});
+
 test("resolveMintForTicker prefers known tokens over built-ins", async () => {
   const tm = TokenManager.getInstance(await createWalletStub(), "MINT", "TOK");
   const overrideBonkMint = "TokenMint11111111111111111111111111111111";

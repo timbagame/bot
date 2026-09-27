@@ -18,6 +18,16 @@ export interface ReferralConfig {
 
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
+// Lookup aliases are not additions to the game-token allowlist. Metadata is
+// still validated from the mint, and explicitly configured ticker entries win.
+const TOKEN_MINT_ALIASES: Readonly<Record<string, string>> = {
+  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+};
+
+export function getTokenMintAlias(ticker: string): string | undefined {
+  return TOKEN_MINT_ALIASES[ticker.trim().toUpperCase()];
+}
+
 const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
   { mint: WSOL_MINT, ticker: "SOL", decimals: 9, isNativeSol: true },
   { mint: WSOL_MINT, ticker: "WSOL", decimals: 9 },
