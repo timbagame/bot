@@ -450,9 +450,8 @@ describe("GameManager.updateGameMessage routing", () => {
         "coinflip",
         1_000_000_000,
         "@creator",
-        "Completed",
+        "Active",
         "TOK",
-        "SomeWinner",
       );
       const calls = (ctx as any).__calls;
       const sendIndex = calls.findIndex((c: any[]) => c[0] === "send");
@@ -467,6 +466,10 @@ describe("GameManager.updateGameMessage routing", () => {
           { reply_markup: { inline_keyboard: [] } },
         ]);
       }
+      // The original card stays tracked, so its keyboard comes back.
+      const keyboard = calls[sendIndex][3]?.reply_markup;
+      expect(keyboard?.inline_keyboard?.length).toBeGreaterThan(0);
+      expect(calls.at(-1)).toEqual(["retire", 1, 46, { reply_markup: keyboard }]);
       const active = gm.getActiveGameMessages(addr)?.get(1);
       expect(active?.messageId).toBe(46);
     });

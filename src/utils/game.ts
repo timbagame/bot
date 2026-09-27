@@ -3654,10 +3654,12 @@ export class GameManager {
             }
             // Retire the old keyboard before publishing a second card. If Telegram
             // cannot do that, retain this message for retry instead of abandoning it.
+            let retired = false;
             try {
               await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
                 reply_markup: { inline_keyboard: [] },
               });
+              retired = true;
             } catch (retireError) {
               if (!isMessageMissing(retireError) && !isMessageNotModified(retireError))
                 throw retireError;
@@ -3669,7 +3671,23 @@ export class GameManager {
               messageText: payload.text,
               inlineKeyboard,
             });
-            if (!recreated) throw textError;
+            if (!recreated) {
+              // The original card is still the tracked one, so give its
+              // controls back rather than leaving the game without buttons.
+              if (retired && inlineKeyboard) {
+                try {
+                  await ctx.api.editMessageReplyMarkup(gameMessage.chatId, gameMessage.messageId, {
+                    reply_markup: inlineKeyboard,
+                  });
+                } catch (restoreError) {
+                  console.warn(
+                    `Failed to restore game keyboard ${gameMessage.chatId}:${gameMessage.messageId}:`,
+                    restoreError,
+                  );
+                }
+              }
+              throw textError;
+            }
             return null;
           };
 
