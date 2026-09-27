@@ -101,6 +101,19 @@ describe("prepareIntegratorForQuote", () => {
 });
 
 describe("SwapService.ensureUserSolBufferForSwap", () => {
+  let restoreUnwrapEstimate: () => void;
+  beforeEach(() => {
+    const plan = vi
+      .spyOn(wallet, "buildUnwrapWsolPlan")
+      .mockResolvedValue({ instructions: [] } as any);
+    const fee = vi.spyOn(wallet as any, "estimateFee").mockResolvedValue(5_000);
+    restoreUnwrapEstimate = () => {
+      plan.mockRestore();
+      fee.mockRestore();
+    };
+  });
+  afterEach(() => restoreUnwrapEstimate());
+
   const stubBackend: SwapBackend = {
     getQuote: vi.fn(),
     executeJupiterSwap: vi.fn(),
@@ -305,11 +318,9 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
         provider: "unwrap" as const,
       } as any;
       try {
-        await expect(service.ensureUserSolBufferForSwap(quote, user)).rejects.toThrow(/keep/);
+        await expect(service.ensureUserSolBufferForSwap(quote, user)).rejects.toThrow(/Keep/);
         quote.integrator = { payerKind: "admin" };
-        await expect(service.ensureUserSolBufferForSwap(quote, user)).resolves.toBe(
-          BigInt(USER_SOL_MAX_BUFFER_LAMPORTS),
-        );
+        await expect(service.ensureUserSolBufferForSwap(quote, user)).resolves.toBe(5_000n);
       } finally {
         accountSpy.mockRestore();
         restoreConn();
@@ -372,7 +383,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
-  test("returns required buffer shortfall for admin unwrap providers", async () => {
+  test("returns the actual fee shortfall for admin unwrap providers", async () => {
     const user = await Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
@@ -384,9 +395,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
       integrator: { payerKind: "admin" },
     } as any;
 
-    await expect(service.ensureUserSolBufferForSwap(quote as any, user)).resolves.toBe(
-      BigInt(USER_SOL_MAX_BUFFER_LAMPORTS - 1),
-    );
+    await expect(service.ensureUserSolBufferForSwap(quote as any, user)).resolves.toBe(4_999n);
 
     restoreConn();
   });
@@ -439,6 +448,19 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
 });
 
 describe("SwapService.execute", async () => {
+  let restoreUnwrapEstimate: () => void;
+  beforeEach(() => {
+    const plan = vi
+      .spyOn(wallet, "buildUnwrapWsolPlan")
+      .mockResolvedValue({ instructions: [] } as any);
+    const fee = vi.spyOn(wallet as any, "estimateFee").mockResolvedValue(5_000);
+    restoreUnwrapEstimate = () => {
+      plan.mockRestore();
+      fee.mockRestore();
+    };
+  });
+  afterEach(() => restoreUnwrapEstimate());
+
   const user = await Keypair.generate();
   const backend: SwapBackend = {
     getQuote: vi.fn(),
@@ -498,7 +520,7 @@ describe("SwapService.execute", async () => {
     expect(backend.executeJupiterSwap).not.toHaveBeenCalled();
   });
 
-  test("passes admin top-up for unwrap providers when SOL buffer is short", async () => {
+  test("passes the actual fee shortfall to sponsored unwrap execution", async () => {
     restoreConn?.();
     restoreConn = stubWalletConnection(0);
 
@@ -516,8 +538,37 @@ describe("SwapService.execute", async () => {
     expect(backend.executeUnwrapSwap).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ provider: "unwrap" }),
-      BigInt(USER_SOL_MAX_BUFFER_LAMPORTS),
+      5_000n,
     );
+  });
+
+  test("a funded unwrap below the generic swap buffer does not borrow", async () => {
+    restoreConn?.();
+    restoreConn = stubWalletConnection(10_000);
+    const planSpy = vi
+      .spyOn(wallet, "buildUnwrapWsolPlan")
+      .mockResolvedValue({ instructions: [] } as any);
+    const feeSpy = vi.spyOn(wallet as any, "estimateFee").mockResolvedValue(5_000);
+    try {
+      await service.execute(
+        {
+          ...baseQuote,
+          provider: "unwrap",
+          inputMint: WSOL_MINT,
+          outputMint: "SOL",
+          integrator: { payerKind: "admin" },
+        } as any,
+        user,
+      );
+      expect(backend.executeUnwrapSwap).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        0n,
+      );
+    } finally {
+      planSpy.mockRestore();
+      feeSpy.mockRestore();
+    }
   });
 
   test("does not borrow from admin when unwrap buffer is already satisfied", async () => {

@@ -105,10 +105,20 @@ export class SwapService {
       return 0n;
     }
 
+    if (isSyntheticSolUnwrap) {
+      const amountLamports = Number(quote.inputAmountRaw ?? quote.inputAmount);
+      const shortfall = await this.wallet.getUnwrapFeeShortfall(userKeypair, amountLamports);
+      if (shortfall > 0 && quote.integrator?.payerKind !== "admin") {
+        throw new Error(
+          `Keep ${this.wallet.formatSolBalance(shortfall)} more SOL to pay the unwrap fee.`,
+        );
+      }
+      return BigInt(shortfall);
+    }
+
     const userBalance = await this.wallet.getConnection().getBalance(userKeypair.publicKey);
 
-    const amountLamports =
-      quote.provider === "unwrap" ? 0n : quote.inputAmountRaw ? BigInt(quote.inputAmountRaw) : 0n;
+    const amountLamports = quote.inputAmountRaw ? BigInt(quote.inputAmountRaw) : 0n;
 
     if (amountLamports > 0 && userBalance < safeBigIntToNumber(amountLamports)) {
       throw new Error(`Insufficient balance to attempt this swap. Add SOL or reduce the amount.`);
@@ -170,9 +180,6 @@ export class SwapService {
     }
 
     const deficitLamports = requiredLeftoverBig - leftover;
-    if (isSyntheticSolUnwrap && quote.integrator?.payerKind === "admin") {
-      return deficitLamports;
-    }
     const formattedRequired = this.wallet.formatSolBalance(requiredLamports);
     const formattedRoute = this.wallet.formatSolBalance(routeLamports);
     const formattedDeficit = this.wallet.formatSolBalance(safeBigIntToNumber(deficitLamports));
