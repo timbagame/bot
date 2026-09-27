@@ -8,6 +8,9 @@ import {
   __test_setSolWrapRentReserveLamports,
   __test_getSolWrapRentReserveLamports,
   __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer,
+  __test_getSolFeeBufferLamports,
+  __test_setSolFeeBufferLamports,
+  __test_resolveSolInputFeeBufferLamports as resolveSolInputFeeBufferLamports,
   wallet,
 } from "../src/bot";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
@@ -736,6 +739,43 @@ describe("buildAdminIntegratorConfig", () => {
     priceSpy.mockRestore();
     restoreConn();
     restoreAdmin();
+  });
+});
+
+describe("resolveSolInputFeeBufferLamports", () => {
+  const stubAccountInfo = (exists: boolean) => {
+    const original = wallet.getConnection;
+    (wallet as any).getConnection = () => ({
+      getAccountInfo: async () => (exists ? { lamports: 2_039_280 } : null),
+      getMinimumBalanceForRentExemption: async () => 2_039_280,
+    });
+    return () => {
+      (wallet as any).getConnection = original;
+    };
+  };
+
+  test("reserves wrap rent only when the WSOL account is missing", async () => {
+    __test_setSolWrapRentReserveLamports(2_039_280);
+    // Keep the base buffer above the Jupiter minimum so the floor cannot mask rent.
+    const originalBuffer = __test_getSolFeeBufferLamports();
+    __test_setSolFeeBufferLamports(20_000_000);
+    const owner = (await Keypair.generate()).publicKey;
+    const balance = 1_000_000_000;
+
+    try {
+      let restore = stubAccountInfo(true);
+      const withAccount = await resolveSolInputFeeBufferLamports(owner, balance);
+      restore();
+
+      restore = stubAccountInfo(false);
+      const withoutAccount = await resolveSolInputFeeBufferLamports(owner, balance);
+      restore();
+
+      expect(withAccount).toBe(20_000_000);
+      expect(withoutAccount).toBe(22_039_280);
+    } finally {
+      __test_setSolFeeBufferLamports(originalBuffer);
+    }
   });
 });
 
