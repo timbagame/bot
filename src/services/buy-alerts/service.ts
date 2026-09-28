@@ -35,7 +35,10 @@ export type CreateBuyAlertServiceDeps = {
 export function createBuyAlertService(deps: CreateBuyAlertServiceDeps): BuyAlertService {
   const feeds: BuyFeed[] = [deps.feed ?? createPoolTradePoller()];
   const publisher = createBuyAlertPublisher({
-    chatDb: deps.chatDb,
+    // Read through so callers can swap the database behind a getter.
+    get chatDb() {
+      return deps.chatDb;
+    },
     tokenManager: {
       getChatDefaultToken: (chatId) => deps.getTokenManager().getChatDefaultToken(chatId),
       getDefaultToken: () => deps.getTokenManager().getDefaultToken(),

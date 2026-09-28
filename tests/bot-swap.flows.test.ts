@@ -17,6 +17,8 @@ import {
   wallet,
 } from "./helpers/bot-harness";
 import * as priceService from "../src/utils/price-service";
+import * as pricesModule from "../src/utils/prices";
+import * as holderModule from "../src/services/buy-alerts/holder";
 import { WSOL_MINT } from "../src/utils/constants";
 import { clearAllInputSessions, storePendingTransaction } from "../src/utils/user-state";
 
@@ -284,5 +286,173 @@ describe("custom swap inputs", () => {
 
     expect(lastText()).toContain("Confirm this swap?");
     expect((prepareSwap.mock.calls[0] as any[])[0].amount).toBe(String(LAMPORTS / 2));
+  });
+});
+
+describe("swap confirmation side effects", () => {
+  let chatId: number;
+  let fetchSpy: ReturnType<typeof spyOn>;
+  let pricesSpy: ReturnType<typeof spyOn>;
+  let holderSpy: ReturnType<typeof spyOn>;
+  const originalRpcUrl = process.env.RPC_URL;
+  let signature = 0;
+
+  beforeEach(() => {
+    // Buy alerts for the swapped-into token are posted to the user's own chat.
+    chatId = USER;
+    execute.mockImplementation(async () => `swap-signature-${++signature}`);
+    fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
+    pricesSpy = spyOn(pricesModule, "getPricesUSD").mockResolvedValue({ [WSOL_MINT]: 150 });
+    holderSpy = spyOn(holderModule, "detectNewHolder").mockResolvedValue(true);
+    const tokenManager = botModule.__test_getTokenManager() as any;
+    tokenManager.getChatDefaultToken = () => null;
+    tokenManager.getDefaultToken = () => ({ tokenMint: BONK, tokenTicker: "BONK" });
+  });
+
+  afterEach(() => {
+    botModule.__test_getChatDatabase().upsertChatBuyAlerts(chatId, { enabled: false });
+    fetchSpy.mockRestore();
+    pricesSpy.mockRestore();
+    holderSpy.mockRestore();
+    if (originalRpcUrl === undefined) delete process.env.RPC_URL;
+    else process.env.RPC_URL = originalRpcUrl;
+  });
+
+  const enableAlerts = (media: Record<string, unknown> = {}) =>
+    botModule.__test_getChatDatabase().upsertChatBuyAlerts(chatId, {
+      enabled: true,
+      token_mint: USDC,
+      token_ticker: "USDC",
+      ...media,
+    });
+
+  const confirmSwap = async () => {
+    await at("swap_amount_SOL_USDC_50%");
+    await at(callbackStarting("confirm_swap_"));
+    // The alert is published in the background.
+    await Bun.sleep(5);
+  };
+
+  test("a completed swap into an alerted token posts a buy alert with SOL value", async () => {
+    enableAlerts();
+
+    await confirmSwap();
+
+    const alert = messageCalls().find(
+      (call) => call.method === "sendMessage" && call.payload.chat_id === chatId,
+    );
+    expect(messageText(alert)).toContain("USDC");
+    expect(pricesSpy).toHaveBeenCalledWith([WSOL_MINT]);
+    expect(holderSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("buy alerts use the chat's photo, GIF or video", async () => {
+    for (const [mediaType, method] of [
+      ["photo", "sendPhoto"],
+      ["animation", "sendAnimation"],
+      ["video", "sendVideo"],
+    ] as const) {
+      resetCalls();
+      chatId = USER * 10 + method.length;
+      enableAlerts({ media_file_id: `${mediaType}-file`, media_type: mediaType });
+      // Route the alert to this chat by making it the user's chat.
+      await press("swap_amount_SOL_USDC_50%", { userId: USER, chatId });
+      await press(callbackStarting("confirm_swap_"), { userId: USER, chatId });
+      await Bun.sleep(5);
+
+      const call = messageCalls().find((entry) => entry.method === method);
+      expect(call?.payload).toMatchObject({ chat_id: chatId, parse_mode: "HTML" });
+      botModule.__test_getChatDatabase().upsertChatBuyAlerts(chatId, { enabled: false });
+    }
+  });
+
+  test("a failing buy alert publish is logged without affecting the swap", async () => {
+    enableAlerts();
+    const db = botModule.__test_getChatDatabase();
+    stub(db, "getEnabledChatBuyAlerts", () => {
+      throw new Error("chat db locked");
+    });
+
+    await confirmSwap();
+
+    expect(lastText()).toContain("✅ <b>Swap Completed</b>");
+    expect(errorSpy).toHaveBeenCalledWith("Failed to ingest swap buy alert:", expect.any(Error));
+  });
+
+  test("mainnet swaps link to the transaction", async () => {
+    process.env.RPC_URL = "https://api.mainnet-beta.solana.com";
+
+    await confirmSwap();
+
+    expect(lastText()).toContain("🔗 View transaction");
+    expect(lastText()).toContain("swap-signature-");
+  });
+
+  test("unexpected failures in the confirmation are reported to the user", async () => {
+    stub(wallet, "formatSolBalance", () => {
+      throw new Error("formatter exploded");
+    });
+    storePendingTransaction("wrap-boom", {
+      type: "swap",
+      fromToken: "SOL",
+      toToken: "WSOL",
+      amount: "0.5",
+      rawAmount: String(LAMPORTS / 2),
+      userId: String(USER),
+    });
+
+    await at("confirm_swap_wrap-boom");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error in swap confirmation:", expect.any(Error));
+    expect(answers().at(-1)).toBe("❌ Error processing swap");
+  });
+});
+
+describe("swap menu", () => {
+  test("lists SOL and funded tokens, and each token opens its swap targets", async () => {
+    stub(wallet, "getAllWalletTokenBalances", async () => [
+      { mint: USDC, ticker: "USDC", balance: 20, decimals: 6, rawBalance: "20000000" },
+      { mint: BONK, ticker: "BONK", balance: 3, decimals: 5 },
+      {
+        mint: "EmptyMint1111111111111111111111111111111111",
+        ticker: "EMPTY",
+        balance: 0,
+        decimals: 6,
+      },
+      {
+        mint: "ZeroRaw11111111111111111111111111111111111",
+        ticker: "ZRAW",
+        balance: 1,
+        decimals: 6,
+        rawBalance: "0",
+      },
+    ]);
+
+    await at("cmd_swap");
+
+    expect(lastText()).toContain("💱 <b>Swap Tokens</b>");
+    expect(lastText()).toContain("Select token to swap FROM");
+    expect(answers().at(-1)).toBe("💱 Select token to swap from");
+    const labels = buttons(lastMessage()).map((button) => button.text);
+    expect(labels.join(" ")).toContain("USDC");
+    expect(labels.join(" ")).toContain("BONK");
+    expect(labels.join(" ")).not.toContain("EMPTY");
+    expect(labels.join(" ")).not.toContain("ZRAW");
+
+    const usdc = buttons(lastMessage()).find((button) => button.text.includes("USDC"))!;
+    expect(usdc.data).toMatch(/^swap_from_/);
+    await at(usdc.data);
+    expect(lastText()).toContain("💱 <b>Swap USDC</b>");
+  });
+
+  test("an empty wallet has nothing to swap", async () => {
+    stub(wallet, "getBalance", async () => 0);
+    stub(wallet, "getAllWalletTokenBalances", async () => []);
+
+    await at("cmd_swap");
+
+    expect(buttons(lastMessage()).map((button) => button.text)).toContain(
+      "❌ No tokens available to swap",
+    );
   });
 });

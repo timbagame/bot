@@ -3187,7 +3187,9 @@ export const __test_getBuyAlertBotUsername = (
 ): string | undefined => (targetBot.isInited() ? targetBot.botInfo.username : undefined);
 
 const buyAlertService = createBuyAlertService({
-  chatDb,
+  get chatDb() {
+    return chatDb;
+  },
   getTokenManager: () => tokenManager,
   sendHtml: async (chatId, text, media, keyboard) => {
     await sendMediaWithFallback({
