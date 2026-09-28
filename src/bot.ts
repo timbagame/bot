@@ -214,17 +214,13 @@ bot.api.config.use(
 
 // Global error boundary for unhandled middleware errors
 bot.catch((err) => {
-  try {
-    const ctx = err.ctx as Context | undefined;
-    const path = ctx?.update?.callback_query
-      ? "callback_query"
-      : ctx?.update?.message
-        ? "message"
-        : "update";
-    console.error(`Bot error while handling ${path}:`, err.error || err);
-  } catch (e) {
-    console.error("Bot error (logging failed):", err);
-  }
+  const ctx = err.ctx as Context | undefined;
+  const path = ctx?.update?.callback_query
+    ? "callback_query"
+    : ctx?.update?.message
+      ? "message"
+      : "update";
+  console.error(`Bot error while handling ${path}:`, err.error || err);
 });
 
 // Telegram changes a basic group's chat ID when it becomes a supergroup. Move
@@ -3657,40 +3653,51 @@ const getBotMenuCommands = (scope: "all" | "private" | "group" = "all") =>
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
 
-const evmRuntime = process.env["EVM_BOT_CONFIG_FILE"]
-  ? registerEvmBot(
-      bot,
-      process.env["EVM_BOT_CONFIG_FILE"],
-      (chatId, type) => {
-        const settings = chatDb.getChatGameSettings(chatId);
-        const maxPlayers = resolveChatDefaultPlayers(
-          settings,
-          type,
-          type === "coinflip" ? 2 : 10,
-          100,
-        );
-        const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
-        return {
-          maxPlayers,
-          minPlayers: options.minPlayers,
-          timeout: options.timeoutSeconds,
-          isPrivate: options.isPrivate,
-        };
-      },
-      async (token, chatId) => {
-        const resolved = await tokenManager.resolveGameTokenContext(chatId, token, "game");
-        return resolved.success
-          ? { address: resolved.tokenMint, symbol: resolved.tokenTicker }
-          : null;
-      },
-      async (ctx) => {
-        const command = ctx.message?.text?.split(/\s+/)[0]?.toLowerCase().split("@")[0];
-        if (command === "/cf" || command === "/coinflip")
-          await handleCoinflipCommand(ctx, createCoinflipDeps());
-        else await handleGiveawayCommand(ctx);
-      },
-    )
-  : undefined;
+/** Solana-side chat defaults applied to EVM games started in the same chat. */
+const evmGameDefaults = (chatId: number, type: "coinflip" | "giveaway") => {
+  const settings = chatDb.getChatGameSettings(chatId);
+  const maxPlayers = resolveChatDefaultPlayers(settings, type, type === "coinflip" ? 2 : 10, 100);
+  const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
+  return {
+    maxPlayers,
+    minPlayers: options.minPlayers,
+    timeout: options.timeoutSeconds,
+    isPrivate: options.isPrivate,
+  };
+};
+
+const resolveEvmSolanaToken = async (token: string | undefined, chatId: number) => {
+  const resolved = await tokenManager.resolveGameTokenContext(chatId, token, "game");
+  return resolved.success ? { address: resolved.tokenMint, symbol: resolved.tokenTicker } : null;
+};
+
+/** Hand a game command the EVM bot did not take back to the Solana handlers. */
+const dispatchSolanaGameCommand = async (ctx: Context) => {
+  const command = ctx.message?.text?.split(/\s+/)[0]?.toLowerCase().split("@")[0];
+  if (command === "/cf" || command === "/coinflip")
+    await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
+  else await handleGiveawayCommand(ctx as Context & { message?: any });
+};
+
+export const createEvmRuntime = (
+  targetBot: Bot,
+  configFile: string | undefined = process.env["EVM_BOT_CONFIG_FILE"],
+) =>
+  configFile
+    ? registerEvmBot(
+        targetBot,
+        configFile,
+        evmGameDefaults,
+        resolveEvmSolanaToken,
+        dispatchSolanaGameCommand,
+      )
+    : undefined;
+
+export const __test_evmGameDefaults = evmGameDefaults;
+export const __test_resolveEvmSolanaToken = resolveEvmSolanaToken;
+export const __test_dispatchSolanaGameCommand = dispatchSolanaGameCommand;
+
+const evmRuntime = createEvmRuntime(bot);
 
 bot.use(caseInsensitiveCommands);
 
@@ -6194,10 +6201,6 @@ registerCallbackPrefixHandler(
 // ================================
 
 // Error handling
-bot.catch((err) => {
-  console.error("Bot error:", err);
-});
-
 // ================================
 // MESSAGE HANDLER FOR USER INPUT
 // ================================
