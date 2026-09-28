@@ -7,7 +7,7 @@ import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
-import { run, sequentialize } from "@grammyjs/runner";
+import { run, sequentialize, type RunnerHandle } from "@grammyjs/runner";
 import {
   BotHealthResponseSchema,
   CompletedGameNotificationResponseSchema,
@@ -1627,6 +1627,13 @@ export const __test_setTokenManager = (manager: TokenManager): void => {
 };
 let swapManager: SwapManager;
 let swapService: SwapService;
+export const __test_getSwapManagers = () => ({ swapManager, swapService });
+export const __test_setSwapManagers = (managers: {
+  swapManager: SwapManager;
+  swapService: SwapService;
+}): void => {
+  ({ swapManager, swapService } = managers);
+};
 let gameCompletedListenerId: number | null = null;
 let gameInitializedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
@@ -3423,6 +3430,8 @@ const setupProgram = async () => {
     throw error;
   }
 };
+
+export const __test_setupProgram = setupProgram;
 
 let recoveringGameCreations = false;
 const recoverPendingGameCreations = async (): Promise<void> => {
@@ -6612,210 +6621,240 @@ export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
 export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
-// Start the bot and set up the program client (skip during tests)
-if (process.env.NODE_ENV !== "test") {
-  setupProgram()
-    .then(async () => {
-      console.log("Starting bot...");
-      lightningDeposits.start();
+/** Serves the internal health and game-completion endpoints used by the oracle. */
+export const handleInternalApiRequest = async (request: Request): Promise<Response> => {
+  const url = new URL(request.url);
+  if (url.pathname === "/health" && request.method === "GET") {
+    return new Response(JSON.stringify(BotHealthResponseSchema.parse({ status: "ok" })), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (url.pathname === "/internal/completed" && request.method === "POST") {
+    try {
+      const body = CompletedGameNotificationSchema.safeParse(await request.json());
+      if (!body.success) {
+        return new Response(JSON.stringify({ error: "Invalid completion notification" }), {
+          status: 400,
+        });
+      }
+      const { gameAddress, winnerAddress, totalPot, winnerTxSignature } = body.data;
+      await runProcessGameCompletion(gameAddress, winnerAddress, totalPot, winnerTxSignature);
+      return new Response(
+        JSON.stringify(CompletedGameNotificationResponseSchema.parse({ success: true })),
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error handling /internal/completed:", error);
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+      });
+    }
+  }
+  return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+};
 
+/** Side effects of starting the bot, injectable so startup can be exercised in tests. */
+export type BotStartupRuntime = {
+  setupProgram: () => Promise<void>;
+  setInterval: (handler: () => unknown, intervalMs: number) => unknown;
+  serve: (options: { port: number; fetch: (request: Request) => Promise<Response> }) => {
+    stop: () => unknown;
+  };
+  runBot: () => Pick<RunnerHandle, "stop" | "task"> | undefined;
+  onSignal: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
+  exit: (code: number) => void;
+  feeSweeperEnabled: boolean;
+};
+
+const defaultStartupRuntime: BotStartupRuntime = {
+  setupProgram,
+  setInterval: (handler, intervalMs) => setInterval(handler, intervalMs),
+  serve: (options) => Bun.serve(options),
+  runBot: () =>
+    run(bot, {
+      runner: {
+        fetch: {
+          // Only handle updates we actually process
+          allowed_updates: ["message", "callback_query"],
+        },
+      },
+    }),
+  onSignal: (signal, handler) => {
+    process.once(signal, handler);
+  },
+  exit: (code) => process.exit(code),
+  feeSweeperEnabled: ENABLE_FEE_SWEEPER,
+};
+
+/** Set up the program client, background jobs, internal API and update polling. */
+export const startBot = async (
+  runtime: BotStartupRuntime = defaultStartupRuntime,
+): Promise<void> => {
+  try {
+    await runtime.setupProgram();
+    console.log("Starting bot...");
+    lightningDeposits.start();
+
+    try {
+      await bot.api.setMyCommands(getBotMenuCommands());
+      await bot.api.setMyCommands(getBotMenuCommands("private"), {
+        scope: { type: "all_private_chats" },
+      });
+      await bot.api.setMyCommands(getBotMenuCommands("group"), {
+        scope: { type: "all_group_chats" },
+      });
+      console.log("Registered bot commands in the Telegram command menu");
+    } catch (error) {
+      console.error("Failed to register bot commands in the Telegram command menu:", error);
+    }
+
+    // Reload game message mappings from database
+    await gameManager.reloadGameMessages();
+    console.log(`Reloaded game message mappings from database`);
+    gameDb.resumeGameCreationRecovery();
+    void recoverPendingGameCreations();
+    runtime.setInterval(recoverPendingGameCreations, 3_000);
+
+    await registerProgramEventListeners();
+    attachRpcEndpointFailoverHandler();
+    financeBackfillWorker.start();
+    console.log("Finance history backfill worker scheduled");
+    buyAlertService.start();
+    console.log("Buy alert feed synchronized");
+
+    const expireFaucets = async () => {
       try {
-        await bot.api.setMyCommands(getBotMenuCommands());
-        await bot.api.setMyCommands(getBotMenuCommands("private"), {
-          scope: { type: "all_private_chats" },
-        });
-        await bot.api.setMyCommands(getBotMenuCommands("group"), {
-          scope: { type: "all_group_chats" },
-        });
-        console.log("Registered bot commands in the Telegram command menu");
+        const count = await faucetModule.expireDue();
+        if (count > 0) console.log(`⌛ Expired ${count} faucet${count === 1 ? "" : "s"}`);
       } catch (error) {
-        console.error("Failed to register bot commands in the Telegram command menu:", error);
+        console.error("❌ Faucet expiry check failed:", error);
+      }
+    };
+    await expireFaucets();
+    runtime.setInterval(expireFaucets, 60_000);
+
+    const scheduleFeeSweeper = () => {
+      if (!runtime.feeSweeperEnabled) {
+        console.log("ℹ️ Automated fee sweeper disabled; skipping scheduled runs.");
+        return;
       }
 
-      // Reload game message mappings from database
-      await gameManager.reloadGameMessages();
-      console.log(`Reloaded game message mappings from database`);
-      gameDb.resumeGameCreationRecovery();
-      void recoverPendingGameCreations();
-      setInterval(recoverPendingGameCreations, 3_000);
-
-      await registerProgramEventListeners();
-      attachRpcEndpointFailoverHandler();
-      financeBackfillWorker.start();
-      console.log("Finance history backfill worker scheduled");
-      buyAlertService.start();
-      console.log("Buy alert feed synchronized");
-
-      const expireFaucets = async () => {
+      const runSweep = async () => {
         try {
-          const count = await faucetModule.expireDue();
-          if (count > 0) console.log(`⌛ Expired ${count} faucet${count === 1 ? "" : "s"}`);
+          await sweepFees({ walletManager: wallet });
         } catch (error) {
-          console.error("❌ Faucet expiry check failed:", error);
+          console.error("❌ Automated fee sweep failed:", error);
         }
       };
-      await expireFaucets();
-      setInterval(expireFaucets, 60_000);
 
-      const scheduleFeeSweeper = () => {
-        if (!ENABLE_FEE_SWEEPER) {
-          console.log("ℹ️ Automated fee sweeper disabled; skipping scheduled runs.");
-          return;
-        }
+      console.log(
+        `🧹 Automated fee sweeper enabled (interval: ${Math.round(
+          FEE_SWEEP_INTERVAL_MS / 60_000,
+        )} min)`,
+      );
 
-        const runSweep = async () => {
-          try {
-            await sweepFees({ walletManager: wallet });
-          } catch (error) {
-            console.error("❌ Automated fee sweep failed:", error);
-          }
-        };
+      runtime.setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
+    };
 
-        console.log(
-          `🧹 Automated fee sweeper enabled (interval: ${Math.round(
-            FEE_SWEEP_INTERVAL_MS / 60_000,
-          )} min)`,
-        );
+    scheduleFeeSweeper();
 
-        setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
-      };
+    // Schedule daily database cleanup
+    const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const CLEANUP_DAYS_OLD = 30;
 
-      scheduleFeeSweeper();
-
-      // Schedule daily database cleanup
-      const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-      const CLEANUP_DAYS_OLD = 30;
-
-      const scheduleDatabaseCleanup = () => {
-        const runCleanup = () => {
-          try {
-            const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
-            if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
-              console.log(
-                `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`,
-              );
-            }
-          } catch (error) {
-            console.error("❌ Database cleanup failed:", error);
-          }
-        };
-
-        console.log(
-          `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`,
-        );
-
-        setInterval(runCleanup, CLEANUP_INTERVAL_MS);
-      };
-
-      scheduleDatabaseCleanup();
-
-      // Periodic expired-game sweep: one blockchain-time read per run, batched
-      // account loads, and no overlapping runs.
-      const expiredGameScanner = createExpiredGameScanner({
-        getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
-          gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
-        gameAccounts: () => program.account.game,
-        getBlockchainTime: () => wallet.getBlockchainTime(),
-        isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
-        handleExpiredGame: (gamePda, gameAccount) =>
-          gameManager.handleExpiredGame(gamePda, gameAccount),
-        completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
-        updateGameMessage: (gameAddress, game) =>
-          updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
-        cleanupOrphanedGame,
-        lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
-      });
-      setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
-
-      const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
-      const internalServer = Bun.serve({
-        port: botInternalPort,
-        async fetch(request) {
-          const url = new URL(request.url);
-          if (url.pathname === "/health" && request.method === "GET") {
-            return new Response(JSON.stringify(BotHealthResponseSchema.parse({ status: "ok" })), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
-          if (url.pathname === "/internal/completed" && request.method === "POST") {
-            try {
-              const body = CompletedGameNotificationSchema.safeParse(await request.json());
-              if (!body.success) {
-                return new Response(JSON.stringify({ error: "Invalid completion notification" }), {
-                  status: 400,
-                });
-              }
-              const { gameAddress, winnerAddress, totalPot, winnerTxSignature } = body.data;
-              await runProcessGameCompletion(
-                gameAddress,
-                winnerAddress,
-                totalPot,
-                winnerTxSignature,
-              );
-              return new Response(
-                JSON.stringify(CompletedGameNotificationResponseSchema.parse({ success: true })),
-                { status: 200 },
-              );
-            } catch (error) {
-              console.error("Error handling /internal/completed:", error);
-              return new Response(JSON.stringify({ error: "Internal server error" }), {
-                status: 500,
-              });
-            }
-          }
-          return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
-        },
-      });
-      console.log(`🤖 Bot internal API listening on port ${botInternalPort}`);
-
-      // Start the bot with concurrent processing
-      console.log("Starting bot with concurrent processing...");
-      const handle = run(bot, {
-        runner: {
-          fetch: {
-            // Only handle updates we actually process
-            allowed_updates: ["message", "callback_query"],
-          },
-        },
-      });
-
-      // Set up graceful shutdown
-      const shutdown = async (signal: string) => {
-        console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+    const scheduleDatabaseCleanup = () => {
+      const runCleanup = () => {
         try {
-          rpcEndpointListenerCleanup?.();
-          rpcEndpointListenerCleanup = null;
-          evmRuntime?.stop();
-          lightningDeposits.stop();
-          financeBackfillWorker.stop();
-          buyAlertService.stop();
-          await unregisterProgramEventListeners();
-          await handle?.stop();
-          internalServer?.stop();
-          console.log("✅ Bot stopped successfully");
-          process.exit(0);
+          const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
+          if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
+            console.log(
+              `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`,
+            );
+          }
         } catch (error) {
-          console.error("❌ Error during shutdown:", error);
-          process.exit(1);
+          console.error("❌ Database cleanup failed:", error);
         }
       };
 
-      // Handle different shutdown signals
-      process.once("SIGINT", () => shutdown("SIGINT"));
-      process.once("SIGTERM", () => shutdown("SIGTERM"));
+      console.log(
+        `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`,
+      );
 
-      // Handle the runner task completion
-      handle
-        ?.task()
-        ?.then(() => {
-          console.log("🏁 Bot runner task completed");
-        })
-        .catch((error) => {
-          console.error("❌ Bot runner task failed:", error);
-        });
-    })
-    .catch((error) => {
-      console.error("Failed to set up program client:", error);
+      runtime.setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+    };
+
+    scheduleDatabaseCleanup();
+
+    // Periodic expired-game sweep: one blockchain-time read per run, batched
+    // account loads, and no overlapping runs.
+    const expiredGameScanner = createExpiredGameScanner({
+      getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
+        gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
+      gameAccounts: () => program.account.game,
+      getBlockchainTime: () => wallet.getBlockchainTime(),
+      isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
+      handleExpiredGame: (gamePda, gameAccount) =>
+        gameManager.handleExpiredGame(gamePda, gameAccount),
+      completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
+      updateGameMessage: (gameAddress, game) =>
+        updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
+      cleanupOrphanedGame,
+      lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
     });
+    runtime.setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+
+    const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
+    const internalServer = runtime.serve({
+      port: botInternalPort,
+      fetch: handleInternalApiRequest,
+    });
+    console.log(`🤖 Bot internal API listening on port ${botInternalPort}`);
+
+    // Start the bot with concurrent processing
+    console.log("Starting bot with concurrent processing...");
+    const handle = runtime.runBot();
+
+    // Set up graceful shutdown
+    const shutdown = async (signal: string) => {
+      console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+      try {
+        rpcEndpointListenerCleanup?.();
+        rpcEndpointListenerCleanup = null;
+        evmRuntime?.stop();
+        lightningDeposits.stop();
+        financeBackfillWorker.stop();
+        buyAlertService.stop();
+        await unregisterProgramEventListeners();
+        await handle?.stop();
+        internalServer?.stop();
+        console.log("✅ Bot stopped successfully");
+        runtime.exit(0);
+      } catch (error) {
+        console.error("❌ Error during shutdown:", error);
+        runtime.exit(1);
+      }
+    };
+
+    // Handle different shutdown signals
+    runtime.onSignal("SIGINT", () => shutdown("SIGINT"));
+    runtime.onSignal("SIGTERM", () => shutdown("SIGTERM"));
+
+    // Handle the runner task completion
+    handle
+      ?.task()
+      ?.then(() => {
+        console.log("🏁 Bot runner task completed");
+      })
+      .catch((error) => {
+        console.error("❌ Bot runner task failed:", error);
+      });
+  } catch (error) {
+    console.error("Failed to set up program client:", error);
+  }
+};
+
+// Start the bot and set up the program client (skip during tests)
+if (process.env.NODE_ENV !== "test") {
+  void startBot();
 }
