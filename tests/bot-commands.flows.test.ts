@@ -139,6 +139,22 @@ describe("/withdraw", () => {
     expect(lastText()).toContain("✅ Withdrawal of 2 SOL sent");
   });
 
+  test("mainnet withdrawals link to the transaction on Solscan", async () => {
+    const original = process.env["RPC_URL"];
+    process.env["RPC_URL"] = "https://api.mainnet-beta.solana.com";
+    stub(wallet, "transferSol", async () => "mainnet-sig");
+    try {
+      await withdraw(`${recipient} 2 SOL`);
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(process.env, "RPC_URL");
+      else process.env["RPC_URL"] = original;
+    }
+
+    expect(lastText()).toContain("✅ Withdrawal of 2 SOL sent");
+    expect(lastText()).toContain("🔗 View transaction");
+    expect(lastText()).toContain("mainnet-sig");
+  });
+
   test("sends token amounts and reports shortfalls by ticker", async () => {
     parseResult = {
       success: true,
