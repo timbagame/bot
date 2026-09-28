@@ -216,6 +216,100 @@ describe("startBot", () => {
   });
 });
 
+describe("autoStartBot", () => {
+  test("starts the bot everywhere except under tests", () => {
+    const start = mock(async () => {});
+
+    botModule.autoStartBot("test", start);
+    expect(start).not.toHaveBeenCalled();
+
+    botModule.autoStartBot("production", start);
+    botModule.autoStartBot(undefined, start);
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("expired game sweep", () => {
+  test("cancels expired games and cleans up games whose account is gone", async () => {
+    const expired = new PublicKey("So11111111111111111111111111111111111111112").toBase58();
+    const orphan = new PublicKey("SysvarC1ock11111111111111111111111111111111").toBase58();
+    const gameDb = botModule.__test_getGameDatabase();
+    const completed: Array<[string, string]> = [];
+    let batch = 0;
+    stub(gameDb as any, "getGamesExpiringBefore", () =>
+      batch++ === 0
+        ? [
+            { game_address: expired, status: "active" },
+            { game_address: orphan, status: "active" },
+          ]
+        : [],
+    );
+    stub(gameDb as any, "getGame", (address: string) => ({
+      game_address: address,
+      status: "active",
+    }));
+    stub(gameDb as any, "getGameMessages", () => [{ chatId: -900, messageId: 5 }]);
+    stub(gameDb as any, "completeGame", (address: string, winner: string) => {
+      completed.push([address, winner]);
+    });
+    const handleExpiredGame = mock(async () => true);
+    const updates: Array<[string, string, string | undefined]> = [];
+    botModule.__test_setGameManager({
+      reloadGameMessages: async () => {},
+      recoverPendingGameCreation: async () => false,
+      handleExpiredGame,
+      getActiveGameMessages: () => new Map(),
+      updateGameMessageFromData: async (
+        _ctx: unknown,
+        address: string,
+        status: string,
+        winner?: string,
+      ) => {
+        updates.push([address, status, winner]);
+        if (address === orphan) throw new Error("message deleted");
+      },
+    } as any);
+    botModule.__test_setProgram({
+      programId: new PublicKey("11111111111111111111111111111112"),
+      addEventListener: async () => 1,
+      removeEventListener: async () => {},
+      account: {
+        game: {
+          fetchMultiple: async () => [{ ticketsCount: 1, maxTickets: 2, expired: true }, null],
+        },
+      },
+    } as any);
+    stub(botModule.wallet as any, "getBlockchainTime", async () => 1_000);
+    const isExpired = spyOn(
+      (await import("../src/utils/game")).GameManager,
+      "isExpired",
+    ).mockImplementation((account: any) => account.expired === true);
+    botModule.__test_setCompletionHistoryFetcher(async () => null);
+    try {
+      const env = createRuntime();
+      await botModule.startBot(env.runtime);
+
+      // Registered after the faucet expiry job, which may share the same period.
+      const scans = env.intervals.filter((entry) => entry.ms === EXPIRED_GAMES_CHECK_INTERVAL_MS);
+      await scans.at(-1)!.handler();
+
+      expect((handleExpiredGame.mock.calls[0] as any[])[0].toBase58()).toBe(expired);
+      expect(completed).toEqual([
+        [expired, "cancelled"],
+        [orphan, "cancelled"],
+      ]);
+      expect(updates).toEqual([
+        [expired, "Completed", "cancelled"],
+        [orphan, "Completed", "cancelled"],
+      ]);
+      expect(logged(warnSpy, `Could not update message for game ${orphan}:`)).toBe(true);
+    } finally {
+      isExpired.mockRestore();
+      botModule.__test_resetCompletionHistoryFetcher();
+    }
+  });
+});
+
 describe("internal API", () => {
   const post = (body: unknown) =>
     botModule.handleInternalApiRequest(

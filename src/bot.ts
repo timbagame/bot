@@ -6761,6 +6761,12 @@ export const startBot = async (
 };
 
 // Start the bot and set up the program client (skip during tests)
-if (process.env.NODE_ENV !== "test") {
-  void startBot();
-}
+export const autoStartBot = (
+  nodeEnv = process.env.NODE_ENV,
+  start: () => Promise<void> = startBot,
+): void => {
+  if (nodeEnv !== "test") {
+    void start();
+  }
+};
+autoStartBot();
