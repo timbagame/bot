@@ -3747,7 +3747,9 @@ registerCaseInsensitiveCommand(
 
 const faucetModule = createFaucetModule({
   bot,
-  database: FaucetDatabase.getInstance(),
+  get database() {
+    return FaucetDatabase.getInstance();
+  },
   parseAmount: (args, index, chatId, context) =>
     tokenManager.parseAmount(args, index, chatId, context),
   inferMaxPlayers,
@@ -6670,23 +6672,22 @@ export type BotStartupRuntime = {
   feeSweeperEnabled: boolean;
 };
 
+// Bound functions keep these thin wrappers free of untestable bodies.
 const defaultStartupRuntime: BotStartupRuntime = {
   setupProgram,
-  setInterval: (handler, intervalMs) => setInterval(handler, intervalMs),
-  serve: (options) => Bun.serve(options),
-  runBot: () =>
-    run(bot, {
-      runner: {
-        fetch: {
-          // Only handle updates we actually process
-          allowed_updates: ["message", "callback_query"],
-        },
+  setInterval: globalThis.setInterval.bind(globalThis) as BotStartupRuntime["setInterval"],
+  serve: Bun.serve.bind(Bun) as BotStartupRuntime["serve"],
+  // run() infers its update type from the adapter; bind() cannot, so widen the bot.
+  runBot: run.bind(undefined, bot as never, {
+    runner: {
+      fetch: {
+        // Only handle updates we actually process
+        allowed_updates: ["message", "callback_query"],
       },
-    }),
-  onSignal: (signal, handler) => {
-    process.once(signal, handler);
-  },
-  exit: (code) => process.exit(code),
+    },
+  }),
+  onSignal: process.once.bind(process) as BotStartupRuntime["onSignal"],
+  exit: process.exit.bind(process),
   feeSweeperEnabled: ENABLE_FEE_SWEEPER,
 };
 
