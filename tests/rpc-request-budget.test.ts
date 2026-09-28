@@ -38,3 +38,25 @@ test("aborted background work never calls the provider", async () => {
     }),
   ).rejects.toThrow("cancelled");
 });
+test("aborting while background work waits for foreground traffic rejects without calling", async () => {
+  let release!: () => void;
+  const foreground = foregroundRpc(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const controller = new AbortController();
+  let called = false;
+  const background = backgroundRpc("https://abort-wait.test", controller.signal, async () => {
+    called = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const reason = new Error("scan cancelled");
+  controller.abort(reason);
+
+  await expect(background).rejects.toBe(reason);
+  expect(called).toBe(false);
+  release();
+  await foreground;
+});

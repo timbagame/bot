@@ -3,6 +3,7 @@ import {
   formatBuyAlertMessage,
   dexLabel,
   dexMark,
+  formatBuyTokenAmount,
   formatMarketCapUsd,
 } from "../src/services/buy-alerts/formatter";
 import type { BuyEvent } from "../src/services/buy-alerts/types";
@@ -164,4 +165,19 @@ test("formatMarketCapUsd uses MAGAIBA-style suffixes", () => {
   expect(formatMarketCapUsd(132_750)).toBe("132.75K");
   expect(formatMarketCapUsd(5_238)).toBe("5.24K");
   expect(formatMarketCapUsd(1_500_000)).toBe("1.5M");
+});
+
+test("formatMarketCapUsd hides missing or invalid market caps", () => {
+  expect(formatMarketCapUsd(0)).toBe("");
+  expect(formatMarketCapUsd(-5)).toBe("");
+  expect(formatMarketCapUsd(Number.NaN)).toBe("");
+  expect(formatMarketCapUsd(2_500_000_000)).toBe("2.5B");
+  expect(formatMarketCapUsd(12.5)).toBe("12.5");
+});
+
+test("formatBuyTokenAmount shows 0 for invalid amounts and compacts real ones", () => {
+  expect(formatBuyTokenAmount(0)).toBe("0");
+  expect(formatBuyTokenAmount(-1)).toBe("0");
+  expect(formatBuyTokenAmount(Number.POSITIVE_INFINITY)).toBe("0");
+  expect(formatBuyTokenAmount(1_270_000)).toBe("1.27M");
 });

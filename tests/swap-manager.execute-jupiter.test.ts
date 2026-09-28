@@ -882,4 +882,32 @@ describe("SwapManager.executeJupiterSwap", () => {
       expect((error as Error).message).toMatch(/confirmed with error/i);
     }
   });
+
+  test("build lookup tables are materialized from Jupiter's address map", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, timeNow: () => Date.now() },
+    );
+    const sm = new SwapManager(connection, wallet);
+    const table = (await Keypair.generate()).publicKey;
+    const first = (await Keypair.generate()).publicKey;
+    const second = (await Keypair.generate()).publicKey;
+
+    const getTables = Reflect.get(sm, "getJupiterBuildLookupTables").bind(sm);
+    expect(getTables({ addressesByLookupTableAddress: null })).toEqual([]);
+
+    const tables = getTables({
+      addressesByLookupTableAddress: {
+        [table.toBase58()]: [first.toBase58(), second.toBase58()],
+      },
+    });
+    expect(tables).toHaveLength(1);
+    expect(tables[0].key.equals(table)).toBe(true);
+    expect(tables[0].isActive()).toBe(true);
+    expect(tables[0].state.addresses.map((address: PublicKey) => address.toBase58())).toEqual([
+      first.toBase58(),
+      second.toBase58(),
+    ]);
+  });
 });

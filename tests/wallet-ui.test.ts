@@ -1,10 +1,14 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { InlineKeyboard, type Context } from "grammy";
 import {
+  buildQuickAmountKeyboard,
+  buildQuickAmountRows,
+  buildWalletActionMenu,
   buildWalletCaption,
   buildWalletTokenLines,
   buildWalletActionMenuForUser,
   showCustomAmountPrompt,
+  persistInputPrompt,
   persistInputPromptFromContext,
   sanitizeTokenSymbol,
 } from "../src/utils/wallet-ui";
@@ -629,4 +633,234 @@ test("buildWalletActionMenuForUser applies prepareBalances overrides", async () 
   const buttonLabels = flattened.map((btn) => btn?.text);
   expect(buttonLabels.filter((label) => label?.includes("AAA"))).toHaveLength(1);
   expect(buttonLabels.some((label) => label?.includes("BBB"))).toBe(false);
+});
+
+test("buildWalletTokenLines copies the exact raw on-chain amount when available", async () => {
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: 0,
+    tokenBalances: [
+      {
+        mint: "mint-raw",
+        ticker: "RAW",
+        balance: 123.45678912,
+        decimals: 9,
+        rawBalance: " 123456789123 ",
+      },
+      { mint: "mint-bad-raw", ticker: "BAD", balance: 2, decimals: 0, rawBalance: "1.5" },
+    ],
+    formatSolBalance: () => "0",
+    fetchPricesUSD: async () => ({}),
+  });
+
+  expect(lines.find((line) => line.ticker === "RAW")?.copyAmount).toBe("123.456789123");
+  expect(lines.find((line) => line.ticker === "BAD")?.copyAmount).toBe("2");
+});
+
+test("showCustomAmountPrompt drops sections that contain only blank lines", async () => {
+  const edits: EditCall[] = [];
+  const ctx = createMockContext(edits);
+
+  await showCustomAmountPrompt({
+    ctx,
+    userId: "blank-user",
+    title: "Title",
+    tokenLines: ["   ", ""],
+    instructions: ["Enter an amount"],
+    footerLines: [],
+    cancelCallback: "cancel_blank",
+    state: { type: "send_custom_amount", chatId: 654, messageId: 321 } as any,
+  });
+
+  expect(expectSingleEdit(edits).text).toBe("Title\n\nEnter an amount");
+});
+
+test("persistInputPrompt skips the session when no chat can be resolved", async () => {
+  const replyCalls: ReplyCall[] = [];
+  const edits: EditCall[] = [];
+  const ctx = createMockContext(edits, {
+    replyCalls,
+    overrides: { callbackQuery: undefined, chat: undefined },
+  });
+  ctx.chat = undefined;
+  ctx.callbackQuery = undefined;
+
+  const result = await persistInputPrompt({
+    ctx,
+    userState: {},
+    text: "Prompt",
+    keyboard: new InlineKeyboard(),
+    session: { type: "send_custom_amount", initiatorId: "" } as any,
+    logLabel: "test",
+    initiatorId: "44",
+  });
+
+  expect(replyCalls).toHaveLength(1);
+  expect(result).toEqual({ chatId: undefined, messageId: replyCalls[0]!.message_id });
+  expect(getInputSession(`undefined_${replyCalls[0]!.message_id}`)).toBeUndefined();
+});
+
+test("persistInputPrompt falls back to the provided initiator when the session has none", async () => {
+  const replyCalls: ReplyCall[] = [];
+  const ctx = createMockContext([], {
+    replyCalls,
+    overrides: { callbackQuery: undefined },
+  });
+  ctx.callbackQuery = undefined;
+
+  const result = await persistInputPrompt({
+    ctx,
+    userState: {},
+    text: "Prompt",
+    keyboard: new InlineKeyboard(),
+    session: { type: "send_custom_amount", initiatorId: "" } as any,
+    logLabel: "test",
+    initiatorId: "44",
+  });
+
+  expect(result.chatId).toBe(654);
+  const stored = getInputSession(`654_${result.messageId}`) as any;
+  expect(stored?.initiatorId).toBe("44");
+});
+
+test("persistInputPromptFromContext replies to the triggering text message", async () => {
+  const replyCalls: ReplyCall[] = [];
+  const ctx = createMockContext([], {
+    replyCalls,
+    overrides: { callbackQuery: undefined, message: { message_id: 808 }, from: { id: 5 } },
+  });
+  ctx.callbackQuery = undefined;
+
+  await persistInputPromptFromContext({
+    ctx,
+    text: "Prompt",
+    keyboard: new InlineKeyboard(),
+    session: { type: "send_custom_amount" } as any,
+    logLabel: "test",
+  });
+
+  expect(replyCalls).toHaveLength(1);
+  expect(replyCalls[0]!.options.reply_to_message_id).toBe(808);
+});
+
+test("buildQuickAmountRows rejects invalid column counts and truncates fractional ones", () => {
+  const buttons = [
+    { label: "A", callback: "a" },
+    { label: "B", callback: "b" },
+    { label: "C", callback: "c" },
+  ];
+  expect(buildQuickAmountRows(buttons, 0)).toEqual([]);
+  expect(buildQuickAmountRows(buttons, -1)).toEqual([]);
+  expect(buildQuickAmountRows(buttons, Number.NaN)).toEqual([]);
+  expect(buildQuickAmountRows(buttons, 2.9).map((row) => row.map((b) => b.label))).toEqual([
+    ["A", "B"],
+    ["C"],
+  ]);
+});
+
+test("buildQuickAmountKeyboard places non-empty extra rows before the percentages", () => {
+  const keyboard = buildQuickAmountKeyboard({
+    baseCallback: (value) => `buy_${value}`,
+    backCallback: "back",
+    extraRows: [[], [{ label: "0.1 SOL", value: "0.1" }]],
+    percentages: ["MAX"],
+    includeCustom: false,
+  });
+
+  expect(keyboard.inline_keyboard.filter((row) => row.length > 0)).toEqual([
+    [{ text: "0.1 SOL", callback_data: "buy_0.1" }],
+    [{ text: "MAX", callback_data: "buy_MAX" }],
+    [{ text: "← Back", callback_data: "back" }],
+  ]);
+});
+
+test("buildQuickAmountKeyboard shows only the insufficient notice when quick rows are hidden", () => {
+  const keyboard = buildQuickAmountKeyboard({
+    baseCallback: (value) => `buy_${value}`,
+    backCallback: "back",
+    showQuickRows: false,
+    insufficientLabel: "❌ Not enough SOL",
+  });
+  expect(keyboard.inline_keyboard.filter((row) => row.length > 0)).toEqual([
+    [{ text: "❌ Not enough SOL", callback_data: "noop" }],
+    [{ text: "← Back", callback_data: "back" }],
+  ]);
+
+  const bare = buildQuickAmountKeyboard({
+    baseCallback: (value) => `buy_${value}`,
+    backCallback: "back",
+    showQuickRows: false,
+  });
+  expect(bare.inline_keyboard.filter((row) => row.length > 0)).toEqual([
+    [{ text: "← Back", callback_data: "back" }],
+  ]);
+});
+
+describe("buildWalletActionMenu token selection", () => {
+  const formatters = {
+    formatSolBalance: (lamports: number) => (lamports / LAMPORTS_PER_SOL).toFixed(2),
+    formatTokenBalance: (balance: number, decimals: number) =>
+      (balance / Math.pow(10, decimals)).toFixed(2),
+  };
+  const balances = {
+    solBalanceLamports: LAMPORTS_PER_SOL,
+    tokenBalances: [
+      { mint: "mint-aaa", ticker: "AAA", balance: 100, decimals: 2 },
+      { mint: "mint-bbb", ticker: "BBB", balance: 200, decimals: 2 },
+    ],
+  };
+  const callbacks = (menu: { keyboard: InlineKeyboard }) =>
+    menu.keyboard.inline_keyboard.flat().map((button: any) => button.callback_data);
+
+  test("omits SOL when not requested and honours the token filter", () => {
+    const menu = buildWalletActionMenu({
+      title: "Pick",
+      walletAddress: "wallet",
+      bodyLines: [],
+      balances,
+      formatters,
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "pick_",
+        filter: (token) => token.ticker !== "AAA",
+      },
+    });
+    expect(callbacks(menu)).toEqual(["pick_BBB"]);
+  });
+
+  test("includes SOL for option objects without an includeIf predicate", () => {
+    const menu = buildWalletActionMenu({
+      title: "Pick",
+      walletAddress: "wallet",
+      bodyLines: [],
+      balances,
+      formatters,
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "pick_",
+        includeSol: { callback: "pick_native", label: (formatted) => `Native ${formatted}` },
+        limit: 0,
+      },
+    });
+    expect(menu.keyboard.inline_keyboard).toEqual([
+      [{ text: "Native 1.00", callback_data: "pick_native" }],
+    ]);
+  });
+
+  test("requires a wallet address and rejects unknown quick action types", () => {
+    const base = { title: "Pick", bodyLines: [], balances, formatters };
+    expect(() =>
+      buildWalletActionMenu({
+        ...base,
+        walletAddress: "",
+        quickActions: { type: "token-select", actionPrefix: "pick_" },
+      }),
+    ).toThrow("walletAddress is required");
+    expect(() =>
+      buildWalletActionMenu({
+        ...base,
+        walletAddress: "wallet",
+        quickActions: { type: "carousel" } as any,
+      }),
+    ).toThrow("Unsupported wallet quick action: carousel");
+  });
 });

@@ -161,6 +161,55 @@ describe("RpcEndpointManager", () => {
     });
   });
 
+  test("reports failing async listeners and stops notifying unsubscribed ones", async () => {
+    const endpoints = ["https://rpc-primary", "https://rpc-secondary", "https://rpc-primary"];
+    const errors: unknown[][] = [];
+    const manager = new RpcEndpointManager(endpoints, {
+      commitment: "confirmed",
+      connectionFactory: (endpoint: string, commitment: string) =>
+        new FakeConnection(
+          endpoint,
+          commitment,
+          endpoint === endpoints[0],
+        ) as unknown as Connection,
+      logger: { error: (...args: unknown[]) => errors.push(args) } as any,
+    });
+    expect(manager.getAllEndpoints()).toEqual(["https://rpc-primary", "https://rpc-secondary"]);
+
+    const listenerFailure = new Error("listener exploded");
+    manager.onActiveEndpointChange(async () => {
+      throw listenerFailure;
+    });
+    let removedCalls = 0;
+    const unsubscribe = manager.onActiveEndpointChange(() => {
+      removedCalls += 1;
+    });
+    unsubscribe();
+
+    expect(await manager.getConnection().getSlot()).toBe(42n);
+    await sleep(0);
+
+    expect(removedCalls).toBe(0);
+    expect(errors).toEqual([["RPC endpoint change listener failed:", listenerFailure]]);
+  });
+
+  test("property writes on the proxied connection reach the active connection", () => {
+    const created: FakeConnection[] = [];
+    const manager = new RpcEndpointManager(["https://rpc-primary"], {
+      connectionFactory: (endpoint: string, commitment: string) => {
+        const connection = new FakeConnection(endpoint, commitment, false);
+        created.push(connection);
+        return connection as unknown as Connection;
+      },
+    });
+
+    (manager.getConnection() as any).customFlag = "enabled";
+
+    expect(created).toHaveLength(1);
+    expect((created[0] as any).customFlag).toBe("enabled");
+    expect((manager.getConnection() as any).customFlag).toBe("enabled");
+  });
+
   test("maintains promoted endpoint across concurrent fallbacks", async () => {
     const endpoints = ["https://rpc-primary", "https://rpc-secondary"];
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, test, expect } from "bun:test";
+import { beforeEach, describe, test, expect, spyOn } from "bun:test";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
@@ -58,5 +58,69 @@ describe("TokenManager wrapper methods", () => {
     ).toBe("USDC");
     tm.removeToken("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     expect(tm.getTokenCount()).toBe(0);
+  });
+
+  test("chat count reflects configured chats", () => {
+    const tm = TokenManager.getInstance(makeWallet(), "MINT", "TOK");
+    expect(tm.getChatCount()).toBe(0);
+    tm.setChatDefaultToken(-10, "CHAT_MINT", "CHAT", "user");
+    tm.setChatDefaultToken(-20, "CHAT_MINT", "CHAT", "user");
+    expect(tm.getChatCount()).toBe(2);
+  });
+
+  test("getBalanceWithMetadata scales the raw balance by the token decimals", async () => {
+    const calls: Array<[bigint, string]> = [];
+    const wallet = {
+      ...makeWallet(),
+      getTokenBalance: async (telegramId: bigint, mint: string) => {
+        calls.push([telegramId, mint]);
+        return 1_234_500;
+      },
+    };
+    const tm = TokenManager.getInstance(wallet, "MINT", "TOK");
+
+    const result = await tm.getBalanceWithMetadata(42n, {
+      tokenMint: "MINT_X",
+      tokenTicker: "X",
+      decimals: 4,
+    });
+
+    expect(calls).toEqual([[42n, "MINT_X"]]);
+    expect(result).toEqual({
+      rawBalance: 1_234_500,
+      displayBalance: 123.45,
+      tokenMint: "MINT_X",
+      tokenTicker: "X",
+      decimals: 4,
+    });
+  });
+
+  test("getBalanceWithMetadata reports a zero balance when the lookup fails", async () => {
+    const failure = new Error("rpc down");
+    const wallet = {
+      ...makeWallet(),
+      getTokenBalance: async () => {
+        throw failure;
+      },
+    };
+    const tm = TokenManager.getInstance(wallet, "MINT", "TOK");
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await tm.getBalanceWithMetadata(7n, {
+        tokenMint: "MINT_Y",
+        tokenTicker: "Y",
+        decimals: 9,
+      });
+      expect(result).toEqual({
+        rawBalance: 0,
+        displayBalance: 0,
+        tokenMint: "MINT_Y",
+        tokenTicker: "Y",
+        decimals: 9,
+      });
+      expect(errorSpy).toHaveBeenCalledWith("Error getting token balance with metadata:", failure);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

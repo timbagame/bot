@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import {
   fetchDexScreenerPairStats,
   fetchDexScreenerPoolStats,
@@ -124,4 +124,107 @@ test("pair discovery keeps the watched mint's orientation and returns every Sola
   expect((await fetchDexScreenerPairStats("usdc", fetchImpl as any))?.pairAddress).toBe(
     "base-side",
   );
+});
+
+test("pair selection handles empty inputs and ranks watched-mint base pairs first", () => {
+  expect(selectSolanaPairs(null)).toEqual([]);
+  expect(selectSolanaPairs([])).toEqual([]);
+  expect(selectSolanaPair(undefined)).toBeNull();
+
+  const pairs = [
+    {
+      chainId: "solana",
+      pairAddress: "quote-a",
+      liquidity: { usd: 900 },
+      baseToken: { address: "other-a" },
+      quoteToken: { address: "mint" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "base-low",
+      liquidity: { usd: 10 },
+      baseToken: { address: "mint" },
+      quoteToken: { address: "sol" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "quote-b",
+      liquidity: { usd: 500 },
+      baseToken: { address: "other-b" },
+      quoteToken: { address: "mint" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "unrelated",
+      liquidity: { usd: 99_999 },
+      baseToken: { address: "x" },
+      quoteToken: { address: "y" },
+    },
+  ];
+  expect(selectSolanaPairs(pairs, " mint ").map((pair) => pair.pairAddress)).toEqual([
+    "base-low",
+    "quote-a",
+    "quote-b",
+  ]);
+  expect(selectSolanaPairs([...pairs].reverse(), "mint").map((pair) => pair.pairAddress)).toEqual([
+    "base-low",
+    "quote-a",
+    "quote-b",
+  ]);
+});
+
+test("fetchDexScreenerPoolStats skips blank mints and caches failed HTTP lookups as empty", async () => {
+  __test_clearDexScreenerCache();
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return new Response("upstream error", { status: 502 });
+  };
+
+  expect(await fetchDexScreenerPoolStats("   ", fetchImpl as any)).toEqual([]);
+  expect(calls).toBe(0);
+
+  expect(await fetchDexScreenerPoolStats("bad-mint", fetchImpl as any)).toEqual([]);
+  expect(await fetchDexScreenerPoolStats("bad-mint", fetchImpl as any)).toEqual([]);
+  expect(calls).toBe(1);
+  expect(await fetchDexScreenerPairStats("bad-mint", fetchImpl as any)).toBeNull();
+});
+
+test("fetchDexScreenerPoolStats falls back to the stale lookup, or none, when the request fails", async () => {
+  __test_clearDexScreenerCache();
+  const start = new Date("2026-01-01T00:00:00Z");
+  setSystemTime(start);
+  try {
+    let fail = false;
+    const fetchImpl = async () => {
+      if (fail) throw new Error("network down");
+      return Response.json({
+        pairs: [
+          {
+            chainId: "solana",
+            dexId: "pumpswap",
+            url: "https://dexscreener.com/solana/stale",
+            pairAddress: "pair-stale",
+            priceUsd: "0.5",
+            liquidity: { usd: 10 },
+            quoteToken: { address: "sol", symbol: "SOL" },
+            baseToken: { address: "stale-mint", name: "STALE", symbol: "STALE" },
+          },
+        ],
+      });
+    };
+
+    const fresh = await fetchDexScreenerPoolStats("stale-mint", fetchImpl as any);
+    expect(fresh.map((stats) => stats.pairAddress)).toEqual(["pair-stale"]);
+
+    // Past the 30s TTL the lookup is retried; a failed retry serves the expired result.
+    setSystemTime(new Date(start.getTime() + 31_000));
+    fail = true;
+    expect(await fetchDexScreenerPoolStats("stale-mint", fetchImpl as any)).toEqual(fresh);
+
+    // With nothing cached, a failed request yields no pools.
+    expect(await fetchDexScreenerPoolStats("never-seen", fetchImpl as any)).toEqual([]);
+  } finally {
+    setSystemTime();
+  }
 });

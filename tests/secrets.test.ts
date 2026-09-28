@@ -53,4 +53,17 @@ describe("protected secrets", () => {
       loadWalletMnemonic({ MNEMONIC_FILE: secretFile("not a mnemonic") } as NodeJS.ProcessEnv),
     ).toThrow("not valid BIP-39");
   });
+  test("rejects empty and oversized files before reading them", () => {
+    expect(() => readProtectedSecretFile(secretFile(""), "Secret")).toThrow(
+      "Secret has an invalid size",
+    );
+    expect(() => readProtectedSecretFile(secretFile("x".repeat(4097)), "Secret")).toThrow(
+      "Secret has an invalid size",
+    );
+    expect(readProtectedSecretFile(secretFile("x".repeat(4096)), "Secret")).toHaveLength(4096);
+  });
+
+  test("rejects files that contain only whitespace", () => {
+    expect(() => readProtectedSecretFile(secretFile(" \n\t"), "Secret")).toThrow("Secret is empty");
+  });
 });

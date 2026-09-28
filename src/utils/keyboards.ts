@@ -344,20 +344,12 @@ export const createAmountSelectionKeyboard = (
         : `amount_${gameType}_${amount}`;
     const fullDisplay = formatTokenDisplay(amount, { decimals });
     const display = formatCompactTokenDisplay(fullDisplay);
-    let usdText = "";
-    if (usdTarget !== undefined) {
-      const usdFormatted = formatUsdValue(usdTarget, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      });
-      usdText = ` ($${usdFormatted})`;
-    } else if (tokenPriceUSD !== undefined) {
-      const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      });
-      usdText = ` ($${usdFormatted})`;
-    }
+    const usdValue =
+      usdTarget ?? (tokenPriceUSD !== undefined ? amount * tokenPriceUSD : undefined);
+    const usdText =
+      usdValue !== undefined
+        ? ` ($${formatUsdValue(usdValue, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})`
+        : "";
 
     amountButtons.push({
       text: `${display}${usdText}`,

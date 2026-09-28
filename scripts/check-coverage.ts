@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from "path";
 
-const THRESHOLD = 95;
+const THRESHOLD = 100;
 
 type CoverageConfig = {
   roots: string[];

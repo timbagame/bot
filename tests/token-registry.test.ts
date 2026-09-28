@@ -87,4 +87,12 @@ describe("token-registry", () => {
       /Token mint missing is not configured/,
     );
   });
+  test("requireToken helpers return configured entries", () => {
+    networkSpy = spyOn(NetworkDetector, "getCurrentNetwork").mockReturnValue("mainnet");
+    const wsol = getTokenByMint(WSOL_MINT);
+    expect(wsol).toBeDefined();
+
+    expect(requireTokenByMint(`  ${WSOL_MINT} `)).toEqual(wsol!);
+    expect(requireTokenByTicker(wsol!.ticker.toLowerCase())).toEqual(wsol!);
+  });
 });

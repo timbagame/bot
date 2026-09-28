@@ -107,3 +107,81 @@ describe("GameManager expired giveaway handler", () => {
     });
   });
 });
+
+describe("GameManager orphaned giveaway cleanup", () => {
+  const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
+  const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+  const setup = (results: Array<{ success: boolean }>) => {
+    resetGameManager();
+    const gm = GameManager.getInstance(stubProgram(), {} as any, {} as any);
+    const calls: any[][] = [];
+    (gm as any).cancelGameWithPlayerKeys = async (...args: any[]) => {
+      calls.push(args);
+      return results.shift() ?? { success: false };
+    };
+    return { gm, calls };
+  };
+
+  test("cancels empty or under-filled giveaways immediately and reports the outcome", async () => {
+    const empty = setup([{ success: true }]);
+    expect(
+      await (empty.gm as any).handleExpiredGiveaway(
+        gamePda,
+        { gameType: { giveaway: {} }, ticketsCount: 0, minTickets: 0 },
+        "ADDR",
+      ),
+    ).toBe(true);
+    expect(empty.calls).toEqual([[gamePda, "giveaway"]]);
+
+    const underFilled = setup([{ success: false }]);
+    expect(
+      await (underFilled.gm as any).handleExpiredGiveaway(
+        gamePda,
+        { gameType: { giveaway: {} }, ticketsCount: 2, minTickets: 5 },
+        "ADDR",
+      ),
+    ).toBe(false);
+    expect(underFilled.calls).toHaveLength(1);
+  });
+
+  test("waits for the oracle buffer before closing a giveaway that reached its minimum", async () => {
+    const { gm, calls } = setup([]);
+    const result = await (gm as any).handleExpiredGiveaway(
+      gamePda,
+      {
+        gameType: { giveaway: {} },
+        ticketsCount: 5,
+        minTickets: 2,
+        createdAt: nowSeconds() - 120,
+        timeout: 60,
+      },
+      "ADDR",
+    );
+    expect(result).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  test("closes a filled giveaway once the buffer elapsed and reports cancellation failures", async () => {
+    const expiredAccount = {
+      gameType: { giveaway: {} },
+      ticketsCount: 5,
+      minTickets: 2,
+      maxTickets: 10,
+      createdAt: 0,
+      timeout: 60,
+    };
+
+    const succeeded = setup([{ success: true }]);
+    expect(await (succeeded.gm as any).handleExpiredGiveaway(gamePda, expiredAccount, "ADDR")).toBe(
+      true,
+    );
+    expect(succeeded.calls).toEqual([[gamePda, "giveaway"]]);
+
+    const failed = setup([{ success: false }]);
+    expect(await (failed.gm as any).handleExpiredGiveaway(gamePda, expiredAccount, "ADDR")).toBe(
+      false,
+    );
+    expect(failed.calls).toHaveLength(1);
+  });
+});

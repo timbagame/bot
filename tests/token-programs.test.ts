@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { PublicKey } from "#solana";
 import { TOKEN_2022_PROGRAM_ID } from "#token";
 import { detectTokenProgram } from "../src/utils/token-programs";
@@ -67,5 +67,44 @@ describe("detectTokenProgram", () => {
     const conn = new StubConnection({ [mint.toBase58()]: randomOwner });
 
     await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(/unknown program/);
+  });
+  test("returns null when the RPC reports the mint account cannot be found", async () => {
+    for (const failure of [
+      new Error("Could not find account 2zsB6q5fkvMS4L7HhQTF19EaiqRkJWhGXZ6Q3A1tqhzd"),
+      "Account NOT FOUND",
+    ]) {
+      const conn = {
+        async getAccountInfo() {
+          throw failure;
+        },
+      };
+
+      const result = await detectTokenProgram(
+        conn as any,
+        "2zsB6q5fkvMS4L7HhQTF19EaiqRkJWhGXZ6Q3A1tqhzd",
+      );
+      expect(result).toBeNull();
+    }
+  });
+
+  test("logs and rethrows unexpected RPC failures", async () => {
+    const failure = new Error("503 Service Unavailable");
+    const conn = {
+      async getAccountInfo() {
+        throw failure;
+      },
+    };
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        detectTokenProgram(conn as any, "2zsB6q5fkvMS4L7HhQTF19EaiqRkJWhGXZ6Q3A1tqhzd"),
+      ).rejects.toBe(failure);
+      expect(logSpy).toHaveBeenCalledWith(
+        "Error checking token program for 2zsB6q5fkvMS4L7HhQTF19EaiqRkJWhGXZ6Q3A1tqhzd:",
+        failure,
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

@@ -159,6 +159,27 @@ describe("OracleClient", () => {
     expect(res2.authorized).toBe(false);
   });
 
+  test("setOracleUrl changes the URL reported and used for requests", async () => {
+    const requested: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      requested.push(String(url));
+      return new Response(JSON.stringify(oracleResponse({ status: "healthy" })), {
+        status: 200,
+      });
+    }) as any;
+
+    const oc = OracleClient.getInstance();
+    oc.setOracleUrl("http://other-oracle.local");
+    try {
+      expect(oc.getOracleUrl()).toBe("http://other-oracle.local");
+      expect(await oc.isHealthy()).toBe(true);
+      expect(requested).toEqual(["http://other-oracle.local/health"]);
+    } finally {
+      oc.setOracleUrl(ORACLE_URL);
+    }
+    expect(oc.getOracleUrl()).toBe(ORACLE_URL);
+  });
+
   // Restore fetch after tests
   afterAll(() => {
     globalThis.fetch = originalFetch;

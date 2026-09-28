@@ -120,6 +120,29 @@ describe("finance report", () => {
     ).toContain("backfill 1/4 sources, 30 transactions indexed; retrying after an RPC error");
   });
 
+  test("ignores malformed stored raw amounts instead of failing the report", async () => {
+    const report = await buildFinanceReport("30d", {
+      now: NOW,
+      financeEvents: [
+        event({}),
+        event({ eventId: "corrupt", signature: "corrupt-1", amountRaw: "12.5" }),
+        event({ eventId: "bad-fee", signature: "bad-fee-1", networkFeeLamports: "n/a" }),
+      ],
+      sponsorRecords: [],
+      gameClaimable: [],
+      swapClaimable: [],
+      coverage: "complete",
+      backfill: COMPLETE_BACKFILL,
+      monthlyExpenses: [],
+      contractRentLamports: 0n,
+      resolveTokenMetadata: metadata,
+      resolveTokenPriceUsd: price,
+    });
+
+    expect(report.gameRevenueUsd).toBeCloseTo(0.02);
+    expect(report.completionNetworkExpensesUsd).toBeCloseTo(0.002);
+  });
+
   test("subtracts only unreimbursed sponsored transaction costs", async () => {
     const report = await buildFinanceReport("30d", {
       now: NOW,

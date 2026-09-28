@@ -8,6 +8,9 @@ import {
   resetGameManager as resetGM,
 } from "./helpers/game-manager";
 import { GameManager } from "../src/utils/game";
+import { ChatDatabase } from "../src/utils/chat-database";
+import { CHAT_MEDIA_DISABLED_SENTINEL } from "../src/utils/constants";
+import { resetTestDatabase } from "./helpers/database";
 
 function ctxStub(
   options: {
@@ -229,6 +232,61 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(calls[0][0]).toBe("text");
     const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.usesVideo).toBe(false);
+  });
+
+  test("video card in a chat with media disabled falls back from caption to text", async () => {
+    resetGM();
+    resetTestDatabase("chat-settings.sqlite");
+    ChatDatabase.resetForTesting();
+    const chatId = 4242;
+    ChatDatabase.getInstance().upsertChatGameSettings(chatId, {
+      coinflip_video_id: CHAT_MEDIA_DISABLED_SENTINEL,
+      coinflip_media_type: null,
+      set_by_telegram_id: "admin",
+    });
+    try {
+      const gameAcc = {
+        ticketsCount: 1,
+        maxTickets: 2,
+        minTickets: 1,
+        totalAmount: 0,
+        createdAt: 1_000_000,
+        timeout: 60,
+        gameType: { coinflip: {} },
+      };
+      const gm = GameManager.getInstance(
+        makeProgramStub(gameAcc),
+        makeWalletStub({
+          tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+        }),
+        makeDbStub(),
+      );
+      const ctx = ctxStub({
+        failCaption: { description: "Bad Request: there is no caption in the message to edit" },
+      });
+      const addr = new PublicKey("11111111111111111111111111111119").toBase58();
+      const msgMap = new Map();
+      msgMap.set(chatId, { chatId, messageId: 49, usesVideo: true });
+      (gm as any).activeGameMessages.set(addr, msgMap);
+
+      await gm.updateGameMessage(
+        ctx as any,
+        addr,
+        "coinflip",
+        1_000_000_000,
+        "@creator",
+        "Active",
+        "TOK",
+      );
+
+      const calls = (ctx as any).__calls;
+      expect(calls.map((call: any[]) => call[0])).toEqual(["caption", "text"]);
+      expect(calls[1].slice(1, 3)).toEqual([chatId, 49]);
+      expect(gm.getActiveGameMessages(addr)?.get(chatId)?.usesVideo).toBe(false);
+    } finally {
+      resetTestDatabase("chat-settings.sqlite");
+      ChatDatabase.resetForTesting();
+    }
   });
 
   test("coinflip completed falls back to text when media update fails", async () => {

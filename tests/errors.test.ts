@@ -1,5 +1,9 @@
-import { expect, test, describe } from "bun:test";
-import { parseTransactionError, truncateMessage } from "../src/utils/errors";
+import { expect, test, describe, spyOn } from "bun:test";
+import {
+  buildFriendlyShortfallMessage,
+  parseTransactionError,
+  truncateMessage,
+} from "../src/utils/errors";
 
 test("truncateMessage returns original message when under limit", () => {
   const message = "short error";
@@ -195,4 +199,79 @@ test("timeout errors do not turn a fragment of a long identifier into a transact
   );
   expect(message).not.toContain("Signature:");
   expect(message).not.toContain("solscan.io/tx/");
+});
+
+test("parseTransactionError explains dropped transactions and keeps the signature", async () => {
+  const signature = "B".repeat(88);
+  const withSignature = await parseTransactionError(
+    new Error(`Transaction expired before confirmation: signature ${signature}`),
+  );
+  expect(withSignature).toContain("Transaction dropped");
+  expect(withSignature).toContain(`Signature: ${signature}`);
+  expect(withSignature).toContain("Try again to send a fresh transaction.");
+
+  const withoutSignature = await parseTransactionError(
+    new Error("Signature has expired: block height exceeded last valid block height"),
+  );
+  expect(withoutSignature).toContain("Transaction dropped");
+  expect(withoutSignature).not.toContain("Signature:");
+});
+
+test("parseTransactionError explains leftover WSOL blocking native conversions", async () => {
+  const msg = await parseTransactionError(
+    new Error("Program log: Error: Instruction does not support non-native tokens"),
+  );
+  expect(msg).toContain("Couldn't convert SOL");
+  expect(msg).toContain("Unwrap any leftover WSOL");
+});
+
+test("parseTransactionError still formats errors when the fee budget cannot be resolved", async () => {
+  const budgetError = new Error("connection unavailable");
+  let connectionLookups = 0;
+  const wallet = {
+    formatSolBalance: walletStub.formatSolBalance,
+    getConnection: () => {
+      connectionLookups += 1;
+      // The first lookup serves lamport extraction; fail when the fee budget asks next.
+      if (connectionLookups > 1) throw budgetError;
+      return undefined;
+    },
+  } as any;
+  const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const msg = await parseTransactionError(new Error("Account does not exist"), wallet);
+    expect(msg).toContain("Account setup needed");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to resolve fee budget manager for error formatting:",
+      budgetError,
+    );
+  } finally {
+    warnSpy.mockRestore();
+  }
+});
+
+describe("buildFriendlyShortfallMessage", () => {
+  test("uses the wallet formatter for a zero shortfall and the default action", () => {
+    const msg = buildFriendlyShortfallMessage({
+      missingLamports: -5,
+      walletManager: { formatSolBalance: () => "0.000000" } as any,
+    });
+    expect(msg).toBe(
+      "💰 Not enough SOL\nYou need about 0.000000 SOL more.\nAdd SOL or reduce the amount and try again.",
+    );
+  });
+
+  test("omits blank reasons and strips trailing punctuation from real ones", () => {
+    const blank = buildFriendlyShortfallMessage({ missingLamports: 1_500, reason: "   " });
+    expect(blank).toStartWith("💰 Not enough SOL\nYou need about 0.000002 SOL more.");
+
+    const reasoned = buildFriendlyShortfallMessage({
+      missingLamports: 1_000_000,
+      reason: " Game entry needs a fee buffer!! ",
+      action: "Deposit SOL first.",
+    });
+    expect(reasoned).toBe(
+      "💰 Not enough SOL\nGame entry needs a fee buffer. You need about 0.001 SOL more.\nDeposit SOL first.",
+    );
+  });
 });

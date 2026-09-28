@@ -91,11 +91,9 @@ export const getRetryAfterSeconds = (error: unknown): number | null => {
 
   const description = getErrorString(error);
   const match = description.match(/retry after (\d+)/i);
-  if (match && match[1]) {
-    const parsed = Number.parseInt(match[1], 10);
-    if (!Number.isNaN(parsed)) {
-      return Math.max(0, parsed);
-    }
+  if (match) {
+    // The capture group only matches digits, so the parsed value is always a non-negative integer.
+    return Number.parseInt(match[1]!, 10);
   }
 
   return null;

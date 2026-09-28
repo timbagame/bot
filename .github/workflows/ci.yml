@@ -87,7 +87,7 @@ jobs:
           echo "===== Tests (contract v0.2.0): exit ${status_v02} ====="
           cat test-v02.log
           [[ "$status_v03" == 0 && "$status_v02" == 0 ]]
-      - name: Enforce 95% line coverage
+      - name: Enforce 100% line coverage
         run: bun run scripts/check-coverage.ts coverage-scope.json coverage/v03/lcov.info coverage/v02/lcov.info
       - name: Upload coverage
         if: always()

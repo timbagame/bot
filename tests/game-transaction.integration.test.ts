@@ -124,6 +124,39 @@ describe("Kit game transaction boundary", () => {
       }),
     ).rejects.toThrow("Oracle changed the game transaction message");
   });
+
+  test("rejects an Oracle response carrying a forged Oracle signature", async () => {
+    const creator = await Keypair.generate();
+    const oracle = await Keypair.generate();
+    const prepared = await buildOracleSignableGameTransaction({
+      instructions: [
+        new TransactionInstruction({
+          programId: new PublicKey("BPFLoader1111111111111111111111111111111111"),
+          keys: [
+            { pubkey: creator.publicKey, isSigner: true, isWritable: true },
+            { pubkey: oracle.publicKey, isSigner: true, isWritable: false },
+          ],
+          data: Uint8Array.of(9),
+        }),
+      ],
+      creator,
+      blockhash: { blockhash: PublicKey.default.toBase58(), lastValidBlockHeight: 42 },
+    });
+    const decoded = decodeGameTransaction(prepared.txBase64);
+    const oracleAddress = oracle.publicKey.toBase58();
+    const forged = {
+      ...decoded,
+      signatures: { ...decoded.signatures, [oracleAddress]: new Uint8Array(64).fill(7) },
+    } as unknown as typeof decoded;
+
+    await expect(
+      finalizeOracleSignedGameTransaction({
+        oracleSignedBase64: getBase64EncodedWireTransaction(forged),
+        expectedMessageBytes: prepared.messageBytes,
+        creator,
+      }),
+    ).rejects.toThrow(`Invalid game transaction signature for ${oracleAddress}`);
+  });
 });
 
 for (const sameCluster of [true, false]) {

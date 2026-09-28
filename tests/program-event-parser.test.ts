@@ -205,4 +205,18 @@ describe("parseProgramEventLogs", () => {
     expect(events.map((e) => e.name)).toEqual(["PlayerUnjoined", "GameCompleted"]);
     expect(events[1]!.data["feeAmount"]).toBe(7n);
   });
+  test("skips malformed program data without dropping later events", () => {
+    const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
+    const truncated = Buffer.concat([PLAYER_UNJOINED_DISCRIMINATOR, Buffer.alloc(10)]);
+
+    const events = parseProgramEventLogs(programId, [
+      `Program ${programId.toBase58()} invoke [1]`,
+      `Program data: ${truncated.toString("base64")}`,
+      `Program data: ${encodeGameCompleted(3n)}`,
+      `Program ${programId.toBase58()} success`,
+    ]);
+
+    expect(events.map((e) => e.name)).toEqual(["GameCompleted"]);
+    expect(events[0]!.data["feeAmount"]).toBe(3n);
+  });
 });

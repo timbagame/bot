@@ -94,3 +94,38 @@ test("buy alert service stays idle when no chat has alerts enabled", () => {
   service.start();
   expect(watched).toEqual([]);
 });
+
+test("buy alert service ingests externally observed buys through the publisher", async () => {
+  resetTestDatabase("chat-settings.sqlite");
+  ChatDatabase.resetForTesting();
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-21, { enabled: true });
+
+  const sent: Array<{ chatId: number; text: string }> = [];
+  const service = createBuyAlertService({
+    chatDb,
+    getTokenManager: () => ({
+      getChatDefaultToken: () => null,
+      getDefaultToken: () => ({ tokenMint: TIMBA_MINT, tokenTicker: "TIMBA" }),
+    }),
+    sendHtml: async (chatId, text) => {
+      sent.push({ chatId, text });
+    },
+    feed: { setMints: () => {}, onTrade: () => {}, stop: () => {} },
+  });
+
+  const event: BuyEvent = {
+    signature: "ingested-sig",
+    mint: TIMBA_MINT,
+    trader: "Trader11111111111111111111111111111111111",
+    solAmount: 0.25,
+    tokenAmount: 500,
+    dex: "raydium",
+  };
+  await service.ingest(event);
+  await service.ingest(event);
+
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.chatId).toBe(-21);
+  expect(sent[0]?.text).toContain("BUY - TIMBA");
+});
