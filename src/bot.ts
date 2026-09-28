@@ -5973,10 +5973,6 @@ bot.callbackQuery(
           await openBuyAlertSwapUi(dmCtx, args);
         },
         ack: async (callbackCtx, text, showAlert) => {
-          if (!text) {
-            await callbackCtx.answerCallbackQuery();
-            return;
-          }
           await callbackCtx.answerCallbackQuery({ text, show_alert: showAlert === true });
         },
       });

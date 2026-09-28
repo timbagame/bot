@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { Keypair } from "#solana";
 import {
   answers,
+  callsTo,
+  failApiMethod,
   botModule,
   buttons,
   lastMessage,
@@ -569,5 +571,51 @@ describe("admin gas payer for swaps into SOL", () => {
     const [request, integrator] = prepareSwap.mock.calls[0] as any[];
     expect(Number(request.amount)).toBeGreaterThan(4.99 * LAMPORTS);
     expect(integrator.payerKind).toBe("admin");
+  });
+});
+
+describe("buy alert Buy button", () => {
+  const GROUP = -5_550;
+  const buy = (mint: string) => press(`buy_alert_${mint}`, { userId: USER, chatId: GROUP });
+  const lastAnswer = () => callsTo("answerCallbackQuery").at(-1)?.payload;
+
+  beforeEach(() => {
+    const tokenManager = botModule.__test_getTokenManager() as any;
+    tokenManager.resolveSwapToken = async (mint: string) =>
+      mint === BONK ? { token_mint: BONK, token_ticker: "bonk", decimals: 5 } : null;
+  });
+
+  test("opens the SOL to token swap in the buyer's private chat", async () => {
+    await buy(BONK);
+
+    const dm = callsTo("sendMessage").at(-1)!;
+    expect(dm.payload.chat_id).toBe(USER);
+    expect(dm.payload.text).toContain("BONK");
+    expect(lastAnswer()).toEqual({
+      callback_query_id: expect.any(String),
+      text: "Swap opened in your private chat.",
+      show_alert: false,
+    });
+  });
+
+  test("SOL itself and unknown tokens cannot be bought from an alert", async () => {
+    await buy(WSOL_MINT);
+    expect(lastAnswer()).toMatchObject({
+      text: "This token isn't available to buy here.",
+      show_alert: true,
+    });
+
+    await buy(USDC);
+    expect(lastAnswer()).toMatchObject({ text: "This token isn't available to buy here." });
+    expect(callsTo("sendMessage")).toHaveLength(0);
+  });
+
+  test("users who never started the bot are told to open it first", async () => {
+    failApiMethod("sendMessage", "Forbidden: bot can't initiate conversation with a user", 403);
+
+    await buy(BONK);
+
+    expect(lastAnswer()?.text).toContain("@test_bot");
+    expect(lastAnswer()?.show_alert).toBe(true);
   });
 });
