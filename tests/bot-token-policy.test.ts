@@ -11,7 +11,7 @@ const MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 
 let minimumRaw: bigint | number;
 let fetchedMints: string[];
-let policySpy: ReturnType<typeof spyOn>;
+let policySpy: ReturnType<typeof mock>;
 let logSpy: ReturnType<typeof spyOn>;
 let warnSpy: ReturnType<typeof spyOn>;
 let errorSpy: ReturnType<typeof spyOn>;
@@ -34,17 +34,16 @@ beforeEach(async () => {
       },
     },
   } as any);
-  policySpy = spyOn(OracleClient.prototype, "requireTokenPolicy").mockImplementation(
-    async (mint: string) => {
-      fetchedMints.push(mint);
-      return { minimumAmountRaw: BigInt(minimumRaw), revision: 3 } as any;
-    },
-  );
+  // Stub the shared instance: other suites assign methods directly on it.
+  policySpy = mock(async (mint: string) => {
+    fetchedMints.push(mint);
+    return { minimumAmountRaw: BigInt(minimumRaw), revision: 3 } as any;
+  });
+  stub(OracleClient.getInstance(wallet) as any, "requireTokenPolicy", policySpy);
 });
 
 afterEach(() => {
   botModule.__test_resetProgram();
-  policySpy.mockRestore();
   restoreStubs();
   logSpy.mockRestore();
   warnSpy.mockRestore();
