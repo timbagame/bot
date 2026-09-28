@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   bot,
   botModule,
+  failApiMethod,
+  messageCalls,
+  stub,
   lastText,
   overrideApiMethod,
   resetCalls,
@@ -24,6 +27,7 @@ const PROMPT = 40;
 let updateId = 91_000_000;
 let errorSpy: ReturnType<typeof spyOn>;
 let logSpy: ReturnType<typeof spyOn>;
+let warnSpy: ReturnType<typeof spyOn>;
 let savedTokenManager: any;
 
 beforeEach(() => {
@@ -32,6 +36,7 @@ beforeEach(() => {
   clearAllInputSessions();
   errorSpy = spyOn(console, "error").mockImplementation(() => {});
   logSpy = spyOn(console, "log").mockImplementation(() => {});
+  warnSpy = spyOn(console, "warn").mockImplementation(() => {});
   // The confirmation menu shows the chat's default token; keep this suite
   // independent of whichever token manager an earlier suite left behind.
   savedTokenManager = botModule.__test_getTokenManager();
@@ -59,6 +64,7 @@ afterEach(() => {
   clearAllInputSessions();
   errorSpy.mockRestore();
   logSpy.mockRestore();
+  warnSpy.mockRestore();
 });
 
 const prompt = (setting: string, initiatorId = String(ADMIN)) =>
@@ -200,5 +206,82 @@ describe("media replies for chat defaults", () => {
 
     expect(lastText()).toContain("Error processing media");
     expect(getInputSession(`${CHAT}_${PROMPT}`)).toBeUndefined();
+  });
+});
+
+describe("typed replies to chat default prompts", () => {
+  const minPrompt = (initiatorId = String(ADMIN)) =>
+    setInputSession(`${CHAT}_${PROMPT}`, {
+      type: "chat_defaults",
+      target: "buy_alerts_min_custom",
+      chatId: CHAT,
+      messageId: PROMPT,
+      initiatorId,
+    } as any);
+
+  const sendReply = (text: string, options: { from?: number | null; replyTo?: number } = {}) =>
+    sendMedia({ text }, { replyTo: PROMPT, ...options });
+
+  test("an admin's typed minimum is saved for buy alerts", async () => {
+    minPrompt();
+
+    await sendReply("0.5");
+
+    expect(botModule.__test_getChatDatabase().getChatBuyAlerts(CHAT)).toMatchObject({
+      min_sol_lamports: 500_000_000,
+    });
+    expect(texts()).toContain("✅ Min buy set to 0.5 SOL");
+    expect(getInputSession(`${CHAT}_${PROMPT}`)).toBeUndefined();
+  });
+
+  test("users whose admin status cannot be checked are refused", async () => {
+    failApiMethod("getChatMember", "Bad Request: user not found");
+    minPrompt();
+
+    await sendReply("0.5");
+
+    expect(texts()).toContain("🔒 Only group administrators can update chat defaults.");
+    expect(
+      warnSpy.mock.calls.some((call: unknown[]) =>
+        String(call[0]).startsWith(`Error checking admin status for user ${ADMIN}`),
+      ),
+    ).toBe(true);
+  });
+
+  test("messages without a sender or not replying to a prompt are ignored", async () => {
+    minPrompt();
+
+    await sendReply("0.5", { from: null });
+    await sendReply("0.5", { replyTo: PROMPT + 1 });
+
+    expect(texts()).toHaveLength(0);
+    expect(getInputSession(`${CHAT}_${PROMPT}`)).toBeDefined();
+  });
+
+  test("a failing prompt handler reports the error by editing the message", async () => {
+    stub(botModule.__test_getChatDatabase() as any, "upsertChatBuyAlerts", () => {
+      throw new Error("db locked");
+    });
+    minPrompt();
+
+    await sendReply("0.5");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error handling user input:", expect.any(Error));
+    expect(texts().at(-1)).toContain("❌ <b>Error processing input</b>");
+    expect(getInputSession(`${CHAT}_${PROMPT}`)).toBeUndefined();
+  });
+
+  test("when the error cannot be edited in, it is sent as a reply", async () => {
+    stub(botModule.__test_getChatDatabase() as any, "upsertChatBuyAlerts", () => {
+      throw new Error("db locked");
+    });
+    failApiMethod("editMessageText", "Bad Request: message can't be edited");
+    minPrompt();
+
+    await sendReply("0.5");
+
+    const last = messageCalls().at(-1)!;
+    expect(last.method).toBe("sendMessage");
+    expect(last.payload.text).toContain("❌ <b>Error processing input</b>");
   });
 });

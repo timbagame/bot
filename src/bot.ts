@@ -2135,10 +2135,8 @@ const notifyGameMessageReady = (gameAddress: string): void => {
 };
 
 function schedulePendingPlayerEventFlush(gameAddress: string): void {
-  const state = pendingPlayerEvents.get(gameAddress);
-  if (!state) {
-    return;
-  }
+  // Callers always keep the pending state for this game before scheduling.
+  const state = pendingPlayerEvents.get(gameAddress)!;
 
   if (state.timer) {
     return;
@@ -4672,10 +4670,7 @@ registerCaseInsensitiveCommand(
     return ctx.reply("❌ Leaderboard is only available in group chats.");
   }
 
-  const chatId = ctx.chat?.id;
-  if (!chatId) {
-    return ctx.reply("❌ Could not load chat information.");
-  }
+  const chatId = ctx.chat!.id;
 
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
@@ -6390,9 +6385,6 @@ const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: stri
     });
 
     clearInputSession(`${userState.chatId}_${userState.messageId}`);
-    if (ctx?.callbackQuery) {
-      await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
-    }
   } catch (error) {
     console.error("Error resolving swap token input:", error);
 

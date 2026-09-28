@@ -455,6 +455,18 @@ describe("program setup", () => {
     expect(outcome).toBe("ok");
     expect(added.length).toBeGreaterThan(1);
     expect(readyListeners).toHaveLength(1);
+    // The listener flushes player events that were waiting for a game card.
+    botModule.__test_enqueuePendingPlayerEvent("ReadyGame", {
+      event: { gameKey: { toString: () => "ReadyGame" } } as any,
+      eventName: "PlayerJoined",
+      receivedAt: Date.now(),
+    });
+    (readyListeners[0] as (address: string) => void)("ReadyGame");
+    await Bun.sleep(0);
+    expect(
+      logged(warnSpy, "Message targets still unavailable for ReadyGame; will retry pending events"),
+    ).toBe(true);
+    botModule.__test_clearPendingPlayerEvents();
     expect(String(botModule.program.programId.toBase58())).toBe("11111111111111111111111111111112");
     expect(botModule.__test_getSwapManagers().swapManager).toBeDefined();
     expect(logged(logSpy, "Oracle max tickets set to 40")).toBe(true);

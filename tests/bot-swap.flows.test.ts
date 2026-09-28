@@ -619,3 +619,129 @@ describe("buy alert Buy button", () => {
     expect(lastAnswer()?.show_alert).toBe(true);
   });
 });
+
+/** A private-chat message context for calling input handlers directly. */
+const directCtx = () =>
+  ({
+    from: { id: USER },
+    chat: { id: USER, type: "private" },
+    api: botModule.bot.api,
+    reply: (text: string, extra?: Record<string, unknown>) =>
+      botModule.bot.api.sendMessage(USER, text, extra as never),
+  }) as any;
+
+describe("swap selection edge cases", () => {
+  test("a pair without a source token is rejected", async () => {
+    await at("swap_to__USDC");
+    expect(answers().at(-1)).toBe("❌ Invalid swap pair");
+  });
+
+  test("amount buttons without a source token are rejected", async () => {
+    await at("swap_amount__USDC_50%");
+    expect(answers().at(-1)).toBe("❌ Invalid swap parameters");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+
+  test("incomplete amount buttons fall through without quoting", async () => {
+    await at("swap_amount_SOL_USDC");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+
+  test("a wallet failure while showing amounts is acknowledged", async () => {
+    stub(wallet, "getBalance", async () => {
+      throw new Error("rpc down");
+    });
+
+    await at("swap_to_SOL_USDC");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error in swap_to selection:", expect.any(Error));
+    expect(answers().at(-1)).toBe("❌ Error processing swap pair");
+  });
+
+  test("tokens the bot cannot resolve are reported when quoting", async () => {
+    await at("swap_amount_SOL_FAKE_50%");
+    expect(prepareSwap).not.toHaveBeenCalled();
+    expect(lastText()).not.toContain("Confirm this swap?");
+
+    await at("swap_amount_FAKE_USDC_50%");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+});
+
+describe("swapping into a token picked from a buy alert", () => {
+  const openFromAlert = async () => {
+    const tokenManager = botModule.__test_getTokenManager() as any;
+    tokenManager.resolveSwapToken = async (mint: string) =>
+      mint === BONK ? { token_mint: BONK, token_ticker: "bonk", decimals: 5 } : null;
+    await press(`buy_alert_${BONK}`, { userId: USER, chatId: -5_551 });
+    const selection = messageCalls().at(-1)!;
+    const cacheId = buttons(selection)
+      .find((button) => button.data.startsWith("swap_amount_SOL_"))!
+      .data.split("_")[3]!;
+    return cacheId;
+  };
+
+  test("amount buttons quote against the cached mint and decimals", async () => {
+    const cacheId = await openFromAlert();
+
+    await at(`swap_amount_SOL_${cacheId}_25%`);
+
+    const request = (prepareSwap.mock.calls[0] as any[])[0];
+    expect(request).toMatchObject({ outputMint: BONK, outputDecimals: 5, outputTicker: "BONK" });
+  });
+
+  test("cancelling a custom amount returns to the cached token's amounts", async () => {
+    const cacheId = await openFromAlert();
+
+    await at(`swap_amount_SOL_${cacheId}_CUSTOM`);
+    await at(`swap_to_SOL_${cacheId}`);
+
+    expect(answers().at(-1)).toBe("SOL → BONK");
+    expect(lastText()).toContain("BONK");
+  });
+
+  test("a custom amount after the token selection expired asks to reselect", async () => {
+    const cacheId = await openFromAlert();
+    await at(`swap_amount_SOL_${cacheId}_CUSTOM`);
+    botModule.__test_clearTransactionCache();
+
+    await botModule.__test_handleSwapCustomAmountInput(
+      directCtx(),
+      { fromToken: "SOL", toToken: cacheId, toTokenDisplay: "BONK", messageId: 1, chatId: USER },
+      "1",
+    );
+
+    expect(lastText()).toContain("❌ <b>Swap session expired</b>\n\nPlease reselect the token");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+});
+
+describe("typed swap input guards", () => {
+  const ctx = () => directCtx();
+
+  test("a custom amount without a swap pair asks to restart", async () => {
+    await botModule.__test_handleSwapCustomAmountInput(ctx(), { fromToken: "SOL" }, "1");
+    expect(lastText()).toContain("❌ <b>Swap session expired</b>\n\nPlease restart the swap flow.");
+  });
+
+  test("an empty token lookup asks for a symbol or address", async () => {
+    await botModule.__test_handleSwapToTokenInput(ctx(), { fromToken: "SOL" }, "   ");
+    expect(lastText()).toContain("Please provide a token symbol or contract address.");
+  });
+
+  test("tokens without usable decimals are not offered", async () => {
+    const tokenManager = botModule.__test_getTokenManager() as any;
+    tokenManager.resolveSwapToken = async () => ({
+      token_mint: BONK,
+      token_ticker: "BONK",
+      decimals: Number.NaN,
+    });
+
+    await botModule.__test_handleSwapToTokenInput(ctx(), { fromToken: "SOL" }, "bonk");
+
+    expect(lastText()).toContain("❌ <b>Token Not Found</b>");
+    expect(String(errorSpy.mock.calls[0]?.[1])).toContain(
+      "Token metadata missing decimals for BONK",
+    );
+  });
+});
