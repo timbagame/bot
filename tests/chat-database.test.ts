@@ -126,3 +126,41 @@ test("ChatDatabase: chat info save/get and counts", () => {
   expect(info.chat_title).toBe("Cool Chat");
   expect(info.chat_type).toBe("supergroup");
 });
+
+test("ChatDatabase migrates every chat-scoped table to the supergroup id", () => {
+  db = ChatDatabase.getInstance();
+  const oldId = -500;
+  const newId = -1_000_000_500;
+  db.setChatDefaultToken(oldId, "mint", "TOK", "admin");
+  db.upsertChatGameSettings(oldId, { coinflip_max_players: 4 });
+  db.upsertChatBuyAlerts(oldId, { enabled: true, token_mint: "mint" });
+
+  db.migrateChatId(oldId, newId);
+
+  expect(db.getChatDefaultToken(oldId)).toBeNull();
+  expect(db.getChatGameSettings(oldId)).toBeNull();
+  expect(db.getChatBuyAlerts(oldId)).toBeNull();
+  expect(db.getChatDefaultToken(newId)?.token_mint).toBe("mint");
+  expect(db.getChatGameSettings(newId)?.coinflip_max_players).toBe(4);
+  expect(db.getChatBuyAlerts(newId)).toMatchObject({ enabled: true, token_mint: "mint" });
+});
+
+test("ChatDatabase migration replaces stale settings already stored under the new id", () => {
+  db = ChatDatabase.getInstance();
+  db.upsertChatGameSettings(-2, { coinflip_max_players: 9 });
+  db.upsertChatGameSettings(-1, { coinflip_max_players: 3 });
+
+  db.migrateChatId(-1, -2);
+
+  expect(db.getChatGameSettings(-2)?.coinflip_max_players).toBe(3);
+  expect(db.getChatGameSettings(-1)).toBeNull();
+});
+
+test("ChatDatabase migration to the same id changes nothing", () => {
+  db = ChatDatabase.getInstance();
+  db.upsertChatGameSettings(-7, { coinflip_max_players: 2 });
+
+  db.migrateChatId(-7, -7);
+
+  expect(db.getChatGameSettings(-7)?.coinflip_max_players).toBe(2);
+});

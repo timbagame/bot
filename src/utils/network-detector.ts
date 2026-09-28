@@ -139,11 +139,7 @@ export class NetworkDetector {
       return baseUrl;
     }
 
-    if (network === "devnet" || network === "testnet") {
-      return `${baseUrl}?cluster=${network}`;
-    }
-
-    return baseUrl;
+    return `${baseUrl}?cluster=${network}`;
   }
 
   public static resolveNetworkInput(input?: string | null): SolanaNetwork | undefined {

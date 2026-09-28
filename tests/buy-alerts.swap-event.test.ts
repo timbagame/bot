@@ -62,3 +62,85 @@ test("buyEventFromSwap ignores invalid output amounts", () => {
     }),
   ).toBeNull();
 });
+
+const base = {
+  signature: "sig",
+  trader: "Trader",
+  inputMint: WSOL_MINT,
+  outputMint: "TokenMint",
+  inputAmountRaw: "500000000",
+  outputAmountRaw: "1000",
+  outputDecimals: 0,
+};
+
+test.each([
+  ["blank signature", { signature: "  " }],
+  ["blank trader", { trader: "" }],
+  ["blank output mint", { outputMint: " " }],
+  ["non-numeric output", { outputAmountRaw: "abc" }],
+  ["negative output", { outputAmountRaw: "-5" }],
+  ["output that underflows after scaling", { outputAmountRaw: "1", outputDecimals: 400 }],
+])("buyEventFromSwap rejects a %s", (_label, overrides) => {
+  expect(buyEventFromSwap({ ...base, ...overrides })).toBeNull();
+});
+
+test("buyEventFromSwap trims identifiers", () => {
+  expect(
+    buyEventFromSwap({
+      ...base,
+      signature: " sig ",
+      trader: " Trader ",
+      outputMint: " TokenMint ",
+    }),
+  ).toMatchObject({ signature: "sig", trader: "Trader", mint: "TokenMint" });
+});
+
+test("buyEventFromSwap treats non-finite output decimals as whole units", () => {
+  expect(buyEventFromSwap({ ...base, outputDecimals: Number.NaN })?.tokenAmount).toBe(1000);
+});
+
+test("buyEventFromSwap defaults SOL input to 9 decimals and labels it SOL", () => {
+  expect(buyEventFromSwap(base)).toMatchObject({
+    solAmount: 0.5,
+    inputAmount: 0.5,
+    inputSymbol: "SOL",
+    quoteSymbol: "SOL",
+    tokenAmount: 1000,
+  });
+});
+
+test("buyEventFromSwap defaults unknown token input to raw units without a symbol", () => {
+  expect(buyEventFromSwap({ ...base, inputMint: "Other", inputAmountRaw: "42" })).toMatchObject({
+    solAmount: null,
+    inputAmount: 42,
+    inputSymbol: null,
+    quoteSymbol: null,
+  });
+});
+
+test("buyEventFromSwap truncates fractional and clamps negative input decimals", () => {
+  expect(
+    buyEventFromSwap({ ...base, inputMint: "Other", inputAmountRaw: "1500", inputDecimals: 3.9 })
+      ?.inputAmount,
+  ).toBe(1.5);
+  expect(
+    buyEventFromSwap({ ...base, inputMint: "Other", inputAmountRaw: "7", inputDecimals: -2 })
+      ?.inputAmount,
+  ).toBe(7);
+});
+
+test("buyEventFromSwap drops invalid input amounts but keeps the buy", () => {
+  expect(buyEventFromSwap({ ...base, inputAmountRaw: "0" })).toMatchObject({
+    solAmount: null,
+    inputAmount: null,
+    tokenAmount: 1000,
+  });
+  expect(buyEventFromSwap({ ...base, inputAmountRaw: "nope" })).toMatchObject({
+    solAmount: null,
+    inputAmount: null,
+  });
+});
+
+test("buyEventFromSwap falls back to the SOL label for a blank ticker", () => {
+  expect(buyEventFromSwap({ ...base, inputTicker: "  " })?.inputSymbol).toBe("SOL");
+});

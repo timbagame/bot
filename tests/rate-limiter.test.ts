@@ -82,4 +82,36 @@ describe("SlidingWindowRateLimiter", () => {
     const valid = limiter.consume("user", 1);
     expect(valid.allowed).toBe(true);
   });
+
+  test("reset with a key clears only that caller's budget", () => {
+    const limiter = new SlidingWindowRateLimiter(1_000, () => 0);
+    limiter.consume("alice", 1);
+    limiter.consume("bob", 1);
+
+    limiter.reset("alice");
+
+    expect(limiter.consume("alice", 1).allowed).toBe(true);
+    expect(limiter.consume("bob", 1).allowed).toBe(false);
+  });
+
+  test("reset normalises bigint and numeric keys to the same bucket", () => {
+    const limiter = new SlidingWindowRateLimiter(1_000, () => 0);
+    limiter.consume(42n, 1);
+    expect(limiter.consume(42, 1).allowed).toBe(false);
+
+    limiter.reset(42n);
+
+    expect(limiter.consume("42", 1).allowed).toBe(true);
+  });
+
+  test("reset without a key clears every bucket", () => {
+    const limiter = new SlidingWindowRateLimiter(1_000, () => 0);
+    limiter.consume("alice", 1);
+    limiter.consume("bob", 1);
+
+    limiter.reset();
+
+    expect(limiter.getActiveEntries()).toBe(0);
+    expect(limiter.consume("alice", 1).allowed).toBe(true);
+  });
 });

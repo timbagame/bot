@@ -109,3 +109,15 @@ export function __test_setVerifiedTokenMints(mints: string[]): void {
   verifiedMints = new Set(mints);
   refreshAfter = Number.POSITIVE_INFINITY;
 }
+
+export const __test_snapshotPath = snapshotPath;
+
+export function __test_reloadVerifiedTokenSnapshot(): ReadonlySet<string> {
+  verifiedMints = loadSnapshot().mints;
+  refreshAfter = 0;
+  return verifiedMints;
+}
+
+export async function __test_waitForVerifiedTokenRefresh(): Promise<void> {
+  await refreshPromise;
+}

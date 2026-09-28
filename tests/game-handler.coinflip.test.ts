@@ -114,4 +114,58 @@ describe("game handler: coinflip command", () => {
       tokenDecimals: 6,
     });
   });
+
+  const recordingDeps = (resolved: unknown = null) => {
+    const calls = { interactive: 0, command: 0, resolved: [] as unknown[][] };
+    const deps: any = {
+      isGroupChat: () => true,
+      showInteractiveSetup: async () => {
+        calls.interactive += 1;
+      },
+      createGameViaCommand: async () => {
+        calls.command += 1;
+      },
+      resolveTokenOverride: async (...args: unknown[]) => {
+        calls.resolved.push(args);
+        return resolved;
+      },
+    };
+    return { deps, calls };
+  };
+
+  test("unknown token-only argument is rejected without opening setup", async () => {
+    const ctx: any = createTelegramContext("/cf NOPE");
+    const { deps, calls } = recordingDeps(null);
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(calls.resolved).toEqual([["NOPE", 100]]);
+    expect(calls.interactive).toBe(0);
+    expect(calls.command).toBe(0);
+    expect(ctx.__calls).toEqual([["reply", "Token unavailable. Check its symbol or address."]]);
+  });
+
+  test("does nothing but explain when the sender cannot be identified", async () => {
+    const ctx: any = createTelegramContext("/cf 10", "group", { from: undefined });
+    const { deps, calls } = recordingDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(calls.interactive).toBe(0);
+    expect(calls.command).toBe(0);
+    expect(ctx.__calls).toHaveLength(1);
+    expect(ctx.__calls[0][1]).toContain("Unable to resolve your Telegram identity");
+  });
+
+  test("treats a message without text as a bare command", async () => {
+    const ctx: any = createTelegramContext("", "group", {
+      message: { message_id: 1, date: 0, chat: { id: 100 } } as any,
+    });
+    const { deps, calls } = recordingDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(calls.resolved).toEqual([]);
+    expect(calls.interactive).toBe(1);
+  });
 });

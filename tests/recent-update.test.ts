@@ -150,3 +150,40 @@ test("shouldDropUpdate sanity (boundary)", () => {
   expect(shouldDropUpdate(now - 5, now, 5)).toBe(false);
   expect(shouldDropUpdate(now - 6, now, 5)).toBe(true);
 });
+
+test("recentUpdateGuard: legacy MAX_UPDATE_AGE_SEC overrides the per-kind limits", async () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  process.env["MAX_UPDATE_AGE_SEC"] = "10";
+  process.env["MAX_MESSAGE_AGE_SEC"] = "1000";
+  let nextCalled = 0;
+  try {
+    await recentUpdateGuard({ message: { date: nowSec - 100 } } as any, async () => {
+      nextCalled++;
+    });
+    expect(nextCalled).toBe(0);
+
+    await recentUpdateGuard({ message: { date: nowSec - 5 } } as any, async () => {
+      nextCalled++;
+    });
+    expect(nextCalled).toBe(1);
+  } finally {
+    delete process.env["MAX_UPDATE_AGE_SEC"];
+    delete process.env["MAX_MESSAGE_AGE_SEC"];
+  }
+});
+
+test("recentUpdateGuard: ignores a non-positive legacy override", async () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  process.env["MAX_UPDATE_AGE_SEC"] = "0";
+  process.env["MAX_MESSAGE_AGE_SEC"] = "1000";
+  let nextCalled = 0;
+  try {
+    await recentUpdateGuard({ message: { date: nowSec - 100 } } as any, async () => {
+      nextCalled++;
+    });
+    expect(nextCalled).toBe(1);
+  } finally {
+    delete process.env["MAX_UPDATE_AGE_SEC"];
+    delete process.env["MAX_MESSAGE_AGE_SEC"];
+  }
+});

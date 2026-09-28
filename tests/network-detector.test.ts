@@ -203,3 +203,80 @@ describe("network detector utilities", () => {
     );
   });
 });
+
+describe("network detector edge cases", () => {
+  test("resolveNetworkInput ignores blank and unknown values", () => {
+    expect(NetworkDetector.resolveNetworkInput(undefined)).toBeUndefined();
+    expect(NetworkDetector.resolveNetworkInput("")).toBeUndefined();
+    expect(NetworkDetector.resolveNetworkInput("   ")).toBeUndefined();
+    expect(NetworkDetector.resolveNetworkInput("staging")).toBeUndefined();
+  });
+
+  test("resolveNetworkInput is case and whitespace insensitive", () => {
+    expect(NetworkDetector.resolveNetworkInput("  Mainnet-Beta ")).toBe("mainnet");
+    expect(NetworkDetector.resolveNetworkInput("LOCALHOST")).toBe("localnet");
+    expect(NetworkDetector.resolveNetworkInput("Localnet")).toBe("localnet");
+    expect(NetworkDetector.resolveNetworkInput("HTTP://127.0.0.1:8899")).toBe("localnet");
+  });
+
+  test("an unknown override falls back to the configured network", () => {
+    const original = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.testnet.solana.com";
+    try {
+      expect(NetworkDetector.buildSolscanTxUrl("sig", "staging")).toBe(
+        "https://solscan.io/tx/sig?cluster=testnet",
+      );
+    } finally {
+      process.env.SOLANA_NETWORK = original;
+    }
+  });
+
+  test("buildTransactionLinkMessage returns an empty result without a signature", () => {
+    for (const signature of [undefined, null, ""]) {
+      expect(buildTransactionLinkMessage({ signature, networkOverride: "mainnet" })).toEqual({
+        message: null,
+        solscanUrl: null,
+        previewDisabled: false,
+        displaySignature: null,
+      });
+    }
+  });
+
+  test("buildTransactionLinkMessage renders an HTML link with preview disabled", () => {
+    expect(
+      buildTransactionLinkMessage({ signature: "sig", networkOverride: "mainnet", label: "Tx: " }),
+    ).toEqual({
+      message: 'Tx: <a href="https://solscan.io/tx/sig">sig</a>',
+      solscanUrl: "https://solscan.io/tx/sig",
+      previewDisabled: true,
+      displaySignature: "sig",
+    });
+  });
+
+  test("buildTransactionLinkMessage renders Markdown with custom link text", () => {
+    expect(
+      buildTransactionLinkMessage({
+        signature: "sig",
+        networkOverride: "devnet",
+        linkText: "View",
+        format: "markdown",
+      }).message,
+    ).toBe("[View](https://solscan.io/tx/sig?cluster=devnet)");
+  });
+
+  test("buildTransactionLinkMessage omits the message on localnet unless asked to fall back", () => {
+    expect(buildTransactionLinkMessage({ signature: "sig", networkOverride: "localnet" })).toEqual({
+      message: null,
+      solscanUrl: null,
+      previewDisabled: false,
+      displaySignature: "sig",
+    });
+    expect(
+      buildTransactionLinkMessage({
+        signature: "sig",
+        networkOverride: "localnet",
+        fallbackToSignature: true,
+      }).message,
+    ).toBe("sig");
+  });
+});

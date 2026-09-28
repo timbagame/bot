@@ -161,3 +161,65 @@ describe("createRebateAwareFetch", () => {
     ).rejects.toThrow(error);
   });
 });
+
+describe("createRebateAwareFetch binary bodies and request overrides", () => {
+  const HELIUS = "https://mainnet.helius-rpc.com/?api-key=k";
+  const sendTx = JSON.stringify({ method: "sendTransaction" });
+
+  test("detects sendTransaction in a Uint8Array body", async () => {
+    const { fetch: spyFetch, calls } = createSpyFetch();
+    const rebateFetch = createRebateAwareFetch(spyFetch, "RebateAddr");
+
+    await rebateFetch(HELIUS, { method: "POST", body: new TextEncoder().encode(sendTx) });
+
+    expect(calls[0]!.input).toContain("rebate-address=RebateAddr");
+  });
+
+  test("detects sendTransaction in an ArrayBuffer body", async () => {
+    const { fetch: spyFetch, calls } = createSpyFetch();
+    const rebateFetch = createRebateAwareFetch(spyFetch, "RebateAddr");
+    const bytes = new TextEncoder().encode(sendTx);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+    await rebateFetch(HELIUS, { method: "POST", body: buffer });
+
+    expect(calls[0]!.input).toContain("rebate-address=RebateAddr");
+  });
+
+  test("leaves unsupported body types alone", async () => {
+    const { fetch: spyFetch, calls } = createSpyFetch();
+    const rebateFetch = createRebateAwareFetch(spyFetch, "RebateAddr");
+    const form = new URLSearchParams({ method: "sendTransaction" });
+
+    await rebateFetch(HELIUS, { method: "POST", body: form });
+
+    expect(calls[0]!.input).toBe(HELIUS);
+  });
+
+  test("applies init overrides when rewriting a Request", async () => {
+    const { fetch: spyFetch, calls } = createSpyFetch();
+    const rebateFetch = createRebateAwareFetch(spyFetch, "RebateAddr");
+    const request = new Request(HELIUS, {
+      method: "POST",
+      headers: { "x-original": "1" },
+      body: sendTx,
+    });
+
+    await rebateFetch(request, { headers: { "x-override": "2" } });
+
+    const forwarded = calls[0]!.request!;
+    expect(forwarded.url).toContain("rebate-address=RebateAddr");
+    expect(forwarded.headers.get("x-override")).toBe("2");
+    expect(forwarded.headers.get("x-original")).toBeNull();
+    expect(forwarded.method).toBe("POST");
+    expect(await forwarded.text()).toBe(sendTx);
+    expect(calls[0]!.init).toBeUndefined();
+  });
+
+  test("returns the base fetch untouched without a rebate address", () => {
+    const { fetch: spyFetch } = createSpyFetch();
+
+    expect(createRebateAwareFetch(spyFetch)).toBe(spyFetch);
+    expect(createRebateAwareFetch(spyFetch, "   ")).toBe(spyFetch);
+  });
+});

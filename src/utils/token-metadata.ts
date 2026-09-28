@@ -132,17 +132,14 @@ export async function resolveTokenMetadata({
     }
   }
 
-  try {
-    const metadata = await fetchJupiterTokenMetadata(mintAddress, fetchImpl);
-    if (metadata) {
-      return {
-        symbol: metadata.symbol,
-        name: metadata.name || metadata.symbol,
-        decimals: await ensureDecimals(metadata.decimals),
-      };
-    }
-  } catch (error) {
-    console.log("Jupiter token search not available for", mintAddress, error);
+  // fetchJupiterTokenMetadata reports its own failures and resolves to null.
+  const metadata = await fetchJupiterTokenMetadata(mintAddress, fetchImpl);
+  if (metadata) {
+    return {
+      symbol: metadata.symbol,
+      name: metadata.name || metadata.symbol,
+      decimals: await ensureDecimals(metadata.decimals),
+    };
   }
 
   return {

@@ -288,3 +288,99 @@ describe("price utilities resilience", () => {
     }
   });
 });
+
+describe("price utilities edge cases", () => {
+  const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
+
+  test("getPricesUSD returns zeros for every id when prices are disabled", async () => {
+    process.env["PRICES_ENABLED"] = "false";
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls += 1;
+      throw new Error("unexpected");
+    }) as any;
+
+    expect(await getPricesUSD([USDC, "not-a-mint"], fetchImpl)).toEqual({
+      [USDC]: 0,
+      "not-a-mint": 0,
+    });
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("getPricesUSD falls back to single lookups when the batch request fails", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      const ids = new URL(url).searchParams.get("ids")!;
+      if (ids.includes(",")) return new Response("down", { status: 503 });
+      return Response.json({ [ids]: { usdPrice: ids === USDC ? 1.0001 : 0.00002 } });
+    }) as any;
+
+    const prices = await getPricesUSD([USDC, BONK], fetchImpl);
+
+    expect(prices).toEqual({ [USDC]: 1.0001, [BONK]: 0.00002 });
+    expect(new URL(urls[0]!).searchParams.get("ids")).toBe(`${USDC},${BONK}`);
+    expect(urls).toHaveLength(3);
+  });
+
+  test("getPricesUSD survives a malformed batch payload", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    let batchCalls = 0;
+    const fetchImpl = (async (url: string) => {
+      const ids = new URL(url).searchParams.get("ids")!;
+      if (ids.includes(",")) {
+        batchCalls += 1;
+        return new Response("<html>not json</html>", { status: 200 });
+      }
+      return Response.json({ [ids]: { usdPrice: 3 } });
+    }) as any;
+
+    expect(await getPricesUSD([USDC, BONK], fetchImpl)).toEqual({ [USDC]: 3, [BONK]: 3 });
+    expect(batchCalls).toBe(1);
+  });
+
+  test("a failed refresh keeps the last known price for later callers", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      let fail = false;
+      let calls = 0;
+      const fetchImpl = (async (url: string) => {
+        calls += 1;
+        if (fail) return new Response("down", { status: 500 });
+        const id = new URL(url).searchParams.get("ids")!;
+        return Response.json({ [id]: { usdPrice: 2.5 } });
+      }) as any;
+
+      expect(await getPriceUSD(USDC, fetchImpl)).toBe(2.5);
+
+      now += 10 * 60_000; // past the cache TTL
+      fail = true;
+      await getPriceUSD(USDC, fetchImpl);
+      expect(calls).toBe(2);
+
+      // The stale value was re-cached, so the next lookup is served without a request.
+      expect(await getPriceUSD(USDC, fetchImpl)).toBe(2.5);
+      expect(calls).toBe(2);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test("a failed first lookup caches nothing, so the next call retries", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response("down", { status: 500 });
+    }) as any;
+
+    expect(await getPriceUSD(USDC, fetchImpl)).toBe(0);
+    expect(await getPriceUSD(USDC, fetchImpl)).toBe(0);
+    expect(calls).toBe(2);
+  });
+});

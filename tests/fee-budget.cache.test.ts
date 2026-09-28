@@ -142,3 +142,43 @@ describe("FeeBudgetManager caching and fallbacks", () => {
     );
   });
 });
+
+describe("FeeBudgetManager defaults", () => {
+  test("instance default getters match the static defaults", () => {
+    const manager = FeeBudgetManager.createForTest(baseConnection);
+
+    expect(manager.getDefaultSingleTransactionLamports()).toBe(
+      FeeBudgetManager.getDefaultSingleTransactionLamports(),
+    );
+    expect(manager.getDefaultWrapFeeBufferLamports()).toBe(
+      FeeBudgetManager.getDefaultWrapFeeBufferLamports(),
+    );
+    expect(manager.getDefaultGameSafetyBufferLamports()).toBe(
+      FeeBudgetManager.getDefaultGameSafetyBufferLamports(),
+    );
+  });
+
+  test("defaults are positive and ordered single <= wrap <= game safety", () => {
+    const single = FeeBudgetManager.getDefaultSingleTransactionLamports();
+    const wrap = FeeBudgetManager.getDefaultWrapFeeBufferLamports();
+    const game = FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+
+    expect(single).toBeGreaterThan(0);
+    expect(wrap).toBeGreaterThanOrEqual(single);
+    expect(game).toBeGreaterThanOrEqual(wrap);
+  });
+
+  test("cached getters fall back to defaults before anything is computed", () => {
+    const manager = FeeBudgetManager.createForTest(baseConnection);
+
+    expect(manager.getCachedSingleTransactionLamports()).toBe(
+      manager.getDefaultSingleTransactionLamports(),
+    );
+    expect(manager.getCachedWrapFeeBufferLamports()).toBe(
+      manager.getDefaultWrapFeeBufferLamports(),
+    );
+    expect(manager.getCachedGameSafetyBufferLamports()).toBe(
+      manager.getDefaultGameSafetyBufferLamports(),
+    );
+  });
+});

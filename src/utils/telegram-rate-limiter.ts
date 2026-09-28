@@ -5,8 +5,6 @@
  * Implements per-chat throttling and callback answer queuing.
  */
 
-import type { Context } from "grammy";
-
 // ================================
 // Constants
 // ================================
@@ -237,16 +235,6 @@ export class TelegramRateLimiter {
     this.chatStates.clear();
     this.globalState.retryAfterMs = 0;
     this.globalState.blockedUntil = 0;
-  }
-
-  /**
-   * Wait until the rate limit for a chat expires.
-   */
-  async waitForLimit(chatId?: number): Promise<void> {
-    const waitTime = this.getWaitTimeMs(chatId);
-    if (waitTime > 0) {
-      await sleep(waitTime);
-    }
   }
 
   /**
@@ -517,24 +505,6 @@ export const getCallbackQueue = (): CallbackAnswerQueue | null => {
   return globalCallbackQueue;
 };
 
-/**
- * Answer a callback query through the throttled queue.
- * Falls back to direct answering if queue not initialized.
- */
-export const enqueueCallbackAnswer = (ctx: Context, text?: string, showAlert?: boolean): void => {
-  const callbackQueryId = ctx.callbackQuery?.id;
-  if (!callbackQueryId) {
-    return;
-  }
-
-  if (globalCallbackQueue) {
-    globalCallbackQueue.enqueue(callbackQueryId, text, showAlert);
-  } else {
-    // Fallback to direct answer (legacy behavior)
-    ctx.answerCallbackQuery({ text, show_alert: showAlert }).catch(() => {});
-  }
-};
-
 // ================================
 // Test Helpers
 // ================================
@@ -546,12 +516,4 @@ export const __test_resetGlobals = (): void => {
   globalCallbackQueue = null;
   globalGameOperationQueue?.clear();
   globalGameOperationQueue = null;
-};
-
-export const __test_setRateLimiter = (limiter: TelegramRateLimiter): void => {
-  globalRateLimiter = limiter;
-};
-
-export const __test_setGameOperationQueue = (queue: GameOperationQueue): void => {
-  globalGameOperationQueue = queue;
 };

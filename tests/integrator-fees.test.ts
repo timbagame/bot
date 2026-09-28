@@ -77,6 +77,49 @@ describe("Integrator fee calculations", () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  test("refuses an admin-funded swap when prices are unavailable", async () => {
+    __test_setReferralConfig({
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
+    });
+    vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(null);
+
+    await expect(
+      resolveIntegratorSwapParams({
+        inputMint: ADMIN_REF_MINT2,
+        outputMint: CLAMP_REF_MINT,
+        inputTicker: "TKN",
+        inputDecimals: 6,
+        inputAmountRaw: 5_000_000,
+        userPublicKey: "UserNoPrice",
+        availableSolLamports: 0,
+      }),
+    ).rejects.toThrow("Cannot estimate referral surcharge for gas payer");
+  });
+
+  test("keeps the user as payer when exactly at the SOL buffer", async () => {
+    __test_setReferralConfig({
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
+    });
+    const spy = vi.spyOn(priceService, "getUsdPrice");
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: ADMIN_REF_MINT2,
+      outputMint: CLAMP_REF_MINT,
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 5_000_000,
+      userPublicKey: "UserAtBuffer",
+      availableSolLamports: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+    });
+
+    expect(result).toMatchObject({ payerKind: "user", payer: "UserAtBuffer" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   test("applies extra referral fee to reimburse admin gas payer shortfall", async () => {
     __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,

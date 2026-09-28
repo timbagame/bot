@@ -150,19 +150,12 @@ export const createSolConversionUtilities = ({
       const normalizedAmount =
         amountLamports !== undefined ? amountLamports : initialAmountLamports;
 
-      if (normalizedAmount === undefined) {
-        if (treatZeroAmountAsEmpty) {
-          await onEmpty?.(validation.formattedAmount);
-          return { status: "empty", formattedAmount: validation.formattedAmount };
-        }
-        throw new Error("Unable to determine transaction amount");
-      }
-
-      if (!Number.isFinite(normalizedAmount)) {
+      if (normalizedAmount !== undefined && !Number.isFinite(normalizedAmount)) {
         throw new Error("Invalid transaction amount");
       }
 
-      if (treatZeroAmountAsEmpty && normalizedAmount <= 0) {
+      // Only whole-balance unwraps omit the amount, and those treat it as empty.
+      if (normalizedAmount === undefined || (treatZeroAmountAsEmpty && normalizedAmount <= 0)) {
         await onEmpty?.(validation.formattedAmount);
         return { status: "empty", formattedAmount: validation.formattedAmount };
       }
@@ -241,10 +234,6 @@ export const createSolConversionUtilities = ({
       return { status: "insufficient" };
     }
 
-    if (result.status === "error") {
-      return { status: "error" };
-    }
-
     return { status: "error" };
   };
 
@@ -298,10 +287,6 @@ export const createSolConversionUtilities = ({
 
     if (result.status === "empty") {
       return { status: "empty", formattedAmount: result.formattedAmount };
-    }
-
-    if (result.status === "error") {
-      return { status: "error" };
     }
 
     return { status: "error" };
