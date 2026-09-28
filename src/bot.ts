@@ -3755,6 +3755,7 @@ const faucetModule = createFaucetModule({
   answerCallback: (ctx, text) => safeAnswerCallbackQuery(ctx, text),
 });
 faucetModule.registerCallbacks();
+export const __test_faucetModule = faucetModule;
 
 registerCaseInsensitiveCommand(
   ["faucet", "rain"],
