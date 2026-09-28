@@ -5,6 +5,7 @@ import {
   resetCalls,
   restoreStubs,
   press,
+  sendText,
   stub,
   useBotHarness,
   wallet,
@@ -64,6 +65,26 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreStubs();
+});
+
+describe("/start and /balance", () => {
+  const walletCard = () =>
+    calls.filter((call) => /^send(Photo|Video|Animation|Message)$/.test(call.method)).at(-1);
+  const cardText = () => String(walletCard()?.payload.caption ?? walletCard()?.payload.text ?? "");
+
+  test("/start opens the wallet in a private chat", async () => {
+    await sendText("/start", { userId: USER });
+
+    expect(walletCard()?.payload.chat_id).toBe(USER);
+    expect(cardText()).toContain("SOL: <code>2</code> SOL");
+  });
+
+  test("/balance in a group sends the wallet privately", async () => {
+    await sendText("/balance", { userId: USER, chatId: -4_401 });
+
+    expect(walletCard()?.payload.chat_id).toBe(String(USER));
+    expect(cardText()).toContain("SOL: <code>2</code> SOL");
+  });
 });
 
 describe("wallet menu buttons", () => {
