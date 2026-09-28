@@ -24,6 +24,7 @@ const PROMPT = 40;
 let updateId = 91_000_000;
 let errorSpy: ReturnType<typeof spyOn>;
 let logSpy: ReturnType<typeof spyOn>;
+let savedTokenManager: any;
 
 beforeEach(() => {
   CHAT -= 1;
@@ -31,6 +32,21 @@ beforeEach(() => {
   clearAllInputSessions();
   errorSpy = spyOn(console, "error").mockImplementation(() => {});
   logSpy = spyOn(console, "log").mockImplementation(() => {});
+  // The confirmation menu shows the chat's default token; keep this suite
+  // independent of whichever token manager an earlier suite left behind.
+  savedTokenManager = botModule.__test_getTokenManager();
+  botModule.__test_setTokenManager({
+    getDefaultToken: () => ({
+      token_mint: "So11111111111111111111111111111111111111112",
+      token_ticker: "SOL",
+      decimals: 9,
+    }),
+    getChatDefaultToken: () => ({
+      token_mint: "So11111111111111111111111111111111111111112",
+      token_ticker: "SOL",
+      decimals: 9,
+    }),
+  } as any);
   overrideApiMethod("getChatMember", (payload) => ({
     status: "administrator",
     user: { id: payload.user_id },
@@ -38,6 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  botModule.__test_setTokenManager(savedTokenManager);
   restoreStubs();
   clearAllInputSessions();
   errorSpy.mockRestore();

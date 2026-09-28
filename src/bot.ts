@@ -639,6 +639,8 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
+export const __test_getGameManager = (): GameManager => gameManager;
+
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
 };
@@ -2530,6 +2532,9 @@ const handlePlayerUnjoinedProgramEvent = async (event: PlayerUnjoinedEvent): Pro
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
+export const __test_handlePlayerJoinedProgramEvent = handlePlayerJoinedProgramEvent;
+export const __test_handlePlayerUnjoinedProgramEvent = handlePlayerUnjoinedProgramEvent;
+
 type ProgramEventName = "gameInitialized" | "gameCompleted" | "playerJoined" | "playerUnjoined";
 
 type ProgramEventDescriptor = {
@@ -3222,7 +3227,9 @@ const buyAlertService = createBuyAlertService({
 
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
-  chatDb,
+  get chatDb() {
+    return chatDb;
+  },
   get gameDb() {
     return gameDb;
   },
