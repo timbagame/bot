@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   createPoolTradePoller,
   GeckoRateLimitError,
@@ -545,4 +545,136 @@ test("pool trade poller preserves buys after enabling while baseline pools wait"
 
   expect(received).toEqual(["after-enable"]);
   poller.stop();
+});
+
+describe("pool trade poller defaults", () => {
+  const pair = {
+    priceUsd: 1,
+    marketCapUsd: 1,
+    priceChangeH24: 1,
+    url: null,
+    dexId: "raydium",
+    quoteSymbol: "SOL",
+    pairAddress: "pair/with space",
+    tokenName: "TOKEN",
+  };
+  const originalFetch = globalThis.fetch;
+  const spies: Array<{ mockRestore: () => void }> = [];
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    for (const spy of spies.splice(0)) spy.mockRestore();
+  });
+
+  const stubFetch = (response: () => Response) => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return response();
+    }) as unknown as typeof fetch;
+    return calls;
+  };
+
+  test("fetches GeckoTerminal trades for the encoded pool address", async () => {
+    const calls = stubFetch(() => Response.json({ data: [geckoBuy] }));
+    const received: BuyEvent[] = [];
+    const poller = createPoolTradePoller({
+      minRequestIntervalMs: 0,
+      fetchPairStats: async () => pair,
+    });
+    poller.onTrade((event) => received.push(event));
+
+    poller.setMints([mint]);
+    await poller.pollNow();
+    poller.stop();
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0]!.url).toBe(
+      "https://api.geckoterminal.com/api/v2/networks/solana/pools/pair%2Fwith%20space/trades",
+    );
+    expect(calls[0]!.init.headers).toEqual({ accept: "application/json" });
+    expect(calls[0]!.init.signal).toBeInstanceOf(AbortSignal);
+    // The first snapshot only primes the pool.
+    expect(received).toEqual([]);
+  });
+
+  test("the default error reporter explains a rate limit with the retry delay", async () => {
+    stubFetch(() => new Response("slow down", { status: 429, headers: { "retry-after": "5" } }));
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    spies.push(warn);
+    const poller = createPoolTradePoller({
+      intervalMs: 60_000,
+      minRequestIntervalMs: 1_000,
+      poolsPerCycle: 1,
+      fetchPairStats: async () => pair,
+      now: () => 0,
+      wait: async () => {},
+    });
+
+    poller.setMints([mint]);
+    await poller.pollNow();
+    poller.stop();
+
+    expect(warn).toHaveBeenCalledWith("GeckoTerminal rate limited buy alerts; retrying in 60s");
+  });
+
+  test("the default error reporter logs other trade failures", async () => {
+    stubFetch(() => new Response("oops", { status: 500 }));
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    spies.push(error);
+    const poller = createPoolTradePoller({
+      minRequestIntervalMs: 0,
+      fetchPairStats: async () => pair,
+    });
+
+    poller.setMints([mint]);
+    await poller.pollNow();
+    poller.stop();
+
+    expect(error.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    expect((error.mock.calls[0]?.[0] as Error).message).toBe(
+      "GeckoTerminal trades request failed with status 500",
+    );
+  });
+
+  test("the interval polls only when no poll is already queued", async () => {
+    let tick: (() => void) | undefined;
+    const intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(((fn: () => void) => {
+      tick = fn;
+      return { unref() {} };
+    }) as any);
+    const clearSpy = spyOn(globalThis, "clearInterval").mockImplementation((() => {}) as any);
+    spies.push(intervalSpy, clearSpy);
+    let release: () => void = () => {};
+    let discoveries = 0;
+    const poller = createPoolTradePoller({
+      minRequestIntervalMs: 0,
+      fetchPoolStats: async () => {
+        discoveries += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return [];
+      },
+      fetchTrades: async () => ({ data: [] }),
+    });
+
+    poller.setMints([mint]);
+    await Promise.resolve();
+    expect(discoveries).toBe(1);
+
+    // The start-up poll is still running, so the tick is skipped.
+    tick!();
+    await Promise.resolve();
+    expect(discoveries).toBe(1);
+
+    release();
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    tick!();
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    expect(discoveries).toBe(2);
+
+    release();
+    poller.stop();
+    expect(clearSpy).toHaveBeenCalled();
+  });
 });
