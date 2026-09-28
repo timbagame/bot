@@ -3407,6 +3407,8 @@ const recoverPendingGameCreations = async (): Promise<void> => {
   }
 };
 
+export const __test_recoverPendingGameCreations = recoverPendingGameCreations;
+
 const initializeTokensList = async () => {
   try {
     console.log("Initializing approved tokens...");
@@ -3532,6 +3534,8 @@ const checkTokenPolicyStatus = async () => {
     );
   }
 };
+
+export const __test_checkTokenPolicyStatus = checkTokenPolicyStatus;
 
 const createBalanceDeps = (): BalanceDeps => ({
   isPrivateChat,
