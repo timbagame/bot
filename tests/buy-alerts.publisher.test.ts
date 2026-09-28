@@ -1,7 +1,7 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, spyOn, test } from "bun:test";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { resetTestDatabase } from "./helpers/database";
-import { createBuyAlertPublisher } from "../src/services/buy-alerts/publisher";
+import { attachBuyAlertFeed, createBuyAlertPublisher } from "../src/services/buy-alerts/publisher";
 import type { BuyEvent } from "../src/services/buy-alerts/types";
 
 const TIMBA_MINT = "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump";
@@ -333,4 +333,110 @@ test("publisher forgets delivered signatures after the deduplication TTL", async
   clock += 60 * 60 * 1000 + 1;
   expect((await publisher.publish(event({ signature: "ttl-signature" }))).posted).toBe(1);
   expect(sent).toBe(2);
+});
+
+test("publisher keeps a known new-holder flag without asking the resolver", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-8, { enabled: true });
+
+  const sent: string[] = [];
+  let resolverCalls = 0;
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (_chatId, text) => {
+      sent.push(text);
+    },
+    fetchPairStats: async () => null,
+    resolveNewHolder: async () => {
+      resolverCalls += 1;
+      return true;
+    },
+  });
+
+  await publisher.publish(event({ signature: "known-holder", newHolder: false }));
+  expect(resolverCalls).toBe(0);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).not.toContain("New Holder!");
+});
+
+test("publisher treats a signature still being delivered as a duplicate", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-11, { enabled: true });
+
+  let releasePair!: () => void;
+  const pairGate = new Promise<null>((resolve) => {
+    releasePair = () => resolve(null);
+  });
+  const sent: number[] = [];
+  const publisher = createBuyAlertPublisher({
+    chatDb,
+    tokenManager,
+    sendHtml: async (chatId) => {
+      sent.push(chatId);
+    },
+    fetchPairStats: () => pairGate,
+  });
+
+  const first = publisher.publish(event({ signature: "in-flight" }));
+  const concurrent = await publisher.publish(event({ signature: "in-flight" }));
+  expect(concurrent).toEqual({ posted: 0, skipped: ["duplicate"] });
+
+  releasePair();
+  expect(await first).toEqual({ posted: 1, skipped: [] });
+  expect(sent).toEqual([-11]);
+});
+
+test("publisher skips chats whose alerts were disabled after being listed", async () => {
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.upsertChatBuyAlerts(-12, { enabled: true });
+  const enabledSnapshot = chatDb.getEnabledChatBuyAlerts();
+  chatDb.upsertChatBuyAlerts(-12, { enabled: false });
+
+  const sent: number[] = [];
+  const publisher = createBuyAlertPublisher({
+    chatDb: {
+      getEnabledChatBuyAlerts: () => enabledSnapshot,
+      getChatBuyAlerts: (chatId: number) => chatDb.getChatBuyAlerts(chatId),
+    } as unknown as ChatDatabase,
+    tokenManager,
+    sendHtml: async (chatId) => {
+      sent.push(chatId);
+    },
+    fetchPairStats: async () => null,
+  });
+
+  expect(await publisher.publish(event({ signature: "disabled-race" }))).toEqual({
+    posted: 0,
+    skipped: [],
+  });
+  expect(sent).toEqual([]);
+});
+
+test("attachBuyAlertFeed forwards trades and logs publish failures", async () => {
+  let handler: ((event: BuyEvent) => void) | undefined;
+  const feed = {
+    setMints: () => {},
+    onTrade: (next: (event: BuyEvent) => void) => {
+      handler = next;
+    },
+    stop: () => {},
+  };
+  const failure = new Error("telegram down");
+  const published: string[] = [];
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    attachBuyAlertFeed(feed, async (trade) => {
+      published.push(trade.signature);
+      throw failure;
+    });
+    handler!(event({ signature: "feed-sig" }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(published).toEqual(["feed-sig"]);
+    expect(errorSpy).toHaveBeenCalledWith("Failed to publish buy alert for feed-sig:", failure);
+  } finally {
+    errorSpy.mockRestore();
+  }
 });

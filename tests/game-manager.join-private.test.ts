@@ -131,4 +131,57 @@ describe("GameManager joinPrivateGame resilience", () => {
     expect(result.success).toBe(true);
     expect(sendHistory).toEqual(["SIG1", "SIG2"]);
   });
+
+  test("confirmation recovery resends the full join instruction set", async () => {
+    resetGM();
+
+    const playerKp = await Keypair.generate();
+    const adminKp = await Keypair.generate();
+    const setupIx = { ix: "setup" };
+    const joinIx = { ix: "join" };
+    const program = {
+      account: { game: { fetchNullable: async () => ({ ticketsCount: 0 }) } },
+      methods: {
+        joinGame: () => ({ accounts: () => ({ instruction: async () => joinIx }) }),
+      },
+    } as any;
+    const wallet = {
+      getKeyPair: () => playerKp,
+      sendTransaction: async () => "SIG_INITIAL",
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, {
+      getGame: () => ({ token_mint: "mint" }),
+    } as any);
+    (gm as any).oracleClient = {
+      authorizePlayer: async () => ({ authorized: true, operatorKeypair: adminKp }),
+    };
+    (gm as any).buildJoinAccounts = async () => ({
+      accounts: { mock: true },
+      setupInstructions: [setupIx],
+    });
+    const resends: any[][] = [];
+    (gm as any).sendInstructionsWithFallback = async (...args: any[]) => {
+      resends.push(args);
+      return "SIG_RESENT";
+    };
+    (gm as any).confirmTransactionWithRecovery = async (
+      signature: string,
+      _pda: PublicKey,
+      _label: string,
+      _player: PublicKey,
+      resend: () => Promise<string>,
+    ) => {
+      expect(signature).toBe("SIG_INITIAL");
+      return await resend();
+    };
+
+    const result = await gm.joinPrivateGame(
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      playerKp,
+      99,
+    );
+
+    expect(result).toEqual({ success: true, tx: "SIG_RESENT" });
+    expect(resends).toEqual([[[setupIx, joinIx], [playerKp, adminKp], "Player join transaction"]]);
+  });
 });

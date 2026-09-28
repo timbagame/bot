@@ -31,13 +31,8 @@ const parseRetryAfterSeconds = (error: any): number => {
   const description = getErrorDescription(error);
   const match = description.match(/retry after (\d+)/i);
   if (match) {
-    const [, retryAfterDigits] = match;
-    if (retryAfterDigits) {
-      const parsed = Number.parseInt(retryAfterDigits, 10);
-      if (!Number.isNaN(parsed)) {
-        return Math.max(0, parsed);
-      }
-    }
+    // The capture group only matches digits, so the parsed value is always a non-negative integer.
+    return Number.parseInt(match[1]!, 10);
   }
 
   return 1;
@@ -71,11 +66,8 @@ const runQueuedMediaEdit = async <T>(key: string, task: QueuedEditTask<T>): Prom
     task.reject(error);
   }
 
-  const state = messageMediaEditQueue.get(key);
-  if (!state) {
-    return;
-  }
-
+  // The queue entry is only removed below, once no edit is pending for this key.
+  const state = messageMediaEditQueue.get(key)!;
   if (state.pending) {
     const nextTask = state.pending;
     state.pending = undefined;
@@ -116,13 +108,11 @@ export const awaitTelegramRetry = async <T>(
   options: { maxAttempts?: number } = {},
 ): Promise<T> => {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
-  let attempt = 0;
 
-  while (attempt < maxAttempts) {
+  for (let attempt = 1; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      attempt += 1;
       if (!isTooManyRequestsError(error) || attempt >= maxAttempts) {
         throw error;
       }
@@ -131,8 +121,6 @@ export const awaitTelegramRetry = async <T>(
       await sleep(delaySeconds * 1000);
     }
   }
-
-  throw new Error("awaitTelegramRetry exhausted attempts");
 };
 
 export const isRecoverableMediaError = (error: any): boolean => {

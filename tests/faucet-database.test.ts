@@ -160,4 +160,16 @@ describe("FaucetDatabase", () => {
     expect(db.releaseStaleProcessing(2_000, 3_001)).toBe(1);
     expect(db.getClaim(faucet.id, 1n)?.status).toBe("failed");
   });
+
+  test("migrateChatId moves faucets to the upgraded supergroup id", () => {
+    const moved = createFaucet({ chatId: -100 });
+    const other = createFaucet({ chatId: -200 });
+
+    db.migrateChatId(-100, -100);
+    expect(db.getFaucet(moved.id)?.chat_id).toBe("-100");
+
+    db.migrateChatId(-100, -1009999);
+    expect(db.getFaucet(moved.id)?.chat_id).toBe("-1009999");
+    expect(db.getFaucet(other.id)?.chat_id).toBe("-200");
+  });
 });

@@ -173,3 +173,19 @@ test("a complete empty census drops the mark so the next hold starts fresh", () 
   expect(store.get(WALLET, TIMBA)).toBeCloseTo(0.00000538222, 12);
   expect(next.size).toBe(0);
 });
+
+test("blank wallet addresses never read or write hold marks", () => {
+  const store = createMemoryHoldMarkStore();
+  store.set(WALLET, TIMBA, 1);
+
+  const percents = applyHoldMarks({
+    walletAddress: "   ",
+    marks: [{ mint: TIMBA, priceUsd: 2 }],
+    store,
+  });
+  expect(percents.size).toBe(0);
+  expect(store.listMints("")).toEqual([]);
+
+  pruneHoldMarks("  ", [], store, { complete: true });
+  expect(store.get(WALLET, TIMBA)).toBe(1);
+});

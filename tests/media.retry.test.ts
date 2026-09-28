@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import fc from "fast-check";
 import {
   awaitTelegramRetry,
   editMediaWithFallback,
+  isRecoverableMediaError,
   sendMediaWithFallback,
   trySendVideoWithFallback,
 } from "../src/utils/media";
@@ -139,5 +140,105 @@ describe("media retry helpers", () => {
 
     expect(result).toEqual({ result: { id: "new" }, usedFallback: true, skipped: false });
     expect(hookCalled).toBe(1);
+  });
+  test("awaitTelegramRetry rethrows the last 429 once attempts are exhausted", async () => {
+    let attempts = 0;
+    const error: any = new Error("Too Many Requests");
+    error.error_code = 429;
+    error.parameters = { retry_after: 0 };
+
+    await expect(
+      awaitTelegramRetry(
+        async () => {
+          attempts += 1;
+          throw error;
+        },
+        { maxAttempts: 2 },
+      ),
+    ).rejects.toBe(error);
+    expect(attempts).toBe(2);
+  });
+
+  test("awaitTelegramRetry waits one second when a 429 carries no retry-after hint", async () => {
+    const delays: number[] = [];
+    globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+      delays.push(ms ?? 0);
+      callback();
+      return 0 as any;
+    }) as any;
+    let attempts = 0;
+    try {
+      const result = await awaitTelegramRetry(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw Object.assign(new Error("Too Many Requests"), { error_code: 429 });
+        }
+        return "sent";
+      });
+      expect(result).toBe("sent");
+      expect(delays).toEqual([1000]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  test("isRecoverableMediaError ignores unchanged messages and empty errors", () => {
+    expect(isRecoverableMediaError(null)).toBe(false);
+    expect(isRecoverableMediaError({})).toBe(false);
+    expect(
+      isRecoverableMediaError({
+        description: "Bad Request: message is not modified: there is no caption in the message",
+      }),
+    ).toBe(false);
+    expect(isRecoverableMediaError({ description: "Bad Request: wrong file id" })).toBe(true);
+  });
+
+  test("trySendVideoWithFallback rethrows unrecoverable errors without falling back", async () => {
+    const error = new Error("Forbidden: bot was blocked by the user");
+    let fallbackCalls = 0;
+
+    await expect(
+      trySendVideoWithFallback(
+        async () => {
+          throw error;
+        },
+        async () => {
+          fallbackCalls += 1;
+          return "text";
+        },
+      ),
+    ).rejects.toBe(error);
+    expect(fallbackCalls).toBe(0);
+  });
+
+  test("sendMediaWithFallback sends a new video when the edit fails unrecoverably", async () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const editError = new Error("Bad Request: message can't be edited");
+    let textCalls = 0;
+    try {
+      const response = await sendMediaWithFallback({
+        videoFileId: "abc",
+        logLabel: "game card",
+        sendText: async () => {
+          textCalls += 1;
+          return { text: "sent" };
+        },
+        sendVideo: async () => ({ id: "video" }),
+        editMessage: async () => {
+          throw editError;
+        },
+      });
+
+      expect(response).toEqual({
+        result: { id: "video" },
+        usedVideo: true,
+        usedFallback: false,
+        skippedEdit: false,
+      });
+      expect(textCalls).toBe(0);
+      expect(warnSpy).toHaveBeenCalledWith("game card edit failed, attempting send", editError);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

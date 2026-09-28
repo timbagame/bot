@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  parseCreationProofCheckpoint,
   proveExpiredCreationAbsent,
   withCreationRebroadcast,
   getCreationRecoveryDelay,
@@ -94,6 +95,66 @@ describe("Finalized creation absence proof", () => {
         throw new Error("offline");
       }),
     ).rejects.toThrow("offline");
+  });
+  test("invalid lifetimes are rejected before any RPC is contacted", async () => {
+    const { input } = fixture();
+    const calls: string[] = [];
+    const rpc: RecoveryRpc = async (method) => {
+      calls.push(method);
+      return null;
+    };
+    for (const lastValidBlockHeight of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(await proveExpiredCreationAbsent({ ...input, lastValidBlockHeight }, rpc, rpc)).toBe(
+        false,
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+  test("history deeper than the bounded scan window is never treated as absence", async () => {
+    const blocks = new Map<number, any>();
+    for (let slot = 1; slot <= 300; slot++)
+      blocks.set(slot, {
+        blockhash: `hash${slot}`,
+        previousBlockhash: `hash${slot - 1}`,
+        parentSlot: slot - 1,
+        blockHeight: slot,
+        signatures: [],
+      });
+    const visited: number[] = [];
+    const saved: number[] = [];
+    const rpc: RecoveryRpc = async (method, params) => {
+      switch (method) {
+        case "getGenesisHash":
+          return "chain";
+        case "getSlot":
+          return 300;
+        case "getBlock":
+          visited.push(params[0] as number);
+          return blocks.get(params[0] as number) ?? null;
+        case "getSignatureStatuses":
+          return { value: [null] };
+        case "getAccountInfo":
+          return { context: { slot: 300 }, value: null };
+        case "isBlockhashValid":
+          return { context: { slot: 300 }, value: false };
+        default:
+          throw new Error(method);
+      }
+    };
+    const input = {
+      signature: "original",
+      blockhash: "hash1",
+      lastValidBlockHeight: 299,
+      gameAddress: "game",
+    };
+
+    expect(
+      await proveExpiredCreationAbsent(input, rpc, rpc, {
+        save: (checkpoint) => saved.push(checkpoint.checkedBlocks),
+      }),
+    ).toBe(false);
+    expect(Math.min(...visited)).toBe(44);
+    expect(saved.at(-1)).toBe(256);
   });
   test("expired height alone is insufficient if the actual blockhash is still valid", async () => {
     const { input, rpc } = fixture();
@@ -254,5 +315,22 @@ describe("Checkpointed absence scans", () => {
         save,
       }),
     ).toBe(false);
+  });
+});
+
+describe("parseCreationProofCheckpoint", () => {
+  test("parses stored checkpoints and ignores empty or corrupt values", () => {
+    const checkpoint = {
+      key: "game:sig:hash:1",
+      genesis: "chain",
+      anchor: { slot: 3, hash: "hash3", height: 3 },
+      cursor: { slot: 2, hash: "hash2", height: 2 },
+      checkedBlocks: 1,
+    };
+    expect(parseCreationProofCheckpoint(JSON.stringify(checkpoint))).toEqual(checkpoint);
+    expect(parseCreationProofCheckpoint(null)).toBeNull();
+    expect(parseCreationProofCheckpoint(undefined)).toBeNull();
+    expect(parseCreationProofCheckpoint("")).toBeNull();
+    expect(parseCreationProofCheckpoint("{not json")).toBeNull();
   });
 });

@@ -832,10 +832,6 @@ const buildWrapKeyboard = (
 
 const trimTrailingEmptyRows = (keyboard: InlineKeyboard): InlineKeyboard => {
   const rows = keyboard.inline_keyboard;
-  if (!rows) {
-    return keyboard;
-  }
-
   while (rows.length > 0 && (rows[rows.length - 1]?.length ?? 0) === 0) {
     rows.pop();
   }
@@ -869,8 +865,10 @@ export const buildWalletActionMenu = ({
       case "prebuilt":
         return quickActions.keyboard;
       default: {
-        const neverType: never = quickActions;
-        return neverType;
+        const unsupported: never = quickActions;
+        throw new Error(
+          `Unsupported wallet quick action: ${String((unsupported as { type?: unknown }).type)}`,
+        );
       }
     }
   })();

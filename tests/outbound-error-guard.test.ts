@@ -31,6 +31,8 @@ describe("outbound Telegram error guard", () => {
     "Status: waiting for another player",
     "Open https://solscan.io/tx/example to view your transaction.",
     "You have 1.25 SOL and need 2 SOL.",
+    "[Tip] Use /help to see every command.",
+    '{"title":"Weekly leaderboard"}',
   ])("preserves normal user-facing message: %s", (friendly) => {
     expect(guardOutboundText(friendly)).toBe(friendly);
   });

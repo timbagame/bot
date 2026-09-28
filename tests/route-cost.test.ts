@@ -62,4 +62,19 @@ describe("calculateRouteCosts", () => {
     expect(costs.paddingLamports).toBe(DEFAULT_ROUTE_LAMPORTS_PADDING);
     expect(costs.requiredLamports).toBe(1_355_000 + DEFAULT_ROUTE_LAMPORTS_PADDING + adminRequired);
   });
+  test("treats non-finite padding as zero instead of propagating NaN or Infinity", () => {
+    const infinite = calculateRouteCosts(buildCosts(1_000), {
+      paddingRatio: Number.POSITIVE_INFINITY,
+      baseRequiredLamports: 5_000,
+    });
+    expect(infinite.paddingLamports).toBe(0);
+    expect(infinite.requiredLamports).toBe(5_000);
+
+    const nan = calculateRouteCosts(buildCosts(1_000), {
+      paddingExtraLamports: Number.NaN,
+      requiredStrategy: "sum",
+    });
+    expect(nan.paddingLamports).toBe(0);
+    expect(nan.requiredLamports).toBe(1_000);
+  });
 });

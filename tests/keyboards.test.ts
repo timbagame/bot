@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, spyOn } from "bun:test";
 import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
@@ -131,6 +131,31 @@ test("positions keyboard pages tokens without a DexScreener button", () => {
   expect(callbacks).toContain("cmd_swap");
   expect(callbacks).toContain("main_wallet");
   expect(texts).not.toContain("DexScreener");
+});
+
+test("wallet keyboard adds page arrows only when more than one page exists", () => {
+  const rowsOf = (kb: any) =>
+    kb.inline_keyboard.map((row: any[]) => row.map((b) => b.callback_data));
+
+  expect(rowsOf(createWalletKeyboard({ page: 0, pageCount: 1 }))).toEqual(
+    rowsOf(createWalletKeyboard()),
+  );
+
+  const first = rowsOf(createWalletKeyboard({ page: 0, pageCount: 3 }));
+  expect(first.at(-1)).toEqual(["wallet_page_1"]);
+
+  const middle = rowsOf(createWalletKeyboard({ page: 1, pageCount: 3 }));
+  expect(middle.at(-1)).toEqual(["wallet_page_0", "wallet_page_2"]);
+
+  const last = rowsOf(createWalletKeyboard({ page: 2, pageCount: 3 }));
+  expect(last.at(-1)).toEqual(["wallet_page_1"]);
+});
+
+test("positions keyboard shows a back arrow on later pages", () => {
+  const callbacks = extractCallbacks(createPositionsKeyboard({ page: 1, pageCount: 2 }));
+  expect(callbacks).toContain("wallet_pos_0");
+  expect(callbacks).not.toContain("wallet_pos_2");
+  expect(callbacks).toContain("wallet_pos_r_1");
 });
 
 test("back to settings keyboard returns wallet_settings callback", () => {
@@ -383,6 +408,37 @@ describe("keyboards: player selection and confirm", () => {
     expect(minPlayersDeltas).toEqual(expect.arrayContaining([1, 2]));
     expect(texts).toContain("Min 2");
     expect(texts).toContain("MAX");
+  });
+});
+
+describe("keyboards: callback overflow protection", () => {
+  const overflowCreator = "creator-".repeat(10);
+  const expectOverflowKeyboard = (kb: any) => {
+    expect(kb.inline_keyboard.filter((row: unknown[]) => row.length > 0)).toEqual([
+      [{ text: "⚠️ Unable to render options", callback_data: "noop" }],
+    ]);
+  };
+
+  test("amount selection refuses to render callbacks beyond Telegram's limit", () => {
+    expectOverflowKeyboard(createAmountSelectionKeyboard("coinflip", 100, overflowCreator, 20));
+  });
+
+  test("player selection refuses to render callbacks beyond Telegram's limit", () => {
+    expectOverflowKeyboard(createPlayerSelectionKeyboard("giveaway", "30", overflowCreator));
+  });
+
+  test("confirm keyboard logs and refuses oversized callbacks", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expectOverflowKeyboard(createGameConfirmKeyboard("coinflip", "30", "4", overflowCreator));
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Refusing to render confirm keyboard due to callback overflow",
+        `amount_coinflip_30_${overflowCreator}`,
+        null,
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

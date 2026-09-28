@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { InlineKeyboard } from "grammy";
 import { respondWithMenu } from "../src/utils/menu-response";
 
@@ -302,6 +302,100 @@ describe("respondWithMenu", () => {
       messageId: 222,
       chatId: 333,
       respondedWithReply: true,
+    });
+  });
+
+  test("treats an unchanged message as a successful edit", async () => {
+    const ctx = makeCtx();
+    ctx.callbackQuery.message.caption = "same";
+    ctx.editMessageCaption = async () => {
+      const err: any = new Error("not modified");
+      err.description = "Bad Request: message is not modified";
+      throw err;
+    };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    expect(ctx.__calls).toEqual([]);
+    expect(result).toEqual({ messageId: 99, chatId: 42, respondedWithReply: false });
+  });
+
+  test("explicit caption edit errors skip the text edit for that target and log why", async () => {
+    const captionError: any = new Error("forbidden");
+    captionError.description = "Bad Request: message can't be edited";
+    const ctx = makeCtx({
+      api: {
+        editMessageCaption: async () => {
+          throw captionError;
+        },
+      },
+    });
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await respondWithMenu(ctx as any, basePayload, {
+        targetChatId: 777,
+        targetMessageId: 888,
+        logLabel: "menu",
+      });
+
+      expect(ctx.__calls.map((c: any) => c.type)).toEqual(["text"]);
+      expect(result).toEqual({ messageId: 99, chatId: 42, respondedWithReply: false });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "menu: editMessageCaption failed for explicit target, replying instead:",
+        captionError,
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("explicit caption edits fall through to text edits when the message has no caption", async () => {
+    const captionError: any = new Error("no caption");
+    captionError.description = "Bad Request: there is no caption in the message to edit";
+    const ctx = makeCtx({
+      api: {
+        editMessageCaption: async () => {
+          throw captionError;
+        },
+      },
+    });
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await respondWithMenu(ctx as any, basePayload, {
+        targetChatId: 777,
+        targetMessageId: 888,
+        logLabel: "menu",
+      });
+
+      expect(ctx.__calls.map((c: any) => c.type)).toEqual(["api_text"]);
+      expect(result).toEqual({ messageId: 888, chatId: 777, respondedWithReply: false });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "menu: editMessageCaption failed (missing caption), attempting text edit:",
+        captionError,
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("adapter targets fall back to the context chat id, or null when unknown", async () => {
+    const withChat = makeCtx();
+    withChat.callbackQuery = undefined;
+    withChat.chat = { id: 555 };
+    withChat.__editAdapterTarget = { messageId: 10 };
+    expect(await respondWithMenu(withChat as any, basePayload)).toEqual({
+      messageId: 10,
+      chatId: 555,
+      respondedWithReply: false,
+    });
+
+    const withoutChat = makeCtx();
+    withoutChat.callbackQuery = undefined;
+    withoutChat.__editAdapterTarget = { chatId: "bad", messageId: "bad" };
+    expect(await respondWithMenu(withoutChat as any, basePayload)).toEqual({
+      messageId: null,
+      chatId: null,
+      respondedWithReply: false,
     });
   });
 });

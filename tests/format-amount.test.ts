@@ -189,6 +189,24 @@ test("formatRate renders tiny values without scientific notation", () => {
   expect(formatRate(3.456e-9)).toBe("0.000000003456");
 });
 
+test("formatRate uses ten decimals for values between 1e-8 and 1e-6", () => {
+  expect(formatRate(2.5e-7)).toBe("0.00000025");
+  expect(formatRate(1e-8)).toBe("0.00000001");
+});
+
+test("formatRate returns 0 for non-positive and non-finite rates", () => {
+  expect(formatRate(0)).toBe("0");
+  expect(formatRate(-1.5)).toBe("0");
+  expect(formatRate(Number.NaN)).toBe("0");
+  expect(formatRate(Number.POSITIVE_INFINITY)).toBe("0");
+});
+
+test("formatCompactTokenDisplay treats missing values as zero and keeps non-numeric text", () => {
+  expect(formatCompactTokenDisplay(null as unknown as string)).toBe("0");
+  expect(formatCompactTokenDisplay(undefined as unknown as number)).toBe("0");
+  expect(formatCompactTokenDisplay("n/a")).toBe("n/a");
+});
+
 test("formatRate falls back to exponential for extremely small values", () => {
   expect(formatRate(4e-13)).toBe("4.00e-13");
 });

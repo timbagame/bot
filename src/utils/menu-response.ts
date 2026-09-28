@@ -141,10 +141,8 @@ export const respondWithMenu = async (
               }),
             ),
           shouldContinue: shouldContinueOnMissingContent,
+          // onFailure only runs for results that carry an error.
           onFailure: (result) => {
-            if (!result.error) {
-              return;
-            }
             if (isMissingEditableContent(result.error)) {
               console.warn(
                 `${logLabel}: editMessageCaption failed (missing caption), attempting text edit:`,

@@ -214,6 +214,23 @@ test("restart restores orders, hides plaintext tokens, and preserves ambiguous r
   }
 });
 
+test("unresolved lists only ambiguous deposits for operator review", () => {
+  const db = store();
+  const active = db.quote("1", destination, "10000", "0.02");
+  db.update(active.id, "active", order());
+  const ambiguous = db.quote("2", destination, "20000", "0.04");
+  db.update(ambiguous.id, "unknown", order());
+
+  const unresolved = db.unresolved();
+  expect(unresolved.map((deposit) => deposit.id)).toEqual([ambiguous.id]);
+  expect(unresolved[0]?.owner).toBe("2");
+  expect(unresolved[0]?.order?.token).toBe("synthetic-token");
+
+  db.abandonUnknown(ambiguous.id, "synthetic provider evidence: no payable order");
+  expect(db.unresolved()).toEqual([]);
+  db.close();
+});
+
 test("continues reconciling late payments on expired invoices", async () => {
   const db = store();
   const expired = { ...order(), status: "EXPIRED" as const };
@@ -430,4 +447,49 @@ test("quote limits are shown in sats and unexpected errors stay private", async 
   expect(depositQuoteErrorMessage(new Error("synthetic private provider data"))).toBe(
     "Unable to get a quote right now. Please try again shortly.",
   );
+});
+
+describe("FixedFloatClient requests", () => {
+  const okJson = (data: unknown) => Response.json({ code: 0, data });
+
+  test("defaults to the global fetch and reads order status with the order token", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      requests.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      return okJson(order());
+    }) as unknown as typeof fetch;
+    let client: FixedFloatClient;
+    try {
+      client = new FixedFloatClient({ key: "k", secret: "s", refcode: "r" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const status = await client.order("TEST01", "synthetic-token");
+    expect(status.id).toBe("TEST01");
+    expect(status.status).toBe("NEW");
+    expect(requests).toEqual([
+      { url: "https://ff.io/api/v2/order", body: { id: "TEST01", token: "synthetic-token" } },
+    ]);
+  });
+
+  test("a malformed create response is ambiguous and never marked retry-safe", async () => {
+    const client = new FixedFloatClient(
+      { key: "k", secret: "s", refcode: "r" },
+      (async () => okJson({ ...order(), token: "" })) as unknown as typeof fetch,
+      () => 1_000,
+    );
+
+    const failure = await client.create("10000", destination).catch((error) => error);
+    expect(failure).toBeInstanceOf(FixedFloatError);
+    expect(failure.retrySafe).toBe(false);
+  });
+
+  test("rejects order lookups whose payload does not match the order schema", async () => {
+    const client = new FixedFloatClient({ key: "k", secret: "s", refcode: "r" }, (async () =>
+      okJson({ ...order(), id: "bad id" })) as unknown as typeof fetch);
+
+    await expect(client.order("TEST01", "synthetic-token")).rejects.toThrow();
+  });
 });

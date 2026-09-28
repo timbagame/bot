@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, beforeEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   TransactionHistory,
@@ -246,5 +246,41 @@ describe("TransactionHistory query helpers", () => {
     // Cleanup: set a far-future keep window to avoid deletions
     const removedNone = db.cleanOldTransactions(3650);
     expect(removedNone).toBe(0);
+  });
+});
+
+describe("TransactionHistory close", () => {
+  test("close releases the database handle so later queries fail", () => {
+    resetTestDatabase("transaction-history.sqlite");
+    TransactionHistory.resetForTesting();
+    const db = TransactionHistory.getInstance();
+    db.addTransaction(
+      createTransactionRecord(
+        "closed-user",
+        "BUY",
+        "sig-close",
+        "SOL",
+        "PUMP",
+        "1",
+        "2",
+        "SUCCESS",
+      ),
+    );
+    expect(db.getUserTransactionCount("closed-user")).toBe(1);
+
+    db.close();
+
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(db.getUserHistory("closed-user")).toEqual([]);
+      expect(errorSpy).toHaveBeenCalledWith("Error getting user history:", expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    TransactionHistory.resetForTesting();
+    const reopened = TransactionHistory.getInstance();
+    expect(reopened).not.toBe(db);
+    expect(reopened.getUserHistory("closed-user")).toEqual([]);
   });
 });

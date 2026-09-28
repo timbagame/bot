@@ -132,11 +132,8 @@ const decodeCreatorId = (encoded: string | undefined): string | null => {
   }
 
   if (mode === "s") {
-    try {
-      return Buffer.from(value, "base64url").toString("utf8");
-    } catch {
-      return null;
-    }
+    // base64url decoding never throws; invalid characters are skipped.
+    return Buffer.from(value, "base64url").toString("utf8");
   }
 
   return null;

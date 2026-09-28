@@ -41,6 +41,15 @@ describe("telegram error helpers", () => {
     expect(isBotInitiationForbidden(unrelated)).toBe(false);
   });
 
+  test("predicates return false when the error carries no description", () => {
+    for (const empty of [null, undefined, "", {}, { description: 404 }]) {
+      expect(isMessageNotModified(empty)).toBe(false);
+      expect(isMessageMissing(empty)).toBe(false);
+      expect(isDuplicateContent(empty)).toBe(false);
+      expect(shouldFallbackToReply(empty)).toBe(false);
+    }
+  });
+
   test("shouldFallbackToReply aggregates individual predicates", () => {
     expect(shouldFallbackToReply("Message to delete not found")).toBe(true);
     expect(shouldFallbackToReply("some other error")).toBe(false);
@@ -72,6 +81,7 @@ describe("telegram error helpers", () => {
     expect(getRetryAfterSeconds({ error_code: 429, parameters: { retry_after: 7 } })).toBe(7);
     expect(getRetryAfterSeconds({ retry_after: 2 })).toBe(2);
     expect(getRetryAfterSeconds({ description: "Too Many Requests: retry after 4" })).toBe(4);
+    expect(getRetryAfterSeconds({ description: "Too Many Requests: Retry After 0" })).toBe(0);
     expect(getRetryAfterSeconds({ description: "Too Many Requests" })).toBeNull();
     expect(getRetryAfterSeconds("retry after 9")).toBeNull();
   });

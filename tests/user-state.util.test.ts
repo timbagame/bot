@@ -7,6 +7,7 @@ import {
   __test_getRawUserState,
   __test_clearUserState,
   __test_getRawPending,
+  markInputSessionProcessing,
 } from "../src/utils/user-state";
 import { INPUT_TIMEOUT_MS } from "../src/utils/constants";
 
@@ -94,4 +95,12 @@ test("getters drop expired state without requiring new writes", () => {
     Date.now = originalNow;
     __test_clearUserState("reader");
   }
+});
+
+test("markInputSessionProcessing refuses to lock a missing input session", () => {
+  const key = "missing-session_1";
+  __test_clearUserState(`input_session:${key}`);
+
+  expect(markInputSessionProcessing(key, "locker")).toBe(false);
+  expect(__test_getRawUserState(`input_session:${key}`)).toBeUndefined();
 });

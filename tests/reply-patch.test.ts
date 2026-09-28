@@ -95,3 +95,20 @@ test("treats null reply_to_message_id as needing default", async () => {
   await ctx.reply("nullish", { reply_to_message_id: null });
   expect(ctx.__calls[0][2].reply_to_message_id).toBe(654);
 });
+
+test("patchReplyBehavior rethrows unrelated reply errors without retrying", async () => {
+  const attempts: any[] = [];
+  const err: any = new Error("Forbidden: bot was blocked by the user");
+  const ctx: any = {
+    callbackQuery: { message: { message_id: 77 } },
+    reply: async (_text: string, opts?: any) => {
+      attempts.push(opts);
+      throw err;
+    },
+  };
+
+  patchReplyBehavior(ctx);
+  await expect(ctx.reply("hi", { reply_to_message_id: 5 })).rejects.toBe(err);
+  expect(attempts).toEqual([{ reply_to_message_id: 5 }]);
+  expect(ctx.replyWithVideo).toBeUndefined();
+});

@@ -310,6 +310,33 @@ test("interactive recovery persists continuation and startup preserves cooldown"
   );
 });
 
+test("absence scans persist their checkpoint and resume from it on the next attempt", async () => {
+  const f = await fixture();
+  const seen: unknown[] = [];
+  f.wallet.proveGameCreationAbsent = (async (_input: unknown, progress: any) => {
+    seen.push(progress.checkpoint);
+    progress.save({ key: "scan", checkedBlocks: 3 });
+    throw new RpcRetryLaterError("checkpointed", Date.now() + 30000);
+  }) as any;
+
+  await expect(
+    f.manager.recoverPendingGameCreation({ api: {} } as any, f.db.getPendingGameCreation(f.game)!),
+  ).rejects.toThrow("checkpointed");
+  const saved = f.db.getPendingGameCreation(f.game)!.recovery_checkpoint;
+  expect(JSON.parse(saved!)).toEqual({ key: "scan", checkedBlocks: 3 });
+
+  // Let the retry cooldown elapse so the next attempt resumes the scan.
+  (f.db as any).run(
+    "UPDATE pending_game_creations SET recovery_retry_not_before = NULL WHERE game_address = ?",
+    [f.game],
+  );
+  await expect(
+    f.manager.recoverPendingGameCreation({ api: {} } as any, f.db.getPendingGameCreation(f.game)!),
+  ).rejects.toThrow("checkpointed");
+  expect(seen).toEqual([null, { key: "scan", checkedBlocks: 3 }]);
+  expect(f.sends()).toBe(0);
+});
+
 test("startup advances legacy backoff and recovery eventually pauses without discarding evidence", async () => {
   const f = await fixture();
   const now = Date.now();

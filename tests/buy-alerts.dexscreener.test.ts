@@ -125,3 +125,67 @@ test("pair discovery keeps the watched mint's orientation and returns every Sola
     "base-side",
   );
 });
+
+test("pair selection handles empty inputs and ranks watched-mint base pairs first", () => {
+  expect(selectSolanaPairs(null)).toEqual([]);
+  expect(selectSolanaPairs([])).toEqual([]);
+  expect(selectSolanaPair(undefined)).toBeNull();
+
+  const pairs = [
+    {
+      chainId: "solana",
+      pairAddress: "quote-a",
+      liquidity: { usd: 900 },
+      baseToken: { address: "other-a" },
+      quoteToken: { address: "mint" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "base-low",
+      liquidity: { usd: 10 },
+      baseToken: { address: "mint" },
+      quoteToken: { address: "sol" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "quote-b",
+      liquidity: { usd: 500 },
+      baseToken: { address: "other-b" },
+      quoteToken: { address: "mint" },
+    },
+    {
+      chainId: "solana",
+      pairAddress: "unrelated",
+      liquidity: { usd: 99_999 },
+      baseToken: { address: "x" },
+      quoteToken: { address: "y" },
+    },
+  ];
+  expect(selectSolanaPairs(pairs, " mint ").map((pair) => pair.pairAddress)).toEqual([
+    "base-low",
+    "quote-a",
+    "quote-b",
+  ]);
+  expect(selectSolanaPairs([...pairs].reverse(), "mint").map((pair) => pair.pairAddress)).toEqual([
+    "base-low",
+    "quote-a",
+    "quote-b",
+  ]);
+});
+
+test("fetchDexScreenerPoolStats skips blank mints and caches failed HTTP lookups as empty", async () => {
+  __test_clearDexScreenerCache();
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return new Response("upstream error", { status: 502 });
+  };
+
+  expect(await fetchDexScreenerPoolStats("   ", fetchImpl as any)).toEqual([]);
+  expect(calls).toBe(0);
+
+  expect(await fetchDexScreenerPoolStats("bad-mint", fetchImpl as any)).toEqual([]);
+  expect(await fetchDexScreenerPoolStats("bad-mint", fetchImpl as any)).toEqual([]);
+  expect(calls).toBe(1);
+  expect(await fetchDexScreenerPairStats("bad-mint", fetchImpl as any)).toBeNull();
+});

@@ -90,4 +90,59 @@ describe("GameManager unjoin errors", () => {
       ),
     ).rejects.toThrow(/Unauthorized unjoin attempt/);
   });
+
+  test("unjoinPlayerFromGame sends, confirms with a resend path and untracks the player", async () => {
+    resetGM();
+    const creator = await Keypair.generate();
+    const player = await Keypair.generate();
+    const gamePda = new PublicKey("BPFLoader8111111111111111111111111111111111");
+    const removed: any[][] = [];
+    const db = baseDb({
+      getGameParticipants: (_: string) => ["123"],
+      getPlayerPublicKey: (_: string) => player.publicKey.toBase58(),
+      removeGameParticipant: (...args: any[]) => removed.push(args),
+    });
+    const unjoinIx = { ix: "unjoin" };
+    const accountsSeen: any[] = [];
+    const program = {
+      account: { game: { fetch: async () => ({ creator: creator.publicKey }) } },
+      methods: {
+        unjoinGame: () => ({
+          accounts: (accounts: any) => {
+            accountsSeen.push(accounts);
+            return { instruction: async () => unjoinIx };
+          },
+        }),
+      },
+    } as any;
+    const gm = GameManager.getInstance(program, await baseWallet(), db);
+    (gm as any).recoverParticipantsFromChain = () => {};
+    (gm as any).buildJoinAccounts = async () => ({ accounts: { game: gamePda } });
+    const sends: any[][] = [];
+    (gm as any).sendInstructionsWithFallback = async (...args: any[]) => {
+      sends.push(args);
+      return `SIG${sends.length}`;
+    };
+    const confirmations: any[][] = [];
+    (gm as any).confirmTransactionWithRecovery = async (
+      signature: string,
+      pda: PublicKey,
+      label: string,
+      playerKey: PublicKey,
+      resend: () => Promise<string>,
+    ) => {
+      confirmations.push([signature, pda, label, playerKey]);
+      return await resend();
+    };
+
+    await (gm as any).unjoinPlayerFromGame(gamePda, player, player.publicKey, "123");
+
+    expect(accountsSeen).toEqual([{ game: gamePda, authority: player.publicKey }]);
+    expect(sends).toEqual([
+      [[unjoinIx], [player], "Player unjoin transaction", { skipConfirmation: true }],
+      [[unjoinIx], [player], "Player unjoin transaction"],
+    ]);
+    expect(confirmations).toEqual([["SIG1", gamePda, "Player unjoin", player.publicKey]]);
+    expect(removed).toEqual([[gamePda.toBase58(), "123"]]);
+  });
 });

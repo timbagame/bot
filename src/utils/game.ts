@@ -4849,17 +4849,7 @@ export class GameManager {
               undefined,
               { retryDelays: [] },
             ),
-          async (signal) => {
-            const pending = this.gameDb.getPendingGameCreation?.(gamePda.toBase58());
-            if (
-              pending &&
-              pending.transaction_signature === creationTx &&
-              !(await this.isPendingGameCreationLifetimeExpired(pending))
-            ) {
-              signal.throwIfAborted();
-              await this.rebroadcastPendingGameCreation(pending, signal);
-            }
-          },
+          this.rebroadcastCurrentGameCreation.bind(this, gamePda.toBase58(), creationTx),
         );
       } catch (error) {
         // After broadcast, even a processed failure can belong to a fork.
@@ -7168,6 +7158,23 @@ export class GameManager {
       throw new Error("game message delivery is already in flight");
     }
     await this.finishCreationPlaceholder(ctx, pending);
+  }
+
+  /** Rebroadcast a creation while it is still the durable, unexpired submission. */
+  private async rebroadcastCurrentGameCreation(
+    gameAddress: string,
+    signature: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const pending = this.gameDb.getPendingGameCreation?.(gameAddress);
+    if (
+      pending &&
+      pending.transaction_signature === signature &&
+      !(await this.isPendingGameCreationLifetimeExpired(pending))
+    ) {
+      signal.throwIfAborted();
+      await this.rebroadcastPendingGameCreation(pending, signal);
+    }
   }
 
   private async isPendingGameCreationLifetimeExpired(

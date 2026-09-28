@@ -144,3 +144,67 @@ test("custom players callback stays compact", () => {
   expect(decoded.amount).toBe("1234567890.5");
   expect(decoded.creatorId).toBe("creator999");
 });
+
+test("encoders refuse payloads that cannot be represented", () => {
+  const base = { gameType: "coinflip" as const, amount: "1.5", creatorId: "42" };
+  const invalidAmount = { ...base, amount: "1e3" };
+  const missingCreator = { ...base, creatorId: "" };
+
+  for (const payload of [invalidAmount, missingCreator]) {
+    expect(
+      encodeGameConfirmPayload({
+        ...payload,
+        players: 2,
+        timeoutSeconds: 600,
+        minPlayers: 2,
+        isPrivate: false,
+      }),
+    ).toBeNull();
+    expect(encodeTimeoutChangePayload({ ...payload, players: 2, deltaMinutes: 5 })).toBeNull();
+    expect(encodeVisibilityPayload({ ...payload, players: 2, isPrivate: true })).toBeNull();
+    expect(encodeMinPlayersChangePayload({ ...payload, players: 2, deltaPlayers: 1 })).toBeNull();
+    expect(encodeAmountSelectionPayload(payload)).toBeNull();
+    expect(encodePlayersSelectionPayload({ ...payload, players: 2 })).toBeNull();
+    expect(encodeCustomPlayersPayload(payload)).toBeNull();
+  }
+
+  expect(
+    encodeGameConfirmPayload({
+      ...base,
+      players: -1,
+      timeoutSeconds: 600,
+      minPlayers: 2,
+      isPrivate: false,
+    }),
+  ).toBeNull();
+  expect(encodeTimeoutChangePayload({ ...base, players: 2, deltaMinutes: Number.NaN })).toBeNull();
+  expect(
+    encodeMinPlayersChangePayload({ ...base, players: 2, deltaPlayers: Number.POSITIVE_INFINITY }),
+  ).toBeNull();
+});
+
+test("decoders reject unknown game types, malformed fields and unknown creator encodings", () => {
+  expect(decodeGameConfirmPayload("cg|x|0:1|2|gg|2|0|n16")).toBeNull();
+  expect(decodeGameConfirmPayload("cg|c|0:1|2|gg|2|0|x16")).toBeNull();
+  expect(decodeGameConfirmPayload("cg|c|0:1|2|gg|2|0|n")).toBeNull();
+  expect(decodeTimeoutChangePayload("ct|c|0:1|2|!|n16")).toBeNull();
+  expect(decodeVisibilityPayload("cv|c|0:?|2|1|n16")).toBeNull();
+  expect(decodeMinPlayersChangePayload("cm|c|0:1|2||n16")).toBeNull();
+  expect(decodeAmountSelectionPayload("ga|z|0:1|n16")).toBeNull();
+  expect(decodePlayersSelectionPayload("gp|c|0:1|-1|n16")).toBeNull();
+  expect(decodeCustomPlayersPayload("gcp|c|0|n16")).toBeNull();
+});
+
+test("non-numeric creator ids round-trip through the compact encoding", () => {
+  const encoded = encodeAmountSelectionPayload({
+    gameType: "giveaway",
+    amount: "0.5",
+    creatorId: "user_abc",
+  });
+  expect(encoded).toStartWith("ga|g|");
+  expect(decodeAmountSelectionPayload(encoded!)).toEqual({
+    gameType: "giveaway",
+    amount: "0.5",
+    creatorId: "user_abc",
+  });
+});

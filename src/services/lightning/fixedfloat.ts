@@ -62,7 +62,13 @@ const quote = z.object({
 });
 export type FixedFloatQuote = z.output<typeof quote>;
 
-export class DepositInputError extends Error {}
+export class DepositInputError extends Error {
+  // Explicit pass-through constructor: Bun's coverage mis-attributes an implicit
+  // derived constructor to the following class declaration.
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args);
+  }
+}
 
 export class FixedFloatError extends Error {
   constructor(readonly retrySafe: boolean) {
