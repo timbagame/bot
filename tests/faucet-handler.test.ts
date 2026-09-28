@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PublicKey } from "#solana";
-import { createFaucetModule } from "../src/handlers/faucet";
+import { buildFaucetMessage, createFaucetModule } from "../src/handlers/faucet";
 import { FaucetDatabase } from "../src/utils/faucet-database";
 import { inferMaxPlayers } from "../src/utils/arg-parsing";
 import { resetTestDatabase } from "./helpers/database";
@@ -28,6 +28,9 @@ const createHarness = (
     outcome?: () => Promise<"confirmed" | "failed" | "unknown">;
     notify?: (chatId: number, text: string) => Promise<void>;
     now?: () => number;
+    parseResult?: any;
+    editError?: () => unknown;
+    answerCallback?: false;
   } = {},
 ) => {
   const callbacks = new Map<string, (ctx: any) => Promise<void>>();
@@ -39,9 +42,11 @@ const createHarness = (
   const events: string[] = [];
   const bot = {
     api: {
-      editMessageText: async (_chat: number, _message: number, text: string, options: any) => {
+      editMessageText: async (_chat: number, _message: number, text: string, editOptions: any) => {
+        const failure = options.editError?.();
+        if (failure) throw failure;
         events.push("edit");
-        edits.push({ text, options });
+        edits.push({ text, options: editOptions });
       },
       sendMessage: async (chatId: number, text: string, messageOptions: any) => {
         events.push("dm");
@@ -57,10 +62,11 @@ const createHarness = (
   const module = createFaucetModule({
     bot,
     database: db,
-    parseAmount: async (args) => ({
-      success: true,
-      data: options.parse?.(args) ?? parsed,
-    }),
+    parseAmount: async (args) =>
+      options.parseResult ?? {
+        success: true,
+        data: options.parse?.(args) ?? parsed,
+      },
     inferMaxPlayers,
     getRequiredTelegramId: async () => 10n,
     getBalance: async () =>
@@ -77,9 +83,12 @@ const createHarness = (
       error instanceof Error && error.message.includes("confirmation timeout"),
     formatAmountError: () => "invalid amount",
     now: options.now ?? (() => 1_000),
-    answerCallback: async (_ctx, text) => {
-      answers.push(text ?? "");
-    },
+    answerCallback:
+      options.answerCallback === false
+        ? undefined
+        : async (_ctx, text) => {
+            answers.push(text ?? "");
+          },
   });
   module.registerCallbacks();
 
@@ -120,6 +129,7 @@ const createHarness = (
 
   return {
     module,
+    callbacks,
     replies,
     edits,
     answers,
@@ -530,5 +540,256 @@ describe("faucet handler", () => {
     await harness.module.handleCancel(harness.callbackContext(10), 1);
     expect(db.getFaucet(1)?.status).toBe("cancelled");
     expect(harness.edits.at(-1)?.text).toContain("Cancelled");
+  });
+});
+
+describe("faucet handler edge cases", () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => warnSpy.mockRestore());
+
+  test("shows usage when no amount is given", async () => {
+    const harness = createHarness();
+
+    await harness.module.handleCommand(harness.commandContext("/faucet"));
+
+    expect(harness.replies[0]?.text).toStartWith("Usage: <code>/faucet &lt;amount&gt;");
+    expect(db.getFaucet(1)).toBeNull();
+  });
+
+  test("ignores commands without a resolvable creator or chat", async () => {
+    const harness = createHarness();
+    const ctx = harness.commandContext("/faucet 1 2");
+    ctx.chat = undefined;
+
+    await harness.module.handleCommand(ctx);
+
+    expect(harness.replies).toEqual([]);
+  });
+
+  test("reports an amount that cannot be parsed", async () => {
+    const harness = createHarness({ parseResult: { success: false, error: "invalid_amount" } });
+
+    await harness.module.handleCommand(harness.commandContext("/faucet nope"));
+
+    expect(harness.replies).toEqual([{ text: "invalid amount", options: { parse_mode: "HTML" } }]);
+  });
+
+  test("rejects a claim count above the limit", async () => {
+    const harness = createHarness();
+
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 101"));
+
+    expect(harness.replies[0]?.text).toStartWith("❌ Faucet ");
+    expect(db.getFaucet(1)).toBeNull();
+  });
+
+  test("cancels the new faucet when its message cannot be posted", async () => {
+    const harness = createHarness();
+    const ctx = harness.commandContext("/faucet 1 2");
+    ctx.reply = async () => {
+      throw new Error("bot was kicked");
+    };
+
+    await expect(harness.module.handleCommand(ctx)).rejects.toThrow("bot was kicked");
+    expect(db.getFaucet(1)?.status).toBe("cancelled");
+  });
+
+  test("registered callbacks route claims and cancellations by faucet id", async () => {
+    const harness = createHarness();
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
+    const claim = harness.callbacks.get("^faucet:claim:(\\d+)$")!;
+    const cancel = harness.callbacks.get("^faucet:cancel:(\\d+)$")!;
+
+    await claim({ ...harness.callbackContext(20), match: ["faucet:claim:1", "1"] });
+    expect(db.getClaim(1, 20n)?.status).toBe("paid");
+
+    await cancel({ ...harness.callbackContext(10), match: ["faucet:cancel:1", "1"] });
+    expect(db.getFaucet(1)?.status).toBe("cancelled");
+  });
+
+  test("answers callbacks directly when no answer helper is injected", async () => {
+    const harness = createHarness({ answerCallback: false });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
+    const answers: unknown[] = [];
+    const ctx = harness.callbackContext(11);
+    ctx.answerCallbackQuery = async (payload?: unknown) => {
+      answers.push(payload);
+    };
+
+    await harness.module.handleCancel(ctx, 1);
+    const creator = harness.callbackContext(10);
+    creator.answerCallbackQuery = async (payload?: unknown) => {
+      answers.push(payload);
+    };
+    await harness.module.handleCancel(creator, 1);
+
+    expect(answers[0]).toEqual({
+      text: expect.stringContaining("Only the faucet creator"),
+      show_alert: true,
+    });
+    expect(answers[1]).toEqual({ text: "Faucet cancelled.", show_alert: undefined });
+  });
+
+  test("an unchanged faucet message is not an error", async () => {
+    const harness = createHarness();
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
+    const ctx = harness.callbackContext(10);
+    ctx.api.editMessageText = async () => {
+      throw new Error("Bad Request: message is not modified");
+    };
+
+    await expect(harness.module.handleCancel(ctx, 1)).resolves.toBeUndefined();
+  });
+
+  test("reconciliation fails a submitted claim whose transaction failed", async () => {
+    const harness = createHarness({
+      transfer: async (onPrepared) => {
+        onPrepared("failed-signature");
+        throw new Error("confirmation timeout");
+      },
+      outcome: async () => "failed",
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(await harness.module.reconcile()).toBe(1);
+    expect(db.getClaim(1, 20n)).toMatchObject({
+      status: "failed",
+      last_error: "submitted transaction failed",
+    });
+    expect(harness.edits.at(-1)?.text).toContain("Collected by: <b>0/1 users</b>");
+  });
+
+  test("reconciliation skips claims whose outcome cannot be read", async () => {
+    const harness = createHarness({
+      transfer: async (onPrepared) => {
+        onPrepared("sig");
+        throw new Error("confirmation timeout");
+      },
+      outcome: async () => {
+        throw new Error("rpc down");
+      },
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+
+    expect(await harness.module.reconcile()).toBe(0);
+    expect(db.getClaim(1, 20n)?.status).toBe("submitted");
+    expect(warnSpy.mock.calls.at(-1)?.[0]).toBe("Failed to reconcile faucet claim 1:");
+  });
+
+  test("reconciliation keeps going when the faucet message cannot be updated", async () => {
+    let failEdits = false;
+    const harness = createHarness({
+      transfer: async (onPrepared) => {
+        onPrepared("sig");
+        throw new Error("confirmation timeout");
+      },
+      outcome: async () => "confirmed",
+      editError: () => (failEdits ? new Error("chat not found") : undefined),
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 1"));
+    await harness.module.handleClaim(harness.callbackContext(20), 1);
+    failEdits = true;
+
+    expect(await harness.module.reconcile()).toBe(1);
+    expect(db.getClaim(1, 20n)?.status).toBe("paid");
+    expect(
+      warnSpy.mock.calls.some(
+        (call: unknown[]) => call[0] === "Failed to update reconciled faucet 1:",
+      ),
+    ).toBe(true);
+    expect(harness.privateMessages).toHaveLength(1);
+  });
+
+  test("expireDue closes overdue faucets and refreshes their messages", async () => {
+    let currentTime = 1_000;
+    const harness = createHarness({ now: () => currentTime });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
+
+    expect(await harness.module.expireDue()).toBe(0);
+    currentTime += 25 * 60 * 60 * 1_000;
+    expect(await harness.module.expireDue()).toBe(1);
+
+    expect(db.getFaucet(1)?.status).toBe("expired");
+    expect(harness.edits.at(-1)?.text).toContain("⌛ Expired");
+    expect(harness.edits.at(-1)?.options.reply_markup.inline_keyboard.flat()).toEqual([]);
+  });
+
+  test("expireDue still expires faucets whose message cannot be edited", async () => {
+    let currentTime = 1_000;
+    const harness = createHarness({
+      now: () => currentTime,
+      editError: () => new Error("message to edit not found"),
+    });
+    await harness.module.handleCommand(harness.commandContext("/faucet 1 2"));
+    currentTime += 25 * 60 * 60 * 1_000;
+
+    expect(await harness.module.expireDue()).toBe(1);
+    expect(db.getFaucet(1)?.status).toBe("expired");
+    expect(warnSpy.mock.calls.at(-1)?.[0]).toBe("Failed to update expired faucet 1:");
+  });
+});
+
+describe("buildFaucetMessage", () => {
+  const faucet = {
+    id: 1,
+    creator_id: "10",
+    chat_id: "-100",
+    message_id: 5,
+    creator_display_name: "@creator",
+    token_mint: "mint",
+    token_ticker: "TOK",
+    decimals: 2,
+    is_sol: 0,
+    amount_per_claim: "100",
+    max_claims: 30,
+    display_amount: "1 TOK",
+    status: "active",
+    created_at: 0,
+    expires_at: 1,
+  } as const;
+
+  test("lists at most twenty collectors and counts the rest", () => {
+    const collectors = Array.from({ length: 22 }, (_, index) => ({
+      telegramId: String(index + 1),
+      displayName: index === 0 ? "<b>bold</b>" : null,
+    }));
+
+    const text = buildFaucetMessage({ faucet, paidClaims: 22, processingClaims: 0, collectors });
+
+    expect(text).toContain('<a href="tg://user?id=1">&lt;b&gt;bold&lt;/b&gt;</a>');
+    expect(text).toContain('<a href="tg://user?id=2">User 2</a>');
+    expect(text).not.toContain("User 21");
+    expect(text).toContain(", +2 more");
+    expect(text).toContain("Remaining: <b>8/30 TOK</b>");
+  });
+
+  test("does not link collectors without a numeric id", () => {
+    const text = buildFaucetMessage({
+      faucet,
+      paidClaims: 1,
+      processingClaims: 0,
+      collectors: [{ telegramId: "legacy", displayName: "Old" }],
+    });
+
+    expect(text).toContain("Collectors: Old");
+    expect(text).not.toContain("tg://user?id=legacy");
+  });
+
+  test("an empty faucet shows nothing remaining", () => {
+    const text = buildFaucetMessage({
+      faucet: { ...faucet, status: "empty" },
+      paidClaims: 3,
+      processingClaims: 0,
+      collectors: [],
+    });
+
+    expect(text).toContain("Remaining: <b>0/30 TOK</b>");
+    expect(text).toContain("🚰 Empty");
+    expect(text).not.toContain("Collectors:");
   });
 });

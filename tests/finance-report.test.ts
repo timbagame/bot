@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { buildFinanceReport, resolveFinanceWindow } from "../src/services/finance-report";
 import {
   createFinanceHandlers,
@@ -213,7 +213,7 @@ describe("finance authorization", () => {
     const backgroundTasks: Promise<void>[] = [];
     const handlers = createFinanceHandlers({
       ...makeDependencies(),
-      trackBackgroundTask: (task) => backgroundTasks.push(task),
+      trackBackgroundTask: (task: Promise<void>) => backgroundTasks.push(task),
     });
     let message = "";
     await handlers.handleCommand({
@@ -249,7 +249,7 @@ describe("finance authorization", () => {
     };
     const handlers = createFinanceHandlers({
       ...dependencies,
-      trackBackgroundTask: (task) => backgroundTasks.push(task),
+      trackBackgroundTask: (task: Promise<void>) => backgroundTasks.push(task),
     });
 
     await handlers.handleCommand({
@@ -288,7 +288,7 @@ describe("finance authorization", () => {
     };
     const handlers = createFinanceHandlers({
       ...dependencies,
-      trackBackgroundTask: (task) => backgroundTasks.push(task),
+      trackBackgroundTask: (task: Promise<void>) => backgroundTasks.push(task),
     });
     const ctx = {
       chat: { type: "private" },
@@ -307,5 +307,220 @@ describe("finance authorization", () => {
     expect(replies.at(-1)).toContain("already being built");
     finishSync();
     await Promise.all(backgroundTasks);
+  });
+});
+
+describe("finance handlers: capital, callbacks and failures", () => {
+  let warn: ReturnType<typeof spyOn>;
+  let error: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+    error = spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
+  const baseDependencies = () => ({
+    financeLedger: {
+      getSnapshot: async () => ({
+        gameClaimable: [],
+        swapClaimable: [],
+        coverage: "complete" as const,
+        backfill: COMPLETE_BACKFILL,
+      }),
+    },
+    transactionHistory: { getFinanceEvents: () => [], getReferralFees: () => [] },
+    resolveTokenMetadata: async () => ({ ticker: "SOL", decimals: 9 }),
+    resolveTokenPriceUsd: async () => 100,
+    adminIds: new Set(["123"]),
+    monthlyExpenses: [],
+  });
+
+  const commandContext = () => {
+    const edits: string[] = [];
+    const replies: string[] = [];
+    const ctx = {
+      chat: { type: "private" },
+      from: { id: 123 },
+      reply: async (text: string) => {
+        replies.push(text);
+        return { chat: { id: 123 }, message_id: 456 };
+      },
+      api: {
+        editMessageText: async (_chat: number, _message: number, text: string) => {
+          edits.push(text);
+        },
+      },
+    } as any;
+    return { ctx, edits, replies };
+  };
+
+  const callbackContext = (fromId = 123) => {
+    const answers: Array<string | undefined> = [];
+    const edits: string[] = [];
+    const replies: string[] = [];
+    const ctx = {
+      chat: { type: "private" },
+      from: { id: fromId },
+      callbackQuery: { id: "cb" },
+      answerCallbackQuery: async (text?: string) => {
+        answers.push(text);
+      },
+      editMessageText: async (text: string) => {
+        edits.push(text);
+      },
+      reply: async (text: string) => {
+        replies.push(text);
+      },
+    } as any;
+    return { ctx, answers, edits, replies };
+  };
+
+  const run = async (
+    extra: Record<string, unknown>,
+    act: (handlers: ReturnType<typeof createFinanceHandlers>) => Promise<void>,
+  ) => {
+    const tasks: Promise<void>[] = [];
+    const handlers = createFinanceHandlers({
+      ...baseDependencies(),
+      trackBackgroundTask: (task: Promise<void>) => tasks.push(task),
+      ...extra,
+    } as any);
+    await act(handlers);
+    await Promise.all(tasks);
+  };
+
+  test("reports live contract capital without the estimate marker", async () => {
+    const { ctx, edits } = commandContext();
+
+    await run({ resolveContractCapital: async () => ({ lamports: 1_500_000_000n }) }, (h) =>
+      h.handleCommand(ctx),
+    );
+
+    expect(edits[0]).toContain("Contract deposits: 1.5 SOL ≈ $150.00");
+    expect(edits[0]).not.toContain("SOL ≈ $150.00 <i>estimated</i>");
+  });
+
+  test("falls back to the estimated rent when the live lookup fails", async () => {
+    const { ctx, edits } = commandContext();
+    await run(
+      {
+        resolveContractCapital: async () => {
+          throw new Error("rpc down");
+        },
+      },
+      (h) => h.handleCommand(ctx),
+    );
+
+    const fallbackSol = (Number(FINANCE_CONTRACT_RENT_LAMPORTS) / 1e9).toLocaleString("en-US", {
+      maximumFractionDigits: 6,
+    });
+    expect(edits[0]).toContain(`Contract deposits: ${fallbackSol} SOL`);
+    expect(edits[0]).toContain("<i>estimated</i>");
+    expect(warn.mock.calls[0]?.[0]).toBe("Unable to load live contract capital; using fallback:");
+  });
+
+  test("callbacks from non-admins are only acknowledged", async () => {
+    const { ctx, answers, edits } = callbackContext(999);
+
+    await run({}, (h) => h.handleCallback(ctx, "7d"));
+
+    expect(answers).toEqual([undefined]);
+    expect(edits).toEqual([]);
+  });
+
+  test("admins refresh the report for the chosen period in place", async () => {
+    const { ctx, answers, edits } = callbackContext();
+
+    await run({}, (h) => h.handleCallback(ctx, "90d"));
+
+    expect(answers).toEqual(["Refreshing finance report…"]);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]).toContain("Timba Finance");
+  });
+
+  test("an unchanged report is not treated as a failure", async () => {
+    const { ctx, replies } = callbackContext();
+    ctx.editMessageText = async () => {
+      throw new Error("Bad Request: message is not modified");
+    };
+
+    await run({}, (h) => h.handleCallback(ctx, "7d"));
+
+    expect(replies).toEqual([]);
+  });
+
+  test("a failed refresh tells the admin and frees the slot for a retry", async () => {
+    const { ctx, answers, replies } = callbackContext();
+    ctx.editMessageText = async () => {
+      throw "network";
+    };
+    const tasks: Promise<void>[] = [];
+    const handlers = createFinanceHandlers({
+      ...baseDependencies(),
+      trackBackgroundTask: (task: Promise<void>) => tasks.push(task),
+    } as any);
+
+    await handlers.handleCallback(ctx, "7d");
+    // Second click while the first is still running.
+    await handlers.handleCallback(ctx, "7d");
+    await Promise.all(tasks);
+
+    expect(answers).toEqual([
+      "Refreshing finance report…",
+      "Your finance report is already being built.",
+    ]);
+    expect(replies).toEqual([
+      "❌ Unable to build the finance report right now. Please try again later.",
+    ]);
+
+    await handlers.handleCallback(ctx, "7d");
+    await Promise.all(tasks);
+    expect(answers.at(-1)).toBe("Refreshing finance report…");
+    expect(replies).toHaveLength(2);
+  });
+
+  test("a failed command report replaces the loading message", async () => {
+    const { ctx, edits } = commandContext();
+    await run(
+      {
+        financeLedger: {
+          getSnapshot: async () => {
+            throw new Error("db locked");
+          },
+        },
+      },
+      (h) => h.handleCommand(ctx),
+    );
+
+    expect(edits).toEqual([
+      "❌ Unable to build the finance report right now. Please try again later.",
+    ]);
+    expect(error.mock.calls[0]?.[0]).toBe("Unable to build finance report:");
+  });
+
+  test("logs when even the failure message cannot be delivered", async () => {
+    const { ctx } = commandContext();
+    ctx.api.editMessageText = async () => {
+      throw new Error("chat not found");
+    };
+    await run({}, (h) => h.handleCommand(ctx));
+
+    expect(error.mock.calls.map((call: unknown[]) => call[0])).toEqual([
+      "Unable to build finance report:",
+      "Unable to report finance background failure:",
+    ]);
+  });
+
+  test("works without a background task tracker", async () => {
+    const { ctx, edits } = commandContext();
+    const handlers = createFinanceHandlers(baseDependencies() as any);
+
+    await handlers.handleCommand(ctx);
+    for (let i = 0; i < 20 && edits.length === 0; i += 1) await Bun.sleep(5);
+
+    expect(edits[0]).toContain("Timba Finance");
   });
 });

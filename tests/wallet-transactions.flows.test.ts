@@ -1,9 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Keypair } from "#solana";
 import {
+  bot,
   botModule,
   answers,
   buttons,
+  failApiMethod,
   lastMessage,
   lastText,
   messageCalls,
@@ -18,7 +20,7 @@ import {
   wallet,
 } from "./helpers/bot-harness";
 import { WSOL_MINT } from "../src/utils/constants";
-import { clearAllInputSessions } from "../src/utils/user-state";
+import { clearAllInputSessions, storePendingTransaction } from "../src/utils/user-state";
 
 useBotHarness();
 
@@ -364,5 +366,229 @@ describe("wrap and unwrap flows", () => {
     });
     await press("unwrap_confirm", { userId: USER });
     expect(answers().at(-1)).toBe("❌ Unwrap failed");
+  });
+});
+
+describe("send confirmation edge cases", () => {
+  let txCounter = 0;
+  const pending = (fields: Record<string, unknown>) => {
+    const txId = `edge-${++txCounter}`;
+    storePendingTransaction(txId, {
+      type: "send",
+      userId: String(USER),
+      address: recipient,
+      ...fields,
+    });
+    return `confirm_send_${txId}`;
+  };
+
+  test("summarises a stored amount when no display label was saved", async () => {
+    await press(pending({ token: "SOL", amount: "0.5" }), { userId: USER });
+    expect(texts()).toContain(
+      "⏳ <b>Sending…</b>\n\nSending 0.5 SOL...\n\n<i>This usually takes a few seconds.</i>",
+    );
+    expect(transfers.find((entry) => entry.kind === "sol")?.args[2]).toBe(LAMPORTS / 2);
+
+    await press(pending({ token: TOKEN_MINT, amount: "max" }), { userId: USER });
+    expect(texts().some((text) => text.includes(`Sending MAX ${TOKEN_MINT}...`))).toBe(true);
+    expect(transfers.find((entry) => entry.kind === "token")?.args[2]).toBe(2_500_000);
+  });
+
+  test.each([
+    ["no recipient", { token: "SOL", amount: "0.1", address: "" }],
+    ["no token", { token: "", amount: "1" }],
+    ["a token missing from the wallet", { token: "NOPE", amount: "1" }],
+  ])("fails a send with %s without moving funds", async (_label, fields) => {
+    await press(pending(fields), { userId: USER });
+
+    expect(answers().at(-1)).toBe("❌ Send failed");
+    expect(transfers.filter((entry) => entry.kind !== "confirm")).toEqual([]);
+  });
+
+  test("fails a MAX token send when the balance is empty", async () => {
+    seedWallet({ tokenBalance: 0 });
+
+    await press(pending({ token: TOKEN_MINT, amount: "max" }), { userId: USER });
+
+    expect(answers().at(-1)).toBe("❌ Send failed");
+    expect(lastText()).toContain("Something went wrong");
+    expect(transfers).toEqual([]);
+  });
+
+  test("fails a send for a wallet token without a mint", async () => {
+    walletTokens = [{ mint: "", ticker: "GHOST", balance: 10, decimals: 0, rawBalance: "10" }];
+    botModule.__test_clearWalletCache(BigInt(USER));
+    botModule.__test_setWalletCache(BigInt(USER), {
+      solBalance: LAMPORTS,
+      tokenBalances: walletTokens,
+    });
+
+    await press(pending({ token: "GHOST", amount: "1" }), { userId: USER });
+
+    expect(answers().at(-1)).toBe("❌ Send failed");
+    expect(transfers).toEqual([]);
+  });
+
+  test("the address prompt still works when the wallet address cannot be derived", async () => {
+    stub(wallet, "getKeyPair", async () => {
+      throw new Error("derivation failed");
+    });
+
+    await press("send_amount_SOL_25%", { userId: USER });
+
+    expect(lastText()).toContain("Enter destination address");
+  });
+});
+
+describe("wallet transaction callbacks without a Telegram identity", () => {
+  test.each(["cmd_unwrap", "wrap_amount_50%", "unwrap_confirm", `confirm_wrap_${LAMPORTS}`])(
+    "%s asks the user to open a direct chat",
+    async (data) => {
+      const wraps: unknown[] = [];
+      stub(wallet, "wrapSol", async (...args: unknown[]) => {
+        wraps.push(args);
+        return "sig";
+      });
+      stub(wallet, "unwrapSol", async (...args: unknown[]) => {
+        wraps.push(args);
+        return { signature: "sig", amountLamports: 1 };
+      });
+
+      await press(data, { userId: 0, chatId: 5, chatType: "private" });
+
+      expect(answers()).toContain("❌ Unable to resolve Telegram identity");
+      expect(wraps).toEqual([]);
+    },
+  );
+});
+
+describe("custom wrap input edge cases", () => {
+  test("a zero amount is rejected", async () => {
+    await press("wrap_custom", { userId: USER });
+    await replyToPrompt("0");
+    expect(lastText()).toContain("Error processing input");
+  });
+
+  test("the confirmation is still shown when balances cannot be loaded", async () => {
+    await press("wrap_custom", { userId: USER });
+    botModule.__test_clearWalletCache(BigInt(USER));
+    stub(wallet, "getAllWalletTokenBalances", async () => {
+      throw new Error("rpc down");
+    });
+    stub(wallet, "getBalance", async () => {
+      throw new Error("rpc down");
+    });
+
+    await replyToPrompt("0.25");
+
+    expect(lastText()).toContain("Wrap Confirmation");
+  });
+});
+
+describe("input handlers guard their sessions", () => {
+  const ctxFor = (userId?: number) =>
+    ({
+      from: userId === undefined ? undefined : { id: userId },
+      chat: { id: USER, type: "private" },
+      message: { message_id: 5 },
+      api: bot.api,
+      reply: (text: string, options?: unknown) => bot.api.sendMessage(USER, text, options),
+    }) as any;
+
+  test("reject input from someone other than the prompt's owner", async () => {
+    await expect(
+      botModule.__test_handleAddressInput(
+        ctxFor(OTHER_USER),
+        { initiatorId: String(USER) },
+        recipient,
+      ),
+    ).rejects.toThrow("Input prompt locked to a different user");
+  });
+
+  test("reject input when the sender is unknown", async () => {
+    await expect(
+      botModule.__test_handleWrapAmountInput(ctxFor(), { initiatorId: String(USER) }, "1"),
+    ).rejects.toThrow("Unable to resolve user for prompt session");
+  });
+
+  test("reject a custom amount for a token that left the wallet", async () => {
+    await expect(
+      botModule.__test_handleCustomAmountInput(
+        ctxFor(USER),
+        { initiatorId: String(USER), token: "GONE" },
+        "1",
+      ),
+    ).rejects.toThrow("Token GONE not found in wallet");
+  });
+
+  test("the confirmation targets the current chat when the session has no chat id", async () => {
+    const sent: Array<{ chatId: unknown; text: string }> = [];
+    const ctx = {
+      ...ctxFor(USER),
+      reply: async (text: string) => {
+        sent.push({ chatId: "reply", text });
+        return { message_id: 9, chat: { id: USER } };
+      },
+      api: {
+        sendMessage: async (chatId: number, text: string) => {
+          sent.push({ chatId, text });
+          return { message_id: 9, chat: { id: chatId } };
+        },
+        editMessageText: async () => {
+          throw new Error("nothing to edit");
+        },
+      },
+    } as any;
+
+    await botModule.__test_handleAddressInput(
+      ctx,
+      { initiatorId: String(USER), token: "SOL", amount: "0.1" },
+      recipient,
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Send Confirmation");
+    expect(sent[0]!.text).toContain("0.1 SOL");
+    expect([USER, "reply"]).toContain(sent[0]!.chatId as any);
+  });
+});
+
+describe("Telegram failures while showing wallet transaction menus", () => {
+  test("unwrap reports failure when the progress message cannot be shown", async () => {
+    const unwraps: unknown[] = [];
+    stub(wallet, "unwrapSol", async (...args: unknown[]) => {
+      unwraps.push(args);
+      return { signature: "sig", amountLamports: LAMPORTS };
+    });
+    failApiMethod("editMessageText", "Bad Request: chat not found");
+    failApiMethod("sendMessage", "Forbidden: bot was blocked by the user", 403);
+
+    await press("unwrap_confirm", { userId: USER });
+
+    expect(unwraps).toEqual([]);
+    // The fallback error menu fails too, so the global handler answers the callback.
+    expect(answers().at(-1)).toStartWith("❌");
+  });
+
+  test("send confirmation reports an error when the progress message cannot be shown", async () => {
+    await press("send_amount_SOL_25%", { userId: USER });
+    await replyToPrompt(recipient);
+    const confirm = confirmButton("confirm_send_");
+    failApiMethod("editMessageText", "Bad Request: chat not found");
+    failApiMethod("sendMessage", "Forbidden: bot was blocked by the user", 403);
+
+    await press(confirm, { userId: USER });
+
+    expect(transfers).toEqual([]);
+    expect(answers().at(-1)).toBe("❌ Error processing transaction");
+  });
+
+  test("token selection reports an error when the menu cannot be shown", async () => {
+    failApiMethod("editMessageText", "Bad Request: chat not found");
+    failApiMethod("sendMessage", "Forbidden: bot was blocked by the user", 403);
+
+    await press(`send_select_${TOKEN_MINT}`, { userId: USER });
+
+    expect(answers().at(-1)).toBe("❌ Error processing selection");
   });
 });
