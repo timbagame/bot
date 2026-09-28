@@ -2671,14 +2671,8 @@ const registerProgramEventListeners = async (): Promise<void> => {
   }
 
   try {
+    // unregisterProgramEventListeners() succeeded, so every handle is cleared here.
     for (const descriptor of programEventDescriptors) {
-      if (descriptor.getId() !== null) {
-        console.warn(
-          `⚠️ Skipping ${descriptor.label} event listener registration because an active listener handle is still present (id=${descriptor.getId()}).`,
-        );
-        continue;
-      }
-
       console.log(`Setting up ${descriptor.label} event listener...`);
       const listenerId = (await program.addEventListener(
         descriptor.eventName,
