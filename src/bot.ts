@@ -4304,12 +4304,7 @@ const handleActiveCommand = async (ctx: Context) => {
 
   try {
     if (isGroupChat(ctx)) {
-      if (ctx.chat?.id == null) {
-        await ctx.reply("Unable to determine chat for this command.");
-        return;
-      }
-
-      await replyWithActiveGamesMenu(ctx, await gameManager.getChatActiveGames(ctx, ctx.chat.id), {
+      await replyWithActiveGamesMenu(ctx, await gameManager.getChatActiveGames(ctx, ctx.chat!.id), {
         emptyText: "No active games in this chat.",
         title: "🎮 Active games",
         callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
@@ -4488,13 +4483,8 @@ bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
 });
 
 const handleGamesRefreshCallback = async (ctx: Context): Promise<void> => {
-  const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
-  if (!match || !match[1]) {
-    await safeAnswerCallbackQuery(ctx, "Invalid request.");
-    return;
-  }
-
-  const ownerId = match[1];
+  // Only routed for data matching /^games_refresh:(\d+)$/.
+  const ownerId = ctx.callbackQuery!.data!.slice("games_refresh:".length);
   const callerId = ctx.from?.id?.toString();
   if (callerId !== ownerId) {
     await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
@@ -4526,11 +4516,7 @@ export const __test_handleActiveCommand = handleActiveCommand;
 export const __test_handleGamesTabCallback = handleGamesTabCallback;
 
 bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
-  try {
-    await safeAnswerCallbackQuery(ctx, "Select a join button below to enter a game.");
-  } catch (error) {
-    await handleCallbackErrorSafe(ctx, error, "active games header");
-  }
+  await safeAnswerCallbackQuery(ctx, "Select a join button below to enter a game.");
 });
 
 // Pagination callback for /active command
