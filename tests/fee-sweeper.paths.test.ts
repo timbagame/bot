@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { Keypair, PublicKey } from "#solana";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "#token";
 import {
+  __test_processTokenFee,
   __test_resolveFeeSweepTokens,
   __test_runReferralSweep,
   __test_shouldWithdrawToken,
@@ -140,9 +141,8 @@ describe("SOL price validation before swaps", () => {
   });
 
   test("allows a price within the drift limit of the cached one", async () => {
-    const { rememberPriceLookup, __test_clearPriceServiceCache } = await import(
-      "../src/utils/price-service"
-    );
+    const { rememberPriceLookup, __test_clearPriceServiceCache } =
+      await import("../src/utils/price-service");
     rememberPriceLookup({ price: 100, identifier: WSOL_MINT }, { tokenMint: WSOL_MINT });
     try {
       expect(await run({ price: 110, resolvedAt: Date.now() })).toBe(1);
@@ -484,123 +484,120 @@ describe("sweepFees orchestration", () => {
     expect(manager).toBeInstanceOf(SwapManager);
   });
 
-  (contractCapabilities.gameTokenAccount ? describe : describe.skip)(
-    "v0.2 game fee withdrawal",
-    () => {
-      const setupWithdrawal = async (options: {
-        feeAmount?: bigint;
-        hasConfig?: boolean;
-        tokenProgram?: PublicKey;
-        confirmed?: unknown;
-      }) => {
-        const admin = await Keypair.generate();
-        const mint = (await Keypair.generate()).publicKey;
-        const sent: unknown[][] = [];
-        const events: any[] = [];
-        const wallet = {
-          getOperatorKeypair: async () => admin,
-          formatSolBalance: String,
-          formatTokenBalance: String,
-          getTokenMetadata: async () => ({ decimals: 6 }),
-          ensureAssociatedTokenAccount: async () => ({
-            address: (await Keypair.generate()).publicKey,
-            instructions: [],
-            programId: options.tokenProgram ?? TOKEN_PROGRAM_ID,
-          }),
-          sendAndConfirmWithResubmits: async (...args: unknown[]) => {
-            sent.push(args);
-            return "withdraw-sig";
-          },
-        };
-        const program = {
-          account: {
-            gameToken: { fetch: async () => ({ feeAmount: options.feeAmount ?? 10_000_000n }) },
-          },
-          methods: {
-            withdrawTokenFee: () => ({
-              accounts: () => ({ instruction: async () => ({ ix: "withdraw" }) }),
-            }),
-          },
-        };
-        const connection = {
-          getAccountInfo: async () => (options.hasConfig === false ? null : { data: [] }),
-          getTransaction: async () => options.confirmed ?? null,
-        };
-        const record = spyOn(
-          TransactionHistory.getInstance(),
-          "recordFinanceEvent",
-        ).mockImplementation((event: any) => {
-          events.push(event);
-        });
-        try {
-          const result = await sweepFees({
-            walletManager: wallet as any,
-            tokenConfigs: [{ mint: mint.toBase58(), ticker: "TKN" }],
-            referralAccount: "",
-            priceResolver: price(1),
-            enableSwapToSol: false,
-            contextFactory: context(connection, program),
-          });
-          return { result, sent, events, mint };
-        } finally {
-          record.mockRestore();
-        }
+  describe("game fee withdrawal", () => {
+    const setupWithdrawal = async (options: {
+      feeAmount?: bigint;
+      hasConfig?: boolean;
+      tokenProgram?: PublicKey;
+      confirmed?: unknown;
+    }) => {
+      const admin = await Keypair.generate();
+      const mint = (await Keypair.generate()).publicKey;
+      const sent: unknown[][] = [];
+      const events: any[] = [];
+      const wallet = {
+        formatTokenBalance: String,
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        ensureAssociatedTokenAccount: async () => ({
+          address: (await Keypair.generate()).publicKey,
+          instructions: [],
+          programId: options.tokenProgram ?? TOKEN_PROGRAM_ID,
+        }),
+        sendAndConfirmWithResubmits: async (...args: unknown[]) => {
+          sent.push(args);
+          return "withdraw-sig";
+        },
       };
-
-      test("withdraws pending fees and records the claim", async () => {
-        const { result, sent, events, mint } = await setupWithdrawal({
-          confirmed: { slot: 4, blockTime: 50, meta: { fee: 5000 } },
-        });
-
-        expect(result.tokenWithdrawals).toBe(1);
-        expect((sent[0]![0] as unknown[]).at(-1)).toEqual({ ix: "withdraw" });
-        expect(sent[0]![2]).toEqual({ operationLabel: "Withdraw TKN fees" });
-        expect(events).toEqual([
-          expect.objectContaining({
-            eventId: `program:withdraw-sig:claim:${mint.toBase58()}`,
-            kind: "claimed",
-            amountRaw: "10000000",
-            networkFeeLamports: "5000",
-            timestamp: 50_000,
-            slot: 4,
+      const program = {
+        programId: new PublicKey("11111111111111111111111111111112"),
+        account: {
+          gameToken: { fetch: async () => ({ feeAmount: options.feeAmount ?? 10_000_000n }) },
+        },
+        methods: {
+          withdrawTokenFee: () => ({
+            accounts: () => ({ instruction: async () => ({ ix: "withdraw" }) }),
           }),
-        ]);
+        },
+      };
+      const connection = {
+        getAccountInfo: async () => (options.hasConfig === false ? null : { data: [] }),
+        getTransaction: async () => options.confirmed ?? null,
+      };
+      const record = spyOn(
+        TransactionHistory.getInstance(),
+        "recordFinanceEvent",
+      ).mockImplementation((event: any) => {
+        events.push(event);
+      });
+      try {
+        const withdrawn = await __test_processTokenFee(
+          program as any,
+          connection as any,
+          wallet as any,
+          admin,
+          admin,
+          { mint: mint.toBase58(), ticker: "TKN" },
+          price(1),
+        );
+        return { withdrawn, sent, events, mint };
+      } finally {
+        record.mockRestore();
+      }
+    };
+
+    test("withdraws pending fees and records the claim", async () => {
+      const { withdrawn, sent, events, mint } = await setupWithdrawal({
+        confirmed: { slot: 4, blockTime: 50, meta: { fee: 5000 } },
       });
 
-      test("an unconfirmed withdrawal is counted without a ledger entry", async () => {
-        const { result, events } = await setupWithdrawal({});
-        expect(result.tokenWithdrawals).toBe(1);
-        expect(events).toEqual([]);
-      });
+      expect(withdrawn).toBe(true);
+      expect((sent[0]![0] as unknown[]).at(-1)).toEqual({ ix: "withdraw" });
+      expect(sent[0]![2]).toEqual({ operationLabel: "Withdraw TKN fees" });
+      expect(events).toEqual([
+        expect.objectContaining({
+          eventId: `program:withdraw-sig:claim:${mint.toBase58()}`,
+          kind: "claimed",
+          amountRaw: "10000000",
+          networkFeeLamports: "5000",
+          timestamp: 50_000,
+          slot: 4,
+        }),
+      ]);
+    });
 
-      test.each([
-        ["no configuration", { hasConfig: false }],
-        ["no pending fees", { feeAmount: 0n }],
-        ["fees below the threshold", { feeAmount: 1n }],
-      ])("skips a token with %s", async (_label, options) => {
-        const { result, sent } = await setupWithdrawal(options);
-        expect(result.tokenWithdrawals).toBe(0);
-        expect(sent).toEqual([]);
-      });
+    test("an unconfirmed withdrawal is counted without a ledger entry", async () => {
+      const { withdrawn, events } = await setupWithdrawal({});
+      expect(withdrawn).toBe(true);
+      expect(events).toEqual([]);
+    });
 
-      test("refuses Token-2022 mints", async () => {
-        const { result } = await setupWithdrawal({ tokenProgram: TOKEN_2022_PROGRAM_ID });
-        expect(result.tokenWithdrawals).toBe(0);
-        expect(logged(errorSpy, "Failed withdrawing TKN")).toBe(true);
-      });
+    test.each([
+      ["no configuration", { hasConfig: false }],
+      ["no pending fees", { feeAmount: 0n }],
+      ["fees below the threshold", { feeAmount: 1n }],
+    ])("skips a token with %s", async (_label, options) => {
+      const { withdrawn, sent } = await setupWithdrawal(options);
+      expect(withdrawn).toBe(false);
+      expect(sent).toEqual([]);
+    });
 
-      test("a withdrawal that cannot be recorded is still counted", async () => {
-        const { result } = await setupWithdrawal({
-          confirmed: {
-            get slot(): number {
-              throw new Error("bad response");
-            },
-            meta: {},
+    test("refuses Token-2022 mints", async () => {
+      await expect(setupWithdrawal({ tokenProgram: TOKEN_2022_PROGRAM_ID })).rejects.toThrow(
+        "Timba only supports legacy SPL Token mints",
+      );
+    });
+
+    test("a withdrawal that cannot be recorded is still counted", async () => {
+      const { withdrawn } = await setupWithdrawal({
+        confirmed: {
+          get slot(): number {
+            throw new Error("bad response");
           },
-        });
-        expect(result.tokenWithdrawals).toBe(1);
-        expect(logged(warnSpy, "Unable to record game-fee withdrawal withdraw-sig")).toBe(true);
+          meta: {},
+        },
       });
-    },
-  );
+      expect(withdrawn).toBe(true);
+      expect(logged(warnSpy, "Unable to record game-fee withdrawal withdraw-sig")).toBe(true);
+    });
+  });
 });

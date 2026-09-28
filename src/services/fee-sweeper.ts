@@ -760,5 +760,6 @@ export const __test_shouldSwapTokenBalance = shouldSwapTokenBalance;
 export const __test_sweepTokensToSol = sweepTokensToSol;
 export const __test_unwrapWsolBalance = unwrapWsolBalance;
 export const __test_runReferralSweep = runReferralSweep;
+export const __test_processTokenFee = processTokenFee;
 export const __test_resolveFeeSweepTokens = resolveFeeSweepTokens;
 export { unwrapWsolBalance };
