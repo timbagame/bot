@@ -658,6 +658,16 @@ describe("swap selection edge cases", () => {
     expect(answers().at(-1)).toBe("❌ Error processing swap pair");
   });
 
+  test("a custom amount prompt that cannot be shown is acknowledged as an error", async () => {
+    failApiMethod("editMessageText", "Bad Request: message to edit not found");
+    failApiMethod("sendMessage", "Forbidden: bot was blocked by the user", 403);
+
+    await at("swap_amount_SOL_USDC_CUSTOM");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error in swap amount selection:", expect.anything());
+    expect(answers().at(-1)).toBe("❌ Error processing swap amount");
+  });
+
   test("tokens the bot cannot resolve are reported when quoting", async () => {
     await at("swap_amount_SOL_FAKE_50%");
     expect(prepareSwap).not.toHaveBeenCalled();

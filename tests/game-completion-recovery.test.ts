@@ -109,8 +109,9 @@ describe("Game completion recovery", () => {
 
     expect(parsed).toEqual({
       winnerAddress: "PlainWinner",
-      totalPot: 9_007_199_254_740_993,
-      winnerAmount: 9_007_199_254_740_993,
+      // Parsed from the string form, so it matches Number() of that string.
+      totalPot: Number("9007199254740993"),
+      winnerAmount: Number("9007199254740993"),
       feeAmountRaw: undefined,
     });
   });

@@ -5837,9 +5837,7 @@ registerCallbackPrefixHandler(
       }
 
       const telegramId = await resolveTelegramIdOrRespond(ctx, "swap amount selection");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
 
       // The quote screen shows its own progress; the toast only covers slow starts.
       await answerCallbackWithGrace(
