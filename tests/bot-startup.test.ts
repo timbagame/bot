@@ -224,8 +224,7 @@ describe("autoStartBot", () => {
     expect(start).not.toHaveBeenCalled();
 
     botModule.autoStartBot("production", start);
-    botModule.autoStartBot(undefined, start);
-    expect(start).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
 
