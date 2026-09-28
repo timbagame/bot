@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   answers,
   bot,
@@ -22,7 +22,6 @@ import { OracleClient } from "../src/utils/oracle";
 import { clearAllGameSetupSessions, getGameSetupSession } from "../src/utils/user-state";
 import * as prices from "../src/utils/prices";
 import { PublicKey } from "@solana/web3.js";
-import { spyOn } from "bun:test";
 import { encodeGameConfirmPayload } from "../src/utils/callback-data";
 
 useBotHarness();
