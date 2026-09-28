@@ -449,14 +449,16 @@ export const __test_resetTokenMetadataCacheMaxEntries = () => {
   TOKEN_METADATA_CACHE_MAX_ENTRIES = DEFAULT_TOKEN_METADATA_CACHE_MAX_ENTRIES;
 };
 
-void (async () => {
+const refreshSolFeeBuffer = async (): Promise<void> => {
   try {
     const { singleTransactionLamports } = await refreshDynamicFeeBudgets(feeBudget);
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
   }
-})();
+};
+void refreshSolFeeBuffer();
+export const __test_refreshSolFeeBuffer = refreshSolFeeBuffer;
 let chatDb = ChatDatabase.getInstance();
 let gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
@@ -711,6 +713,8 @@ const formatUsdThresholdLabel = (value: number): string => {
   return `$${formatted}`;
 };
 
+export const __test_formatUsdThresholdLabel = formatUsdThresholdLabel;
+
 const buildGaslessFeeRequirementMessage = (): string => {
   const usdLabel = formatUsdThresholdLabel(JUPITER_GASLESS_MIN_TRADE_USD);
   const solBufferDisplay = wallet.formatSolBalance(JUPITER_MIN_SOL_BALANCE_LAMPORTS);
@@ -747,6 +751,8 @@ const resolveFormattedBalance = (
     formattedBalance: wallet.formatTokenBalance(entry.balance, entry.decimals),
   };
 };
+
+export const __test_resolveFormattedBalance = resolveFormattedBalance;
 
 interface TokenSelectionCacheEntry {
   targetToken: string;
@@ -804,10 +810,6 @@ const formatSlippagePercent = (value: number): string => {
 
   const absolute = Math.abs(value);
 
-  if (absolute >= 1) {
-    return `${value.toFixed(1)}%`;
-  }
-
   if (absolute >= 0.1) {
     return `${value.toFixed(1)}%`;
   }
@@ -818,6 +820,8 @@ const formatSlippagePercent = (value: number): string => {
 
   return `${value.toFixed(3)}%`;
 };
+
+export const __test_formatSlippagePercent = formatSlippagePercent;
 
 const formatTradeConfirmationSummary = ({
   payToken,
