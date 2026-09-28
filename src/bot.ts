@@ -1797,10 +1797,9 @@ type PendingGameMessageUpdateState = {
   pending: boolean;
   running: boolean;
   timer?: ReturnType<typeof setTimeout>;
-  referenceChatId?: number;
+  referenceChatId: number;
   latestTotalPot?: number;
   nextDelayMs?: number;
-  cancelled?: boolean;
 };
 
 const pendingGameMessageUpdates = new Map<string, PendingGameMessageUpdateState>();
@@ -1821,7 +1820,6 @@ const cancelPendingGameMessageUpdate = (gameAddress: string): void => {
   }
 
   state.pending = false;
-  state.cancelled = true;
   state.timer = undefined;
 
   pendingGameMessageUpdates.delete(gameAddress);
@@ -1910,23 +1908,18 @@ const scheduleGameMessageUpdate = (
   gameAddress: string,
   referenceChatId: number,
   totalPot?: number,
-  options: { delayMs?: number } = {},
 ): void => {
   const state = pendingGameMessageUpdates.get(gameAddress) ?? {
     pending: false,
     running: false,
+    referenceChatId,
   };
 
   state.referenceChatId = referenceChatId;
-  if (typeof options.delayMs === "number" && Number.isFinite(options.delayMs)) {
-    state.nextDelayMs = Math.max(0, Math.trunc(options.delayMs));
-  }
 
   if (typeof totalPot === "number" && Number.isFinite(totalPot)) {
     state.latestTotalPot = totalPot;
   }
-
-  state.cancelled = false;
 
   state.pending = true;
   pendingGameMessageUpdates.set(gameAddress, state);
@@ -1943,27 +1936,13 @@ const scheduleGameMessageUpdate = (
   );
   state.nextDelayMs = undefined;
 
+  // cancelPendingGameMessageUpdate() clears this timer, so it only fires for a
+  // pending, non-cancelled update.
   state.timer = setTimeout(async () => {
     state.timer = undefined;
-
-    if (!state.pending) {
-      if (pendingGameMessageUpdates.get(gameAddress) === state) {
-        pendingGameMessageUpdates.delete(gameAddress);
-      }
-      return;
-    }
-
     state.pending = false;
     state.running = true;
     pendingGameMessageUpdates.set(gameAddress, state);
-
-    if (state.cancelled) {
-      state.running = false;
-      if (pendingGameMessageUpdates.get(gameAddress) === state) {
-        pendingGameMessageUpdates.delete(gameAddress);
-      }
-      return;
-    }
 
     try {
       if (!gameManager) {
@@ -1971,9 +1950,6 @@ const scheduleGameMessageUpdate = (
       }
 
       const chatId = state.referenceChatId;
-      if (chatId == null) {
-        return;
-      }
 
       const gameData = typeof gameDb?.getGame === "function" ? gameDb.getGame(gameAddress) : null;
       const normalizedStatus =
@@ -2019,11 +1995,7 @@ const scheduleGameMessageUpdate = (
     } finally {
       state.running = false;
       if (state.pending && !state.timer) {
-        scheduleGameMessageUpdate(
-          gameAddress,
-          state.referenceChatId ?? referenceChatId,
-          state.latestTotalPot,
-        );
+        scheduleGameMessageUpdate(gameAddress, state.referenceChatId, state.latestTotalPot);
         return;
       }
 
