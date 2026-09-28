@@ -5142,9 +5142,7 @@ bot.callbackQuery(
       }
 
       const telegramId = await resolveTelegramIdOrRespond(ctx, "show private key");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
       pendingPrivateKeyExports.set(telegramId.toString(), Date.now() + PRIVATE_KEY_CONFIRM_TTL_MS);
       const keyboard = new InlineKeyboard()
         .text("Reveal private key", "confirm_privatekey")

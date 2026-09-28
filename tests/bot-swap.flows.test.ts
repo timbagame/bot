@@ -294,7 +294,7 @@ describe("swap confirmation side effects", () => {
   let fetchSpy: ReturnType<typeof spyOn>;
   let pricesSpy: ReturnType<typeof spyOn>;
   let holderSpy: ReturnType<typeof spyOn>;
-  const originalRpcUrl = process.env.RPC_URL;
+  const originalRpcUrl = process.env["RPC_URL"];
   let signature = 0;
 
   beforeEach(() => {
@@ -314,8 +314,8 @@ describe("swap confirmation side effects", () => {
     fetchSpy.mockRestore();
     pricesSpy.mockRestore();
     holderSpy.mockRestore();
-    if (originalRpcUrl === undefined) delete process.env.RPC_URL;
-    else process.env.RPC_URL = originalRpcUrl;
+    if (originalRpcUrl === undefined) delete process.env["RPC_URL"];
+    else process.env["RPC_URL"] = originalRpcUrl;
   });
 
   const enableAlerts = (media: Record<string, unknown> = {}) =>
@@ -380,7 +380,7 @@ describe("swap confirmation side effects", () => {
   });
 
   test("mainnet swaps link to the transaction", async () => {
-    process.env.RPC_URL = "https://api.mainnet-beta.solana.com";
+    process.env["RPC_URL"] = "https://api.mainnet-beta.solana.com";
 
     await confirmSwap();
 
