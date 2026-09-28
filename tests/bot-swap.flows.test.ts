@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { Keypair } from "#solana";
 import {
   answers,
   botModule,
@@ -465,5 +466,108 @@ describe("swap menu", () => {
     expect(buttons(lastMessage()).map((button) => button.text)).toContain(
       "❌ No tokens available to swap",
     );
+  });
+});
+
+describe("spending nearly all SOL", () => {
+  test("a large enough trade may spend down to the gasless floor", async () => {
+    await at("swap_amount_SOL_USDC_100%");
+
+    const request = (prepareSwap.mock.calls[0] as any[])[0];
+    // Only the small user reserve is kept back, not the full fee buffer.
+    expect(Number(request.amount)).toBeGreaterThan(4.99 * LAMPORTS);
+    expect(lastText()).toContain("Confirm this swap?");
+    expect(priceSpy.mock.calls[0]?.[0]).toEqual({ tokenMint: WSOL_MINT });
+  });
+
+  test("a small trade keeps the fee buffer instead of going gasless", async () => {
+    stub(wallet, "getBalance", async () => 0.03 * LAMPORTS);
+
+    await at("swap_amount_SOL_USDC_100%");
+
+    const request = (prepareSwap.mock.calls[0] as any[])[0];
+    expect(Number(request.amount)).toBeLessThanOrEqual(0.02 * LAMPORTS);
+    expect(lastText()).toContain("<b>You Pay:</b> 0.02 SOL");
+  });
+
+  test("a balance that cannot cover the fee buffer explains the gasless minimum", async () => {
+    stub(wallet, "getBalance", async () => 0.009 * LAMPORTS);
+
+    await at("swap_amount_SOL_USDC_100%");
+
+    // The gasless minimum error is shown as the friendly "too small" message.
+    expect(lastText()).toContain("⚠️ Amount too small");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+
+  test("an unknown SOL price is treated as too small for gasless", async () => {
+    stub(wallet, "getBalance", async () => 0.009 * LAMPORTS);
+    priceSpy.mockRejectedValue(new Error("price api down"));
+
+    await at("swap_amount_SOL_USDC_100%");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to fetch SOL price for gasless eligibility check:",
+      expect.any(Error),
+    );
+    // The gasless minimum error is shown as the friendly "too small" message.
+    expect(lastText()).toContain("⚠️ Amount too small");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+
+  test("a price without a value is treated the same way", async () => {
+    stub(wallet, "getBalance", async () => 0.009 * LAMPORTS);
+    priceSpy.mockResolvedValue(null as any);
+
+    await at("swap_amount_SOL_USDC_100%");
+
+    // The gasless minimum error is shown as the friendly "too small" message.
+    expect(lastText()).toContain("⚠️ Amount too small");
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+});
+
+describe("admin gas payer for swaps into SOL", () => {
+  let operator: Keypair;
+
+  beforeEach(async () => {
+    operator = await Keypair.generate();
+    stub(wallet, "getOperatorKeypair", async () => operator);
+    stub(wallet.getConnection(), "getBalance", async () => 5 * LAMPORTS);
+  });
+
+  test("a wallet without enough SOL for fees gets the admin as payer", async () => {
+    stub(wallet, "getBalance", async () => 0.005 * LAMPORTS);
+
+    await at("swap_amount_USDC_SOL_50%");
+
+    const integrator = (prepareSwap.mock.calls[0] as any[])[1];
+    expect(integrator).toMatchObject({
+      payerKind: "admin",
+      payer: operator.publicKey.toBase58(),
+      closeAuthority: operator.publicKey.toBase58(),
+    });
+    expect(lastText()).toContain("Confirm this swap?");
+  });
+
+  test("an underfunded admin payer blocks the quote", async () => {
+    stub(wallet, "getBalance", async () => 0.005 * LAMPORTS);
+    stub(wallet.getConnection(), "getBalance", async () => 1_000);
+
+    await at("swap_amount_USDC_SOL_50%");
+
+    expect(prepareSwap).not.toHaveBeenCalled();
+    expect(
+      errorSpy.mock.calls.some((call: unknown[]) => call[0] === "Error getting swap quote:"),
+    ).toBe(true);
+  });
+
+  test("a SOL to SOL max request skips the fee buffer and uses the admin payer", async () => {
+    // Not offered by the menus; a crafted callback still gets a consistent quote request.
+    await at("swap_amount_SOL_SOL_max");
+
+    const [request, integrator] = prepareSwap.mock.calls[0] as any[];
+    expect(Number(request.amount)).toBeGreaterThan(4.99 * LAMPORTS);
+    expect(integrator.payerKind).toBe("admin");
   });
 });
