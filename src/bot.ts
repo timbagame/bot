@@ -5693,21 +5693,6 @@ export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;
 // WALLET DATA CACHE
 // ================================
 
-// Handle "GET STARTED" button from bot info screen - triggers /start
-bot.callbackQuery("start_bot", async (ctx) => {
-  try {
-    if (ctx.chat?.id) {
-      initiatedChats.add(ctx.chat.id);
-    }
-
-    await onBalance(ctx as any, createBalanceDeps());
-    await safeAnswerCallbackQuery(ctx, "🚀 Welcome to TIMBA!");
-  } catch (error) {
-    console.error("Error in start_bot:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading main menu");
-  }
-});
-
 // ================================
 // ADMIN MENU CALLBACKS
 // ================================
@@ -5727,9 +5712,7 @@ registerCallbackPrefixHandler(
 
     try {
       const telegramId = await resolveTelegramIdOrRespond(ctx, "swap menu from token");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
       const keypair = await wallet.getKeyPair(telegramId);
       const walletAddress = keypair.publicKey.toBase58();
       const walletAddressHtml = escapeHtml(walletAddress);

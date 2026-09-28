@@ -131,6 +131,17 @@ describe("choosing a swap pair", () => {
     ]);
   });
 
+  test("a wallet failure while opening the pair is acknowledged", async () => {
+    stub(wallet, "getKeyPair", async () => {
+      throw new Error("keystore unavailable");
+    });
+
+    await at("swap_from_USDC");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error in swap_from selection:", expect.any(Error));
+    expect(answers().at(-1)).toBe("❌ Error processing swap selection");
+  });
+
   test("does not offer SOL as a target when swapping from SOL", async () => {
     await at("swap_from_SOL");
 
