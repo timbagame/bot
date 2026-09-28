@@ -7,7 +7,7 @@ import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
-import { run, sequentialize } from "@grammyjs/runner";
+import { run, sequentialize, type RunnerHandle } from "@grammyjs/runner";
 import {
   BotHealthResponseSchema,
   CompletedGameNotificationResponseSchema,
@@ -214,17 +214,13 @@ bot.api.config.use(
 
 // Global error boundary for unhandled middleware errors
 bot.catch((err) => {
-  try {
-    const ctx = err.ctx as Context | undefined;
-    const path = ctx?.update?.callback_query
-      ? "callback_query"
-      : ctx?.update?.message
-        ? "message"
-        : "update";
-    console.error(`Bot error while handling ${path}:`, err.error || err);
-  } catch (e) {
-    console.error("Bot error (logging failed):", err);
-  }
+  const ctx = err.ctx as Context | undefined;
+  const path = ctx?.update?.callback_query
+    ? "callback_query"
+    : ctx?.update?.message
+      ? "message"
+      : "update";
+  console.error(`Bot error while handling ${path}:`, err.error || err);
 });
 
 // Telegram changes a basic group's chat ID when it becomes a supergroup. Move
@@ -453,14 +449,16 @@ export const __test_resetTokenMetadataCacheMaxEntries = () => {
   TOKEN_METADATA_CACHE_MAX_ENTRIES = DEFAULT_TOKEN_METADATA_CACHE_MAX_ENTRIES;
 };
 
-void (async () => {
+const refreshSolFeeBuffer = async (): Promise<void> => {
   try {
     const { singleTransactionLamports } = await refreshDynamicFeeBudgets(feeBudget);
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
   }
-})();
+};
+void refreshSolFeeBuffer();
+export const __test_refreshSolFeeBuffer = refreshSolFeeBuffer;
 let chatDb = ChatDatabase.getInstance();
 let gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
@@ -643,6 +641,8 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
+export const __test_getGameManager = (): GameManager => gameManager;
+
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
 };
@@ -713,6 +713,8 @@ const formatUsdThresholdLabel = (value: number): string => {
   return `$${formatted}`;
 };
 
+export const __test_formatUsdThresholdLabel = formatUsdThresholdLabel;
+
 const buildGaslessFeeRequirementMessage = (): string => {
   const usdLabel = formatUsdThresholdLabel(JUPITER_GASLESS_MIN_TRADE_USD);
   const solBufferDisplay = wallet.formatSolBalance(JUPITER_MIN_SOL_BALANCE_LAMPORTS);
@@ -749,6 +751,8 @@ const resolveFormattedBalance = (
     formattedBalance: wallet.formatTokenBalance(entry.balance, entry.decimals),
   };
 };
+
+export const __test_resolveFormattedBalance = resolveFormattedBalance;
 
 interface TokenSelectionCacheEntry {
   targetToken: string;
@@ -806,10 +810,6 @@ const formatSlippagePercent = (value: number): string => {
 
   const absolute = Math.abs(value);
 
-  if (absolute >= 1) {
-    return `${value.toFixed(1)}%`;
-  }
-
   if (absolute >= 0.1) {
     return `${value.toFixed(1)}%`;
   }
@@ -820,6 +820,8 @@ const formatSlippagePercent = (value: number): string => {
 
   return `${value.toFixed(3)}%`;
 };
+
+export const __test_formatSlippagePercent = formatSlippagePercent;
 
 const formatTradeConfirmationSummary = ({
   payToken,
@@ -1627,6 +1629,13 @@ export const __test_setTokenManager = (manager: TokenManager): void => {
 };
 let swapManager: SwapManager;
 let swapService: SwapService;
+export const __test_getSwapManagers = () => ({ swapManager, swapService });
+export const __test_setSwapManagers = (managers: {
+  swapManager: SwapManager;
+  swapService: SwapService;
+}): void => {
+  ({ swapManager, swapService } = managers);
+};
 let gameCompletedListenerId: number | null = null;
 let gameInitializedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
@@ -1788,10 +1797,9 @@ type PendingGameMessageUpdateState = {
   pending: boolean;
   running: boolean;
   timer?: ReturnType<typeof setTimeout>;
-  referenceChatId?: number;
+  referenceChatId: number;
   latestTotalPot?: number;
   nextDelayMs?: number;
-  cancelled?: boolean;
 };
 
 const pendingGameMessageUpdates = new Map<string, PendingGameMessageUpdateState>();
@@ -1812,7 +1820,6 @@ const cancelPendingGameMessageUpdate = (gameAddress: string): void => {
   }
 
   state.pending = false;
-  state.cancelled = true;
   state.timer = undefined;
 
   pendingGameMessageUpdates.delete(gameAddress);
@@ -1901,23 +1908,18 @@ const scheduleGameMessageUpdate = (
   gameAddress: string,
   referenceChatId: number,
   totalPot?: number,
-  options: { delayMs?: number } = {},
 ): void => {
   const state = pendingGameMessageUpdates.get(gameAddress) ?? {
     pending: false,
     running: false,
+    referenceChatId,
   };
 
   state.referenceChatId = referenceChatId;
-  if (typeof options.delayMs === "number" && Number.isFinite(options.delayMs)) {
-    state.nextDelayMs = Math.max(0, Math.trunc(options.delayMs));
-  }
 
   if (typeof totalPot === "number" && Number.isFinite(totalPot)) {
     state.latestTotalPot = totalPot;
   }
-
-  state.cancelled = false;
 
   state.pending = true;
   pendingGameMessageUpdates.set(gameAddress, state);
@@ -1934,27 +1936,13 @@ const scheduleGameMessageUpdate = (
   );
   state.nextDelayMs = undefined;
 
+  // cancelPendingGameMessageUpdate() clears this timer, so it only fires for a
+  // pending, non-cancelled update.
   state.timer = setTimeout(async () => {
     state.timer = undefined;
-
-    if (!state.pending) {
-      if (pendingGameMessageUpdates.get(gameAddress) === state) {
-        pendingGameMessageUpdates.delete(gameAddress);
-      }
-      return;
-    }
-
     state.pending = false;
     state.running = true;
     pendingGameMessageUpdates.set(gameAddress, state);
-
-    if (state.cancelled) {
-      state.running = false;
-      if (pendingGameMessageUpdates.get(gameAddress) === state) {
-        pendingGameMessageUpdates.delete(gameAddress);
-      }
-      return;
-    }
 
     try {
       if (!gameManager) {
@@ -1962,9 +1950,6 @@ const scheduleGameMessageUpdate = (
       }
 
       const chatId = state.referenceChatId;
-      if (chatId == null) {
-        return;
-      }
 
       const gameData = typeof gameDb?.getGame === "function" ? gameDb.getGame(gameAddress) : null;
       const normalizedStatus =
@@ -2010,11 +1995,7 @@ const scheduleGameMessageUpdate = (
     } finally {
       state.running = false;
       if (state.pending && !state.timer) {
-        scheduleGameMessageUpdate(
-          gameAddress,
-          state.referenceChatId ?? referenceChatId,
-          state.latestTotalPot,
-        );
+        scheduleGameMessageUpdate(gameAddress, state.referenceChatId, state.latestTotalPot);
         return;
       }
 
@@ -2154,10 +2135,8 @@ const notifyGameMessageReady = (gameAddress: string): void => {
 };
 
 function schedulePendingPlayerEventFlush(gameAddress: string): void {
-  const state = pendingPlayerEvents.get(gameAddress);
-  if (!state) {
-    return;
-  }
+  // Callers always keep the pending state for this game before scheduling.
+  const state = pendingPlayerEvents.get(gameAddress)!;
 
   if (state.timer) {
     return;
@@ -2527,6 +2506,9 @@ const handlePlayerUnjoinedProgramEvent = async (event: PlayerUnjoinedEvent): Pro
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
+export const __test_handlePlayerJoinedProgramEvent = handlePlayerJoinedProgramEvent;
+export const __test_handlePlayerUnjoinedProgramEvent = handlePlayerUnjoinedProgramEvent;
+
 type ProgramEventName = "gameInitialized" | "gameCompleted" | "playerJoined" | "playerUnjoined";
 
 type ProgramEventDescriptor = {
@@ -2663,14 +2645,8 @@ const registerProgramEventListeners = async (): Promise<void> => {
   }
 
   try {
+    // unregisterProgramEventListeners() succeeded, so every handle is cleared here.
     for (const descriptor of programEventDescriptors) {
-      if (descriptor.getId() !== null) {
-        console.warn(
-          `⚠️ Skipping ${descriptor.label} event listener registration because an active listener handle is still present (id=${descriptor.getId()}).`,
-        );
-        continue;
-      }
-
       console.log(`Setting up ${descriptor.label} event listener...`);
       const listenerId = (await program.addEventListener(
         descriptor.eventName,
@@ -2755,33 +2731,15 @@ const toBase58String = (value: unknown): string => {
     return value;
   }
 
-  if (typeof value === "object" && value !== null) {
-    const candidate = value as {
-      toBase58?: () => string;
-      toString?: () => string;
-    };
-
-    if (typeof candidate.toBase58 === "function") {
-      return candidate.toBase58();
-    }
-
-    if (typeof candidate.toString === "function") {
-      return candidate.toString();
-    }
-  }
-
-  if (typeof value === "bigint") {
-    return value.toString();
+  const candidate = value as { toBase58?: () => string } | null | undefined;
+  if (typeof candidate?.toBase58 === "function") {
+    return candidate.toBase58();
   }
 
   return String(value ?? "");
 };
 
 const bnLikeToNumber = (value: unknown): number | undefined => {
-  if (value === null || value === undefined) {
-    return undefined;
-  }
-
   if (typeof value === "number") {
     return value;
   }
@@ -2790,29 +2748,21 @@ const bnLikeToNumber = (value: unknown): number | undefined => {
     return Number(value);
   }
 
-  if (typeof value === "object") {
-    const candidate = value as {
-      toNumber?: () => number;
-      toString?: () => string;
-    };
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
 
-    if (typeof candidate.toNumber === "function") {
-      try {
-        return candidate.toNumber();
-      } catch {
-        // Fall through to string parsing if the number is too large
-      }
-    }
-
-    if (typeof candidate.toString === "function") {
-      const numericValue = Number(candidate.toString());
-      if (!Number.isNaN(numericValue)) {
-        return numericValue;
-      }
+  const candidate = value as { toNumber?: () => number };
+  if (typeof candidate.toNumber === "function") {
+    try {
+      return candidate.toNumber();
+    } catch {
+      // Fall through to string parsing if the number is too large
     }
   }
 
-  return undefined;
+  const numericValue = Number(String(value));
+  return Number.isNaN(numericValue) ? undefined : numericValue;
 };
 
 type EventParserLike = { parseLogs(logs: string[]): Iterable<ProgramEvent> };
@@ -2935,12 +2885,10 @@ const fetchCompletionDetailsFromHistory = async (
 let completionHistoryFetcher: (gameAddress: string) => Promise<CompletionDetails | null> =
   fetchCompletionDetailsFromHistory;
 
-const getDefaultCompletionEventParserFactory = () => () => {
-  if (!program) {
-    throw new Error("Program not initialized");
-  }
-  return { parseLogs: (logs: string[]) => parseProgramEventLogs(program.programId, logs) };
-};
+// Only used by fetchCompletionDetailsFromHistory, which returns early without a program.
+const getDefaultCompletionEventParserFactory = () => () => ({
+  parseLogs: (logs: string[]) => parseProgramEventLogs(program.programId, logs),
+});
 
 let completionEventParserFactory: () => EventParserLike = getDefaultCompletionEventParserFactory();
 
@@ -3179,7 +3127,9 @@ export const __test_getBuyAlertBotUsername = (
 ): string | undefined => (targetBot.isInited() ? targetBot.botInfo.username : undefined);
 
 const buyAlertService = createBuyAlertService({
-  chatDb,
+  get chatDb() {
+    return chatDb;
+  },
   getTokenManager: () => tokenManager,
   sendHtml: async (chatId, text, media, keyboard) => {
     await sendMediaWithFallback({
@@ -3219,7 +3169,9 @@ const buyAlertService = createBuyAlertService({
 
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
-  chatDb,
+  get chatDb() {
+    return chatDb;
+  },
   get gameDb() {
     return gameDb;
   },
@@ -3424,6 +3376,8 @@ const setupProgram = async () => {
   }
 };
 
+export const __test_setupProgram = setupProgram;
+
 let recoveringGameCreations = false;
 const recoverPendingGameCreations = async (): Promise<void> => {
   if (recoveringGameCreations) return;
@@ -3450,6 +3404,8 @@ const recoverPendingGameCreations = async (): Promise<void> => {
     recoveringGameCreations = false;
   }
 };
+
+export const __test_recoverPendingGameCreations = recoverPendingGameCreations;
 
 const initializeTokensList = async () => {
   try {
@@ -3577,6 +3533,8 @@ const checkTokenPolicyStatus = async () => {
   }
 };
 
+export const __test_checkTokenPolicyStatus = checkTokenPolicyStatus;
+
 const createBalanceDeps = (): BalanceDeps => ({
   isPrivateChat,
   clearWalletCache,
@@ -3648,40 +3606,51 @@ const getBotMenuCommands = (scope: "all" | "private" | "group" = "all") =>
 
 export const __test_getRegisteredBotCommands = getBotMenuCommands;
 
-const evmRuntime = process.env["EVM_BOT_CONFIG_FILE"]
-  ? registerEvmBot(
-      bot,
-      process.env["EVM_BOT_CONFIG_FILE"],
-      (chatId, type) => {
-        const settings = chatDb.getChatGameSettings(chatId);
-        const maxPlayers = resolveChatDefaultPlayers(
-          settings,
-          type,
-          type === "coinflip" ? 2 : 10,
-          100,
-        );
-        const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
-        return {
-          maxPlayers,
-          minPlayers: options.minPlayers,
-          timeout: options.timeoutSeconds,
-          isPrivate: options.isPrivate,
-        };
-      },
-      async (token, chatId) => {
-        const resolved = await tokenManager.resolveGameTokenContext(chatId, token, "game");
-        return resolved.success
-          ? { address: resolved.tokenMint, symbol: resolved.tokenTicker }
-          : null;
-      },
-      async (ctx) => {
-        const command = ctx.message?.text?.split(/\s+/)[0]?.toLowerCase().split("@")[0];
-        if (command === "/cf" || command === "/coinflip")
-          await handleCoinflipCommand(ctx, createCoinflipDeps());
-        else await handleGiveawayCommand(ctx);
-      },
-    )
-  : undefined;
+/** Solana-side chat defaults applied to EVM games started in the same chat. */
+const evmGameDefaults = (chatId: number, type: "coinflip" | "giveaway") => {
+  const settings = chatDb.getChatGameSettings(chatId);
+  const maxPlayers = resolveChatDefaultPlayers(settings, type, type === "coinflip" ? 2 : 10, 100);
+  const options = resolveAdvancedOptions(type, maxPlayers, undefined, 100, settings);
+  return {
+    maxPlayers,
+    minPlayers: options.minPlayers,
+    timeout: options.timeoutSeconds,
+    isPrivate: options.isPrivate,
+  };
+};
+
+const resolveEvmSolanaToken = async (token: string | undefined, chatId: number) => {
+  const resolved = await tokenManager.resolveGameTokenContext(chatId, token, "game");
+  return resolved.success ? { address: resolved.tokenMint, symbol: resolved.tokenTicker } : null;
+};
+
+/** Hand a game command the EVM bot did not take back to the Solana handlers. */
+const dispatchSolanaGameCommand = async (ctx: Context) => {
+  const command = ctx.message?.text?.split(/\s+/)[0]?.toLowerCase().split("@")[0];
+  if (command === "/cf" || command === "/coinflip")
+    await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
+  else await handleGiveawayCommand(ctx as Context & { message?: any });
+};
+
+export const createEvmRuntime = (
+  targetBot: Bot,
+  configFile: string | undefined = process.env["EVM_BOT_CONFIG_FILE"],
+) =>
+  configFile
+    ? registerEvmBot(
+        targetBot,
+        configFile,
+        evmGameDefaults,
+        resolveEvmSolanaToken,
+        dispatchSolanaGameCommand,
+      )
+    : undefined;
+
+export const __test_evmGameDefaults = evmGameDefaults;
+export const __test_resolveEvmSolanaToken = resolveEvmSolanaToken;
+export const __test_dispatchSolanaGameCommand = dispatchSolanaGameCommand;
+
+const evmRuntime = createEvmRuntime(bot);
 
 bot.use(caseInsensitiveCommands);
 
@@ -3731,7 +3700,9 @@ registerCaseInsensitiveCommand(
 
 const faucetModule = createFaucetModule({
   bot,
-  database: FaucetDatabase.getInstance(),
+  get database() {
+    return FaucetDatabase.getInstance();
+  },
   parseAmount: (args, index, chatId, context) =>
     tokenManager.parseAmount(args, index, chatId, context),
   inferMaxPlayers,
@@ -3758,6 +3729,7 @@ const faucetModule = createFaucetModule({
   answerCallback: (ctx, text) => safeAnswerCallbackQuery(ctx, text),
 });
 faucetModule.registerCallbacks();
+export const __test_faucetModule = faucetModule;
 
 registerCaseInsensitiveCommand(
   ["faucet", "rain"],
@@ -3936,7 +3908,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  let recipientTelegramId: bigint | null;
+  let recipientTelegramId: bigint;
   let recipientName = "User";
   let amountArgs = args;
 
@@ -4099,10 +4071,6 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         : args.filter(
             (_token, idx) => idx < mentionStart || idx >= mentionStart + mentionTokenCount,
           );
-  }
-
-  if (recipientTelegramId === null) {
-    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
   const amountArgIndex = 1;
@@ -4281,12 +4249,7 @@ const handleActiveCommand = async (ctx: Context) => {
 
   try {
     if (isGroupChat(ctx)) {
-      if (ctx.chat?.id == null) {
-        await ctx.reply("Unable to determine chat for this command.");
-        return;
-      }
-
-      await replyWithActiveGamesMenu(ctx, await gameManager.getChatActiveGames(ctx, ctx.chat.id), {
+      await replyWithActiveGamesMenu(ctx, await gameManager.getChatActiveGames(ctx, ctx.chat!.id), {
         emptyText: "No active games in this chat.",
         title: "🎮 Active games",
         callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
@@ -4465,13 +4428,8 @@ bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
 });
 
 const handleGamesRefreshCallback = async (ctx: Context): Promise<void> => {
-  const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
-  if (!match || !match[1]) {
-    await safeAnswerCallbackQuery(ctx, "Invalid request.");
-    return;
-  }
-
-  const ownerId = match[1];
+  // Only routed for data matching /^games_refresh:(\d+)$/.
+  const ownerId = ctx.callbackQuery!.data!.slice("games_refresh:".length);
   const callerId = ctx.from?.id?.toString();
   if (callerId !== ownerId) {
     await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
@@ -4503,11 +4461,7 @@ export const __test_handleActiveCommand = handleActiveCommand;
 export const __test_handleGamesTabCallback = handleGamesTabCallback;
 
 bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
-  try {
-    await safeAnswerCallbackQuery(ctx, "Select a join button below to enter a game.");
-  } catch (error) {
-    await handleCallbackErrorSafe(ctx, error, "active games header");
-  }
+  await safeAnswerCallbackQuery(ctx, "Select a join button below to enter a game.");
 });
 
 // Pagination callback for /active command
@@ -4716,10 +4670,7 @@ registerCaseInsensitiveCommand(
     return ctx.reply("❌ Leaderboard is only available in group chats.");
   }
 
-  const chatId = ctx.chat?.id;
-  if (!chatId) {
-    return ctx.reply("❌ Could not load chat information.");
-  }
+  const chatId = ctx.chat!.id;
 
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
@@ -4938,6 +4889,9 @@ const financeBackfillWorker = new FinanceBackfillWorker(async () =>
   (await getFinanceLedgerService()).backfillNextBatch(financeBackfillStartTimeMs),
 );
 
+export const __test_financeBackfillWorker = financeBackfillWorker;
+export const __test_getFinanceLedgerService = getFinanceLedgerService;
+
 const financeHandlers = createFinanceHandlers({
   financeLedger: {
     getSnapshot: async () => (await getFinanceLedgerService()).getSnapshot(),
@@ -5119,9 +5073,7 @@ bot.callbackQuery(
       }
 
       const telegramId = await resolveTelegramIdOrRespond(ctx, "show private key");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
       pendingPrivateKeyExports.set(telegramId.toString(), Date.now() + PRIVATE_KEY_CONFIRM_TTL_MS);
       const keyboard = new InlineKeyboard()
         .text("Reveal private key", "confirm_privatekey")
@@ -5686,21 +5638,6 @@ export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;
 // WALLET DATA CACHE
 // ================================
 
-// Handle "GET STARTED" button from bot info screen - triggers /start
-bot.callbackQuery("start_bot", async (ctx) => {
-  try {
-    if (ctx.chat?.id) {
-      initiatedChats.add(ctx.chat.id);
-    }
-
-    await onBalance(ctx as any, createBalanceDeps());
-    await safeAnswerCallbackQuery(ctx, "🚀 Welcome to TIMBA!");
-  } catch (error) {
-    console.error("Error in start_bot:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading main menu");
-  }
-});
-
 // ================================
 // ADMIN MENU CALLBACKS
 // ================================
@@ -5720,9 +5657,7 @@ registerCallbackPrefixHandler(
 
     try {
       const telegramId = await resolveTelegramIdOrRespond(ctx, "swap menu from token");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
       const keypair = await wallet.getKeyPair(telegramId);
       const walletAddress = keypair.publicKey.toBase58();
       const walletAddressHtml = escapeHtml(walletAddress);
@@ -5902,9 +5837,7 @@ registerCallbackPrefixHandler(
       }
 
       const telegramId = await resolveTelegramIdOrRespond(ctx, "swap amount selection");
-      if (telegramId == null) {
-        return;
-      }
+      if (telegramId == null) return;
 
       // The quote screen shows its own progress; the toast only covers slow starts.
       await answerCallbackWithGrace(
@@ -6010,10 +5943,6 @@ bot.callbackQuery(
           await openBuyAlertSwapUi(dmCtx, args);
         },
         ack: async (callbackCtx, text, showAlert) => {
-          if (!text) {
-            await callbackCtx.answerCallbackQuery();
-            return;
-          }
           await callbackCtx.answerCallbackQuery({ text, show_alert: showAlert === true });
         },
       });
@@ -6185,10 +6114,6 @@ registerCallbackPrefixHandler(
 // ================================
 
 // Error handling
-bot.catch((err) => {
-  console.error("Bot error:", err);
-});
-
 // ================================
 // MESSAGE HANDLER FOR USER INPUT
 // ================================
@@ -6316,10 +6241,6 @@ const handleMediaForChatDefaults = async (
     inputSession = fallback.session;
   }
 
-  if (inputSession.type !== "chat_defaults") {
-    return;
-  }
-
   const setting = inputSession["setting"] as string | undefined;
   if (!isChatDefaultsMediaSetting(setting)) {
     return;
@@ -6348,9 +6269,8 @@ const handleMediaForChatDefaults = async (
   }
 
   try {
-    const message = ctx.message;
-
-    if (mediaType === "document" && message?.document) {
+    // Each handler is registered for its own media type, so the media is present.
+    if (mediaType === "document") {
       // Reject all documents - only accept direct photos, videos, and animations
       await ctx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
@@ -6358,17 +6278,6 @@ const handleMediaForChatDefaults = async (
           "Files sent as documents are not supported.",
         { parse_mode: "HTML" },
       );
-      clearInputSession(sessionKey);
-      return;
-    }
-
-    const hasMedia =
-      (mediaType === "video" && !!message?.video) ||
-      (mediaType === "animation" && !!message?.animation) ||
-      (mediaType === "photo" && Array.isArray(message?.photo) && message.photo.length > 0);
-
-    if (!hasMedia) {
-      await ctx.reply("❌ Could not read that media. Please try again.");
       clearInputSession(sessionKey);
       return;
     }
@@ -6474,9 +6383,6 @@ const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: stri
     });
 
     clearInputSession(`${userState.chatId}_${userState.messageId}`);
-    if (ctx?.callbackQuery) {
-      await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
-    }
   } catch (error) {
     console.error("Error resolving swap token input:", error);
 
@@ -6612,210 +6518,245 @@ export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
 export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
-// Start the bot and set up the program client (skip during tests)
-if (process.env.NODE_ENV !== "test") {
-  setupProgram()
-    .then(async () => {
-      console.log("Starting bot...");
-      lightningDeposits.start();
+/** Serves the internal health and game-completion endpoints used by the oracle. */
+export const handleInternalApiRequest = async (request: Request): Promise<Response> => {
+  const url = new URL(request.url);
+  if (url.pathname === "/health" && request.method === "GET") {
+    return new Response(JSON.stringify(BotHealthResponseSchema.parse({ status: "ok" })), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (url.pathname === "/internal/completed" && request.method === "POST") {
+    try {
+      const body = CompletedGameNotificationSchema.safeParse(await request.json());
+      if (!body.success) {
+        return new Response(JSON.stringify({ error: "Invalid completion notification" }), {
+          status: 400,
+        });
+      }
+      const { gameAddress, winnerAddress, totalPot, winnerTxSignature } = body.data;
+      await runProcessGameCompletion(gameAddress, winnerAddress, totalPot, winnerTxSignature);
+      return new Response(
+        JSON.stringify(CompletedGameNotificationResponseSchema.parse({ success: true })),
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error handling /internal/completed:", error);
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+      });
+    }
+  }
+  return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+};
 
+/** Side effects of starting the bot, injectable so startup can be exercised in tests. */
+export type BotStartupRuntime = {
+  setupProgram: () => Promise<void>;
+  setInterval: (handler: () => unknown, intervalMs: number) => unknown;
+  serve: (options: { port: number; fetch: (request: Request) => Promise<Response> }) => {
+    stop: () => unknown;
+  };
+  runBot: () => Pick<RunnerHandle, "stop" | "task"> | undefined;
+  onSignal: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
+  exit: (code: number) => void;
+  feeSweeperEnabled: boolean;
+};
+
+// Bound functions keep these thin wrappers free of untestable bodies.
+const defaultStartupRuntime: BotStartupRuntime = {
+  setupProgram,
+  setInterval: globalThis.setInterval.bind(globalThis) as BotStartupRuntime["setInterval"],
+  serve: Bun.serve.bind(Bun) as BotStartupRuntime["serve"],
+  // run() infers its update type from the adapter; bind() cannot, so widen the bot.
+  runBot: run.bind(undefined, bot as never, {
+    runner: {
+      fetch: {
+        // Only handle updates we actually process
+        allowed_updates: ["message", "callback_query"],
+      },
+    },
+  }),
+  onSignal: process.once.bind(process) as BotStartupRuntime["onSignal"],
+  exit: process.exit.bind(process),
+  feeSweeperEnabled: ENABLE_FEE_SWEEPER,
+};
+
+/** Set up the program client, background jobs, internal API and update polling. */
+export const startBot = async (
+  runtime: BotStartupRuntime = defaultStartupRuntime,
+): Promise<void> => {
+  try {
+    await runtime.setupProgram();
+    console.log("Starting bot...");
+    lightningDeposits.start();
+
+    try {
+      await bot.api.setMyCommands(getBotMenuCommands());
+      await bot.api.setMyCommands(getBotMenuCommands("private"), {
+        scope: { type: "all_private_chats" },
+      });
+      await bot.api.setMyCommands(getBotMenuCommands("group"), {
+        scope: { type: "all_group_chats" },
+      });
+      console.log("Registered bot commands in the Telegram command menu");
+    } catch (error) {
+      console.error("Failed to register bot commands in the Telegram command menu:", error);
+    }
+
+    // Reload game message mappings from database
+    await gameManager.reloadGameMessages();
+    console.log(`Reloaded game message mappings from database`);
+    gameDb.resumeGameCreationRecovery();
+    void recoverPendingGameCreations();
+    runtime.setInterval(recoverPendingGameCreations, 3_000);
+
+    await registerProgramEventListeners();
+    attachRpcEndpointFailoverHandler();
+    financeBackfillWorker.start();
+    console.log("Finance history backfill worker scheduled");
+    buyAlertService.start();
+    console.log("Buy alert feed synchronized");
+
+    const expireFaucets = async () => {
       try {
-        await bot.api.setMyCommands(getBotMenuCommands());
-        await bot.api.setMyCommands(getBotMenuCommands("private"), {
-          scope: { type: "all_private_chats" },
-        });
-        await bot.api.setMyCommands(getBotMenuCommands("group"), {
-          scope: { type: "all_group_chats" },
-        });
-        console.log("Registered bot commands in the Telegram command menu");
+        const count = await faucetModule.expireDue();
+        if (count > 0) console.log(`⌛ Expired ${count} faucet${count === 1 ? "" : "s"}`);
       } catch (error) {
-        console.error("Failed to register bot commands in the Telegram command menu:", error);
+        console.error("❌ Faucet expiry check failed:", error);
+      }
+    };
+    await expireFaucets();
+    runtime.setInterval(expireFaucets, 60_000);
+
+    const scheduleFeeSweeper = () => {
+      if (!runtime.feeSweeperEnabled) {
+        console.log("ℹ️ Automated fee sweeper disabled; skipping scheduled runs.");
+        return;
       }
 
-      // Reload game message mappings from database
-      await gameManager.reloadGameMessages();
-      console.log(`Reloaded game message mappings from database`);
-      gameDb.resumeGameCreationRecovery();
-      void recoverPendingGameCreations();
-      setInterval(recoverPendingGameCreations, 3_000);
-
-      await registerProgramEventListeners();
-      attachRpcEndpointFailoverHandler();
-      financeBackfillWorker.start();
-      console.log("Finance history backfill worker scheduled");
-      buyAlertService.start();
-      console.log("Buy alert feed synchronized");
-
-      const expireFaucets = async () => {
+      const runSweep = async () => {
         try {
-          const count = await faucetModule.expireDue();
-          if (count > 0) console.log(`⌛ Expired ${count} faucet${count === 1 ? "" : "s"}`);
+          await sweepFees({ walletManager: wallet });
         } catch (error) {
-          console.error("❌ Faucet expiry check failed:", error);
+          console.error("❌ Automated fee sweep failed:", error);
         }
       };
-      await expireFaucets();
-      setInterval(expireFaucets, 60_000);
 
-      const scheduleFeeSweeper = () => {
-        if (!ENABLE_FEE_SWEEPER) {
-          console.log("ℹ️ Automated fee sweeper disabled; skipping scheduled runs.");
-          return;
-        }
+      console.log(
+        `🧹 Automated fee sweeper enabled (interval: ${Math.round(
+          FEE_SWEEP_INTERVAL_MS / 60_000,
+        )} min)`,
+      );
 
-        const runSweep = async () => {
-          try {
-            await sweepFees({ walletManager: wallet });
-          } catch (error) {
-            console.error("❌ Automated fee sweep failed:", error);
-          }
-        };
+      runtime.setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
+    };
 
-        console.log(
-          `🧹 Automated fee sweeper enabled (interval: ${Math.round(
-            FEE_SWEEP_INTERVAL_MS / 60_000,
-          )} min)`,
-        );
+    scheduleFeeSweeper();
 
-        setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
-      };
+    // Schedule daily database cleanup
+    const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const CLEANUP_DAYS_OLD = 30;
 
-      scheduleFeeSweeper();
-
-      // Schedule daily database cleanup
-      const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-      const CLEANUP_DAYS_OLD = 30;
-
-      const scheduleDatabaseCleanup = () => {
-        const runCleanup = () => {
-          try {
-            const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
-            if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
-              console.log(
-                `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`,
-              );
-            }
-          } catch (error) {
-            console.error("❌ Database cleanup failed:", error);
-          }
-        };
-
-        console.log(
-          `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`,
-        );
-
-        setInterval(runCleanup, CLEANUP_INTERVAL_MS);
-      };
-
-      scheduleDatabaseCleanup();
-
-      // Periodic expired-game sweep: one blockchain-time read per run, batched
-      // account loads, and no overlapping runs.
-      const expiredGameScanner = createExpiredGameScanner({
-        getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
-          gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
-        gameAccounts: () => program.account.game,
-        getBlockchainTime: () => wallet.getBlockchainTime(),
-        isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
-        handleExpiredGame: (gamePda, gameAccount) =>
-          gameManager.handleExpiredGame(gamePda, gameAccount),
-        completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
-        updateGameMessage: (gameAddress, game) =>
-          updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
-        cleanupOrphanedGame,
-        lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
-      });
-      setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
-
-      const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
-      const internalServer = Bun.serve({
-        port: botInternalPort,
-        async fetch(request) {
-          const url = new URL(request.url);
-          if (url.pathname === "/health" && request.method === "GET") {
-            return new Response(JSON.stringify(BotHealthResponseSchema.parse({ status: "ok" })), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
-          if (url.pathname === "/internal/completed" && request.method === "POST") {
-            try {
-              const body = CompletedGameNotificationSchema.safeParse(await request.json());
-              if (!body.success) {
-                return new Response(JSON.stringify({ error: "Invalid completion notification" }), {
-                  status: 400,
-                });
-              }
-              const { gameAddress, winnerAddress, totalPot, winnerTxSignature } = body.data;
-              await runProcessGameCompletion(
-                gameAddress,
-                winnerAddress,
-                totalPot,
-                winnerTxSignature,
-              );
-              return new Response(
-                JSON.stringify(CompletedGameNotificationResponseSchema.parse({ success: true })),
-                { status: 200 },
-              );
-            } catch (error) {
-              console.error("Error handling /internal/completed:", error);
-              return new Response(JSON.stringify({ error: "Internal server error" }), {
-                status: 500,
-              });
-            }
-          }
-          return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
-        },
-      });
-      console.log(`🤖 Bot internal API listening on port ${botInternalPort}`);
-
-      // Start the bot with concurrent processing
-      console.log("Starting bot with concurrent processing...");
-      const handle = run(bot, {
-        runner: {
-          fetch: {
-            // Only handle updates we actually process
-            allowed_updates: ["message", "callback_query"],
-          },
-        },
-      });
-
-      // Set up graceful shutdown
-      const shutdown = async (signal: string) => {
-        console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+    const scheduleDatabaseCleanup = () => {
+      const runCleanup = () => {
         try {
-          rpcEndpointListenerCleanup?.();
-          rpcEndpointListenerCleanup = null;
-          evmRuntime?.stop();
-          lightningDeposits.stop();
-          financeBackfillWorker.stop();
-          buyAlertService.stop();
-          await unregisterProgramEventListeners();
-          await handle?.stop();
-          internalServer?.stop();
-          console.log("✅ Bot stopped successfully");
-          process.exit(0);
+          const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
+          if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
+            console.log(
+              `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`,
+            );
+          }
         } catch (error) {
-          console.error("❌ Error during shutdown:", error);
-          process.exit(1);
+          console.error("❌ Database cleanup failed:", error);
         }
       };
 
-      // Handle different shutdown signals
-      process.once("SIGINT", () => shutdown("SIGINT"));
-      process.once("SIGTERM", () => shutdown("SIGTERM"));
+      console.log(
+        `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`,
+      );
 
-      // Handle the runner task completion
-      handle
-        ?.task()
-        ?.then(() => {
-          console.log("🏁 Bot runner task completed");
-        })
-        .catch((error) => {
-          console.error("❌ Bot runner task failed:", error);
-        });
-    })
-    .catch((error) => {
-      console.error("Failed to set up program client:", error);
+      runtime.setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+    };
+
+    scheduleDatabaseCleanup();
+
+    // Periodic expired-game sweep: one blockchain-time read per run, batched
+    // account loads, and no overlapping runs.
+    const expiredGameScanner = createExpiredGameScanner({
+      getGamesExpiringBefore: (cutoffMs, limit, exclude) =>
+        gameDb.getGamesExpiringBefore(cutoffMs, limit, exclude),
+      gameAccounts: () => program.account.game,
+      getBlockchainTime: () => wallet.getBlockchainTime(),
+      isExpired: (gameAccount, currentTime) => GameManager.isExpired(gameAccount, currentTime),
+      handleExpiredGame: (gamePda, gameAccount) =>
+        gameManager.handleExpiredGame(gamePda, gameAccount),
+      completeGame: (gameAddress) => gameDb.completeGame(gameAddress, "cancelled", Date.now()),
+      updateGameMessage: (gameAddress, game) =>
+        updateGameMessageSafely(gameAddress, game, "Completed", "cancelled"),
+      cleanupOrphanedGame,
+      lookaheadMs: EXPIRED_GAMES_CHECK_INTERVAL_MS,
     });
-}
+    runtime.setInterval(expiredGameScanner.scan, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+
+    const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
+    const internalServer = runtime.serve({
+      port: botInternalPort,
+      fetch: handleInternalApiRequest,
+    });
+    console.log(`🤖 Bot internal API listening on port ${botInternalPort}`);
+
+    // Start the bot with concurrent processing
+    console.log("Starting bot with concurrent processing...");
+    const handle = runtime.runBot();
+
+    // Set up graceful shutdown
+    const shutdown = async (signal: string) => {
+      console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+      try {
+        rpcEndpointListenerCleanup?.();
+        rpcEndpointListenerCleanup = null;
+        evmRuntime?.stop();
+        lightningDeposits.stop();
+        financeBackfillWorker.stop();
+        buyAlertService.stop();
+        await unregisterProgramEventListeners();
+        await handle?.stop();
+        internalServer?.stop();
+        console.log("✅ Bot stopped successfully");
+        runtime.exit(0);
+      } catch (error) {
+        console.error("❌ Error during shutdown:", error);
+        runtime.exit(1);
+      }
+    };
+
+    // Handle different shutdown signals
+    runtime.onSignal("SIGINT", () => shutdown("SIGINT"));
+    runtime.onSignal("SIGTERM", () => shutdown("SIGTERM"));
+
+    // Handle the runner task completion
+    handle
+      ?.task()
+      ?.then(() => {
+        console.log("🏁 Bot runner task completed");
+      })
+      .catch((error) => {
+        console.error("❌ Bot runner task failed:", error);
+      });
+  } catch (error) {
+    console.error("Failed to set up program client:", error);
+  }
+};
+
+// Start the bot and set up the program client (skip during tests)
+export const autoStartBot = (
+  nodeEnv = process.env.NODE_ENV,
+  start: () => Promise<void> = startBot,
+): void => {
+  if (nodeEnv !== "test") {
+    void start();
+  }
+};
+autoStartBot();

@@ -79,9 +79,11 @@ const createHarness = async (
   });
   const solanaDispatched: string[] = [];
   // Keep the background refresh timer out of the tests; they call refresh() directly.
-  const intervalSpy = spyOn(globalThis, "setInterval").mockImplementation((() => ({
-    unref() {},
-  })) as any);
+  let intervalCallback: (() => void) | undefined;
+  const intervalSpy = spyOn(globalThis, "setInterval").mockImplementation(((fn: () => void) => {
+    intervalCallback = fn;
+    return { unref() {} };
+  }) as any);
   const runtime = registerEvmBot(
     bot,
     join(folder, "config.json"),
@@ -174,6 +176,7 @@ const createHarness = async (
     balances,
     solanaDispatched,
     fallthrough,
+    tickInterval: () => intervalCallback?.(),
     setMemberStatus: (status: string) => {
       memberStatus = status;
     },
@@ -334,6 +337,14 @@ describe("network and token settings", () => {
 
     await h.click(`game_token:${recipient}`);
     expect(h.answers().at(-1)).toBe("Token settings are temporarily unavailable.");
+  });
+
+  test("group admins can change the chat's default token", async () => {
+    h.setMemberStatus("creator");
+    await h.click(`game_token:${usdcAddress}`, { chat: "group" });
+    expect(h.store.token("-100")).toBe(usdcAddress);
+    expect(h.store.network("-100")).toBe("evm");
+    expect(h.replies().at(-1)).toContain("Default token on Anvil: USDC");
   });
 });
 
@@ -570,6 +581,27 @@ describe("EVM game buttons", () => {
 });
 
 describe("EVM refresh loop", () => {
+  test("the background timer drives refresh", async () => {
+    const step = spyOn(h.runtime.service, "step").mockResolvedValue(undefined as never);
+    h.store.add({
+      id: "timer",
+      user: "1",
+      chat: 1,
+      message: 5,
+      kind: "join",
+      body: JSON.stringify({ createdAt: Date.now() }),
+      phase: "new",
+      raw: null,
+      hash: null,
+    } as any);
+
+    h.tickInterval();
+    await Bun.sleep(20);
+
+    expect(step).toHaveBeenCalledTimes(1);
+    expect((step.mock.calls[0] as any[])[0].id).toBe("timer");
+  });
+
   const addAction = (overrides: Record<string, unknown>) =>
     h.store.add({
       id: crypto.randomUUID(),

@@ -271,7 +271,7 @@ export function parsePositiveDuration(key: string, fallback: number): number {
   return parsed;
 }
 
-function parsePositiveInteger(key: string, fallback: number): number {
+export function parsePositiveInteger(key: string, fallback: number): number {
   const raw = process.env[key];
   if (raw === undefined) {
     return fallback;
@@ -294,7 +294,7 @@ function parsePositiveInteger(key: string, fallback: number): number {
   return Math.floor(parsed);
 }
 
-function parseNonNegativeFloat(key: string, fallback: number): number {
+export function parseNonNegativeFloat(key: string, fallback: number): number {
   const raw = process.env[key];
   if (raw === undefined) {
     return fallback;

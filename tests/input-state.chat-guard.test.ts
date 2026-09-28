@@ -8,7 +8,25 @@ process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 const previousPricesEnabled = process.env["PRICES_ENABLED"];
 process.env["PRICES_ENABLED"] = "false";
 
+// Methods this suite replaces on the shared bot and wallet singletons.
+const replaced: Array<{ target: any; key: string; own: boolean; value: unknown }> = [];
+const replace = (target: any, key: string, value: unknown) => {
+  replaced.push({
+    target,
+    key,
+    own: Object.prototype.hasOwnProperty.call(target, key),
+    value: target[key],
+  });
+  target[key] = value;
+};
+
 afterAll(() => {
+  // Restore in reverse so the first saved value wins for keys replaced twice.
+  for (const { target, key, own, value } of replaced.reverse()) {
+    if (own) target[key] = value;
+    else delete target[key];
+  }
+
   if (previousPricesEnabled === undefined) {
     process.env["PRICES_ENABLED"] = "true";
     return;
@@ -39,17 +57,23 @@ beforeAll(async () => {
   };
 
   // Stub wallet RPCs used indirectly
-  (wallet as any).getBalance = async () => 0;
-  (wallet as any).getAllWalletTokenBalances = async () => [];
+  replace(wallet, "getBalance", async () => 0);
+  replace(wallet, "getAllWalletTokenBalances", async () => []);
 
   // Stub Telegram API methods that may be called
-  (bot as any).api.editMessageText = async () => ({ ok: true, result: true });
-  (bot as any).api.deleteMessage = async () => ({ ok: true, result: true });
-  (bot as any).api.sendMessage = async () =>
-    ({ message_id: 999, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) }) as any;
-  (bot as any).api.sendVideo = async () =>
-    ({ message_id: 998, chat: { id: 1 }, date: Math.floor(Date.now() / 1000) }) as any;
-  (bot as any).api.answerCallbackQuery = async () => ({ ok: true, result: true });
+  replace(bot.api, "editMessageText", async () => ({ ok: true, result: true }));
+  replace(bot.api, "deleteMessage", async () => ({ ok: true, result: true }));
+  replace(bot.api, "sendMessage", async () => ({
+    message_id: 999,
+    chat: { id: 1 },
+    date: Math.floor(Date.now() / 1000),
+  }));
+  replace(bot.api, "sendVideo", async () => ({
+    message_id: 998,
+    chat: { id: 1 },
+    date: Math.floor(Date.now() / 1000),
+  }));
+  replace(bot.api, "answerCallbackQuery", async () => ({ ok: true, result: true }));
 });
 
 test("typed-input ignores messages from a different chat (swap_to_token)", async () => {

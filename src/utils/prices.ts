@@ -139,14 +139,9 @@ async function fetchBatchFromJupiter(
   fetchImpl: FetchLike,
   timeoutMs: number,
 ): Promise<Record<string, number | null>> {
-  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
-  if (uniqueIds.length === 0) {
-    return {};
-  }
-
   try {
     const url = new URL(JUPITER_PRICE_URL);
-    url.searchParams.set("ids", uniqueIds.join(","));
+    url.searchParams.set("ids", ids.join(","));
     const apiKey = process.env.JUPITER_API_KEY;
 
     const res = await withTimeout(
@@ -163,7 +158,7 @@ async function fetchBatchFromJupiter(
     }
 
     const container = getPriceEntries(await res.json());
-    return uniqueIds.reduce<Record<string, number | null>>((acc, requestId) => {
+    return ids.reduce<Record<string, number | null>>((acc, requestId) => {
       const entry = container?.[requestId];
       acc[requestId] = entry ? pickUsdPrice(entry, requestId) : null;
       return acc;
@@ -196,12 +191,10 @@ export async function getPriceUSD(
   const inflightRef: { current?: Promise<number> } = {};
 
   const pendingPromise = (async () => {
-    let resolvedPrice = 0;
     try {
       // 1) Jupiter price endpoint
       const fromJup = await fetchFromJupiter(key, fetchImpl, PRICES_TIMEOUT_MS);
       if (fromJup && fromJup > 0) {
-        resolvedPrice = fromJup;
         priceCache.setWithTTL(key, { value: fromJup });
         return fromJup;
       }
@@ -209,11 +202,10 @@ export async function getPriceUSD(
       // 2) Give up
       return 0;
     } finally {
+      // A successful fetch already replaced the in-flight entry above.
       const latest = priceCache.peek(key);
       if (latest?.inflight === inflightRef.current) {
-        if (resolvedPrice > 0) {
-          priceCache.setWithTTL(key, { value: resolvedPrice });
-        } else if (latest?.value !== undefined) {
+        if (latest?.value !== undefined) {
           priceCache.setWithTTL(key, { value: latest.value });
         } else {
           priceCache.delete(key);

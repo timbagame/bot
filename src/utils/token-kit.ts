@@ -90,23 +90,6 @@ export const AccountLayout = {
     Buffer.from((value.closeAuthority ?? ZERO_KEY).toBytes()).copy(bytes, 133);
     return 165;
   },
-  decode(source: Uint8Array): TokenAccountFields {
-    if (source.length < 165) throw new TokenAccountNotFoundError("Invalid token account size");
-    const bytes = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
-    return {
-      mint: new PublicKey(bytes.subarray(0, 32)),
-      owner: new PublicKey(bytes.subarray(32, 64)),
-      amount: bytes.readBigUInt64LE(64),
-      delegateOption: bytes.readUInt32LE(72),
-      delegate: new PublicKey(bytes.subarray(76, 108)),
-      state: bytes.readUInt8(108),
-      isNativeOption: bytes.readUInt32LE(109),
-      isNative: bytes.readBigUInt64LE(113),
-      delegatedAmount: bytes.readBigUInt64LE(121),
-      closeAuthorityOption: bytes.readUInt32LE(129),
-      closeAuthority: new PublicKey(bytes.subarray(133, 165)),
-    };
-  },
 };
 
 const address = (key: PublicKey): Address => key.toBase58();

@@ -352,7 +352,8 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     if (cached) {
       const cachedCaption = await renderWalletCaption(cached.data, cached.fetchedAt);
       const sent = await sendWalletContent(cachedCaption);
-      if (!sent || (ctx as any).__walletDmForbidden) {
+      // null means the user blocked DMs; there is no message to refresh.
+      if (!sent) {
         return;
       }
 
@@ -390,9 +391,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const caption = await renderWalletCaption(pageData, pageData.fetchedAt ?? now());
 
     await sendWalletContent(caption);
-    if ((ctx as any).__walletDmForbidden) {
-      return;
-    }
   } catch (error) {
     if (error instanceof RateLimitExceededError) {
       const waitSeconds = Math.max(1, Math.ceil(error.retryAfterMs / 1000));
@@ -408,9 +406,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
         `<i>Try again in ${waitSeconds}s.</i>`,
       ];
       await sendWalletContent(response.join("\n"));
-      if ((ctx as any).__walletDmForbidden) {
-        return;
-      }
       return;
     }
 
@@ -424,9 +419,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       "<i>Tap Refresh to try again</i>",
     ];
     await sendWalletContent(errorResponse.join("\n"));
-    if ((ctx as any).__walletDmForbidden) {
-      return;
-    }
   }
 }
 
@@ -549,12 +541,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       await clearWalletCache(telegramId);
     } catch {}
 
-    const dmTargetBigInt = telegramId;
-    if (dmTargetBigInt === 0n) {
-      throw new Error("Unable to determine DM recipient");
-    }
-
-    const dmTarget = dmTargetBigInt.toString();
+    const dmTarget = telegramId.toString();
 
     const dmContext = {
       ...ctx,

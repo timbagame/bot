@@ -180,10 +180,6 @@ class KeypairCache {
       this.cache.delete(oldestKey);
     }
   }
-
-  clear(): void {
-    this.cache.clear();
-  }
 }
 
 type WalletDeps = {
@@ -710,18 +706,8 @@ export class WalletManager {
   private isAtaAlreadyExistsError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
     const normalized = message.toLowerCase();
-    if (normalized.includes("already in use") || normalized.includes("account exists")) {
-      return true;
-    }
-
-    if (error instanceof SendTransactionError && Array.isArray(error.logs)) {
-      return error.logs.some((log: string) => {
-        const lower = log.toLowerCase();
-        return lower.includes("already in use") || lower.includes("account exists");
-      });
-    }
-
-    return false;
+    // SendTransactionError includes its program logs in the message.
+    return normalized.includes("already in use") || normalized.includes("account exists");
   }
 
   // ================================

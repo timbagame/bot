@@ -3,6 +3,7 @@ import { WSOL_MINT } from "../src/utils/constants";
 import {
   USDC_MINT,
   USDT_MINT,
+  applyFillsToLots,
   buildTokenPositions,
   clearPositionSnapshot,
   createDecimalResolver,
@@ -17,6 +18,7 @@ import {
   quoteAmountToSol,
   rawAmountToNumber,
   sortTokenPositions,
+  formatUnrealizedScopeLine,
   type TokenPosition,
 } from "../src/services/positions";
 import type { SwapStatRecord } from "../src/utils/transaction-history";
@@ -1027,5 +1029,206 @@ test("loadTokenPositionsForWallet retries a mint after a failed price fetch", as
   expect(fetches[1]).toContain(TIMBA);
   expect(second[0]?.priceUsd).toBeCloseTo(1.2, 8);
   expect(second[0]?.pnlPercent).not.toBeNull();
+  clearPositionSnapshot();
+});
+
+test("rawAmountToNumber handles missing, invalid and non-integer raw values", () => {
+  expect(rawAmountToNumber(undefined, 6)).toBe(0);
+  expect(rawAmountToNumber("", 6)).toBe(0);
+  expect(rawAmountToNumber("100", -1)).toBe(0);
+  expect(rawAmountToNumber("1.5e3", 3)).toBe(1.5);
+  expect(rawAmountToNumber("not-a-number", 3)).toBe(0);
+});
+
+test("same-timestamp rotations apply the sell before the buy", () => {
+  const buy = {
+    mint: TIMBA,
+    ticker: "TIMBA",
+    side: "buy" as const,
+    tokenAmount: 50,
+    quoteMint: "",
+    quoteAmount: 0,
+    timestamp: 5,
+    source: "rotate" as const,
+    groupId: "rotation",
+  };
+  const sell = { ...buy, mint: BONK, ticker: "BONK", side: "sell" as const, tokenAmount: 10 };
+  const seed = {
+    mint: BONK,
+    ticker: "BONK",
+    side: "buy" as const,
+    tokenAmount: 10,
+    quoteMint: WSOL_MINT,
+    quoteAmount: 2,
+    timestamp: 1,
+    source: "cash" as const,
+  };
+
+  // The buy is listed first but must inherit the cost moved out by the sell.
+  const lots = applyFillsToLots([seed, buy, sell]);
+
+  expect(lots.get(TIMBA)?.costSol).toBeCloseTo(2, 8);
+  expect(lots.get(BONK)?.qty).toBeCloseTo(0, 8);
+});
+
+test("fills at the same time in different groups keep their order", () => {
+  const base = {
+    ticker: "TIMBA",
+    quoteMint: WSOL_MINT,
+    timestamp: 5,
+    source: "cash" as const,
+  };
+  const lots = applyFillsToLots([
+    { ...base, mint: TIMBA, side: "buy", tokenAmount: 10, quoteAmount: 1, groupId: "a" },
+    { ...base, mint: TIMBA, side: "buy", tokenAmount: 5, quoteAmount: 0, groupId: "a" },
+    { ...base, mint: TIMBA, side: "sell", tokenAmount: 5, quoteAmount: 1, groupId: "b" },
+  ]);
+
+  expect(lots.get(TIMBA)?.qty).toBe(10);
+  expect(lots.get(TIMBA)?.buyCount).toBe(2);
+  expect(lots.get(TIMBA)?.costSol).toBeCloseTo(2 / 3, 8);
+});
+
+test("duplicate holdings keep the first known ticker", () => {
+  const positions = buildTokenPositions({
+    fills: fromSwaps([swap({ amount_in: "1000000000", amount_out: "2000000" })]),
+    holdings: [
+      { mint: TIMBA, ticker: "", balance: 1, decimals: 6 },
+      { mint: TIMBA, ticker: "TIMBA", balance: 1, decimals: 6 },
+    ],
+    pricesUsd: { [WSOL_MINT]: 100, [TIMBA]: 60 },
+  });
+
+  expect(positions[0]?.ticker).toBe("TIMBA");
+  expect(positions[0]?.balance).toBe(2);
+});
+
+test("sortTokenPositions falls back to the ticker for equal value and PNL", () => {
+  const zeroValue = { priceUsd: null, pnlPercent: null } as const;
+  expect(
+    sortTokenPositions([
+      card({ ticker: "ZED", ...zeroValue }),
+      card({ ticker: "ABE", ...zeroValue }),
+      card({ ticker: "MID", priceUsd: 1, balance: 0, pnlPercent: null }),
+    ]).map((position) => position.ticker),
+  ).toEqual(["ABE", "MID", "ZED"]);
+});
+
+test("position cards cope with unusual balances and decimals", () => {
+  expect(
+    formatPositionMessage(card({ rawBalance: undefined, balance: 1.25, decimals: 2.5 })),
+  ).toContain("Balance: <code>1.25</code>");
+  expect(
+    formatPositionMessage(card({ rawBalance: "x", balance: Number.NaN, decimals: 6 })),
+  ).toContain("Balance: <code>0</code>");
+});
+
+test("formatUnrealizedScopeLine ignores invalid tracked balances", () => {
+  expect(formatUnrealizedScopeLine(card({ trackedBalance: 0 }))).toBeNull();
+  expect(formatUnrealizedScopeLine(card({ trackedBalance: Number.NaN }))).toBeNull();
+  expect(formatUnrealizedScopeLine(card({ trackedBalance: Number.POSITIVE_INFINITY }))).toBeNull();
+});
+
+test("concurrent position loads share work and price newly held mints", async () => {
+  clearPositionSnapshot();
+  let releaseFirst: () => void = () => {};
+  const firstPrices = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const requested: string[][] = [];
+  const swaps = [
+    swap({ signature: "timba", amount_in: "1000000000", amount_out: "100000000", timestamp: 1 }),
+    swap({
+      signature: "bonk",
+      output_mint: BONK,
+      output_ticker: "BONK",
+      amount_in: "500000000",
+      amount_out: "100000",
+      timestamp: 2,
+    }),
+  ];
+  const timbaOnly = [{ mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6 }];
+  const both = [...timbaOnly, { mint: BONK, ticker: "BONK", balance: 1, decimals: 5 }];
+  const loader = (holdings: typeof both) => ({
+    walletAddress: "wallet-concurrent",
+    getHoldings: async () => holdings,
+    getSwaps: () => swaps,
+    fetchPricesUSD: async (mints: string[]) => {
+      requested.push(mints);
+      if (requested.length === 1) await firstPrices;
+      return Object.fromEntries(mints.map((mint) => [mint, mint === WSOL_MINT ? 100 : 1]));
+    },
+    knownTokens: [
+      { mint: TIMBA, decimals: 6 },
+      { mint: BONK, decimals: 5 },
+    ],
+  });
+
+  const first = loadTokenPositionsForWallet(loader(timbaOnly));
+  await Bun.sleep(0);
+  const second = loadTokenPositionsForWallet(loader(both));
+  await Bun.sleep(0);
+  releaseFirst();
+  const [firstPositions, secondPositions] = await Promise.all([first, second]);
+
+  expect(requested).toEqual([[WSOL_MINT, TIMBA], [BONK]]);
+  expect(firstPositions.map((position) => position.mint)).toEqual([TIMBA]);
+  expect(secondPositions.map((position) => position.mint).sort()).toEqual([BONK, TIMBA].sort());
+  clearPositionSnapshot();
+});
+
+test("a concurrent load with nothing new to price reuses the shared prices", async () => {
+  clearPositionSnapshot();
+  let priceCalls = 0;
+  const loader = {
+    walletAddress: "wallet-concurrent-same",
+    getHoldings: async () => [{ mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6 }],
+    getSwaps: () => [swap({ amount_in: "1000000000", amount_out: "100000000" })],
+    fetchPricesUSD: async () => {
+      priceCalls += 1;
+      await Bun.sleep(5);
+      return { [WSOL_MINT]: 100, [TIMBA]: 1 };
+    },
+    knownTokens: [{ mint: TIMBA, decimals: 6 }],
+  };
+
+  const [a, b] = await Promise.all([
+    loadTokenPositionsForWallet(loader),
+    loadTokenPositionsForWallet(loader),
+  ]);
+
+  expect(priceCalls).toBe(1);
+  expect(b).toEqual(a);
+  clearPositionSnapshot();
+});
+
+test("newly known token metadata rebuilds cached fills", async () => {
+  clearPositionSnapshot();
+  const swaps = [
+    swap({
+      output_mint: UNKNOWN_MINT,
+      output_ticker: "NEW",
+      amount_in: "1000000000",
+      amount_out: "1000",
+    }),
+  ];
+  const base = {
+    walletAddress: "wallet-known-grew",
+    getSwaps: () => swaps,
+    fetchPricesUSD: async (mints: string[]) =>
+      Object.fromEntries(mints.map((mint) => [mint, mint === WSOL_MINT ? 100 : 1])),
+  };
+
+  const before = await loadTokenPositionsForWallet({
+    ...base,
+    getHoldings: async () => [{ mint: TIMBA, ticker: "TIMBA", balance: 1, decimals: 6 }],
+  });
+  const after = await loadTokenPositionsForWallet({
+    ...base,
+    getHoldings: async () => [{ mint: UNKNOWN_MINT, ticker: "NEW", balance: 10, decimals: 2 }],
+  });
+
+  expect(before).toEqual([]);
+  expect(after.map((position) => position.mint)).toEqual([UNKNOWN_MINT]);
   clearPositionSnapshot();
 });

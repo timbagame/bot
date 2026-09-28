@@ -742,6 +742,71 @@ describe("buildAdminIntegratorConfig", () => {
   });
 });
 
+describe("buildAdminIntegratorConfig funding and pricing", () => {
+  const build = (overrides: Partial<Parameters<typeof buildAdminIntegratorConfig>[0]> = {}) =>
+    buildAdminIntegratorConfig({
+      referralConfig: { referralAccount: "REF" },
+      baseFeeBps: 85,
+      tradeAmountRaw: 1_000_000_000,
+      tradeMint: WSOL_MINT,
+      tradeTicker: "SOL",
+      tradeDecimals: 9,
+      solFeeBufferLamports: undefined,
+      ...overrides,
+    });
+  let restoreAdmin: () => void;
+  let savedRent: number;
+
+  beforeEach(async () => {
+    savedRent = __test_getSolWrapRentReserveLamports();
+    __test_setSolWrapRentReserveLamports(2_039_280);
+    restoreAdmin = await stubOperatorKeypair();
+  });
+
+  afterEach(() => {
+    restoreAdmin();
+    __test_setSolWrapRentReserveLamports(savedRent);
+  });
+
+  test("refuses when the admin gas payer cannot cover rent and priority fees", async () => {
+    const restoreConn = stubWalletConnection(1_000);
+    try {
+      await expect(build()).rejects.toThrow(
+        /^Integrator gas payer is low on SOL\. Need at least .+ to cover rent and priority fees\.$/,
+      );
+    } finally {
+      restoreConn();
+    }
+  });
+
+  test("falls back to the base referral fee when prices are unavailable", async () => {
+    const restoreConn = stubWalletConnection(10_000_000_000);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const priceSpy = vi.spyOn(priceService, "getUsdPrice").mockRejectedValue(new Error("down"));
+    try {
+      const config = await build();
+
+      expect(config.referralFee).toBe(85);
+      expect(config.payerKind).toBe("admin");
+      expect(config.adminBalanceLamports).toBe(10_000_000_000);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to compute admin payer surcharge, falling back to base referral fee",
+        expect.any(Error),
+      );
+    } finally {
+      priceSpy.mockRestore();
+      warnSpy.mockRestore();
+      restoreConn();
+    }
+  });
+});
+
+describe("prepareIntegratorForQuote without an integrator", () => {
+  test("stays empty for token outputs", () => {
+    expect(prepareIntegratorForQuote(null, "USDC", "USER")).toBeNull();
+  });
+});
+
 describe("resolveSolInputFeeBufferLamports", () => {
   const stubAccountInfo = (kind: "token" | "system" | "missing", owner?: any) => {
     const original = wallet.getConnection;

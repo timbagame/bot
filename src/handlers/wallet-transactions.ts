@@ -150,10 +150,6 @@ const tryGetUserWalletAddress = async (
   wallet: WalletManager,
   telegramId: bigint,
 ): Promise<string | undefined> => {
-  if (telegramId === 0n) {
-    return undefined;
-  }
-
   try {
     return (await wallet.getKeyPair(telegramId)).publicKey.toBase58();
   } catch {
@@ -581,11 +577,8 @@ export const createWalletTransactionsModule = (
   ): Promise<void> => {
     const initiatorId = assertSessionOwnership(ctx, userState);
     const trimmedAmount = amount.trim();
+    // Throws unless the amount is a positive safe integer of lamports.
     const lamportsToWrap = toRawAmount(trimmedAmount, 9);
-
-    if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
-      throw new Error("Invalid amount format");
-    }
 
     const telegramId = requireTelegramId(ctx, "wrap custom amount input");
     let nativeSolBalance = 0;
@@ -825,11 +818,8 @@ export const createWalletTransactionsModule = (
           formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
         });
 
+        // presentSpendAmount throws for zero or unaffordable amounts.
         const lamportsToWrap = spend.rawAmount;
-
-        if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
-          throw new Error("Amount is too small to wrap");
-        }
 
         const selection = amountChoice.trim().toUpperCase();
         const confirmation = buildWrapConfirmation({

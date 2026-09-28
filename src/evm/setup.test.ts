@@ -17,6 +17,7 @@ function fixture() {
   let visible: any;
   const answers: string[] = [];
   let sends = 0;
+  const sent: string[] = [];
   let updateId = 1;
   const chat = { id: 1, type: "private" as const, first_name: "Test" };
   const from = { id: 1, is_bot: false, first_name: "Test" };
@@ -45,7 +46,10 @@ function fixture() {
         if (mode === "lost-response") throw new Error("Response lost");
       }
       if (method === "answerCallbackQuery") answers.push((payload as any).text ?? "");
-      if (method === "sendMessage") sends++;
+      if (method === "sendMessage") {
+        sends++;
+        sent.push((payload as any).text);
+      }
       return {
         ok: true,
         result: method === "sendMessage" ? { message_id: 100, date: 1, chat } : true,
@@ -82,6 +86,10 @@ function fixture() {
     },
     visible: () => visible,
     sends: () => sends,
+    sent,
+    labels: () => visible.reply_markup?.inline_keyboard.flat().map((b: any) => b.text) ?? [],
+    buttonAt: (index: number) =>
+      visible.reply_markup.inline_keyboard.flat()[index].callback_data as string,
     button: (predicate: (text: string) => boolean) => {
       const button = visible.reply_markup.inline_keyboard
         .flat()
@@ -217,4 +225,115 @@ test("retrying a failed timeout edit applies its delta only once", async () => {
   await f.click(increase);
   await f.click(f.button((text) => text.includes("Create")));
   expect(f.submitted[0]?.timeoutSeconds).toBe(7200);
+});
+
+const CONFIRM = { create: 0, visibility: 10, minPlus50: 14, minMax: 15, back: 16 };
+
+async function toConfirm(f: ReturnType<typeof fixture>, players: string) {
+  await f.open();
+  await f.click(f.button(() => true));
+  await f.click(f.button((text) => text === `👥 ${players}`));
+  expect(f.visible().text).toContain("Network: Anvil");
+  expect(f.labels()[0]).toBe("✅ Create Game");
+}
+
+test("cancel closes the setup and retires its buttons", async () => {
+  const f = fixture();
+  await f.open();
+  const amount = f.button(() => true);
+
+  await f.click(f.button((text) => text.includes("Cancel")));
+
+  expect(f.visible().text).toBe("Game setup cancelled.");
+  await f.click(amount);
+  expect(f.answers.at(-1)).toBe("This setup is unavailable.");
+  expect(f.submitted).toHaveLength(0);
+});
+
+test("back buttons return to the previous screens", async () => {
+  const f = fixture();
+  await toConfirm(f, "10");
+
+  await f.click(f.buttonAt(CONFIRM.back));
+  expect(f.labels()).toContain("📊 Custom Players");
+
+  await f.click(f.button((text) => text === "← Back to Amount"));
+  expect(f.labels()).toContain("✏️ Custom Amount");
+});
+
+test("minimum players can be raised but never above the maximum", async () => {
+  const f = fixture();
+  await toConfirm(f, "10");
+
+  await f.click(f.buttonAt(CONFIRM.minPlus50));
+  expect(f.labels()).toContain("Min 3");
+
+  await f.click(f.buttonAt(CONFIRM.minMax));
+  expect(f.labels()).toContain("Min 10");
+
+  await f.click(f.buttonAt(CONFIRM.create));
+  expect(f.submitted[0]).toMatchObject({ players: 10, minPlayers: 10 });
+});
+
+test("visibility toggles to private and is submitted", async () => {
+  const f = fixture();
+  await toConfirm(f, "2");
+  expect(f.labels()).toContain("🌐 Public");
+
+  await f.click(f.buttonAt(CONFIRM.visibility));
+
+  expect(f.labels()).toContain("🔒 Private");
+  await f.click(f.buttonAt(CONFIRM.create));
+  expect(f.submitted[0]?.isPrivate).toBe(true);
+});
+
+test("custom player counts are validated and applied", async () => {
+  const f = fixture();
+  await f.open();
+  await f.click(f.button(() => true));
+  await f.click(f.button((text) => text.includes("Custom Players")));
+  expect(f.sent.at(-1)).toBe("Reply with the maximum number of players (up to 100).");
+
+  for (const invalid of ["1", "101", "2.5", "many"]) {
+    await f.reply(invalid);
+    expect(f.sent.at(-1)).toBe("Invalid value. Reply to the prompt again.");
+  }
+
+  await f.reply("7");
+  expect(f.visible().text).toContain("Network: Anvil");
+  await f.click(f.buttonAt(CONFIRM.create));
+  expect(f.submitted[0]).toMatchObject({ players: 7, minPlayers: 2 });
+});
+
+test("custom amounts below the token minimum are rejected", async () => {
+  const f = fixture();
+  await f.open();
+  await f.click(f.button((text) => text.includes("Custom")));
+  expect(f.sent.at(-1)).toBe("Reply with the amount in TEST.");
+
+  await f.reply("0");
+
+  expect(f.sent.at(-1)).toBe("Invalid value. Reply to the prompt again.");
+  expect(f.labels()).toContain("✏️ Custom Amount");
+});
+
+test("an unknown action index is refused", async () => {
+  const f = fixture();
+  await f.open();
+  const [prefix] = f.button(() => true).match(/^evs:[^:]+:\d+:/)!;
+
+  await f.click(`${prefix}99`);
+
+  expect(f.answers.at(-1)).toBe(
+    "Unable to continue. Check the amount, players and wallet balance.",
+  );
+});
+
+test("replies that do not answer a setup prompt pass through", async () => {
+  const f = fixture();
+  await f.open();
+
+  await f.reply("hello");
+
+  expect(f.sent).toHaveLength(1);
 });

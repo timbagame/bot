@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   answers,
+  bot,
   botModule,
   buttons,
   callsTo,
@@ -21,6 +22,7 @@ import { OracleClient } from "../src/utils/oracle";
 import { clearAllGameSetupSessions, getGameSetupSession } from "../src/utils/user-state";
 import * as prices from "../src/utils/prices";
 import { PublicKey } from "@solana/web3.js";
+import { encodeGameConfirmPayload } from "../src/utils/callback-data";
 
 useBotHarness();
 
@@ -371,6 +373,270 @@ describe("game creation outcomes", () => {
     } as any);
     await clickLabel("✅ Create Game", setupId);
     expect(answers().at(-1)).toBeUndefined();
+  });
+});
+
+describe("game creation edge cases", () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+  let errorSpy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  const reachConfirm = async () => {
+    const setupId = await openSetup();
+    await clickLabel("5", setupId);
+    await clickLabel("👥 2", setupId);
+    return setupId;
+  };
+  const confirmData = (amount: string) =>
+    encodeGameConfirmPayload({
+      gameType: "coinflip",
+      amount,
+      players: 2,
+      timeoutSeconds: 3600,
+      minPlayers: 2,
+      isPrivate: false,
+      creatorId: String(CREATOR),
+    })!;
+  const warned = (text: string) =>
+    warnSpy.mock.calls.some((call: unknown[]) => String(call[0]).includes(text));
+  const errored = (text: string) =>
+    errorSpy.mock.calls.some((call: unknown[]) => String(call[0]).includes(text));
+
+  test("amounts too large for a safe raw integer are refused before anything changes", async () => {
+    const setupId = await openSetup();
+
+    await press(confirmData("100000000000"), { ...group(), messageId: setupId });
+
+    expect(answers().at(-1)).toBe("Amount is too large; please enter a smaller value.");
+    expect(createCalls).toEqual([]);
+  });
+
+  test("a confirmed game is recovered even when recovery and cleanup fail", async () => {
+    const recovered: string[] = [];
+    botModule.__test_setGameManager({
+      createGame: async () => ({
+        success: false,
+        confirmedSignature: "sig",
+        gameAddress: "CONFIRMED_GAME",
+      }),
+      recoverPendingGameCreationByAddress: async (_ctx: unknown, address: string) => {
+        recovered.push(address);
+        throw new Error("rpc down");
+      },
+    } as any);
+    const setupId = await reachConfirm();
+    failApiMethod("deleteMessage", "Bad Request: message can't be deleted");
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(recovered).toEqual(["CONFIRMED_GAME"]);
+    expect(warned("Confirmed game delivery will be retried in the background")).toBe(true);
+    expect(warned("Could not delete failed game confirmation")).toBe(true);
+  });
+
+  test("a confirmation that cannot be deleted is marked as created instead", async () => {
+    const setupId = await reachConfirm();
+    failApiMethod("deleteMessage", "Bad Request: message can't be deleted");
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(createCalls).toHaveLength(1);
+    expect(messageCalls().map(messageText)).toContain(
+      "✅ Game created!\n\n<code>GAME_ADDRESS_1</code>",
+    );
+    expect(gameMessages).toHaveLength(1);
+  });
+
+  test("marking the confirmation fails quietly when editing is also refused", async () => {
+    const setupId = await reachConfirm();
+    failApiMethod("deleteMessage", "Bad Request: message can't be deleted");
+    failApiMethod("editMessageText", "Bad Request: message can't be edited");
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(gameMessages).toHaveLength(1);
+    expect(warned("Failed to mark confirmation message as processed")).toBe(true);
+  });
+
+  test("a failed card refresh after auto-join is only logged", async () => {
+    createResult = { success: true, gameAddress: "G2", autoJoinResult: { success: true } };
+    botModule.__test_setGameManager({
+      createGame: async () => createResult,
+      createGameMessage: async () => 4242,
+      clearPendingGameCreation: () => {},
+      updateGameMessageFromData: async () => {
+        throw new Error("telegram down");
+      },
+    } as any);
+    const setupId = await reachConfirm();
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(errored("Failed to update game message after auto-join")).toBe(true);
+    expect(answers().at(-1)).toBeUndefined();
+  });
+
+  test("a delivery failure after creation hands the game to recovery", async () => {
+    const recovered: string[] = [];
+    botModule.__test_setGameManager({
+      createGame: async () => ({ success: true, gameAddress: "G3" }),
+      createGameMessage: async () => {
+        throw new Error("chat not found");
+      },
+      recoverPendingGameCreationByAddress: async (_ctx: unknown, address: string) => {
+        recovered.push(address);
+        throw new Error("still down");
+      },
+    } as any);
+    const setupId = await reachConfirm();
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(recovered).toEqual(["G3"]);
+    expect(answers()).not.toContain("❌ Error creating game");
+  });
+
+  test("an interrupted creation with no card to restore reports failure, even if that fails", async () => {
+    createResult = () => {
+      throw new Error("rpc down");
+    };
+    const setupId = await reachConfirm();
+    failApiMethod("editMessageReplyMarkup", "Bad Request: message to edit not found");
+    failApiMethod("sendMessage", "Forbidden: bot was kicked", 403);
+
+    await clickLabel("✅ Create Game", setupId);
+
+    expect(answers()).toContain("❌ Error creating game");
+    expect(errored("Failed to update confirmation message after error")).toBe(true);
+  });
+
+  test("creation works for confirmations without a message date", async () => {
+    const setupId = await reachConfirm();
+    await bot.handleUpdate({
+      update_id: 88_000_001,
+      callback_query: {
+        id: "no-date",
+        from: { id: CREATOR, is_bot: false, first_name: "Tester" },
+        chat_instance: "instance",
+        data: confirmData("5"),
+        message: {
+          message_id: setupId,
+          chat: { id: CHAT, type: "supergroup", title: "Test Group" },
+          text: "confirm",
+        },
+      },
+    });
+
+    expect(createCalls).toHaveLength(1);
+  });
+});
+
+describe("setup prompt failures", () => {
+  let errorSpy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errorSpy.mockRestore());
+  const failMenus = () => {
+    failApiMethod("editMessageText", "Bad Request: message can't be edited");
+    failApiMethod("sendMessage", "Forbidden: bot was kicked", 403);
+  };
+
+  test("a custom amount prompt reads the balance when the session has none", async () => {
+    const setupId = await openSetup();
+    const { upsertGameSetupSession } = await import("../src/utils/user-state");
+    upsertGameSetupSession(`${CHAT}_${setupId}`, { userBalance: 0 });
+    stub(wallet, "getTokenBalance", async () => {
+      throw new Error("rpc down");
+    });
+
+    await press(`custom_amount_coinflip_${CREATOR}`, { ...group(), messageId: setupId });
+
+    expect(answers().at(-1)).toBe("Type your amount...");
+    expect(getGameSetupSession(`${CHAT}_${setupId}`)).toMatchObject({
+      waitingFor: "amount_input",
+      userBalance: 0,
+    });
+  });
+
+  test("going back to amounts reads the balance when the session has none", async () => {
+    const setupId = await openSetup();
+    const { upsertGameSetupSession } = await import("../src/utils/user-state");
+    upsertGameSetupSession(`${CHAT}_${setupId}`, { userBalance: 0 });
+    stub(wallet, "getTokenBalance", async () => {
+      throw new Error("rpc down");
+    });
+
+    await press(`back_to_amounts_coinflip_${CREATOR}`, { ...group(), messageId: setupId });
+
+    expect(messageText(lastMessage())).toContain("Select Amount - Coinflip");
+  });
+
+  test.each([
+    [
+      "custom_amount",
+      (id: number) => `custom_amount_coinflip_${id}`,
+      "❌ Error setting up text input",
+    ],
+    ["cancel", (id: number) => `cancel_game_setup_${id}`, "❌ Error cancelling"],
+  ])("a %s menu that cannot be shown is answered with an error", async (_label, data, answer) => {
+    const setupId = await openSetup();
+    failMenus();
+
+    await press(data(CREATOR), { ...group(), messageId: setupId });
+
+    expect(answers().at(-1)).toBe(answer);
+  });
+
+  test("a custom players prompt that cannot be shown is answered with an error", async () => {
+    const setupId = await openSetup();
+    await press(`amount_coinflip_2_${CREATOR}`, { ...group(), messageId: setupId });
+    failMenus();
+
+    await press(`custom_players_coinflip_2_${CREATOR}`, { ...group(), messageId: setupId });
+
+    expect(answers().at(-1)).toBe("❌ Error setting up players input");
+  });
+
+  test("non-text messages skip the typed setup handler", async () => {
+    const setupId = await openSetup();
+    await clickLabel("✏️ Custom Amount", setupId);
+    const before = messageCalls().length;
+
+    await bot.handleUpdate({
+      update_id: 88_000_002,
+      message: {
+        message_id: 99_001,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT, type: "supergroup", title: "Test Group" },
+        from: { id: CREATOR, is_bot: false, first_name: "Tester" },
+        sticker: {
+          file_id: "sticker",
+          file_unique_id: "sticker",
+          type: "regular",
+          width: 1,
+          height: 1,
+          is_animated: false,
+          is_video: false,
+        },
+        reply_to_message: {
+          message_id: setupId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: CHAT, type: "supergroup", title: "Test Group" },
+          text: "prompt",
+        },
+      },
+    } as any);
+
+    expect(getGameSetupSession(`${CHAT}_${setupId}`)?.waitingFor).toBe("amount_input");
+    expect(messageCalls().length).toBe(before);
   });
 });
 

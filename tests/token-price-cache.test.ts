@@ -51,4 +51,70 @@ describe("token price cache", () => {
     expect(refreshed?.price).toBe(2);
     expect(priceSpy).toHaveBeenCalledTimes(1);
   });
+
+  describe("price hints", () => {
+    const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const hint = (overrides: Record<string, unknown> = {}) =>
+      ({
+        price: 1.25,
+        identifier: USDC,
+        tokenMint: USDC,
+        resolvedAt: Date.now(),
+        ...overrides,
+      }) as any;
+
+    test("a fresh matching hint is used and remembered", async () => {
+      const live = vi.spyOn(priceModule, "resolveTokenPriceUSD");
+
+      const first = await getUsdPrice({ tokenMint: ` ${USDC} `, hint: hint() });
+      const second = await getUsdPrice({ tokenMint: USDC });
+
+      expect(first).toMatchObject({ price: 1.25, tokenMint: USDC });
+      expect(second?.price).toBe(1.25);
+      expect(live).not.toHaveBeenCalled();
+    });
+
+    test("a hint for another mint is ignored", async () => {
+      const live = vi
+        .spyOn(priceModule, "resolveTokenPriceUSD")
+        .mockResolvedValue({ price: 0.99, identifier: USDC });
+
+      const resolved = await getUsdPrice({ tokenMint: USDC, hint: hint({ tokenMint: WSOL_MINT }) });
+
+      expect(resolved?.price).toBe(0.99);
+      expect(live).toHaveBeenCalledTimes(1);
+    });
+
+    test("a stale hint is ignored", async () => {
+      const live = vi
+        .spyOn(priceModule, "resolveTokenPriceUSD")
+        .mockResolvedValue({ price: 0.97, identifier: USDC });
+
+      const resolved = await getUsdPrice({ tokenMint: USDC, hint: hint({ resolvedAt: 0 }) });
+
+      expect(resolved?.price).toBe(0.97);
+      expect(live).toHaveBeenCalledTimes(1);
+    });
+
+    test("a hint with a mint answers a request without one", async () => {
+      const live = vi.spyOn(priceModule, "resolveTokenPriceUSD");
+
+      expect((await getUsdPrice({ hint: hint() }))?.price).toBe(1.25);
+      expect(live).not.toHaveBeenCalled();
+    });
+
+    test("a hint without a mint cannot answer a request without one", async () => {
+      vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+
+      expect(await getUsdPrice({ hint: hint({ tokenMint: undefined }) })).toBeNull();
+    });
+
+    test("returns null and caches nothing when the live lookup fails", async () => {
+      const live = vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+
+      expect(await getUsdPrice({ tokenMint: USDC })).toBeNull();
+      expect(await getUsdPrice({ tokenMint: USDC })).toBeNull();
+      expect(live).toHaveBeenCalledTimes(2);
+    });
+  });
 });

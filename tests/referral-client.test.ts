@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Keypair, type Connection, type PublicKey } from "#solana";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, AccountLayout, AccountState, TOKEN_PROGRAM_ID } from "#token";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  AccountLayout,
+  AccountState,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+} from "#token";
 import { REFERRAL_PROGRAM_ID, ReferralProvider } from "../src/utils/referral-client";
 
 const REFERRAL_ACCOUNT_DISCRIMINATOR = Buffer.from([237, 162, 80, 78, 196, 233, 91, 2]);
@@ -181,5 +188,65 @@ describe("Kit Jupiter referral client", () => {
         referralAccountPubKey: referralAddress,
       }),
     ).rejects.toThrow("Invalid Jupiter referral project");
+  });
+
+  describe("initializeReferralTokenAccountV2", () => {
+    const setup = async (owner: PublicKey | null) => {
+      const payer = (await Keypair.generate()).publicKey;
+      const referral = (await Keypair.generate()).publicKey;
+      const mint = (await Keypair.generate()).publicKey;
+      const connection = {
+        getAccountInfo: async () => (owner ? accountInfo(owner, Buffer.alloc(82)) : null),
+      } as unknown as Connection;
+      return { provider: new ReferralProvider(connection), payer, referral, mint };
+    };
+
+    test.each([
+      ["SPL Token", TOKEN_PROGRAM_ID],
+      ["Token-2022", TOKEN_2022_PROGRAM_ID],
+    ])("creates the referral ATA idempotently for a %s mint", async (_label, tokenProgram) => {
+      const { provider, payer, referral, mint } = await setup(tokenProgram);
+
+      const { tx, tokenAccount } = await provider.initializeReferralTokenAccountV2({
+        payerPubKey: payer,
+        referralAccountPubKey: referral,
+        mint,
+      });
+
+      expect(tokenAccount.toBase58()).toBe(
+        (await getAssociatedTokenAddress(mint, referral, true, tokenProgram)).toBase58(),
+      );
+      expect(tx.instructions).toHaveLength(1);
+      const [instruction] = tx.instructions;
+      expect(instruction!.programId.toBase58()).toBe(ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
+      expect(instruction!.keys.map((key) => key.pubkey.toBase58())).toContain(
+        tokenProgram.toBase58(),
+      );
+      expect([...instruction!.data]).toEqual([1]);
+    });
+
+    test("rejects a mint that does not exist", async () => {
+      const { provider, payer, referral, mint } = await setup(null);
+
+      await expect(
+        provider.initializeReferralTokenAccountV2({
+          payerPubKey: payer,
+          referralAccountPubKey: referral,
+          mint,
+        }),
+      ).rejects.toThrow("Invalid mint");
+    });
+
+    test("rejects an account that is not owned by a token program", async () => {
+      const { provider, payer, referral, mint } = await setup(REFERRAL_PROGRAM_ID);
+
+      await expect(
+        provider.initializeReferralTokenAccountV2({
+          payerPubKey: payer,
+          referralAccountPubKey: referral,
+          mint,
+        }),
+      ).rejects.toThrow("Invalid mint owner");
+    });
   });
 });

@@ -139,10 +139,15 @@ describe("Bot Main Entry Point Tests", () => {
     });
 
     test("allows replacing error handler via catch", () => {
+      const original = (botModule.bot as any).errorHandler;
       const handler = () => {};
-      botModule.bot.catch(handler);
+      try {
+        botModule.bot.catch(handler);
 
-      expect((botModule.bot as any).errorHandler).toBe(handler);
+        expect((botModule.bot as any).errorHandler).toBe(handler);
+      } finally {
+        botModule.bot.catch(original);
+      }
     });
 
     test("uses the default user queue for finance and normal commands", () => {

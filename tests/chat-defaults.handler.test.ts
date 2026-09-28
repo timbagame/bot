@@ -9,7 +9,11 @@ import {
 import { ChatDatabase } from "../src/utils/chat-database";
 import { GameDatabase } from "../src/utils/game-database";
 import { resetTestDatabase } from "./helpers/database";
-import type { InputSessionState } from "../src/utils/user-state";
+import {
+  clearAllInputSessions,
+  findInputSession,
+  type InputSessionState,
+} from "../src/utils/user-state";
 
 const bot = new Bot("test-token");
 
@@ -1232,5 +1236,506 @@ describe("chat defaults module", () => {
     await module.handleDefaultCommand(ctx as any, ["/default", "CLEAR"]);
     expect(tokenManager.getChatDefaultToken()).toBeNull();
     expect(refreshed).toBe(2);
+  });
+});
+
+describe("chat defaults menus and inputs", () => {
+  let chatDb: ChatDatabase;
+  let gameDb: GameDatabase;
+  const promptSession = () =>
+    findInputSession((_key, session) => session.type === "chat_defaults")?.session;
+
+  beforeEach(() => {
+    clearAllInputSessions();
+    resetTestDatabase("chat-settings.sqlite");
+    resetTestDatabase("games.sqlite");
+    ChatDatabase.resetForTesting();
+    GameDatabase.resetForTesting();
+    chatDb = ChatDatabase.getInstance();
+    gameDb = GameDatabase.getInstance();
+  });
+
+  const setup = (options: { admin?: boolean; tokenManager?: any } = {}) => {
+    const mockBot = createMockBot();
+    const tokenManager = options.tokenManager ?? baseTokenManager();
+    const replies: string[] = [];
+    const menus: Array<{ text: string; options: any }> = [];
+    const answers: Array<string | undefined> = [];
+    let refreshes = 0;
+    const module = createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({ getUsernameFromTelegramId: async () => null }) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => options.admin !== false,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+      buyAlerts: {
+        refresh: () => {
+          refreshes += 1;
+        },
+      } as any,
+    });
+    const ctxFor = (data?: string, message: Record<string, unknown> = {}) => {
+      const ctx: any = {
+        chat: { id: 99, type: "supergroup" },
+        from: { id: 123 },
+        message: { message_id: 11, ...message },
+        answerCallbackQuery: async (text?: string) => {
+          answers.push(text);
+        },
+        reply: async (text: string, replyOptions: any) => {
+          menus.push({ text, options: replyOptions });
+          return { message_id: 50, chat: { id: 99 } };
+        },
+        api: {
+          editMessageText: async (
+            _chat: number,
+            messageId: number,
+            text: string,
+            editOptions: any,
+          ) => {
+            menus.push({ text, options: editOptions });
+            return { message_id: messageId, chat: { id: 99 } };
+          },
+        },
+      };
+      if (data)
+        ctx.callbackQuery = { id: "cb", data, message: { message_id: 11, chat: { id: 99 } } };
+      return ctx;
+    };
+    const press = (data: string) => mockBot.dispatch(data, ctxFor(data));
+    const lastMenu = () => menus.at(-1)!;
+    const lastCallbacks = () =>
+      (lastMenu().options?.reply_markup?.inline_keyboard ?? [])
+        .flat()
+        .map((button: any) => button.callback_data);
+    return {
+      module,
+      mockBot,
+      tokenManager,
+      replies,
+      menus,
+      answers,
+      press,
+      ctxFor,
+      lastMenu,
+      lastCallbacks,
+      refreshes: () => refreshes,
+    };
+  };
+
+  test("game submenus summarise players, privacy and media", async () => {
+    const h = setup();
+    chatDb.upsertChatGameSettings(99, {
+      coinflip_max_players: 6,
+      giveaway_default_privacy: "public",
+      giveaway_video_id: "__DISABLED__",
+    });
+
+    await h.press("chat_defaults_game_coinflip");
+    expect(h.lastMenu().text).toContain("<b>Coinflip defaults</b>");
+    expect(h.lastMenu().text).toContain("👥 Players: 6");
+    expect(h.lastMenu().text).toContain("Public 🌍");
+
+    await h.press("chat_defaults_game_giveaway");
+    expect(h.lastMenu().text).toContain("<b>Giveaway defaults</b>");
+    expect(h.lastMenu().text).toContain("👥 Players: 10");
+    expect(h.lastMenu().text).toContain("🎬 Media: Text only");
+    expect(h.lastCallbacks()).toContain("chat_defaults_video_giveaway");
+  });
+
+  test("restoring each default clears only that setting", async () => {
+    const h = setup();
+    h.tokenManager.setChatDefaultToken(99, "mint", "AAA", "1");
+    chatDb.upsertChatGameSettings(99, {
+      coinflip_max_players: 6,
+      giveaway_max_players: 12,
+      timeout_seconds: 900,
+      coinflip_video_id: "coinflip-video",
+      giveaway_video_id: "giveaway-video",
+    });
+    chatDb.upsertChatBuyAlerts(99, { enabled: true, media_file_id: "alert-media" });
+
+    await h.press("chat_defaults_clear_token");
+    expect(h.tokenManager.getChatDefaultToken(99)).toBeNull();
+    await h.press("chat_defaults_clear_timeout");
+    await h.press("chat_defaults_clear_coinflip");
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      timeout_seconds: null,
+      coinflip_max_players: null,
+      giveaway_max_players: 12,
+    });
+    await h.press("chat_defaults_clear_giveaway");
+    await h.press("chat_defaults_clear_video_coinflip");
+    await h.press("chat_defaults_clear_video_giveaway");
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      giveaway_max_players: null,
+      coinflip_video_id: "",
+      giveaway_video_id: "",
+    });
+    expect(h.lastMenu().text).toContain("⚙️ Chat settings");
+
+    await h.press("chat_defaults_clear_video_buy_alerts");
+    expect(chatDb.getChatBuyAlerts(99)).toMatchObject({ enabled: true, media_file_id: "" });
+    expect(h.lastCallbacks()).toContain("chat_defaults_buy_alerts_media");
+    expect(h.answers.at(-1)).toBe("Setting reset to default");
+    expect(h.refreshes()).toBe(2);
+  });
+
+  test.each([
+    ["token", "Send the SPL token ticker or mint"],
+    ["timeout", "Send the default game timeout in seconds."],
+    ["giveaway", "Must be between 1-50 players."],
+  ])("the %s button asks for a reply and remembers the prompt", async (setting, prompt) => {
+    const h = setup();
+
+    await h.press(`chat_defaults_${setting}`);
+
+    expect(h.lastMenu().text).toContain(prompt);
+    expect(h.lastCallbacks()).toContain(`chat_defaults_clear_${setting}`);
+    expect(promptSession()).toMatchObject({
+      type: "chat_defaults",
+      setting,
+      initiatorId: "123",
+    });
+  });
+
+  test("media buttons offer custom, disabled and default media", async () => {
+    const h = setup();
+
+    await h.press("chat_defaults_video_coinflip");
+    expect(h.lastMenu().text).toBe("Choose an option for the coinflip game media.");
+    expect(h.lastCallbacks()).toEqual([
+      "chat_defaults_set_video_coinflip",
+      "chat_defaults_disable_video_coinflip",
+      "chat_defaults_clear_video_coinflip",
+      "chat_defaults_cancel",
+    ]);
+
+    await h.press("chat_defaults_set_video_giveaway");
+    expect(h.lastMenu().text).toContain("Send a video, image, or GIF for the giveaway game.");
+
+    await h.press("chat_defaults_buy_alerts_media");
+    expect(h.lastMenu().text).toBe("Choose an option for buy alert media.");
+    await h.press("chat_defaults_set_video_buy_alerts");
+    expect(h.lastMenu().text).toContain("Send a video, image, or GIF for buy alerts.");
+  });
+
+  test("disabling media stores the sentinel for each target", async () => {
+    const h = setup();
+
+    await h.press("chat_defaults_disable_video_coinflip");
+    expect(h.answers.at(-1)).toBe("coinflip media disabled - games will send text only");
+    await h.press("chat_defaults_disable_video_giveaway");
+    await h.press("chat_defaults_disable_video_buy_alerts");
+
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      coinflip_video_id: "__DISABLED__",
+      giveaway_video_id: "__DISABLED__",
+    });
+    expect(chatDb.getChatBuyAlerts(99)?.media_file_id).toBe("__DISABLED__");
+    expect(h.answers.at(-1)).toBe("Buy alert media disabled");
+  });
+
+  test("non-admins cannot disable media", async () => {
+    const h = setup({ admin: false });
+
+    await h.press("chat_defaults_disable_video_coinflip");
+
+    expect(h.answers).toEqual(["Only admins can change chat defaults"]);
+    expect(chatDb.getChatGameSettings(99)).toBeNull();
+  });
+
+  test("the public game feed can be toggled", async () => {
+    const h = setup();
+
+    await h.press("chat_defaults_public_game_feed");
+    expect(h.lastMenu().text).toContain("Current: ❌ Disabled");
+    expect(h.lastCallbacks()[0]).toBe("chat_defaults_set_public_game_feed_on");
+
+    await h.press("chat_defaults_set_public_game_feed_on");
+    expect(chatDb.getChatGameSettings(99)?.global_public_game_feed).toBe(1 as any);
+    expect(h.answers.at(-1)).toBe("Global public game feed enabled");
+
+    await h.press("chat_defaults_public_game_feed");
+    expect(h.lastMenu().text).toContain("Current: ✅ Enabled");
+
+    await h.press("chat_defaults_set_public_game_feed_off");
+    expect(h.answers.at(-1)).toBe("Global public game feed disabled");
+  });
+
+  test("buy alerts can be enabled and given a minimum", async () => {
+    const h = setup();
+
+    await h.press("chat_defaults_buy_alerts");
+    expect(h.lastCallbacks()[0]).toBe("chat_defaults_set_buy_alerts_on");
+    await h.press("chat_defaults_set_buy_alerts_on");
+    expect(chatDb.getChatBuyAlerts(99)?.enabled).toBe(true);
+    expect(h.answers.at(-1)).toBe("Buy alerts enabled");
+
+    for (const [key, lamports] of [
+      ["01", 100_000_000],
+      ["05", 500_000_000],
+      ["1", 1_000_000_000],
+      ["off", null],
+    ] as const) {
+      await h.press(`chat_defaults_set_buy_alerts_min_${key}`);
+      expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBe(lamports);
+    }
+
+    await h.press("chat_defaults_set_buy_alerts_off");
+    expect(chatDb.getChatBuyAlerts(99)?.enabled).toBe(false);
+    expect(h.refreshes()).toBe(6);
+  });
+
+  test("a custom minimum buy is entered as a reply", async () => {
+    const h = setup();
+    await h.press("chat_defaults_set_buy_alerts_min_custom");
+    expect(h.lastMenu().text).toContain("Send the minimum buy in SOL.");
+    const session = promptSession()!;
+    expect(session).toMatchObject({ target: "buy_alerts_min_custom", chatId: 99 });
+
+    await h.module.handleSettingsInput(h.ctxFor(), session, "lots");
+    expect(h.replies.at(-1)).toStartWith("❌ Invalid amount.");
+
+    await h.module.handleSettingsInput(h.ctxFor(), session, "0.25");
+    expect(chatDb.getChatBuyAlerts(99)?.min_sol_lamports).toBe(250_000_000);
+    expect(h.replies.at(-1)).toBe("✅ Min buy set to 0.25 SOL");
+
+    await h.module.handleSettingsInput(h.ctxFor(), { ...session, chatId: undefined } as any, "1");
+    expect(h.replies.at(-1)).toBe("❌ Session expired. Please try again.");
+  });
+
+  test("join notification settings", async () => {
+    const h = setup();
+
+    await h.press("chat_defaults_set_join_external_on");
+    expect(h.answers.at(-1)).toBe("External notifications enabled");
+    await h.press("chat_defaults_set_join_external_off");
+    expect(h.answers.at(-1)).toBe("External notifications disabled");
+    await h.press("chat_defaults_set_join_rate_0");
+    expect(h.answers.at(-1)).toBe("Rate limit set to disabled");
+    await h.press("chat_defaults_set_join_rate_5");
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      join_notifications_external: 0 as any,
+      join_notifications_per_minute: 5,
+    });
+
+    await h.press("chat_defaults_set_join_rate_custom");
+    expect(h.lastMenu().text).toBe("Enter a custom rate limit (0-30 per minute):");
+    const session = promptSession()!;
+    await h.module.handleSettingsInput(h.ctxFor(), session, "31");
+    expect(h.replies.at(-1)).toBe("❌ Invalid rate. Please enter a number between 0 and 30.");
+    await h.module.handleSettingsInput(h.ctxFor(), session, "0");
+    expect(h.replies.at(-1)).toBe("✅ Rate limit set to disabled");
+    await h.module.handleSettingsInput(h.ctxFor(), session, "12");
+    expect(h.replies.at(-1)).toBe("✅ Rate limit set to 12/min");
+    await h.module.handleSettingsInput(h.ctxFor(), { ...session, chatId: "x" } as any, "3");
+    expect(h.replies.at(-1)).toBe("❌ Session expired. Please try again.");
+
+    await h.press("chat_defaults_clear_join_notifications");
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      join_notifications_external: null,
+      join_notifications_per_minute: null,
+    });
+  });
+
+  test("cancel closes the prompt and returns to the menu", async () => {
+    const h = setup();
+    await h.press("chat_defaults_timeout");
+    const promptId = promptSession()!.messageId as number;
+    const ctx = h.ctxFor("chat_defaults_cancel");
+    ctx.callbackQuery.message.message_id = promptId;
+
+    // The Back button lives on the prompt message itself.
+    await h.mockBot.dispatch("chat_defaults_cancel", ctx);
+
+    expect(promptSession()).toBeUndefined();
+    expect(h.lastMenu().text).toContain("⚙️ Chat settings");
+  });
+
+  const session = (setting: string) =>
+    ({ type: "chat_defaults", chatId: 99, messageId: 11, setting, initiatorId: "123" }) as any;
+
+  test("media replies store the file id and media type for each target", async () => {
+    const h = setup();
+
+    await h.module.handleSettingsInput(
+      h.ctxFor(undefined, { video: { file_id: "video-file-1" } }),
+      session("video_coinflip"),
+      "",
+    );
+    expect(h.replies.at(-1)).toBe("✅ Default coinflip video set. New games will use this video.");
+    await h.module.handleSettingsInput(
+      h.ctxFor(undefined, { animation: { file_id: "gif-file-1" } }),
+      session("video_giveaway"),
+      "",
+    );
+    expect(h.replies.at(-1)).toBe("✅ Default giveaway GIF set. New games will use this GIF.");
+    await h.module.handleSettingsInput(
+      h.ctxFor(undefined, { photo: [{ file_id: "small" }, { file_id: "large-photo" }] }),
+      session("video_buy_alerts"),
+      "",
+    );
+    expect(h.replies.at(-1)).toBe("✅ Buy alert image set.");
+
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      coinflip_video_id: "video-file-1",
+      coinflip_media_type: "video",
+      giveaway_video_id: "gif-file-1",
+      giveaway_media_type: "animation",
+    });
+    expect(chatDb.getChatBuyAlerts(99)).toMatchObject({
+      media_file_id: "large-photo",
+      media_type: "photo",
+    });
+  });
+
+  test("a pasted file id is accepted, with an explicit media type when known", async () => {
+    const h = setup();
+    const ctx = h.ctxFor();
+    ctx.__mediaType = "animation";
+
+    await h.module.handleSettingsInput(ctx, session("video_buy_alerts"), "  file-id-123 ");
+    expect(chatDb.getChatBuyAlerts(99)).toMatchObject({
+      media_file_id: "file-id-123",
+      media_type: "animation",
+    });
+    expect(h.replies.at(-1)).toBe("✅ Buy alert GIF set.");
+
+    await h.module.handleSettingsInput(h.ctxFor(), session("video_giveaway"), "abc");
+    expect(h.replies.at(-1)).toBe("❌ Invalid file ID. Please send a valid Telegram file ID.");
+  });
+
+  test("replying clear resets media settings", async () => {
+    const h = setup();
+    chatDb.upsertChatGameSettings(99, { coinflip_video_id: "a", giveaway_video_id: "b" });
+    chatDb.upsertChatBuyAlerts(99, { media_file_id: "c" });
+
+    await h.module.handleSettingsInput(h.ctxFor(), session("video_coinflip"), "clear");
+    await h.module.handleSettingsInput(h.ctxFor(), session("video_giveaway"), "remove");
+    await h.module.handleSettingsInput(h.ctxFor(), session("video_buy_alerts"), "CLEAR");
+
+    expect(chatDb.getChatGameSettings(99)).toMatchObject({
+      coinflip_video_id: "",
+      giveaway_video_id: "",
+    });
+    expect(chatDb.getChatBuyAlerts(99)?.media_file_id).toBe("");
+    expect(h.replies).toEqual([
+      "✅ Reset to bot default.",
+      "✅ Reset to bot default.",
+      "✅ Buy alert media cleared.",
+    ]);
+  });
+
+  test("player and timeout replies validate and can be reset", async () => {
+    const h = setup();
+    chatDb.upsertChatGameSettings(99, { giveaway_max_players: 7, timeout_seconds: 900 });
+
+    await h.module.handleSettingsInput(h.ctxFor(), session("giveaway"), "many");
+    expect(h.replies.at(-1)).toBe("❌ Invalid number. Please enter a value between 1-50.");
+    await h.module.handleSettingsInput(h.ctxFor(), session("giveaway"), "15");
+    expect(h.replies.at(-1)).toBe("✅ Default giveaway players set to 15.");
+    await h.module.handleSettingsInput(h.ctxFor(), session("coinflip"), "clear");
+    await h.module.handleSettingsInput(h.ctxFor(), session("giveaway"), "clear");
+    expect(chatDb.getChatGameSettings(99)?.giveaway_max_players).toBeNull();
+
+    await h.module.handleSettingsInput(h.ctxFor(), session("timeout"), "soon");
+    expect(h.replies.at(-1)).toBe("❌ Please enter a valid number of seconds.");
+    await h.module.handleSettingsInput(h.ctxFor(), session("timeout"), "remove");
+    expect(h.replies.at(-1)).toBe("✅ Reset timeout to bot default.");
+    expect(chatDb.getChatGameSettings(99)?.timeout_seconds).toBeNull();
+  });
+
+  test("unknown tokens list at most ten supported tokens", async () => {
+    const tokenManager = {
+      ...baseTokenManager(),
+      getSupportedGameTokens: () =>
+        Array.from({ length: 12 }, (_, index) => ({ ticker: `T${index}` })),
+    };
+    const h = setup({ tokenManager });
+
+    await h.module.handleSettingsInput(h.ctxFor(), session("token"), "nope");
+
+    const reply = h.replies.at(-1)!;
+    expect(reply).toContain('❌ Token "NOPE" not found.');
+    expect(reply).toContain("• T9\n");
+    expect(reply).not.toContain("T10");
+    expect(reply).toContain("... and 2 more.");
+  });
+});
+
+describe("/default command", () => {
+  beforeEach(() => {
+    resetTestDatabase("chat-settings.sqlite");
+    ChatDatabase.resetForTesting();
+  });
+
+  const run = async (args: string[], options: { chatType?: string; admin?: boolean } = {}) => {
+    const replies: string[] = [];
+    const tokenManager = baseTokenManager();
+    const module = createChatDefaultsModule({
+      bot: createMockBot() as any,
+      chatDb: ChatDatabase.getInstance(),
+      gameDb: GameDatabase.getInstance(),
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({ getUsernameFromTelegramId: async () => null }) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => options.admin !== false,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+    const ctx: any = {
+      chat: { id: 77, type: options.chatType ?? "group" },
+      from: { id: 5 },
+      message: { message_id: 1 },
+      reply: async (text: string) => {
+        replies.push(text);
+        return { message_id: 2, chat: { id: 77 } };
+      },
+      api: { editMessageText: async () => ({}) },
+    };
+    await module.handleDefaultCommand(ctx, args);
+    return { replies, tokenManager };
+  };
+
+  test("is refused in private chats", async () => {
+    expect((await run(["/default", "AAA"], { chatType: "private" })).replies).toEqual([
+      "🚫 Default tokens can only be set in groups or channels.",
+    ]);
+  });
+
+  test("shows the settings menu without a token", async () => {
+    const { replies } = await run(["/default"]);
+    expect(replies[0]).toContain("⚙️ Chat settings");
+  });
+
+  test("does nothing for non-admins", async () => {
+    const { replies, tokenManager } = await run(["/default", "AAA"], { admin: false });
+    expect(replies).toEqual([]);
+    expect(tokenManager.getChatDefaultToken(77)).toBeNull();
+  });
+
+  test("asks for a ticker when the argument is empty", async () => {
+    expect((await run(["/default", ""])).replies).toEqual(["Please provide a token ticker."]);
+  });
+
+  test("clears the chat token", async () => {
+    expect((await run(["/default", "remove"])).replies).toEqual([
+      "✅ Default token cleared for this chat. Using bot default token now.",
+    ]);
+  });
+
+  test("sets a known token", async () => {
+    const { replies, tokenManager } = await run(["/default", "aaa"]);
+    expect(tokenManager.getChatDefaultToken(77)).toMatchObject({ token_ticker: "AAA" });
+    expect(replies[0]).toContain("AAA");
   });
 });

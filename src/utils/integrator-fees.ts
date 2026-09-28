@@ -200,16 +200,7 @@ export const resolveIntegratorSwapParams = async (
     };
   }
 
-  const shortfallLamports = Math.max(0, effectiveSolFeeBufferLamports - availableForFeesLamports);
-  if (shortfallLamports <= 0) {
-    return {
-      referralAccount: referralConfig.referralAccount,
-      referralFee: baseFeeBps,
-      payer: userPublicKey,
-      closeAuthority: userPublicKey,
-      payerKind: "user",
-    };
-  }
+  const shortfallLamports = effectiveSolFeeBufferLamports - availableForFeesLamports;
 
   const maxExtraBps = referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
 
@@ -235,12 +226,7 @@ export const resolveIntegratorSwapParams = async (
         );
         const deficitUsd = await estimateSolUsdValue(shortfallLamports);
 
-        if (tradeUsd <= 0 || deficitUsd <= 0) {
-          throw new Error(
-            "Cannot estimate referral surcharge for gas payer. Please top up SOL or try a larger trade.",
-          );
-        }
-
+        // Throws when either value is unknown or the trade is too small.
         return calculateReferralFeeBps({
           baseFeeBps,
           tradeUsd,

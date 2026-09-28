@@ -326,40 +326,37 @@ export const createWalletMenuModule = (options: WalletMenuModuleOptions): Wallet
         }
         return snapshot;
       } catch (error) {
+        // allowStaleOnError means a cached native balance or token list existed.
         if (allowStaleOnError) {
           const fallbackNative = wallet.peekCachedNativeBalance(telegramId) ?? staleNative;
           const fallbackTokens = wallet.peekCachedWalletTokenBalances(telegramId) ?? staleTokens;
+          console.warn(
+            `⚠️ Falling back to stale wallet cache for user ${telegramId.toString()} due to RPC error:`,
+            error,
+          );
 
-          if (fallbackNative !== undefined || (fallbackTokens && fallbackTokens.length > 0)) {
-            console.warn(
-              `⚠️ Falling back to stale wallet cache for user ${telegramId.toString()} due to RPC error:`,
-              error,
-            );
+          const resolvedNative = fallbackNative ?? 0;
+          const resolvedTokens: WalletTokenBalance[] = (fallbackTokens ?? []).map((token) => ({
+            ...token,
+          }));
+          const wsolToken = resolvedTokens.find((token) => token.mint === WSOL_MINT);
+          const wsolBalance = wsolToken?.balance ?? 0;
 
-            const resolvedNative = fallbackNative ?? 0;
-            const resolvedTokensSource = fallbackTokens ?? [];
-            const resolvedTokens: WalletTokenBalance[] = resolvedTokensSource.map((token) => ({
-              ...token,
-            }));
-            const wsolToken = resolvedTokens.find((token) => token.mint === WSOL_MINT);
-            const wsolBalance = wsolToken?.balance ?? 0;
-
-            const snapshot: WalletBalancesSnapshot = {
-              solBalance: resolvedNative,
-              nativeSolBalance: resolvedNative,
-              wsolBalance,
-              tokenBalances: resolvedTokens,
-              knownTokens,
-            };
-            const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
-            if (invalidatedAt < fetchStart) {
-              walletSnapshotCache.set(cacheKey, {
-                snapshot,
-                expiresAt: Date.now() + walletRpcCacheTtlMs,
-              });
-            }
-            return snapshot;
+          const snapshot: WalletBalancesSnapshot = {
+            solBalance: resolvedNative,
+            nativeSolBalance: resolvedNative,
+            wsolBalance,
+            tokenBalances: resolvedTokens,
+            knownTokens,
+          };
+          const invalidatedAt = cacheInvalidations.get(cacheKey) ?? 0;
+          if (invalidatedAt < fetchStart) {
+            walletSnapshotCache.set(cacheKey, {
+              snapshot,
+              expiresAt: Date.now() + walletRpcCacheTtlMs,
+            });
           }
+          return snapshot;
         }
 
         throw error;

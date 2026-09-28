@@ -94,3 +94,125 @@ describe("handleSolWsolSwap", () => {
     );
   });
 });
+
+describe("handleSolWsolSwap callbacks", () => {
+  const menuTexts = (deps: FakeDeps) =>
+    (deps.respondWithMenu as any).mock.calls.map((call: any[]) => call[1].text as string);
+  const answer = (deps: FakeDeps) => (deps.safeAnswerCallbackQuery as any).mock.calls.at(-1)?.[1];
+  const unwrapTx = { ...baseTransaction, fromToken: "WSOL", toToken: "SOL" };
+
+  test("wrap progress falls back to the formatted lamports and shows success", async () => {
+    const deps = createDeps({
+      executeWrapFlow: vi.fn(async (_id: bigint, _lamports: number, handlers: any) => {
+        await handlers.onProcessing(undefined);
+        await handlers.onProcessing("<0.5>");
+        await handlers.onSuccess({ signature: "sig", formattedAmount: "0.5" });
+        return { status: "success" };
+      }) as any,
+    });
+
+    await __test_handleSolWsolSwap(baseContext, baseTransaction, 1, deps);
+
+    const [fallback, escaped, success] = menuTexts(deps);
+    expect(fallback).toContain("Wrapping 1 SOL to WSOL");
+    expect(escaped).toContain("Wrapping &lt;0.5&gt; SOL to WSOL");
+    expect(success).toBe("success");
+    expect(deps.renderSolConversionSuccess).toHaveBeenCalledWith({
+      kind: "wrap",
+      formattedAmount: "0.5",
+      signature: "sig",
+    });
+    expect((deps.respondWithMenu as any).mock.calls[2][1].disableLinkPreview).toBe(true);
+  });
+
+  test("wrapping without enough SOL explains the fee reserve", async () => {
+    const deps = createDeps({
+      executeWrapFlow: vi.fn(async (_id: bigint, _lamports: number, handlers: any) => {
+        await handlers.onInsufficientBalance("2");
+        return { status: "insufficient" };
+      }) as any,
+    });
+
+    const status = await __test_handleSolWsolSwap(baseContext, baseTransaction, 1, deps);
+
+    expect(status).toBe("insufficient");
+    expect(menuTexts(deps)[0]).toContain("Not enough SOL to wrap 2.");
+    expect(answer(deps)).toBe("❌ Not enough SOL");
+  });
+
+  test("wrap errors are shown in friendly form", async () => {
+    const error = new Error("rpc down");
+    const deps = createDeps({
+      executeWrapFlow: vi.fn(async (_id: bigint, _lamports: number, handlers: any) => {
+        await handlers.onError(error);
+        return { status: "error" };
+      }) as any,
+    });
+
+    const status = await __test_handleSolWsolSwap(baseContext, baseTransaction, 1, deps);
+
+    expect(status).toBe("error");
+    expect(deps.formatUserFriendlyError).toHaveBeenCalledWith(error, deps.wallet);
+    expect(menuTexts(deps)).toEqual(["friendly"]);
+    expect(answer(deps)).toBe("❌ Wrap failed");
+  });
+
+  test("unwrap progress, success and fallback labels", async () => {
+    const deps = createDeps({
+      executeUnwrapFlow: vi.fn(async (_id: bigint, handlers: any) => {
+        await handlers.onProcessing(undefined);
+        await handlers.onProcessing("3");
+        await handlers.onSuccess({ signature: "sig", formattedAmount: "3" });
+        return { status: "success" };
+      }) as any,
+    });
+
+    await __test_handleSolWsolSwap(baseContext, unwrapTx, 7, deps);
+
+    const [fallback, explicit, success] = menuTexts(deps);
+    expect(fallback).toContain("Unwrapping 1 WSOL to SOL");
+    expect(explicit).toContain("Unwrapping 3 WSOL to SOL");
+    expect(success).toBe("success");
+    expect(deps.renderSolConversionSuccess).toHaveBeenCalledWith({
+      kind: "unwrap",
+      formattedAmount: "3",
+      signature: "sig",
+    });
+    expect(deps.executeUnwrapFlow).toHaveBeenCalledWith(
+      1n,
+      expect.objectContaining({ expectedAmountLamports: 7, unwrapLamports: 7 }),
+    );
+  });
+
+  test("unwrapping an empty WSOL account says so", async () => {
+    const deps = createDeps({
+      executeUnwrapFlow: vi.fn(async (_id: bigint, handlers: any) => {
+        await handlers.onNoBalance();
+        return { status: "empty" };
+      }) as any,
+    });
+
+    const status = await __test_handleSolWsolSwap(baseContext, unwrapTx, 7, deps);
+
+    expect(status).toBe("empty");
+    expect(menuTexts(deps)[0]).toContain("Your WSOL account is already empty.");
+    expect(answer(deps)).toBe("ℹ️ No WSOL to unwrap");
+  });
+
+  test("unwrap errors are shown in friendly form", async () => {
+    const error = new Error("account frozen");
+    const deps = createDeps({
+      executeUnwrapFlow: vi.fn(async (_id: bigint, handlers: any) => {
+        await handlers.onError(error);
+        return { status: "error" };
+      }) as any,
+    });
+
+    const status = await __test_handleSolWsolSwap(baseContext, unwrapTx, 7, deps);
+
+    expect(status).toBe("error");
+    expect(deps.formatUserFriendlyError).toHaveBeenCalledWith(error, deps.wallet);
+    expect(menuTexts(deps)).toEqual(["friendly"]);
+    expect(answer(deps)).toBe("❌ Unwrap failed");
+  });
+});

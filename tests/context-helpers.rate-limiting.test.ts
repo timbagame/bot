@@ -2,10 +2,7 @@
  * Tests for safeAnswerCallbackQuery rate limiting and throttling integration
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import {
-  safeAnswerCallbackQuery,
-  safeAnswerCallbackQueryThrottled,
-} from "../src/utils/context-helpers";
+import { safeAnswerCallbackQuery } from "../src/utils/context-helpers";
 import {
   __test_resetGlobals,
   getRateLimiter,
@@ -195,61 +192,6 @@ describe("safeAnswerCallbackQuery with rate limiting", () => {
 
       expect(answerCalls).toEqual(["Direct message"]);
     });
-  });
-});
-
-describe("safeAnswerCallbackQueryThrottled", () => {
-  beforeEach(() => {
-    __test_resetGlobals();
-  });
-
-  afterEach(() => {
-    __test_resetGlobals();
-  });
-
-  test("uses the queue automatically", async () => {
-    const queuedItems: Array<{ id: string; text?: string }> = [];
-
-    initCallbackQueue(async (id, text) => {
-      queuedItems.push({ id, text });
-      return true;
-    });
-
-    const ctx = {
-      chat: { id: 555 },
-      callbackQuery: { id: "throttled_cb" },
-      answerCallbackQuery: async () => {
-        throw new Error("Should not be called directly");
-      },
-    };
-
-    await safeAnswerCallbackQueryThrottled(ctx, "Throttled message");
-
-    // Wait for queue to process
-    await new Promise((r) => setTimeout(r, 100));
-
-    expect(queuedItems).toHaveLength(1);
-    expect(queuedItems[0]).toEqual({
-      id: "throttled_cb",
-      text: "Throttled message",
-    });
-  });
-
-  test("falls back to direct when queue not initialized", async () => {
-    __test_resetGlobals();
-
-    const answerCalls: any[] = [];
-    const ctx = {
-      chat: { id: 666 },
-      callbackQuery: { id: "fallback_cb" },
-      answerCallbackQuery: async (text?: string) => {
-        answerCalls.push(text);
-      },
-    };
-
-    await safeAnswerCallbackQueryThrottled(ctx, "Fallback message");
-
-    expect(answerCalls).toEqual(["Fallback message"]);
   });
 });
 

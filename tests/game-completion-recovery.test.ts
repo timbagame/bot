@@ -82,6 +82,152 @@ describe("Game completion recovery", () => {
     });
   });
 
+  test("skips unrelated or incomplete events while parsing logs", async () => {
+    const gameAddress = await createTestGameAddress();
+    const events = [
+      { name: "playerJoined", data: {} },
+      { name: "gameCompleted" },
+      createCompletionEvent("OtherGame"),
+      createCompletionEvent(gameAddress, { winner: { toBase58: () => "" } }),
+      createCompletionEvent(gameAddress, {
+        winner: "PlainWinner",
+        winnerAmount: {
+          toNumber: () => {
+            throw new Error("53 bits");
+          },
+          toString: () => "9007199254740993",
+        },
+        feeAmount: undefined,
+      }),
+    ];
+
+    const parsed = botModule.__test_parseCompletionEventFromLogs(
+      ["Program log"],
+      { parseLogs: () => events } as any,
+      gameAddress,
+    );
+
+    expect(parsed).toEqual({
+      winnerAddress: "PlainWinner",
+      // Parsed from the string form, so it matches Number() of that string.
+      totalPot: Number("9007199254740993"),
+      winnerAmount: Number("9007199254740993"),
+      feeAmountRaw: undefined,
+    });
+  });
+
+  test("accepts plain and bigint amounts and ignores unreadable ones", async () => {
+    const gameAddress = await createTestGameAddress();
+    const parse = (overrides: Record<string, unknown>) =>
+      botModule.__test_parseCompletionEventFromLogs(
+        ["Program log"],
+        { parseLogs: () => [createCompletionEvent(gameAddress, overrides)] } as any,
+        gameAddress,
+      );
+
+    expect(parse({ winnerAmount: 100, feeAmount: 5n })).toMatchObject({
+      totalPot: 105,
+      winnerAmount: 100,
+      feeAmountRaw: "5",
+    });
+    expect(parse({ winnerAmount: "100", feeAmount: { toString: () => "n/a" } })).toMatchObject({
+      totalPot: undefined,
+      winnerAmount: undefined,
+      feeAmountRaw: "n/a",
+    });
+    expect(parse({ winnerAmount: null, feeAmount: null })).toMatchObject({
+      totalPot: undefined,
+      feeAmountRaw: "",
+    });
+  });
+
+  test("empty logs have no completion event", () => {
+    expect(
+      botModule.__test_parseCompletionEventFromLogs([], { parseLogs: () => [] } as any, "Game"),
+    ).toBeNull();
+    expect(
+      botModule.__test_parseCompletionEventFromLogs(null, { parseLogs: () => [] } as any, "Game"),
+    ).toBeNull();
+  });
+
+  test("the default parser reads events for the configured program", async () => {
+    const gameAddress = await createTestGameAddress();
+    const connectionStub = {
+      getSignaturesForAddress: async () => [{ signature: "sig-1" }],
+      getTransaction: async () => ({ meta: { logMessages: ["Program log: nothing here"] } }),
+    };
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
+    botModule.wallet.getConnection = () => connectionStub as any;
+    try {
+      expect(await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress)).toBeNull();
+    } finally {
+      botModule.wallet.getConnection = originalGetConnection;
+    }
+  });
+
+  test("history lookups without a program, signatures or transactions find nothing", async () => {
+    const gameAddress = await createTestGameAddress();
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
+    let signatures: Array<{ signature?: string }> = [];
+    botModule.wallet.getConnection = () =>
+      ({
+        getSignaturesForAddress: async () => signatures,
+        getTransaction: async () => null,
+      }) as any;
+    try {
+      expect(await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress)).toBeNull();
+
+      signatures = [{ signature: "" }, { signature: "missing-tx" }];
+      expect(await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress)).toBeNull();
+
+      botModule.__test_setProgram(undefined);
+      expect(await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress)).toBeNull();
+    } finally {
+      botModule.wallet.getConnection = originalGetConnection;
+    }
+  });
+
+  test("completion details omit the network fee when the transaction has none", async () => {
+    const gameAddress = await createTestGameAddress();
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
+    botModule.wallet.getConnection = () =>
+      ({
+        getSignaturesForAddress: async () => [{ signature: "no-fee" }],
+        getTransaction: async () => ({ meta: { logMessages: ["Program log"] } }),
+      }) as any;
+    botModule.__test_setCompletionEventParserFactory(
+      () => ({ parseLogs: () => [createCompletionEvent(gameAddress)] }) as any,
+    );
+    try {
+      const details = await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress);
+      expect(details).not.toHaveProperty("networkFeeLamports");
+      expect(details?.signature).toBe("no-fee");
+    } finally {
+      botModule.wallet.getConnection = originalGetConnection;
+    }
+  });
+
+  test("RPC failures while reconstructing history are logged", async () => {
+    const gameAddress = await createTestGameAddress();
+    const originalGetConnection = botModule.wallet.getConnection.bind(botModule.wallet);
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    botModule.wallet.getConnection = () =>
+      ({
+        getSignaturesForAddress: async () => {
+          throw new Error("429 Too Many Requests");
+        },
+      }) as any;
+    try {
+      expect(await botModule.__test_fetchCompletionDetailsFromHistory(gameAddress)).toBeNull();
+      expect(errors[0]?.[0]).toBe(`Error reconstructing completion history for ${gameAddress}:`);
+    } finally {
+      console.error = originalError;
+      botModule.wallet.getConnection = originalGetConnection;
+    }
+  });
+
   test("fetches completion details from transaction history", async () => {
     const gameAddress = await createTestGameAddress();
     const connectionStub = {

@@ -103,7 +103,7 @@ export interface EvaluateTradeAmountResult {
   kind: "max" | "percentage" | "absolute";
   rawAmount: number;
   displayAmount?: string;
-  normalizedAmount?: string;
+  normalizedAmount: string;
 }
 
 export const evaluateTradeAmount = ({
@@ -307,20 +307,15 @@ export const presentTradeAmount = (
     trim: true,
   });
 
-  const normalizedAmount =
-    evaluation.normalizedAmount ?? (evaluation.kind === "max" ? "max" : fallbackFormatted);
+  const { normalizedAmount } = evaluation;
 
-  let displayAmount = evaluation.displayAmount;
-  if (!displayAmount) {
-    if (evaluation.kind === "max" && normalizedAmount === "max") {
-      displayAmount = "max";
-    } else if (params.assetTicker === "SOL") {
-      displayAmount = params.formatSol?.(evaluation.rawAmount) ?? fallbackFormatted;
-    } else {
-      displayAmount =
-        params.formatToken?.(evaluation.rawAmount, decimalsForFallback) ?? fallbackFormatted;
-    }
-  }
+  const displayAmount =
+    evaluation.displayAmount ||
+    (evaluation.kind === "max" && normalizedAmount === "max"
+      ? "max"
+      : params.assetTicker === "SOL"
+        ? (params.formatSol?.(evaluation.rawAmount) ?? fallbackFormatted)
+        : (params.formatToken?.(evaluation.rawAmount, decimalsForFallback) ?? fallbackFormatted));
 
   return {
     kind: evaluation.kind,

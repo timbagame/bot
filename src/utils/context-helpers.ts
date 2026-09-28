@@ -36,14 +36,7 @@ export const getTelegramId = (
   }
 
   if (typeof rawId === "number") {
-    if (!Number.isFinite(rawId)) {
-      return fallback;
-    }
-    try {
-      return BigInt(Math.trunc(rawId));
-    } catch {
-      return fallback;
-    }
+    return Number.isFinite(rawId) ? BigInt(Math.trunc(rawId)) : fallback;
   }
 
   if (typeof rawId === "string") {
@@ -53,15 +46,8 @@ export const getTelegramId = (
     }
 
     const normalized = trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
-    if (!/^-?\d+$/.test(normalized)) {
-      return fallback;
-    }
-
-    try {
-      return BigInt(trimmed);
-    } catch {
-      return fallback;
-    }
+    // BigInt accepts a leading sign, so a string that passes this check cannot throw.
+    return /^-?\d+$/.test(normalized) ? BigInt(trimmed) : fallback;
   }
 
   if (rawId == null) {
@@ -173,7 +159,8 @@ export const containsBalanceInfo = (text: string): boolean => {
     return true;
   }
 
-  const youHaveTickerPattern = /you have\s+[0-9][\d.,]*\s+[A-Z]{2,10}\b/;
+  // Case-sensitive so the ticker must be upper case, but the sentence may start with "You".
+  const youHaveTickerPattern = /[Yy]ou have\s+[0-9][\d.,]*\s+[A-Z]{2,10}\b/;
   if (youHaveTickerPattern.test(text)) {
     return true;
   }
@@ -433,15 +420,6 @@ const answerCallbackQueryNow = async (
 
     console.error("Failed to answer callback query:", error);
   }
-};
-
-/**
- * Throttled version of safeAnswerCallbackQuery.
- * Uses the callback queue to prevent burst of answers causing rate limits.
- * Falls back to immediate answer if queue is not initialized.
- */
-export const safeAnswerCallbackQueryThrottled = async (ctx: any, text?: string): Promise<void> => {
-  await safeAnswerCallbackQuery(ctx, text, { useQueue: true });
 };
 
 export const respondMissingIdentity = async (

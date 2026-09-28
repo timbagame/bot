@@ -153,23 +153,6 @@ export function quoteAmountToSol(quoteMint: string, quoteAmount: number): number
   return quoteAmount;
 }
 
-export function quoteAmountToUsd(
-  quoteMint: string,
-  quoteAmount: number,
-  solPriceUsd: number,
-): number {
-  if (quoteAmount <= 0) {
-    return 0;
-  }
-  if (quoteMint === USDC_MINT || quoteMint === USDT_MINT) {
-    return quoteAmount;
-  }
-  if (quoteMint === WSOL_MINT && solPriceUsd > 0) {
-    return quoteAmount * solPriceUsd;
-  }
-  return 0;
-}
-
 export function fillsFromSwaps(
   swaps: SwapStatRecord[],
   resolveDecimals: DecimalResolver = resolveTokenDecimals,
@@ -628,16 +611,6 @@ export function formatPositionsPage(
     return [`📊 Positions (${page + 1}/${pageCount})`, "", cards.join("\n\n")].join("\n");
   }
   return cards.join("\n\n");
-}
-
-export function pnlByMint(positions: TokenPosition[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const position of positions) {
-    if (position.pnlPercent != null) {
-      map.set(position.mint, position.pnlPercent);
-    }
-  }
-  return map;
 }
 
 function mergePricedMints(

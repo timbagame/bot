@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   WALLET_PAGE_SNAPSHOT_MAX_AGE_MS,
   createWalletMenuModule,
@@ -165,5 +165,131 @@ describe("wallet message view tracking", () => {
 
     // Updates without a callback message pass through untouched.
     await middlewares[0]!({ message: { text: "/start" } }, async () => {});
+  });
+});
+
+describe("wallet menu caches and limits", () => {
+  test("rejects wallet reads once the per-user RPC budget is spent", async () => {
+    const { wallet } = createStubWallet();
+    const module = createWalletMenuModule({
+      bot: { callbackQuery: () => undefined } as any,
+      wallet,
+      getTokenManager: () => ({ getAllKnownTokensWithMetadata: () => [] }) as any,
+      wrapCallbackHandler: (fn: any) => fn,
+      rpcRateLimiter: {
+        limiter: { consume: () => ({ allowed: false, remaining: 0, resetInMs: 2_100 }) } as any,
+      },
+    });
+
+    await expect(module.getWalletPageData(1n, 0, 8)).rejects.toThrow(
+      "⏳ Too many wallet refreshes. Try again in 3s.",
+    );
+  });
+
+  test("serves the last cached balances when the RPC read fails", async () => {
+    const { wallet } = createStubWallet();
+    wallet.getBalance = async () => {
+      throw new Error("rpc down");
+    };
+    wallet.getAllWalletTokenBalances = async () => [];
+    wallet.peekCachedNativeBalance = () => 7;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const module = createModule(wallet);
+
+      const snapshot = await module.getCachedWalletData(1n);
+
+      expect(snapshot.solBalance).toBe(7);
+      expect(snapshot.tokenBalances).toEqual([]);
+      expect(warn.mock.calls[0]?.[0]).toContain("Falling back to stale wallet cache for user 1");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("uses stale token balances and WSOL when only tokens were cached", async () => {
+    const { wallet } = createStubWallet();
+    wallet.getBalance = async () => {
+      throw new Error("rpc down");
+    };
+    wallet.getAllWalletTokenBalances = async () => [];
+    wallet.peekCachedWalletTokenBalances = () => [
+      { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL", balance: 3 },
+    ];
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const snapshot = await createModule(wallet).getCachedWalletData(1n);
+
+      expect(snapshot.solBalance).toBe(0);
+      expect(snapshot.wsolBalance).toBe(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("rethrows a failed read when nothing was cached", async () => {
+    const { wallet } = createStubWallet();
+    wallet.getBalance = async () => {
+      throw new Error("rpc down");
+    };
+    wallet.getAllWalletTokenBalances = async () => [];
+
+    await expect(createModule(wallet).getCachedWalletData(1n)).rejects.toThrow("rpc down");
+  });
+
+  test("seeding the wallet cache tolerates non-integer raw balances", () => {
+    const { wallet } = createStubWallet();
+    let seeded: any[] = [];
+    wallet.setCachedNativeBalance = () => {};
+    wallet.setCachedWalletTokenBalances = (_id: bigint, tokens: any[]) => {
+      seeded = tokens;
+    };
+
+    createModule(wallet).__test_setWalletCache(1n, {
+      solBalance: 1,
+      tokenBalances: [
+        { mint: "A", ticker: "A", balance: 12.9, decimals: 0, rawBalance: "12.9" },
+        { mint: "B", ticker: "B", balance: Number.NaN, decimals: 0 },
+        { mint: "C", ticker: "C", balance: 4, decimals: 0 },
+      ] as any,
+    });
+
+    expect(seeded.map((token) => token.lamports)).toEqual([12n, 0n, 4n]);
+    expect(seeded.map((token) => token.rawBalance)).toEqual(["12.9", "0", "4"]);
+  });
+
+  test("the oldest page snapshot is evicted beyond the cache limit", async () => {
+    const { wallet } = createStubWallet();
+    const module = createModule(wallet);
+
+    for (let user = 1; user <= 5_001; user += 1) {
+      await module.getWalletPageData(BigInt(user), 0, 8);
+    }
+
+    expect(module.peekWalletPageData(1n, 0, 8)).toBeUndefined();
+    expect(module.peekWalletPageData(2n, 0, 8)).toBeDefined();
+    expect(module.peekWalletPageData(5_001n, 0, 8)).toBeDefined();
+  });
+
+  test("views on messages evicted from the activity log are treated as stale", async () => {
+    const middlewares: Array<(ctx: any, next: () => Promise<void>) => Promise<void>> = [];
+    const { wallet } = createStubWallet();
+    const module = createModule(wallet, {
+      use: (fn: any) => middlewares.push(fn),
+      callbackQuery: () => undefined,
+    });
+    module.registerWalletMenuHandlers();
+    const touch = (messageId: number) =>
+      middlewares[0]!(
+        { callbackQuery: { message: { message_id: messageId, chat: { id: 1 } } } },
+        async () => {},
+      );
+
+    await touch(0);
+    const view = module.captureMessageView(1, 0);
+    for (let messageId = 1; messageId <= 5_000; messageId += 1) await touch(messageId);
+
+    expect(view()).toBe(false);
+    expect(module.captureMessageView(1, 5_000)()).toBe(true);
   });
 });
