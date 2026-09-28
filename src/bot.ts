@@ -4941,6 +4941,9 @@ const financeBackfillWorker = new FinanceBackfillWorker(async () =>
   (await getFinanceLedgerService()).backfillNextBatch(financeBackfillStartTimeMs),
 );
 
+export const __test_financeBackfillWorker = financeBackfillWorker;
+export const __test_getFinanceLedgerService = getFinanceLedgerService;
+
 const financeHandlers = createFinanceHandlers({
   financeLedger: {
     getSnapshot: async () => (await getFinanceLedgerService()).getSnapshot(),
