@@ -47,6 +47,7 @@ import {
 import { respondWithMenu } from "../utils/menu-response";
 import {
   getRequiredTelegramIdForContext,
+  requireTelegramId,
   getTelegramId,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
@@ -213,9 +214,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
     const { tokenMint, sessionPrice } = input;
     if (sessionPrice != null && Number.isFinite(sessionPrice) && sessionPrice > 0) {
       return sessionPrice;
-    }
-    if (process.env.NODE_ENV === "test") {
-      return null;
     }
     try {
       return await deps.fetchTokenPriceUSD({ tokenMint });
@@ -1053,11 +1051,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             failureText: "🚫 Only the game creator can modify this game setup!",
           },
           async (ctx, creatorContext) => {
-            const payload = decodeAmountSelectionPayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid amount selection");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodeAmountSelectionPayload(ctx.callbackQuery?.data)!;
             await handleAmountSelection(ctx, creatorContext, {
               gameType: payload.gameType,
               amount: payload.amount,
@@ -1079,11 +1074,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             failureText: "🚫 Only the game creator can modify this game setup!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const payload = decodePlayersSelectionPayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid player selection");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodePlayersSelectionPayload(ctx.callbackQuery?.data)!;
 
             const { gameType, amount, players } = payload;
 
@@ -1211,11 +1203,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             failureText: "🚫 Only the game creator can adjust visibility!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const payload = decodeVisibilityPayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid visibility selection");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodeVisibilityPayload(ctx.callbackQuery?.data)!;
 
             const { gameType, amount, players } = payload;
             const isPrivate = payload.isPrivate;
@@ -1280,11 +1269,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             failureText: "🚫 Only the game creator can set a custom timeout!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const payload = decodeTimeoutChangePayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid timeout update");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodeTimeoutChangePayload(ctx.callbackQuery?.data)!;
 
             const { gameType, amount, players, deltaMinutes } = payload;
 
@@ -1353,11 +1339,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             failureText: "🚫 Only the game creator can adjust minimum players!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const payload = decodeMinPlayersChangePayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid minimum player update");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodeMinPlayersChangePayload(ctx.callbackQuery?.data)!;
 
             const { gameType, amount, players, deltaPlayers: delta } = payload;
 
@@ -1454,11 +1437,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
           // "Creating game…" never stays on screen without a way forward.
           let restoreConfirmCard: ((notice: string) => Promise<boolean>) | undefined;
           try {
-            const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
-            if (!payload) {
-              await safeAnswerCallbackQuery(ctx, "❌ Invalid confirmation payload");
-              return;
-            }
+            // resolveCreatorId decoded this payload; undecodable data never reaches here.
+            const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data)!;
 
             const gameType = payload.gameType;
             const amount = Number.parseFloat(payload.amount);
@@ -1473,11 +1453,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
             // Force public visibility for DM-created games
             const isFromDM = ctx.chat?.type === "private";
             const isPrivate = isFromDM ? false : payload.isPrivate;
-
-            if (Number.isNaN(amount) || Number.isNaN(players)) {
-              await safeAnswerCallbackQuery(ctx, "Invalid game configuration");
-              return;
-            }
 
             const maxPlayers = Math.max(players, gameType === "coinflip" ? 2 : 1);
 
@@ -1736,18 +1711,10 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                   recoveryError,
                 );
               }
-              try {
-                await safeAnswerCallbackQuery(ctx);
-              } catch (answerError) {
-                console.error("Failed to answer callback after confirmed game error:", answerError);
-              }
+              await safeAnswerCallbackQuery(ctx);
               return;
             }
-            try {
-              await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
-            } catch (answerError) {
-              console.error("Failed to answer callback after error:", answerError);
-            }
+            await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
 
             if (
               restoreConfirmCard &&
@@ -1779,7 +1746,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
     );
 
     deps.bot.callbackQuery(
-      /^custom_amount_(coinflip|giveaway)_(\d+)$/,
+      // type_amount_* is the legacy name of this button on older setup messages.
+      /^(?:custom|type)_amount_(coinflip|giveaway)_(\d+)$/,
       deps.withCreatorContext(
         {
           name: "custom_amount",
@@ -1789,11 +1757,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         async (ctx, { session, tokenContext, updateSession, creatorId }) => {
           try {
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const telegramId = await getRequiredTelegramIdForContext(ctx, "type amount prompt");
-            if (telegramId == null) {
-              await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-              return;
-            }
+            // withCreatorSessionContext already refused callbacks without a sender id.
+            const telegramId = requireTelegramId(ctx, "type amount prompt");
 
             let userBalance =
               session?.userBalance && session.userBalance > 0 ? session.userBalance : 0;
@@ -1919,11 +1884,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
           failureText: "❌ Only the game creator can modify this setup!",
         },
         async (ctx, creatorContext) => {
-          const payload = decodeCustomPlayersPayload(ctx.callbackQuery?.data);
-          if (!payload) {
-            await safeAnswerCallbackQuery(ctx, "❌ Invalid custom player entry");
-            return;
-          }
+          // resolveCreatorId decoded this payload; undecodable data never reaches here.
+          const payload = decodeCustomPlayersPayload(ctx.callbackQuery?.data)!;
 
           const { gameType, amount } = payload;
           const amountNumber = Number(amount);
@@ -2011,11 +1973,8 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         async (ctx, { session, tokenContext, clearSession, creatorId }) => {
           try {
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const telegramId = await getRequiredTelegramIdForContext(ctx, "amount selection");
-            if (telegramId == null) {
-              await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-              return;
-            }
+            // withCreatorSessionContext already refused callbacks without a sender id.
+            const telegramId = requireTelegramId(ctx, "amount selection");
 
             // Leaving typed input is a local state transition. Complete it
             // before any wallet, contract, price, or Telegram request.
@@ -2069,14 +2028,9 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
                   decimals: tokenContext.tokenDecimals,
                 });
                 warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
+                // getSuggestedStakeAmounts sets usdTarget on every suggestion when priced.
                 if (usdTarget !== undefined) {
                   const usdFormatted = formatUsdValue(usdTarget, {
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 2,
-                  });
-                  warningMessage += ` ($${usdFormatted})`;
-                } else if (tokenPriceUSD) {
-                  const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
                     minimumFractionDigits: 0,
                     maximumFractionDigits: 2,
                   });
@@ -2105,72 +2059,6 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
           } catch (error) {
             console.error("Error in creator-protected back_to_amounts callback:", error);
             await safeAnswerCallbackQuery(ctx, "❌ Error going back");
-          }
-        },
-      ),
-    );
-
-    deps.bot.callbackQuery(
-      /^type_amount_(coinflip|giveaway)_(\d+)$/,
-      deps.withCreatorContext(
-        {
-          name: "type_amount",
-          resolveCreatorId: (ctx) => ctx.match?.[2],
-          failureText: "❌ Only the game creator can modify this setup!",
-        },
-        async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-          try {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const telegramId = await getRequiredTelegramIdForContext(ctx, "type amount prompt");
-            if (telegramId == null) {
-              await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-              return;
-            }
-
-            let userBalance =
-              session?.userBalance && session.userBalance > 0 ? session.userBalance : 0;
-            if (userBalance <= 0) {
-              try {
-                const tokenBalance = await deps.wallet.getTokenBalance(
-                  telegramId,
-                  tokenContext.tokenMint,
-                );
-                userBalance = tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-              } catch (error) {
-                console.error("Error getting balance:", error);
-              }
-            }
-
-            const { formatted: contractMin } =
-              tokenContext.contractMinimum !== undefined
-                ? { formatted: tokenContext.contractMinimum }
-                : await deps.getTokenPolicyMinimumAmount(
-                    tokenContext.tokenMint,
-                    tokenContext.tokenDecimals,
-                  );
-
-            await presentCustomAmountPrompt({
-              ctx,
-              gameType,
-              tokenTicker: tokenContext.tokenTicker,
-              contractMin,
-              creatorId,
-            });
-
-            await safeAnswerCallbackQuery(ctx, "Type your amount...");
-
-            updateSession({
-              waitingFor: "amount_input",
-              gameType,
-              userBalance,
-              messageId: ctx.callbackQuery?.message?.message_id || 0,
-              chatId: ctx.chat?.id || 0,
-              contractMinimum: contractMin,
-              amount: session?.amount,
-            });
-          } catch (error) {
-            console.error("Error in creator-protected type_amount callback:", error);
-            await safeAnswerCallbackQuery(ctx, "❌ Error setting up text input");
           }
         },
       ),
