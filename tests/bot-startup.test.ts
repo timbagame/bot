@@ -362,7 +362,7 @@ describe("program setup", () => {
     expect(outcome).toBe("ok");
     expect(added.length).toBeGreaterThan(1);
     expect(readyListeners).toHaveLength(1);
-    expect(botModule.program.programId.toBase58()).toBe("11111111111111111111111111111112");
+    expect(String(botModule.program.programId.toBase58())).toBe("11111111111111111111111111111112");
     expect(botModule.__test_getSwapManagers().swapManager).toBeDefined();
     expect(logged(logSpy, "Oracle max tickets set to 40")).toBe(true);
     expect(logged(logSpy, "Oracle buffer time set to 30 seconds")).toBe(true);
