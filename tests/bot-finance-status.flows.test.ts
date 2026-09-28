@@ -219,3 +219,59 @@ describe("/status", () => {
     expect(errorSpy).toHaveBeenCalledWith("Error in status command:", expect.anything());
   });
 });
+
+describe("/oracle", () => {
+  afterEach(() => {
+    botModule.__test_resetProgram();
+  });
+
+  test("shows the fee, timeouts and player limits from the oracle account", async () => {
+    const operator = (await Keypair.generate()).publicKey;
+    const fetched: unknown[] = [];
+    botModule.__test_setProgram({
+      programId: (await Keypair.generate()).publicKey,
+      account: {
+        oracle: {
+          fetch: async (pda: unknown) => {
+            fetched.push(pda);
+            return {
+              feePercentage: 5,
+              minTimeout: 300,
+              maxTimeout: 86_400,
+              maxTickets: 50,
+              oracleBufferTime: 60,
+              operator,
+            };
+          },
+        },
+      },
+    } as any);
+
+    const id = await sendText("/oracle", { userId: ADMIN + 7 });
+
+    const reply = lastCall("sendMessage")!;
+    expect(reply.payload.reply_to_message_id).toBe(id);
+    expect(reply.payload.text).toContain("💸 Fee: 5% of each prize pool");
+    expect(reply.payload.text).toContain("👥 Max players: 50");
+    expect(reply.payload.text).toContain("⏱️ Game timeout: 5m to 1d");
+    expect(reply.payload.text).toContain(`Oracle: <code>${operator.toBase58()}</code>`);
+    expect(fetched).toHaveLength(1);
+  });
+
+  test("a failed oracle fetch is reported as a command error", async () => {
+    botModule.__test_setProgram({
+      programId: (await Keypair.generate()).publicKey,
+      account: {
+        oracle: {
+          fetch: async () => {
+            throw new Error("Account does not exist");
+          },
+        },
+      },
+    } as any);
+
+    await sendText("/oracle", { userId: ADMIN + 7 });
+
+    expect(errorSpy).toHaveBeenCalledWith("Error in oracle command:", expect.any(Error));
+  });
+});
