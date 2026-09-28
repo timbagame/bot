@@ -3961,7 +3961,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  let recipientTelegramId: bigint | null;
+  let recipientTelegramId: bigint;
   let recipientName = "User";
   let amountArgs = args;
 
@@ -4124,10 +4124,6 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         : args.filter(
             (_token, idx) => idx < mentionStart || idx >= mentionStart + mentionTokenCount,
           );
-  }
-
-  if (recipientTelegramId === null) {
-    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
   const amountArgIndex = 1;
