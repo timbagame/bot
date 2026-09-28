@@ -6330,10 +6330,6 @@ const handleMediaForChatDefaults = async (
     inputSession = fallback.session;
   }
 
-  if (inputSession.type !== "chat_defaults") {
-    return;
-  }
-
   const setting = inputSession["setting"] as string | undefined;
   if (!isChatDefaultsMediaSetting(setting)) {
     return;
@@ -6362,9 +6358,8 @@ const handleMediaForChatDefaults = async (
   }
 
   try {
-    const message = ctx.message;
-
-    if (mediaType === "document" && message?.document) {
+    // Each handler is registered for its own media type, so the media is present.
+    if (mediaType === "document") {
       // Reject all documents - only accept direct photos, videos, and animations
       await ctx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
@@ -6372,17 +6367,6 @@ const handleMediaForChatDefaults = async (
           "Files sent as documents are not supported.",
         { parse_mode: "HTML" },
       );
-      clearInputSession(sessionKey);
-      return;
-    }
-
-    const hasMedia =
-      (mediaType === "video" && !!message?.video) ||
-      (mediaType === "animation" && !!message?.animation) ||
-      (mediaType === "photo" && Array.isArray(message?.photo) && message.photo.length > 0);
-
-    if (!hasMedia) {
-      await ctx.reply("❌ Could not read that media. Please try again.");
       clearInputSession(sessionKey);
       return;
     }
