@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import {
   fetchDexScreenerPairStats,
   fetchDexScreenerPoolStats,
@@ -188,4 +188,43 @@ test("fetchDexScreenerPoolStats skips blank mints and caches failed HTTP lookups
   expect(await fetchDexScreenerPoolStats("bad-mint", fetchImpl as any)).toEqual([]);
   expect(calls).toBe(1);
   expect(await fetchDexScreenerPairStats("bad-mint", fetchImpl as any)).toBeNull();
+});
+
+test("fetchDexScreenerPoolStats falls back to the stale lookup, or none, when the request fails", async () => {
+  __test_clearDexScreenerCache();
+  const start = new Date("2026-01-01T00:00:00Z");
+  setSystemTime(start);
+  try {
+    let fail = false;
+    const fetchImpl = async () => {
+      if (fail) throw new Error("network down");
+      return Response.json({
+        pairs: [
+          {
+            chainId: "solana",
+            dexId: "pumpswap",
+            url: "https://dexscreener.com/solana/stale",
+            pairAddress: "pair-stale",
+            priceUsd: "0.5",
+            liquidity: { usd: 10 },
+            quoteToken: { address: "sol", symbol: "SOL" },
+            baseToken: { address: "stale-mint", name: "STALE", symbol: "STALE" },
+          },
+        ],
+      });
+    };
+
+    const fresh = await fetchDexScreenerPoolStats("stale-mint", fetchImpl as any);
+    expect(fresh.map((stats) => stats.pairAddress)).toEqual(["pair-stale"]);
+
+    // Past the 30s TTL the lookup is retried; a failed retry serves the expired result.
+    setSystemTime(new Date(start.getTime() + 31_000));
+    fail = true;
+    expect(await fetchDexScreenerPoolStats("stale-mint", fetchImpl as any)).toEqual(fresh);
+
+    // With nothing cached, a failed request yields no pools.
+    expect(await fetchDexScreenerPoolStats("never-seen", fetchImpl as any)).toEqual([]);
+  } finally {
+    setSystemTime();
+  }
 });
