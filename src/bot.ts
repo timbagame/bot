@@ -2733,33 +2733,15 @@ const toBase58String = (value: unknown): string => {
     return value;
   }
 
-  if (typeof value === "object" && value !== null) {
-    const candidate = value as {
-      toBase58?: () => string;
-      toString?: () => string;
-    };
-
-    if (typeof candidate.toBase58 === "function") {
-      return candidate.toBase58();
-    }
-
-    if (typeof candidate.toString === "function") {
-      return candidate.toString();
-    }
-  }
-
-  if (typeof value === "bigint") {
-    return value.toString();
+  const candidate = value as { toBase58?: () => string } | null | undefined;
+  if (typeof candidate?.toBase58 === "function") {
+    return candidate.toBase58();
   }
 
   return String(value ?? "");
 };
 
 const bnLikeToNumber = (value: unknown): number | undefined => {
-  if (value === null || value === undefined) {
-    return undefined;
-  }
-
   if (typeof value === "number") {
     return value;
   }
@@ -2768,29 +2750,21 @@ const bnLikeToNumber = (value: unknown): number | undefined => {
     return Number(value);
   }
 
-  if (typeof value === "object") {
-    const candidate = value as {
-      toNumber?: () => number;
-      toString?: () => string;
-    };
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
 
-    if (typeof candidate.toNumber === "function") {
-      try {
-        return candidate.toNumber();
-      } catch {
-        // Fall through to string parsing if the number is too large
-      }
-    }
-
-    if (typeof candidate.toString === "function") {
-      const numericValue = Number(candidate.toString());
-      if (!Number.isNaN(numericValue)) {
-        return numericValue;
-      }
+  const candidate = value as { toNumber?: () => number };
+  if (typeof candidate.toNumber === "function") {
+    try {
+      return candidate.toNumber();
+    } catch {
+      // Fall through to string parsing if the number is too large
     }
   }
 
-  return undefined;
+  const numericValue = Number(String(value));
+  return Number.isNaN(numericValue) ? undefined : numericValue;
 };
 
 type EventParserLike = { parseLogs(logs: string[]): Iterable<ProgramEvent> };
@@ -2913,12 +2887,10 @@ const fetchCompletionDetailsFromHistory = async (
 let completionHistoryFetcher: (gameAddress: string) => Promise<CompletionDetails | null> =
   fetchCompletionDetailsFromHistory;
 
-const getDefaultCompletionEventParserFactory = () => () => {
-  if (!program) {
-    throw new Error("Program not initialized");
-  }
-  return { parseLogs: (logs: string[]) => parseProgramEventLogs(program.programId, logs) };
-};
+// Only used by fetchCompletionDetailsFromHistory, which returns early without a program.
+const getDefaultCompletionEventParserFactory = () => () => ({
+  parseLogs: (logs: string[]) => parseProgramEventLogs(program.programId, logs),
+});
 
 let completionEventParserFactory: () => EventParserLike = getDefaultCompletionEventParserFactory();
 
