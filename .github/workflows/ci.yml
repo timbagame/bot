@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   checks:
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     name: Static checks
     runs-on: ubuntu-26.04
     steps:
@@ -50,6 +51,7 @@ jobs:
         run: bun x tsc -p tsconfig.json --noEmit
 
   validate:
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     name: Validate
     runs-on: ubuntu-26.04
     steps:
@@ -99,7 +101,10 @@ jobs:
 
   publish:
     name: Publish OCI image
-    if: github.event_name != 'pull_request'
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' &&
+      (needs.checks.result == 'success' || ((github.event_name == 'push' && github.ref == 'refs/heads/main') && needs.checks.result == 'skipped')) &&
+      (needs.validate.result == 'success' || ((github.event_name == 'push' && github.ref == 'refs/heads/main') && needs.validate.result == 'skipped'))
     needs: [checks, validate]
     runs-on: ubuntu-26.04
     permissions:
