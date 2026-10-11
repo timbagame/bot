@@ -32,7 +32,7 @@
     "grammy": "^1.46.0",
     "qrcode": "^1.5.4",
     "viem": "2.57.4",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
