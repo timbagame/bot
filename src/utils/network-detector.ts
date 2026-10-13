@@ -19,7 +19,7 @@ function networkFromRpcHost(rpcUrl: string): SolanaNetwork | undefined {
   try {
     const url = new URL(rpcUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    hostname = url.hostname.toLowerCase();
+    hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   } catch {
     return undefined;
   }

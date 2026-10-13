@@ -194,16 +194,16 @@ describe("operator keypair location", () => {
     };
     const realLstat = fs.lstatSync;
     const realFstat = fs.fstatSync;
-    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce((...args) => {
-      const stats = realLstat(...args);
+    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce(((file: fs.PathLike) => {
+      const stats = realLstat(file);
       swap();
       return stats;
-    });
-    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
-      const stats = realFstat(...args);
+    }) as typeof fs.lstatSync);
+    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
+      const stats = realFstat(fd);
       swap();
       return stats;
-    });
+    }) as typeof fs.fstatSync);
     try {
       expect((await walletWith({}).getOperatorKeypair()).publicKey.toBase58()).toBe(
         original.publicKey.toBase58(),

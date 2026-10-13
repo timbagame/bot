@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import fc from "fast-check";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -79,16 +80,16 @@ describe("protected secrets", () => {
     };
     const realLstat = fs.lstatSync;
     const realFstat = fs.fstatSync;
-    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce((...args) => {
-      const stats = realLstat(...args);
+    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce(((file: fs.PathLike) => {
+      const stats = realLstat(file);
       swap();
       return stats;
-    });
-    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
-      const stats = realFstat(...args);
+    }) as typeof fs.lstatSync);
+    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
+      const stats = realFstat(fd);
       swap();
       return stats;
-    });
+    }) as typeof fs.fstatSync);
     try {
       expect(readProtectedSecretFile(file, "Secret")).toBe("original-token");
     } finally {
@@ -118,14 +119,51 @@ describe("protected secrets", () => {
     expect(() => readProtectedSecretFile(join(file, ".."), "Secret")).toThrow("regular file");
   });
 
+  test("validates the opened file even if its path becomes a protected replacement", () => {
+    const file = secretFile("unprotected-token");
+    chmodSync(file, 0o644);
+    const replacement = secretFile("protected-token");
+    const realOpen = fs.openSync;
+    const hook = spyOn(fs, "openSync").mockImplementationOnce((...args) => {
+      const fd = realOpen(...args);
+      fs.renameSync(file, `${file}-original`);
+      fs.renameSync(replacement, file);
+      return fd;
+    });
+    try {
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("insecure permissions");
+    } finally {
+      hook.mockRestore();
+    }
+  });
+
+  test("a substituted FIFO is refused without blocking", () => {
+    const file = secretFile("token");
+    fs.unlinkSync(file);
+    execFileSync("mkfifo", [file]);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        `import { readProtectedSecretFile } from ${JSON.stringify(join(import.meta.dir, "../src/utils/secrets.ts"))};
+         try { readProtectedSecretFile(${JSON.stringify(file)}, "Secret"); process.exit(1); }
+         catch (error) { console.log(error.message); }`,
+      ],
+      { timeout: 2000, encoding: "utf8" },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("must be a regular file");
+  });
+
   test.each(["", "x".repeat(4097)])("rejects size changes after inspection (%#. case)", (value) => {
     const file = secretFile("token");
     const realFstat = fs.fstatSync;
-    const hook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
-      const stats = realFstat(...args);
+    const hook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
+      const stats = realFstat(fd);
       writeFileSync(file, value);
       return stats;
-    });
+    }) as typeof fs.fstatSync);
     try {
       expect(() => readProtectedSecretFile(file, "Secret")).toThrow("invalid size");
     } finally {
@@ -136,9 +174,13 @@ describe("protected secrets", () => {
   test("short reads preserve a multibyte secret", () => {
     const file = secretFile("  token-é🎲  ");
     const realRead = fs.readSync;
-    const hook = spyOn(fs, "readSync").mockImplementation((fd, buffer, offset, length, position) =>
-      realRead(fd, buffer, offset, Math.min(length!, 1), position!),
-    );
+    const hook = spyOn(fs, "readSync").mockImplementation(((
+      fd: number,
+      buffer: NodeJS.ArrayBufferView,
+      offset: number,
+      length: number,
+      position: number | bigint | null,
+    ) => realRead(fd, buffer, offset, Math.min(length, 1), position)) as typeof fs.readSync);
     try {
       expect(readProtectedSecretFile(file, "Secret")).toBe("token-é🎲");
     } finally {

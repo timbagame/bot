@@ -205,11 +205,26 @@ describe("network detector utilities", () => {
 });
 
 describe("RPC hostname detection", () => {
+  test("RPC credentials cannot redirect the default explorer link to another cluster", () => {
+    const original = process.env.SOLANA_NETWORK;
+    try {
+      process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com?api-key=devnet";
+      expect(NetworkDetector.getCurrentNetwork()).toBe("mainnet");
+      expect(NetworkDetector.buildSolscanTxUrl("synthetic-signature")).toBe(
+        "https://solscan.io/tx/synthetic-signature",
+      );
+    } finally {
+      process.env.SOLANA_NETWORK = original;
+    }
+  });
+
   test.each([
     ["https://devnet.helius-rpc.com", "devnet", "Devnet"],
     ["https://solana-testnet.g.alchemy.com", "testnet", "Testnet"],
     ["https://mainnet.helius-rpc.com", "mainnet", "Mainnet"],
     ["https://api.solana.com", "mainnet", "Mainnet"],
+    ["https://api.solana.com.", "mainnet", "Mainnet"],
+    ["http://localhost.:8899", "localnet", "Localnet"],
     ["http://[::1]:8899", "localnet", "Localnet"],
     ["https://API.DEVNET.SOLANA.COM", "devnet", "Devnet"],
     ["https://notdevnet.example.invalid", "mainnet", "Custom Network"],
@@ -219,7 +234,7 @@ describe("RPC hostname detection", () => {
     ["https://localhost.evil.invalid", "mainnet", "Custom Network"],
     ["not a URL containing devnet", "mainnet", "Custom Network"],
     ["ftp://api.devnet.solana.com", "mainnet", "Custom Network"],
-  ])("classifies %s from its host", (url, network, display) => {
+  ] as const)("classifies %s from its host", (url, network, display) => {
     expect(NetworkDetector.detectNetwork(url)).toBe(network);
     expect(NetworkDetector.getDisplayNameFromRpc(url)).toBe(display);
   });
