@@ -16,18 +16,23 @@ const ORIGINAL_ENV = {
   DEFAULT_TOKEN_TICKER: process.env.DEFAULT_TOKEN_TICKER,
 };
 
+const restoreDefaultTokenEnv = () => {
+  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
+
 describe("token-registry", () => {
   let networkSpy: ReturnType<typeof spyOn> | undefined;
 
   beforeEach(() => {
-    process.env.DEFAULT_TOKEN_MINT = ORIGINAL_ENV.DEFAULT_TOKEN_MINT ?? undefined;
-    process.env.DEFAULT_TOKEN_TICKER = ORIGINAL_ENV.DEFAULT_TOKEN_TICKER ?? undefined;
+    restoreDefaultTokenEnv();
     networkSpy?.mockRestore();
   });
 
   afterEach(() => {
-    process.env.DEFAULT_TOKEN_MINT = ORIGINAL_ENV.DEFAULT_TOKEN_MINT ?? undefined;
-    process.env.DEFAULT_TOKEN_TICKER = ORIGINAL_ENV.DEFAULT_TOKEN_TICKER ?? undefined;
+    restoreDefaultTokenEnv();
     networkSpy?.mockRestore();
   });
 
