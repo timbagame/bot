@@ -1,5 +1,6 @@
 {
   "name": "timba-bot",
+  "license": "AGPL-3.0-only",
   "imports": {
     "#solana": "./src/utils/solana.ts",
     "#token": "./src/utils/token-kit.ts"
