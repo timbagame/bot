@@ -14,27 +14,33 @@ const NETWORK_DISPLAY_NAMES: Record<SolanaNetwork, string> = {
   localnet: "Localnet",
 };
 
+function networkFromRpcHost(rpcUrl: string): SolanaNetwork | undefined {
+  let hostname: string;
+  try {
+    const url = new URL(rpcUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    hostname = url.hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") {
+    return "localnet";
+  }
+  // Provider hostnames commonly use a cluster label, such as solana-devnet.
+  // Credentials, paths and queries never determine the cluster.
+  const labels = hostname.split(/[.-]/);
+  if (labels.includes("devnet")) return "devnet";
+  if (labels.includes("testnet")) return "testnet";
+  if (labels.includes("mainnet") || hostname === "api.solana.com") return "mainnet";
+  return undefined;
+}
+
 export class NetworkDetector {
   /**
    * Detect network based on RPC URL
    */
   static detectNetwork(rpcUrl: string): SolanaNetwork {
-    const url = rpcUrl.toLowerCase();
-
-    if (url.includes("devnet")) {
-      return "devnet";
-    }
-
-    if (url.includes("testnet")) {
-      return "testnet";
-    }
-
-    if (url.includes("localhost") || url.includes("127.0.0.1")) {
-      return "localnet";
-    }
-
-    // Default to mainnet for mainnet-beta and other URLs
-    return "mainnet";
+    return networkFromRpcHost(rpcUrl) ?? "mainnet";
   }
 
   /**
@@ -47,22 +53,8 @@ export class NetworkDetector {
       return this.getNetworkDisplayName(this.getCurrentNetwork());
     }
 
-    const url = rpcUrl.toLowerCase();
-    const network = this.detectNetwork(url);
-
-    const isRecognized =
-      url.includes("devnet") ||
-      url.includes("testnet") ||
-      url.includes("mainnet") ||
-      url.includes("api.solana.com") ||
-      url.includes("localhost") ||
-      url.includes("127.0.0.1");
-
-    if (!isRecognized) {
-      return "Custom Network";
-    }
-
-    return this.getNetworkDisplayName(network);
+    const network = networkFromRpcHost(rpcUrl);
+    return network ? this.getNetworkDisplayName(network) : "Custom Network";
   }
 
   /**

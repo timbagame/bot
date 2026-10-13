@@ -11,6 +11,7 @@ import {
   type CreationProofProgress,
 } from "./game-creation-recovery";
 import { mnemonicToSeed } from "bip39";
+import { readProtectedSecretFile } from "./secrets";
 import bs58 from "bs58";
 import {
   assertIsFullySignedTransaction,
@@ -749,24 +750,15 @@ export class WalletManager {
     if (this.operatorKeypair) return this.operatorKeypair;
 
     const keypairPath = this.resolveOperatorKeypairPath();
-    if (!fs.existsSync(keypairPath)) {
-      throw new Error("Operator keypair file not found at " + keypairPath);
-    }
-
     try {
-      const stats = fs.lstatSync(keypairPath);
-      const mode = stats.mode & 0o777;
-      if (!stats.isFile() || stats.isSymbolicLink())
-        throw new Error("Operator keypair must be a regular file, not a symlink");
-      if ((mode & 0o077) !== 0)
-        throw new Error(
-          `Operator keypair has insecure permissions (${mode.toString(8)}); use 400 or 600`,
-        );
-      const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
+      const keypairData = JSON.parse(readProtectedSecretFile(keypairPath, "Operator keypair"));
       const keypair = await Keypair.fromSecretKey(new Uint8Array(keypairData));
       this.operatorKeypair ??= keypair;
       return this.operatorKeypair;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("Operator keypair file not found at " + keypairPath, { cause: error });
+      }
       throw new Error(
         "Failed to load operator keypair. Set OPERATOR_KEYPAIR_PATH or provide operator-keypair.json.",
         { cause: error },

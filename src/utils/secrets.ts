@@ -6,20 +6,45 @@ const MAX_SECRET_BYTES = 4096;
 
 export function readProtectedSecretFile(filePath: string, label: string): string {
   const resolved = path.resolve(filePath);
-  const stats = fs.lstatSync(resolved);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error(`${label} must be a regular file, not a symlink`);
+  let fd: number;
+  try {
+    // Refuse symlinks at open time and avoid blocking on a substituted FIFO.
+    fd = fs.openSync(
+      resolved,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new Error(`${label} must be a regular file, not a symlink`, { cause: error });
+    }
+    throw error;
   }
-  if (stats.size <= 0 || stats.size > MAX_SECRET_BYTES) {
-    throw new Error(`${label} has an invalid size`);
+  try {
+    // Validate and read the same open file, even if its path is replaced.
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile()) throw new Error(`${label} must be a regular file, not a symlink`);
+    if (stats.size <= 0 || stats.size > MAX_SECRET_BYTES) {
+      throw new Error(`${label} has an invalid size`);
+    }
+    const mode = stats.mode & 0o777;
+    if ((mode & 0o077) !== 0) {
+      throw new Error(`${label} has insecure permissions (${mode.toString(8)}); use 400 or 600`);
+    }
+    // Bound the read too: another writer could grow the open file after fstat.
+    const buffer = Buffer.alloc(MAX_SECRET_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length === 0 || length > MAX_SECRET_BYTES) throw new Error(`${label} has an invalid size`);
+    const value = buffer.toString("utf8", 0, length).trim();
+    if (!value) throw new Error(`${label} is empty`);
+    return value;
+  } finally {
+    fs.closeSync(fd);
   }
-  const mode = stats.mode & 0o777;
-  if ((mode & 0o077) !== 0) {
-    throw new Error(`${label} has insecure permissions (${mode.toString(8)}); use 400 or 600`);
-  }
-  const value = fs.readFileSync(resolved, "utf8").trim();
-  if (!value) throw new Error(`${label} is empty`);
-  return value;
 }
 
 export function loadWalletMnemonic(env: NodeJS.ProcessEnv = process.env): string {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getMintEncoder as getMint2022Encoder } from "@solana-program/token-2022";
@@ -179,6 +180,38 @@ describe("operator keypair location", () => {
 
     expect(error.message).toContain("Failed to load operator keypair");
     expect(error.cause.message).toContain("insecure permissions (644)");
+  });
+
+  test("path replacement after inspection cannot substitute an operator key", async () => {
+    const file = join(directory, "original.json");
+    const original = await writeKey(file);
+    const replacement = join(directory, "replacement.json");
+    await writeKey(replacement, 0o644);
+    process.env.OPERATOR_KEYPAIR_PATH = file;
+    const swap = () => {
+      fs.renameSync(file, `${file}-old`);
+      fs.symlinkSync(replacement, file);
+    };
+    const realLstat = fs.lstatSync;
+    const realFstat = fs.fstatSync;
+    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce((...args) => {
+      const stats = realLstat(...args);
+      swap();
+      return stats;
+    });
+    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
+      const stats = realFstat(...args);
+      swap();
+      return stats;
+    });
+    try {
+      expect((await walletWith({}).getOperatorKeypair()).publicKey.toBase58()).toBe(
+        original.publicKey.toBase58(),
+      );
+    } finally {
+      pathHook.mockRestore();
+      descriptorHook.mockRestore();
+    }
   });
 });
 

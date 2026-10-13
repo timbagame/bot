@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import fc from "fast-check";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -65,5 +67,127 @@ describe("protected secrets", () => {
 
   test("rejects files that contain only whitespace", () => {
     expect(() => readProtectedSecretFile(secretFile(" \n\t"), "Secret")).toThrow("Secret is empty");
+  });
+
+  test("a path replaced after inspection cannot substitute another secret", () => {
+    const file = secretFile("original-token");
+    const replacement = secretFile("replacement-token");
+    chmodSync(replacement, 0o644);
+    const swap = () => {
+      fs.renameSync(file, `${file}-original`);
+      symlinkSync(replacement, file);
+    };
+    const realLstat = fs.lstatSync;
+    const realFstat = fs.fstatSync;
+    const pathHook = spyOn(fs, "lstatSync").mockImplementationOnce((...args) => {
+      const stats = realLstat(...args);
+      swap();
+      return stats;
+    });
+    const descriptorHook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
+      const stats = realFstat(...args);
+      swap();
+      return stats;
+    });
+    try {
+      expect(readProtectedSecretFile(file, "Secret")).toBe("original-token");
+    } finally {
+      pathHook.mockRestore();
+      descriptorHook.mockRestore();
+    }
+  });
+
+  test("rejects a symlink substituted just before opening", () => {
+    const file = secretFile("original-token");
+    const replacement = secretFile("replacement-token");
+    const realOpen = fs.openSync;
+    const hook = spyOn(fs, "openSync").mockImplementationOnce((...args) => {
+      fs.unlinkSync(file);
+      symlinkSync(replacement, file);
+      return realOpen(...args);
+    });
+    try {
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("not a symlink");
+    } finally {
+      hook.mockRestore();
+    }
+  });
+
+  test("rejects directories", () => {
+    const file = secretFile("token");
+    expect(() => readProtectedSecretFile(join(file, ".."), "Secret")).toThrow("regular file");
+  });
+
+  test.each(["", "x".repeat(4097)])("rejects size changes after inspection (%#. case)", (value) => {
+    const file = secretFile("token");
+    const realFstat = fs.fstatSync;
+    const hook = spyOn(fs, "fstatSync").mockImplementationOnce((...args) => {
+      const stats = realFstat(...args);
+      writeFileSync(file, value);
+      return stats;
+    });
+    try {
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("invalid size");
+    } finally {
+      hook.mockRestore();
+    }
+  });
+
+  test("short reads preserve a multibyte secret", () => {
+    const file = secretFile("  token-é🎲  ");
+    const realRead = fs.readSync;
+    const hook = spyOn(fs, "readSync").mockImplementation((fd, buffer, offset, length, position) =>
+      realRead(fd, buffer, offset, Math.min(length!, 1), position!),
+    );
+    try {
+      expect(readProtectedSecretFile(file, "Secret")).toBe("token-é🎲");
+    } finally {
+      hook.mockRestore();
+    }
+  });
+
+  test.each(["fstatSync", "readSync"] as const)("closes the file when %s fails", (method) => {
+    const file = secretFile("token");
+    const failure = new Error("synthetic-read-failure");
+    const realFstat = fs.fstatSync;
+    const close = spyOn(fs, "closeSync");
+    const hook = spyOn(fs, method).mockImplementationOnce(() => {
+      throw failure;
+    });
+    try {
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow(failure);
+      const fd = close.mock.calls[0]![0];
+      expect(() => realFstat(fd)).toThrow();
+    } finally {
+      hook.mockRestore();
+      close.mockRestore();
+    }
+  });
+
+  test("closes the file after success", () => {
+    const file = secretFile("token");
+    const close = spyOn(fs, "closeSync");
+    try {
+      expect(readProtectedSecretFile(file, "Secret")).toBe("token");
+      expect(() => fs.fstatSync(close.mock.calls[0]![0])).toThrow();
+    } finally {
+      close.mockRestore();
+    }
+  });
+
+  test("UTF-8 secrets round-trip and whitespace is rejected (property)", () => {
+    const file = secretFile("token");
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom("a", "é", "🎲", "\u0000", " ", "\n"), { maxLength: 50 }),
+        (characters) => {
+          const value = characters.join("");
+          writeFileSync(file, value);
+          if (value.trim()) expect(readProtectedSecretFile(file, "Secret")).toBe(value.trim());
+          else expect(() => readProtectedSecretFile(file, "Secret")).toThrow();
+        },
+      ),
+      { seed: 4096, numRuns: 100 },
+    );
   });
 });
