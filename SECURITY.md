@@ -1,7 +1,7 @@
 # Security
 
-This bot holds the Oracle and fee-payer keys for Timba games and talks to the
-Solana and EVM contracts. A bug here can affect game funds and user wallets.
+This Telegram bot manages in-bot user wallets and signs transactions for them.
+It also calls the Oracle API. A bug here can affect user wallets and game funds.
 
 For the on-chain trust model, see the
 [contracts security policy](https://github.com/timbagame/contracts/blob/main/SECURITY.md).
