@@ -38,7 +38,9 @@ export function readProtectedSecretFile(filePath: string, label: string): string
       if (bytesRead === 0) break;
       length += bytesRead;
     }
-    if (length === 0 || length > MAX_SECRET_BYTES) throw new Error(`${label} has an invalid size`);
+    if (length !== stats.size || length > MAX_SECRET_BYTES) {
+      throw new Error(`${label} has an invalid size`);
+    }
     const value = buffer.toString("utf8", 0, length).trim();
     if (!value) throw new Error(`${label} is empty`);
     return value;

@@ -44,6 +44,15 @@ describe("protected secrets", () => {
     expect(() => readProtectedSecretFile(file, "Secret")).toThrow("insecure permissions");
   });
 
+  test.each([0o601, 0o602, 0o604, 0o610, 0o620, 0o640])(
+    "rejects every permission bit for other users (mode %i)",
+    (mode) => {
+      const file = secretFile("token");
+      chmodSync(file, mode);
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("insecure permissions");
+    },
+  );
+
   test("rejects symlinks", () => {
     const target = secretFile("token");
     const link = `${target}-link`;
@@ -156,20 +165,23 @@ describe("protected secrets", () => {
     expect(result.stdout).toContain("must be a regular file");
   });
 
-  test.each(["", "x".repeat(4097)])("rejects size changes after inspection (%#. case)", (value) => {
-    const file = secretFile("token");
-    const realFstat = fs.fstatSync;
-    const hook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
-      const stats = realFstat(fd);
-      writeFileSync(file, value);
-      return stats;
-    }) as typeof fs.fstatSync);
-    try {
-      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("invalid size");
-    } finally {
-      hook.mockRestore();
-    }
-  });
+  test.each(["", "to", "token-extra", "x".repeat(4097)])(
+    "rejects size changes after inspection (%#. case)",
+    (value) => {
+      const file = secretFile("token");
+      const realFstat = fs.fstatSync;
+      const hook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
+        const stats = realFstat(fd);
+        writeFileSync(file, value);
+        return stats;
+      }) as typeof fs.fstatSync);
+      try {
+        expect(() => readProtectedSecretFile(file, "Secret")).toThrow("invalid size");
+      } finally {
+        hook.mockRestore();
+      }
+    },
+  );
 
   test("short reads preserve a multibyte secret", () => {
     const file = secretFile("  token-é🎲  ");
@@ -183,6 +195,21 @@ describe("protected secrets", () => {
     ) => realRead(fd, buffer, offset, Math.min(length, 1), position)) as typeof fs.readSync);
     try {
       expect(readProtectedSecretFile(file, "Secret")).toBe("token-é🎲");
+    } finally {
+      hook.mockRestore();
+    }
+  });
+
+  test("detects growth beyond the limit even when the original file filled the buffer", () => {
+    const file = secretFile("x".repeat(4096));
+    const realFstat = fs.fstatSync;
+    const hook = spyOn(fs, "fstatSync").mockImplementationOnce(((fd: number) => {
+      const stats = realFstat(fd);
+      writeFileSync(file, "x".repeat(4097));
+      return stats;
+    }) as typeof fs.fstatSync);
+    try {
+      expect(() => readProtectedSecretFile(file, "Secret")).toThrow("invalid size");
     } finally {
       hook.mockRestore();
     }
