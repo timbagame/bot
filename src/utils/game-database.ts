@@ -1558,17 +1558,42 @@ export class GameDatabase extends BaseDatabase {
       return;
     }
 
-    this.run(
-      `
-        INSERT INTO username_mappings (normalized_username, telegram_id, display_name, updated_at)
-        VALUES (?, ?, ?, ?)
+    const save = this.db.transaction(() => {
+      this.run(
+        "DELETE FROM username_mappings WHERE telegram_id = ? AND normalized_username <> ?",
+        [trimmedId, normalized],
+        "removing previous usernames",
+      );
+      this.run(
+        `
+        INSERT INTO username_mappings (normalized_username, telegram_id, display_name, updated_at, trusted)
+        VALUES (?, ?, ?, ?, 1)
         ON CONFLICT(normalized_username) DO UPDATE SET
           telegram_id = excluded.telegram_id,
           display_name = excluded.display_name,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          trusted = 1
       `,
-      [normalized, trimmedId, trimmedDisplay, Date.now()],
-      "saving username mapping",
+        [normalized, trimmedId, trimmedDisplay, Date.now()],
+        "saving username mapping",
+      );
+    });
+    save();
+  }
+
+  public deleteUsernameMappingsForTelegramId(telegramId: string): void {
+    this.run(
+      "DELETE FROM username_mappings WHERE telegram_id = ?",
+      [telegramId],
+      "removing usernames",
+    );
+  }
+
+  public deleteUsernameMapping(normalizedUsername: string, telegramId: string): void {
+    this.run(
+      "DELETE FROM username_mappings WHERE normalized_username = ? AND telegram_id = ?",
+      [normalizedUsername, telegramId],
+      "removing stale username",
     );
   }
 
@@ -1643,7 +1668,7 @@ export class GameDatabase extends BaseDatabase {
     }
 
     const result = this.get<{ telegram_id: string }>(
-      "SELECT telegram_id FROM username_mappings WHERE normalized_username = ? LIMIT 1",
+      "SELECT telegram_id FROM username_mappings WHERE normalized_username = ? AND trusted = 1 LIMIT 1",
       [trimmed],
       "finding telegram id by normalized username",
     );
@@ -1775,11 +1800,18 @@ export class GameDatabase extends BaseDatabase {
           normalized_username TEXT PRIMARY KEY,
           telegram_id TEXT NOT NULL,
           display_name TEXT,
-          updated_at INTEGER NOT NULL
+          updated_at INTEGER NOT NULL,
+          trusted INTEGER NOT NULL DEFAULT 0
         )`,
         [],
         "ensuring username_mappings schema",
       );
+      const columns = this.all<{ name: string }>("PRAGMA table_info(username_mappings)");
+      if (!columns.some((column) => column.name === "trusted")) {
+        // Old rows may have been created from arbitrary display names. Preserve
+        // them for recovery, but exclude them until Telegram reports a handle.
+        this.run("ALTER TABLE username_mappings ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0");
+      }
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_username_mappings_telegram_id ON username_mappings (telegram_id)",
         [],

@@ -790,6 +790,31 @@ test("username mapping lookup persists normalized usernames", () => {
   expect(db.findTelegramIdByUsername("@missing")).toBeNull();
 });
 
+test("renames remove old handles and stale invalidations preserve new owners", () => {
+  const db = GameDatabase.getInstance();
+  db.saveUsernameMapping("old", "111");
+  db.saveUsernameMapping("new", "111");
+  expect(db.findTelegramIdByUsername("@old")).toBeNull();
+  expect(db.findTelegramIdByUsername("@new")).toBe("111");
+  db.saveUsernameMapping("new", "222");
+  db.deleteUsernameMapping("new", "111");
+  expect(db.findTelegramIdByUsername("@new")).toBe("222");
+  db.deleteUsernameMappingsForTelegramId("222");
+  expect(db.findTelegramIdByUsername("@new")).toBeNull();
+});
+
+test("a failed rename rolls back removal of the old username", () => {
+  const db = GameDatabase.getInstance();
+  db.saveUsernameMapping("old", "111");
+  const sqlite = (db as any).db;
+  sqlite.exec(
+    "CREATE TRIGGER fail_username BEFORE INSERT ON username_mappings BEGIN SELECT RAISE(ABORT, 'synthetic-save-failed'); END",
+  );
+  expect(() => db.saveUsernameMapping("new", "111")).toThrow("synthetic-save-failed");
+  expect(db.findTelegramIdByUsername("@old")).toBe("111");
+  expect(db.findTelegramIdByUsername("@new")).toBeNull();
+});
+
 test("getPlayerTelegramId prioritizes confirmed participants over pending fallback", () => {
   const db = GameDatabase.getInstance();
 

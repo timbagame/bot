@@ -100,6 +100,13 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     if (normalized.length === 0) {
       return;
     }
+    for (const [key, id] of Object.entries(normalizedUsernameToId)) {
+      if (id === telegramId && key !== normalized) {
+        delete normalizedUsernameToId[key];
+        delete usernameToId[key];
+        delete usernameToId[`@${key}`];
+      }
+    }
     normalizedUsernameToId[normalized] = telegramId;
     usernameToId[normalized] = telegramId;
     usernameToId[`@${normalized}`] = telegramId;
@@ -155,6 +162,22 @@ export function makeDbStub(options: DbStubOptions = {}): any {
       return withAt ?? null;
     },
     saveUsernameMapping,
+    deleteUsernameMappingsForTelegramId: (telegramId: string) => {
+      for (const [key, id] of Object.entries(normalizedUsernameToId)) {
+        if (id === telegramId) {
+          delete normalizedUsernameToId[key];
+          delete usernameToId[key];
+          delete usernameToId[`@${key}`];
+        }
+      }
+    },
+    deleteUsernameMapping: (normalized: string, telegramId: string) => {
+      if (normalizedUsernameToId[normalized] === telegramId) {
+        delete normalizedUsernameToId[normalized];
+        delete usernameToId[normalized];
+        delete usernameToId[`@${normalized}`];
+      }
+    },
     findTelegramIdByNormalizedUsername,
     clearGameMessage: (address: string) => {
       clearedMessages.push(address);

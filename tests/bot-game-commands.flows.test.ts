@@ -141,6 +141,18 @@ describe("/coinflip through the bot", () => {
 describe("/coinflip naming who to challenge through the bot", () => {
   afterEach(() => clearApiOverride("getChatMember"));
 
+  test("a mismatched or unverifiable username never opens a challenge", async () => {
+    manager.findTelegramIdByUsername = () => "5150";
+    for (const username of ["someone_else", undefined]) {
+      overrideApiMethod("getChatMember", () => ({ user: { id: 5150, is_bot: false, username } }));
+      await sendText("/cf 5 BONK @rival", { userId: USER, chatId: GROUP });
+      expect(lastText()).toBe(
+        "I couldn't verify <code>@rival</code>. Reply to their message or pick them from Telegram's mention list.",
+      );
+      expect(manager.createGame).not.toHaveBeenCalled();
+    }
+  });
+
   test("a saved @display name cannot become a challenge target", async () => {
     const db = botModule.__test_getGameDatabase();
     db.savePlayerMapping("fictional-cf-impersonator", "5151", "@cf_impersonated");

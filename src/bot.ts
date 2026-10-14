@@ -4,7 +4,11 @@ import { resolveAdvancedOptions } from "./utils/game-settings";
 import { mapWithConcurrency } from "./utils/concurrency";
 import { registerEvmBot } from "./evm/bot";
 import { CHALLENGE_JOIN_LABEL } from "./utils/game-challenge";
-import { findNamedUser, resolveNamedUser } from "./utils/user-mention";
+import {
+  findNamedUser,
+  resolveNamedUser,
+  usernameVerificationFailedMessage,
+} from "./utils/user-mention";
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
@@ -256,6 +260,13 @@ bot.use(async (ctx, next) => {
 
 bot.use(async (ctx, next) => {
   const from = ctx.from;
+  if (gameManager && from && !from.username?.trim()) {
+    try {
+      gameManager.clearTelegramUsernames?.(String(from.id));
+    } catch (error) {
+      console.warn("Failed to clear old usernames:", error);
+    }
+  }
   if (
     gameManager &&
     from &&
@@ -3916,6 +3927,8 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     switch (mentioned.kind) {
       case "lookup_failed":
         throw mentioned.error;
+      case "verification_failed":
+        return replyToMessage(ctx, usernameVerificationFailedMessage(mentioned.username));
       case "unknown":
         return replyToMessage(
           ctx,

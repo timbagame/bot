@@ -91,7 +91,14 @@ beforeEach(async () => {
   stub(wallet, "transferToken", transferToken);
   overrideApiMethod("getChatMember", (payload) => ({
     status: "member",
-    user: { id: payload.user_id, is_bot: false, first_name: "Member" },
+    user: {
+      id: payload.user_id,
+      is_bot: false,
+      first_name: "Member",
+      username: Object.entries(lookups)
+        .find(([, id]) => id === String(payload.user_id))?.[0]
+        .replace(/^@/, ""),
+    },
   }));
 });
 
@@ -220,6 +227,9 @@ describe("/tip argument validation", () => {
     expect(callsTo("getChatMember")).toHaveLength(0);
 
     db.saveUsernameMapping("tip_impersonated", String(TARGET), "@tip_impersonated");
+    overrideApiMethod("getChatMember", (payload) => ({
+      user: { id: payload.user_id, is_bot: false, username: "tip_impersonated" },
+    }));
     await tip("/tip @tip_impersonated 2 SOL");
 
     expect(recipientIds).toEqual([BigInt(TARGET)]);
@@ -556,7 +566,7 @@ describe("/tip when the usernames cannot be read", () => {
 });
 
 describe("/tip to a mentioned username", () => {
-  test("pays the account the username names, under the username that was written", async () => {
+  test("refuses a stale username instead of paying an account with a different handle", async () => {
     lookups["@bob"] = String(TARGET);
     overrideApiMethod("getChatMember", (payload) => ({
       status: "member",
@@ -568,7 +578,19 @@ describe("/tip to a mentioned username", () => {
 
     expect(primed).toEqual([]);
     expect(loosePrimed).toEqual([]);
-    expect(texts()).toContain("⏳ Tip of 2 SOL ($300) to @bob…");
-    expect(callsTo("sendMessage").at(-1)!.payload.chat_id).toBe(TARGET);
+    expect(lastText()).toBe(
+      "I couldn't verify <code>@bob</code>. Reply to their message or pick them from Telegram's mention list.",
+    );
+    expect(transferSol).not.toHaveBeenCalled();
+    expect(transferToken).not.toHaveBeenCalled();
+  });
+
+  test("a Telegram outage prevents a typed username tip", async () => {
+    lookups["@bob"] = String(TARGET);
+    failApiMethod("getChatMember", "Bad Request: user not found");
+    await tip("/tip @bob 2 SOL");
+    expect(lastText()).toContain("I couldn't verify");
+    expect(transferSol).not.toHaveBeenCalled();
+    expect(transferToken).not.toHaveBeenCalled();
   });
 });

@@ -317,6 +317,32 @@ describe("GameManager Username Resolution", () => {
   });
 
   describe("findTelegramIdByUsername", () => {
+    test("renaming or removing a username invalidates cached aliases", () => {
+      resetGM();
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
+      const ctx = { chat: { id: 1 } } as any;
+      gm.primeUsernameCache(ctx, "111", "@old", true);
+      expect(gm.findTelegramIdByUsername("@old")).toBe("111");
+      gm.primeUsernameCache(ctx, "111", "@new", true);
+      expect(gm.findTelegramIdByUsername("@old")).toBeNull();
+      expect(gm.findTelegramIdByUsername("@new")).toBe("111");
+      gm.clearTelegramUsernames("111");
+      expect(gm.findTelegramIdByUsername("@new")).toBeNull();
+    });
+
+    test("invalidating an old owner cannot remove a reassigned username", () => {
+      resetGM();
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
+      const ctx = { chat: { id: 1 } } as any;
+      gm.primeUsernameCache(ctx, "111", "@name", true);
+      gm.invalidateUsernameMapping("@name", "111");
+      expect(gm.findTelegramIdByUsername("@name")).toBeNull();
+      gm.primeUsernameCache(ctx, "222", "@name", true);
+      gm.invalidateUsernameMapping("@name", "111");
+      gm.invalidateUsernameMapping(" ", "222");
+      expect(gm.findTelegramIdByUsername("@name")).toBe("222");
+    });
+
     test("normalizes usernames and caches lookups", () => {
       resetGM();
       const dbStub = makeDbStub({ usernameToId: { cached: "111" } });

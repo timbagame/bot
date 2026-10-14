@@ -6,6 +6,7 @@ import { getTelegramUserDisplayName } from "./telegram-display";
 import {
   findNamedUser,
   resolveNamedUser,
+  usernameVerificationFailedMessage,
   type NamedUser,
   type UsernameDirectory,
 } from "./user-mention";
@@ -95,6 +96,8 @@ export const resolveNamedChallenge = async (
       };
     case "unknown":
       return { refusal: unknownNameMessage(mentioned.username) };
+    case "verification_failed":
+      return { refusal: usernameVerificationFailedMessage(mentioned.username) };
     case "lookup_failed":
       console.error("Failed to look up the challenged user:", mentioned.error);
       return {

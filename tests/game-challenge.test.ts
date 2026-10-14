@@ -267,7 +267,7 @@ describe("resolveNamedChallenge", () => {
         ),
       ).toEqual({ challenge: { telegramId: "5150", displayName: "@Rival" } });
     }
-    // The stored username is trusted, as /tip trusts it; the card shows Telegram's.
+    // A stored mapping cannot override Telegram's current username.
     expect(
       await resolveNamedChallenge(
         member({ ...RIVAL, username: "someone_else" }),
@@ -275,10 +275,13 @@ describe("resolveNamedChallenge", () => {
         CREATOR,
         users("5150"),
       ),
-    ).toEqual({ challenge: { telegramId: "5150", displayName: "@someone_else" } });
+    ).toEqual({
+      refusal:
+        "I couldn't verify <code>@rival</code>. Reply to their message or pick them from Telegram's mention list.",
+    });
   });
 
-  test("when Telegram cannot be asked, the typed username names the rival", async () => {
+  test("a typed username cannot name the rival when Telegram cannot verify it", async () => {
     for (const failure of [
       telegramError(400, "Bad Request: user not found"),
       telegramError(429, "Too Many Requests: retry after 5"),
@@ -286,7 +289,10 @@ describe("resolveNamedChallenge", () => {
     ]) {
       expect(
         await resolveNamedChallenge(telegram(failure), named(), CREATOR, users("5150")),
-      ).toEqual({ challenge: { telegramId: "5150", displayName: "@rival" } });
+      ).toEqual({
+        refusal:
+          "I couldn't verify <code>@rival</code>. Reply to their message or pick them from Telegram's mention list.",
+      });
     }
     // Ids past the safe integer range are not asked about at all.
     expect(
@@ -297,7 +303,8 @@ describe("resolveNamedChallenge", () => {
         users("123456789012345678901234567890"),
       ),
     ).toEqual({
-      challenge: { telegramId: "123456789012345678901234567890", displayName: "@rival" },
+      refusal:
+        "I couldn't verify <code>@rival</code>. Reply to their message or pick them from Telegram's mention list.",
     });
   });
 

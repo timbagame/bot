@@ -101,6 +101,23 @@ describe("group to supergroup migration", () => {
 });
 
 describe("username priming", () => {
+  test("an update without a username removes previously known handles", async () => {
+    const clearTelegramUsernames = mock(() => {});
+    botModule.__test_setGameManager({ clearTelegramUsernames } as any);
+    await sendText("hello", { userId: 4242 });
+    expect(clearTelegramUsernames).toHaveBeenCalledWith("4242");
+  });
+
+  test("a failed removal is logged and does not block the update", async () => {
+    botModule.__test_setGameManager({
+      clearTelegramUsernames: () => {
+        throw new Error("synthetic-db-down");
+      },
+    } as any);
+    await sendText("hello", { userId: 4242 });
+    expect(warnSpy).toHaveBeenCalledWith("Failed to clear old usernames:", expect.any(Error));
+  });
+
   test("primes the cache with the sender's handle and survives failures", async () => {
     const primeUsernameCache = mock((): void => {
       throw new Error("cache full");

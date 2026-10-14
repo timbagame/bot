@@ -1,5 +1,6 @@
 import type { Context } from "grammy";
 import type { Message, User } from "grammy/types";
+import { escapeHtml } from "./format-amount";
 
 /** Someone a command names instead of replying to one of their messages. */
 export type NamedUser = {
@@ -18,7 +19,11 @@ export type NamedUser = {
 /** Looks people up by the usernames the bot has seen. Reading may throw. */
 export type UsernameDirectory = {
   findTelegramIdByUsername: (username: string) => string | null | undefined;
+  invalidateUsernameMapping?: (username: string, telegramId: string) => void;
 };
+
+export const usernameVerificationFailedMessage = (username: string): string =>
+  `I couldn't verify <code>${escapeHtml(username)}</code>. Reply to their message or pick them from Telegram's mention list.`;
 
 export type MentionedUser =
   | {
@@ -34,6 +39,7 @@ export type MentionedUser =
   | { kind: "unknown"; username: string }
   /** Reading the usernames failed, which says nothing about whether they exist. */
   | { kind: "lookup_failed"; username: string; error: unknown }
+  | { kind: "verification_failed"; username: string }
   | { kind: "unusable_id" }
   | { kind: "self" }
   | { kind: "bot" };
@@ -148,7 +154,7 @@ export const findNamedUser = (
 
 /**
  * Resolves who a command names to a Telegram account, refusing the sender and
- * bots. Telegram is asked whether the account is a bot unless the mention said so.
+ * bots. A typed username must still belong to the account Telegram returns.
  */
 export const resolveNamedUser = async (
   ctx: Context,
@@ -176,6 +182,7 @@ export const resolveNamedUser = async (
 
   let telegramId: bigint;
   try {
+    if (!/^\d+$/.test(resolvedId) || BigInt(resolvedId) <= 0n) return { kind: "unusable_id" };
     telegramId = BigInt(resolvedId);
   } catch {
     return { kind: "unusable_id" };
@@ -194,7 +201,7 @@ export const resolveNamedUser = async (
       try {
         member = (await ctx.api.getChatMember(chatId, candidate))?.user ?? null;
       } catch {
-        // As in /tip, the account can still be named without the member details.
+        // A picked user carries a Telegram ID; a typed username must be verified below.
       }
     }
   }
@@ -203,6 +210,22 @@ export const resolveNamedUser = async (
   }
   if (isBot) {
     return { kind: "bot" };
+  }
+
+  if (!named.user) {
+    const username = named.username!;
+    if (!member || String(member.id) !== resolvedId) {
+      return { kind: "verification_failed", username };
+    }
+    const requested = username.trim().replace(/^@/, "").toLowerCase();
+    if (!member.username || member.username.toLowerCase() !== requested) {
+      try {
+        directory.invalidateUsernameMapping?.(username, resolvedId);
+      } catch (error) {
+        return { kind: "lookup_failed", username, error };
+      }
+      return { kind: "verification_failed", username };
+    }
   }
 
   return { kind: "user", id: resolvedId, telegramId, user: named.user ?? member, member };

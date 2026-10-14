@@ -1115,6 +1115,31 @@ export class GameManager {
     this.trackUsernameToIdCacheKey(key);
   }
 
+  private evictTelegramUsernameCache(telegramId: string, keepUsername?: string): void {
+    for (const key of [...this.usernameToIdCacheKeys]) {
+      if (key !== keepUsername && this.normalizedUsernameToIdCache.get(key) === telegramId) {
+        this.normalizedUsernameToIdCache.delete(key);
+        this.removeUsernameToIdCacheKey(key);
+      }
+    }
+  }
+
+  public clearTelegramUsernames(telegramId: string): void {
+    this.gameDb.deleteUsernameMappingsForTelegramId(telegramId);
+    this.evictTelegramUsernameCache(telegramId);
+    this.usernameHints.delete(telegramId);
+  }
+
+  public invalidateUsernameMapping(username: string, telegramId: string): void {
+    const normalized = this.normalizeUsernameForLookup(username);
+    if (!normalized) return;
+    this.gameDb.deleteUsernameMapping(normalized, telegramId);
+    if (this.normalizedUsernameToIdCache.get(normalized) === telegramId) {
+      this.normalizedUsernameToIdCache.delete(normalized);
+      this.removeUsernameToIdCacheKey(normalized);
+    }
+  }
+
   private normalizeUsernameForLookup(username: string): string | null {
     if (typeof username !== "string") {
       return null;
@@ -1171,12 +1196,13 @@ export class GameManager {
     const alreadyStored =
       this.usernameHints.get(trimmedId) === trimmedUsername &&
       this.normalizedUsernameToIdCache.get(normalized) === trimmedId;
-    this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
     if (alreadyStored) {
       return;
     }
-    this.usernameHints.set(trimmedId, trimmedUsername);
     this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
+    this.evictTelegramUsernameCache(trimmedId, normalized);
+    this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
+    this.usernameHints.set(trimmedId, trimmedUsername);
   }
 
   /** `isHandle` says Telegram reported `username` as this account's own @username. */
@@ -2547,6 +2573,7 @@ export class GameManager {
               typeof userRecord.username === "string" && userRecord.username.trim().length > 0
                 ? `@${userRecord.username.trim()}`
                 : null;
+            if (!handle) this.clearTelegramUsernames(trimmedId);
             const firstName =
               typeof userRecord.first_name === "string" ? userRecord.first_name.trim() : "";
             const lastName =
