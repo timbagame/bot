@@ -28,9 +28,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try {
-    (db as any).db.close();
-  } catch {}
   FaucetDatabase.resetForTesting();
   resetTestDatabase("faucets.sqlite");
 });

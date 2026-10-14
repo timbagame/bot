@@ -10,12 +10,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (db && (db as any).db) {
-    try {
-      (db as any).db.close();
-    } catch {}
-  }
-  // Reset singleton so other tests get a fresh connection
+  // The bot may still hold this shared connection.
   ChatDatabase.resetForTesting();
   resetTestDatabase("chat-settings.sqlite");
 });
