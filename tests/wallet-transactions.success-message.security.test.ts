@@ -16,7 +16,7 @@ describe("renderSendSuccessMessage", () => {
       expect(text).toContain('<a href="https://solscan.io/tx/fictional-signature">');
       expect(disablePreview).toBe(true);
     } finally {
-      if (previousNetwork === undefined) delete process.env["SOLANA_NETWORK"];
+      if (previousNetwork === undefined) Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
       else process.env["SOLANA_NETWORK"] = previousNetwork;
     }
   });
