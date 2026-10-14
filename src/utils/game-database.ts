@@ -1667,27 +1667,9 @@ export class GameDatabase extends BaseDatabase {
       return null;
     }
 
-    const normalizedLookup = this.findTelegramIdByNormalizedUsername(normalized);
-    if (normalizedLookup) {
-      return normalizedLookup;
-    }
-
-    const withAt = "@" + normalized;
-    const result = this.get<{ telegram_id: string }>(
-      `
-        SELECT telegram_id
-        FROM player_mappings
-        WHERE display_name IS NOT NULL
-          AND TRIM(display_name) LIKE '@%'
-          AND LOWER(TRIM(display_name)) = ?
-        ORDER BY ROWID DESC
-        LIMIT 1
-      `,
-      [withAt],
-      "finding telegram id by username",
-    );
-
-    return result?.telegram_id ?? null;
+    // Display names are user-controlled, even when they start with "@".
+    // Only mappings saved from Telegram's username field may resolve an account.
+    return this.findTelegramIdByNormalizedUsername(normalized);
   }
 
   public getAllPlayerMappings(): PlayerMapping[] {

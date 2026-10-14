@@ -1,4 +1,5 @@
 import { expect, test, beforeEach } from "bun:test";
+import fc from "fast-check";
 import type { GameData } from "../src/types";
 import { GameDatabase } from "../src/utils/game-database";
 import { GAME_CREATION_RATE_LIMIT_WINDOW_MS } from "../src/utils/constants";
@@ -740,6 +741,8 @@ test("findTelegramIdByUsername normalizes usernames", () => {
   db.savePlayerMapping("pk_new", "222", "caseuser");
   db.savePlayerMapping("pk_other", "333", "@otherUser");
   db.savePlayerMapping("pk_plain", "444", "alice");
+  db.saveUsernameMapping("caseuser", "111", "@CaseUser");
+  db.saveUsernameMapping("otheruser", "333", "@otherUser");
 
   expect(db.findTelegramIdByUsername("@CASEUSER")).toBe("111");
   expect(db.findTelegramIdByUsername("caseuser")).toBe("111");
@@ -747,6 +750,33 @@ test("findTelegramIdByUsername normalizes usernames", () => {
   expect(db.findTelegramIdByUsername("@alice")).toBeNull();
   expect(db.findTelegramIdByUsername("@missing")).toBeNull();
   expect(db.findTelegramIdByUsername("   ")).toBeNull();
+});
+
+test("saved display names never resolve accounts", () => {
+  const db = GameDatabase.getInstance();
+  db.savePlayerMapping("fictional-attacker-wallet", "222", "@victim");
+
+  expect(db.getPlayerDisplayName("222")).toBe("@victim");
+  expect(db.findTelegramIdByUsername("@victim")).toBeNull();
+  expect(db.findTelegramIdByUsername("victim")).toBeNull();
+});
+
+test("arbitrary display names cannot claim or replace a verified username", () => {
+  const db = GameDatabase.getInstance();
+  let caseId = 0;
+  fc.assert(
+    fc.property(fc.stringMatching(/^[a-z][a-z0-9_]{4,15}$/), (handle) => {
+      // A unique suffix keeps prior generated verified mappings out of this case.
+      const username = `${handle}_${caseId++}`;
+      db.savePlayerMapping(`attacker-${username}`, "222", `  @${username.toUpperCase()}  `);
+      expect(db.findTelegramIdByUsername(` @${username} `)).toBeNull();
+
+      db.saveUsernameMapping(username, "111", `@${username}`);
+      db.savePlayerMapping(`new-attacker-${username}`, "333", `@${username}`);
+      expect(db.findTelegramIdByUsername(` @${username.toUpperCase()} `)).toBe("111");
+    }),
+    { numRuns: 100 },
+  );
 });
 
 test("username mapping lookup persists normalized usernames", () => {

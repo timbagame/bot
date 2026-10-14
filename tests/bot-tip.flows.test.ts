@@ -198,6 +198,34 @@ describe("/tip argument validation", () => {
     );
   });
 
+  test("a saved @display name cannot receive a tip, while a verified username can", async () => {
+    const db = botModule.__test_getGameDatabase();
+    const manager = botModule.__test_getGameManager();
+    manager.findTelegramIdByUsername = db.findTelegramIdByUsername.bind(db);
+    db.savePlayerMapping("fictional-tip-impersonator", "71003", "@tip_impersonated");
+    const recipientIds: bigint[] = [];
+    stub(wallet, "getPublicKey", async (id: bigint) => {
+      recipientIds.push(id);
+      return recipientKey;
+    });
+
+    await tip("/tip @tip_impersonated 2 SOL");
+
+    expect(lastText()).toBe(
+      "Unable to resolve <code>@tip_impersonated</code>. Ask them to start a chat with the bot first.",
+    );
+    expect(transferSol).not.toHaveBeenCalled();
+    expect(transferToken).not.toHaveBeenCalled();
+    expect(recipientIds).toEqual([]);
+    expect(callsTo("getChatMember")).toHaveLength(0);
+
+    db.saveUsernameMapping("tip_impersonated", String(TARGET), "@tip_impersonated");
+    await tip("/tip @tip_impersonated 2 SOL");
+
+    expect(recipientIds).toEqual([BigInt(TARGET)]);
+    expect(transferSol).toHaveBeenCalledWith(BigInt(SENDER), recipientKey, 2 * LAMPORTS);
+  });
+
   test("an unusable stored id is reported instead of crashing", async () => {
     lookups["@weird"] = "not-a-number";
     const text = "/tip @weird 1";
