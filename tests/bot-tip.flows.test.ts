@@ -31,6 +31,7 @@ let parseResult: any;
 let parseCalls: any[][];
 let lookups: Record<string, string | undefined>;
 let primed: Array<[string, string]>;
+let loosePrimed: Array<[string, string]>;
 let savedTokenManager: any;
 let savedGameManager: any;
 let priceSpy: ReturnType<typeof spyOn>;
@@ -60,6 +61,7 @@ beforeEach(async () => {
   parseCalls = [];
   lookups = {};
   primed = [];
+  loosePrimed = [];
   savedTokenManager = botModule.__test_getTokenManager();
   savedGameManager = botModule.__test_getGameManager();
   botModule.__test_setTokenManager({
@@ -70,7 +72,11 @@ beforeEach(async () => {
   } as any);
   botModule.__test_setGameManager({
     findTelegramIdByUsername: (username: string) => lookups[username],
-    primeUsernameCache: (_ctx: unknown, id: string, name: string) => primed.push([id, name]),
+    primeUsernameCache: (_ctx: unknown, id: string, name: string, isHandle?: boolean) => {
+      // Only handles Telegram reported may claim a name; the rest must not be saved.
+      if (isHandle === true) primed.push([id, name]);
+      else loosePrimed.push([id, name]);
+    },
   } as any);
   priceSpy = spyOn(priceService, "getUsdPrice").mockResolvedValue({ price: 150 } as any);
   recipientKey = (await Keypair.generate()).publicKey.toBase58();
@@ -335,7 +341,9 @@ describe("/tip recipients and amounts", () => {
 
     expect(parseCalls[0]?.[0]).toEqual(["/tip", "2", "SOL"]);
     expect(parseCalls[0]?.slice(2)).toEqual([CHAT, "tip"]);
-    expect(primed).toContainEqual([String(TARGET), "@bob"]);
+    // The typed name found this account; it proves nothing to save.
+    expect(primed).toEqual([]);
+    expect(loosePrimed).toEqual([]);
     expect(texts()).toContain("⏳ Tip of 2 SOL ($300) to @bob…");
   });
 
@@ -373,6 +381,37 @@ describe("/tip recipients and amounts", () => {
     expect(parseCalls[0]?.[0]).toEqual(["/tip", "2", "SOL"]);
     expect(primed).toContainEqual([String(TARGET), "@ana"]);
     expect(texts()).toContain("⏳ Tip of 2 SOL ($300) to @ana…");
+  });
+
+  test("an @word typed next to a picked user without a username is not saved as theirs", async () => {
+    const text = "/tip Ana 2 @bob";
+
+    await tip(text, {
+      entities: [
+        {
+          type: "text_mention",
+          offset: 5,
+          length: 3,
+          user: { id: TARGET, is_bot: false, first_name: "Ana" },
+        },
+      ],
+    });
+
+    expect(primed).toEqual([]);
+    expect(loosePrimed).toEqual([]);
+  });
+
+  test("a picked user whose name starts with @ is not saved under that name", async () => {
+    const text = "/tip @bob 2";
+
+    await tip(text, {
+      entities: [
+        { type: "text_mention", offset: 5, length: 4, user: { id: TARGET, is_bot: false } },
+      ],
+    });
+
+    expect(primed).toEqual([]);
+    expect(loosePrimed).toEqual([]);
   });
 
   test("a text mention covering an @handle uses that handle", async () => {
@@ -499,7 +538,8 @@ describe("/tip to a mentioned username", () => {
 
     await tip(text, { entities: [mentionEntity(text, "@bob")] });
 
-    expect(primed).toEqual([[String(TARGET), "@bob"]]);
+    expect(primed).toEqual([]);
+    expect(loosePrimed).toEqual([]);
     expect(texts()).toContain("⏳ Tip of 2 SOL ($300) to @bob…");
     expect(callsTo("sendMessage").at(-1)!.payload.chat_id).toBe(TARGET);
   });

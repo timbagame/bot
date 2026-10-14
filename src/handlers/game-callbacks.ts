@@ -416,7 +416,12 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
     })();
 
     if (displayNameFromContext) {
-      gameManager.primeUsernameCache(ctx, telegramIdStr, displayNameFromContext);
+      gameManager.primeUsernameCache(
+        ctx,
+        telegramIdStr,
+        displayNameFromContext,
+        Boolean(ctx.from?.username?.trim()),
+      );
     }
 
     try {

@@ -1145,10 +1145,19 @@ export class GameManager {
     this.setCachedTelegramIdForUsername(normalized, trimmedId);
   }
 
-  private rememberTelegramUsername(telegramId: string, username: string): void {
+  /**
+   * Only a handle Telegram reported as the account's own username may claim a
+   * name in the lookup; anything else (full names, typed words) is display only.
+   */
+  private rememberTelegramUsername(telegramId: string, username: string, isHandle = false): void {
     const trimmedId = telegramId.trim();
     const trimmedUsername = username.trim();
     if (!/^\d+$/.test(trimmedId) || trimmedUsername.length === 0) {
+      return;
+    }
+
+    if (!isHandle) {
+      this.usernameHints.set(trimmedId, trimmedUsername);
       return;
     }
 
@@ -1170,7 +1179,13 @@ export class GameManager {
     this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
   }
 
-  public primeUsernameCache(ctx: Context, telegramId: string, username: string | null): void {
+  /** `isHandle` says Telegram reported `username` as this account's own @username. */
+  public primeUsernameCache(
+    ctx: Context,
+    telegramId: string,
+    username: string | null,
+    isHandle = false,
+  ): void {
     if (!username) {
       return;
     }
@@ -1181,7 +1196,7 @@ export class GameManager {
       return;
     }
 
-    this.rememberTelegramUsername(trimmedId, trimmedUsername);
+    this.rememberTelegramUsername(trimmedId, trimmedUsername, isHandle);
     const cacheKey = this.buildUsernameCacheKey(ctx, trimmedId);
     this.setCachedUsername(cacheKey, trimmedUsername);
   }
@@ -2539,7 +2554,7 @@ export class GameManager {
             const fullName = [firstName, lastName].filter((name) => name.length > 0).join(" ");
             const resolved = handle || (fullName.length > 0 ? fullName : null);
             if (resolved) {
-              this.rememberTelegramUsername(trimmedId, resolved);
+              this.rememberTelegramUsername(trimmedId, resolved, handle !== null);
             }
             this.setCachedUsername(cacheKey, resolved);
             return resolved;

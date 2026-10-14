@@ -109,7 +109,11 @@ describe("username priming", () => {
 
     await sendText("hello", { userId: 4242, username: "@@alice" });
 
-    expect((primeUsernameCache.mock.calls[0] as unknown[]).slice(1)).toEqual(["4242", "@alice"]);
+    expect((primeUsernameCache.mock.calls[0] as unknown[]).slice(1)).toEqual([
+      "4242",
+      "@alice",
+      true,
+    ]);
     expect(
       warnSpy.mock.calls.some((call: unknown[]) => call[0] === "Failed to prime username cache:"),
     ).toBe(true);

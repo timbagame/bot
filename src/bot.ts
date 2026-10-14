@@ -266,7 +266,7 @@ bot.use(async (ctx, next) => {
     const handle = from.username.trim().replace(/^@+/, "");
     if (handle.length > 0) {
       try {
-        gameManager.primeUsernameCache(ctx, String(from.id), `@${handle}`);
+        gameManager.primeUsernameCache(ctx, String(from.id), `@${handle}`, true);
       } catch (error) {
         console.warn("Failed to prime username cache:", error);
       }
@@ -3901,7 +3901,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     }
 
     if (fromUser.username) {
-      gameManager.primeUsernameCache(ctx, String(fromUser.id), `@${fromUser.username}`);
+      gameManager.primeUsernameCache(ctx, String(fromUser.id), `@${fromUser.username}`, true);
       recipientName = `@${fromUser.username}`;
     } else if (fromUser.first_name) {
       recipientName = fromUser.first_name;
@@ -3934,20 +3934,23 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         return replyToMessage(ctx, "You cannot tip bots!");
     }
 
-    let mentionUsername = named.username;
+    // Only a username Telegram gave for this account may be saved as theirs; a
+    // typed @word next to a picked user names no one.
+    const ownHandle = named.user ? (named.user.username ?? mentioned.member?.username) : undefined;
+    const mentionUsername = ownHandle ? `@${ownHandle}` : named.user ? null : named.username;
     let mentionLabel = named.label;
-    if (!mentionUsername && mentioned.member?.username) {
-      mentionUsername = `@${mentioned.member.username}`;
-    }
     if (!mentionLabel && mentioned.member?.first_name) {
       mentionLabel = mentioned.member.first_name;
     }
 
     recipientTelegramId = mentioned.telegramId;
-    recipientName = mentionUsername ?? mentionLabel ?? named.user?.first_name ?? "User";
+    recipientName =
+      mentionUsername ??
+      (named.user ? (named.user.first_name ?? mentionLabel) : mentionLabel) ??
+      "User";
 
-    if (mentionUsername) {
-      gameManager.primeUsernameCache(ctx, mentioned.id, mentionUsername);
+    if (ownHandle) {
+      gameManager.primeUsernameCache(ctx, mentioned.id, mentionUsername, true);
     }
 
     amountArgs = named.args;

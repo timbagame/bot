@@ -189,6 +189,34 @@ describe("GameManager Username Resolution", () => {
       expect(calls).toBe(0);
     });
 
+    test("a display name never claims a username in the lookup", async () => {
+      resetGM();
+      const ctx = { chat: { id: 303, type: "supergroup" }, api: {} } as any;
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
+      gm.primeUsernameCache(ctx, "111", "@alice", true);
+
+      gm.primeUsernameCache(ctx, "222", "alice");
+      gm.primeUsernameCache(ctx, "222", "@alice");
+      expect(gm.findTelegramIdByUsername("@alice")).toBe("111");
+
+      gm.primeUsernameCache(ctx, "222", "@alice", true);
+      expect(gm.findTelegramIdByUsername("@alice")).toBe("222");
+    });
+
+    test("a full name found on Telegram does not claim a username", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(makeProgramStub(), makeWalletStub(), makeDbStub());
+      gm.primeUsernameCache({ chat: { id: 1 } } as any, "111", "@bob", true);
+      const ctx = {
+        chat: { id: 304, type: "supergroup" },
+        api: { getChatMember: async () => ({ user: { first_name: "bob" } }) },
+      } as any;
+
+      expect(await gm.getUsernameFromTelegramId(ctx, "222")).toBe("bob");
+      // "bob" and "@bob" are the same name; it still belongs to the real owner.
+      expect(gm.findTelegramIdByUsername("bob")).toBe("111");
+    });
+
     test("falls back to persisted display name when API fails", async () => {
       resetGM();
       let calls = 0;
