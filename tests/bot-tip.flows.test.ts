@@ -525,14 +525,15 @@ describe("/tip recipients and amounts", () => {
     expect(parseCalls[0]?.[0]).toEqual(["/tip", "2"]);
   });
 
-  test("chat member lookup failures do not block the tip", async () => {
+  test("chat member lookup failures block a typed username tip", async () => {
     failApiMethod("getChatMember", "Bad Request: user not found");
     lookups["@bob"] = String(TARGET);
     const text = "/tip @bob 2";
 
     await tip(text, { entities: [mentionEntity(text, "@bob")] });
 
-    expect(texts()).toContain("⏳ Tip of 2 SOL ($300) to @bob…");
+    expect(lastText()).toContain("I couldn't verify");
+    expect(transferSol).not.toHaveBeenCalled();
   });
 
   test("usernames resolving to ids beyond the safe integer range skip the member lookup", async () => {
@@ -542,6 +543,7 @@ describe("/tip recipients and amounts", () => {
     await tip(text, { entities: [mentionEntity(text, "@huge")] });
 
     expect(callsTo("getChatMember")).toHaveLength(0);
+    expect(transferSol).not.toHaveBeenCalled();
   });
 });
 

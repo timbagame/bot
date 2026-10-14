@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import fc from "fast-check";
 import {
   findNamedUser,
   replaceCommandWord,
@@ -226,6 +227,44 @@ const directory = (found: string | null | Error = "5150") => ({
 });
 
 describe("resolveNamedUser", () => {
+  test("arbitrary handles are accepted only when Telegram reports the same owner and name", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.stringMatching(/^[a-z][a-z0-9_]{4,15}$/),
+        fc.boolean(),
+        async (handle, matches) => {
+          const ctx = context({
+            user: { id: 5150, is_bot: false, username: matches ? handle : `other_${handle}` },
+          }).ctx;
+          const result = await resolveNamedUser(
+            ctx,
+            named({ username: `@${handle.toUpperCase()}` }),
+            SENDER,
+            directory(),
+          );
+          expect(result.kind).toBe(matches ? "user" : "verification_failed");
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  test("fuzzed username text never verifies a different Telegram handle", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.string({ maxLength: 100 }), async (input) => {
+        const result = await resolveNamedUser(
+          context().ctx,
+          named({ username: input }),
+          SENDER,
+          directory(),
+        );
+        if (result.kind === "user")
+          expect(input.trim().replace(/^@/, "").toLowerCase()).toBe("rival");
+      }),
+      { numRuns: 200 },
+    );
+  });
+
   test("a typed username is looked up and Telegram is asked for the details", async () => {
     const member = {
       status: "member",

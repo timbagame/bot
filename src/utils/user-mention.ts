@@ -180,13 +180,9 @@ export const resolveNamedUser = async (
     resolvedId = found;
   }
 
-  let telegramId: bigint;
-  try {
-    if (!/^\d+$/.test(resolvedId) || BigInt(resolvedId) <= 0n) return { kind: "unusable_id" };
-    telegramId = BigInt(resolvedId);
-  } catch {
-    return { kind: "unusable_id" };
-  }
+  if (typeof resolvedId !== "string" || !/^\d+$/.test(resolvedId)) return { kind: "unusable_id" };
+  const telegramId = BigInt(resolvedId);
+  if (telegramId <= 0n) return { kind: "unusable_id" };
 
   if (telegramId === senderId) {
     return { kind: "self" };

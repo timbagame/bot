@@ -124,7 +124,7 @@ test("handleTipCommand resolves username mentions via game manager lookup", asyn
     api: {
       getChatMember: async (chatId: number, userId: number) => {
         chatMemberCalls.push({ chatId, userId });
-        return { user: { is_bot: false } };
+        return { user: { id: userId, is_bot: false, username: "TargetUser" } };
       },
     },
   };
@@ -239,7 +239,7 @@ test("handleTipCommand allows mentions after the amount", async () => {
     api: {
       getChatMember: async (chatId: number, userId: number) => {
         chatMemberCalls.push({ chatId, userId });
-        return { user: { is_bot: false } };
+        return { user: { id: userId, is_bot: false, username: "TargetUser" } };
       },
     },
   };
@@ -290,7 +290,7 @@ test("handleTipCommand keeps token hints when mention is last", async () => {
       return { message_id: 909 };
     },
     api: {
-      getChatMember: async () => ({ user: { is_bot: false } }),
+      getChatMember: async () => ({ user: { id: 222222, is_bot: false, username: "TargetUser" } }),
     },
   };
 

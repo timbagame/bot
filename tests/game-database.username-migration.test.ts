@@ -7,7 +7,7 @@ import { GameDatabase } from "../src/utils/game-database";
 
 test("a copy of legacy data quarantines usernames and preserves player mappings across restarts", () => {
   const dir = mkdtempSync(join(tmpdir(), "username-migration-"));
-  const originalDir = process.env.BOT_DB_DIR;
+  const originalDir = process.env["BOT_DB_DIR"];
   const opened: Database[] = [];
   try {
     const source = join(dir, "legacy.sqlite");
@@ -22,7 +22,7 @@ test("a copy of legacy data quarantines usernames and preserves player mappings 
     const copied = join(dir, "copy");
     mkdirSync(copied);
     copyFileSync(source, join(copied, "games.sqlite"));
-    process.env.BOT_DB_DIR = copied;
+    process.env["BOT_DB_DIR"] = copied;
     // Construct independent connections without resetting the shared singleton.
     const db = Reflect.construct(GameDatabase, []) as GameDatabase;
     const sql = (db as any).db as Database;
@@ -54,8 +54,8 @@ test("a copy of legacy data quarantines usernames and preserves player mappings 
     });
   } finally {
     for (const db of opened) db.close();
-    if (originalDir === undefined) delete process.env.BOT_DB_DIR;
-    else process.env.BOT_DB_DIR = originalDir;
+    if (originalDir === undefined) delete process.env["BOT_DB_DIR"];
+    else process.env["BOT_DB_DIR"] = originalDir;
     rmSync(dir, { recursive: true, force: true });
   }
 });
