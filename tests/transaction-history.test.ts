@@ -255,10 +255,10 @@ describe("TransactionHistory query helpers", () => {
 describe("TransactionHistory close", () => {
   test("close releases the database handle so later queries fail", () => {
     const dir = mkdtempSync(join(tmpdir(), "bot-history-close-"));
-    const previousDir = process.env.BOT_DB_DIR;
+    const previousDir = process.env["BOT_DB_DIR"];
     const opened: TransactionHistory[] = [];
     try {
-      process.env.BOT_DB_DIR = dir;
+      process.env["BOT_DB_DIR"] = dir;
       // Closing an owned connection must not close the singleton used by the bot.
       const db = Reflect.construct(TransactionHistory, []) as TransactionHistory;
       opened.push(db);
@@ -293,8 +293,8 @@ describe("TransactionHistory close", () => {
       expect(reopened.getUserHistory("closed-user")).toEqual([]);
     } finally {
       for (const db of opened) db.close();
-      if (previousDir === undefined) delete process.env.BOT_DB_DIR;
-      else process.env.BOT_DB_DIR = previousDir;
+      if (previousDir === undefined) delete process.env["BOT_DB_DIR"];
+      else process.env["BOT_DB_DIR"] = previousDir;
       rmSync(dir, { recursive: true, force: true });
     }
   });
