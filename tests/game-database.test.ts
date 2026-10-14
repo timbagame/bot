@@ -810,9 +810,13 @@ test("a failed rename rolls back removal of the old username", () => {
   sqlite.exec(
     "CREATE TRIGGER fail_username BEFORE INSERT ON username_mappings BEGIN SELECT RAISE(ABORT, 'synthetic-save-failed'); END",
   );
-  expect(() => db.saveUsernameMapping("new", "111")).toThrow("synthetic-save-failed");
-  expect(db.findTelegramIdByUsername("@old")).toBe("111");
-  expect(db.findTelegramIdByUsername("@new")).toBeNull();
+  try {
+    expect(() => db.saveUsernameMapping("new", "111")).toThrow("synthetic-save-failed");
+    expect(db.findTelegramIdByUsername("@old")).toBe("111");
+    expect(db.findTelegramIdByUsername("@new")).toBeNull();
+  } finally {
+    sqlite.exec("DROP TRIGGER fail_username");
+  }
 });
 
 test("getPlayerTelegramId prioritizes confirmed participants over pending fallback", () => {

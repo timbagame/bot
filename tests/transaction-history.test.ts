@@ -1,5 +1,8 @@
 import { describe, test, expect, beforeAll, beforeEach, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   TransactionHistory,
   createTransactionRecord,
@@ -251,36 +254,48 @@ describe("TransactionHistory query helpers", () => {
 
 describe("TransactionHistory close", () => {
   test("close releases the database handle so later queries fail", () => {
-    resetTestDatabase("transaction-history.sqlite");
-    TransactionHistory.resetForTesting();
-    const db = TransactionHistory.getInstance();
-    db.addTransaction(
-      createTransactionRecord(
-        "closed-user",
-        "BUY",
-        "sig-close",
-        "SOL",
-        "PUMP",
-        "1",
-        "2",
-        "SUCCESS",
-      ),
-    );
-    expect(db.getUserTransactionCount("closed-user")).toBe(1);
-
-    db.close();
-
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const dir = mkdtempSync(join(tmpdir(), "bot-history-close-"));
+    const previousDir = process.env.BOT_DB_DIR;
+    const opened: TransactionHistory[] = [];
     try {
-      expect(db.getUserHistory("closed-user")).toEqual([]);
-      expect(errorSpy).toHaveBeenCalledWith("Error getting user history:", expect.any(Error));
-    } finally {
-      errorSpy.mockRestore();
-    }
+      process.env.BOT_DB_DIR = dir;
+      // Closing an owned connection must not close the singleton used by the bot.
+      const db = Reflect.construct(TransactionHistory, []) as TransactionHistory;
+      opened.push(db);
+      db.addTransaction(
+        createTransactionRecord(
+          "closed-user",
+          "BUY",
+          "sig-close",
+          "SOL",
+          "PUMP",
+          "1",
+          "2",
+          "SUCCESS",
+        ),
+      );
+      expect(db.getUserTransactionCount("closed-user")).toBe(1);
 
-    TransactionHistory.resetForTesting();
-    const reopened = TransactionHistory.getInstance();
-    expect(reopened).not.toBe(db);
-    expect(reopened.getUserHistory("closed-user")).toEqual([]);
+      db.close();
+
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(db.getUserHistory("closed-user")).toEqual([]);
+        expect(errorSpy).toHaveBeenCalledWith("Error getting user history:", expect.any(Error));
+      } finally {
+        errorSpy.mockRestore();
+      }
+
+      resetTestDatabase("transaction-history.sqlite");
+      const reopened = Reflect.construct(TransactionHistory, []) as TransactionHistory;
+      opened.push(reopened);
+      expect(reopened).not.toBe(db);
+      expect(reopened.getUserHistory("closed-user")).toEqual([]);
+    } finally {
+      for (const db of opened) db.close();
+      if (previousDir === undefined) delete process.env.BOT_DB_DIR;
+      else process.env.BOT_DB_DIR = previousDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
