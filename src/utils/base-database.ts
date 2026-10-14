@@ -1,6 +1,6 @@
 import type { Changes, SQLQueryBindings, Statement } from "bun:sqlite";
 import { Database } from "bun:sqlite";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { createSingleton } from "./singleton";
@@ -27,16 +27,49 @@ export function resolveDatabaseFilename(filename: string): string {
  */
 const MAX_CACHED_STATEMENTS = 256;
 
+/** Empty test data without unlinking files that other services still have open. */
+export function clearDatabaseForTesting(db: Database): void {
+  db.transaction(() => {
+    db.run("PRAGMA defer_foreign_keys = ON");
+    const tables = db
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all();
+    for (const { name } of tables) {
+      if (!name.startsWith("sqlite_")) {
+        db.run(`DELETE FROM "${name.replaceAll('"', '""')}"`);
+      }
+    }
+    if (tables.some(({ name }) => name === "sqlite_sequence")) {
+      db.run("DELETE FROM sqlite_sequence");
+    }
+  })();
+}
+
+export function clearDatabaseFileForTesting(filename: string): void {
+  if (
+    !filename ||
+    filename === ":memory:" ||
+    filename.startsWith("file:") ||
+    !existsSync(filename)
+  ) {
+    return;
+  }
+  const db = new Database(filename);
+  try {
+    clearDatabaseForTesting(db);
+  } finally {
+    db.close();
+  }
+}
+
 export abstract class BaseDatabase {
   protected db: Database;
   private readonly name: string;
-  private readonly filename: string;
   private readonly statements = new Map<string, Statement>();
 
   protected constructor(filename: string, initStatements: string[], name: string) {
     const resolvedFilename = resolveDatabaseFilename(filename);
     this.name = name;
-    this.filename = filename; // Store original filename
     this.db = new Database(resolvedFilename, { create: true });
 
     try {
@@ -145,12 +178,8 @@ export abstract class BaseDatabase {
     throw error instanceof Error ? error : new Error(String(error));
   }
 
-  /**
-   * Internal method to get the original filename for cleanup purposes
-   * @internal
-   */
-  getFilenameForCleanup(): string {
-    return this.filename;
+  clearForTesting(): void {
+    clearDatabaseForTesting(this.db);
   }
 }
 
@@ -206,33 +235,17 @@ export function createDatabaseSingleton<T extends BaseDatabase>(
   resetForTesting: () => void;
 } {
   const { getInstance, reset } = createDatabaseHandle(factory);
-  let cachedFilename: string | null = null;
+  let current: T | undefined;
 
   return {
     getInstance: () => {
-      const instance = getInstance();
-      // Cache the filename from the first instance
-      if (!cachedFilename && instance instanceof BaseDatabase) {
-        cachedFilename = (instance as any).getFilenameForCleanup?.() || null;
-      }
-      return instance;
+      current = getInstance();
+      return current;
     },
     resetForTesting: () => {
-      // Clean up the database file before resetting
-      if (cachedFilename) {
-        try {
-          const fullPath = resolveDatabaseFilename(cachedFilename);
-          if (fullPath && fullPath !== ":memory:" && !fullPath.startsWith("file:")) {
-            for (const suffix of ["", "-wal", "-shm"]) {
-              rmSync(`${fullPath}${suffix}`, { force: true });
-            }
-          }
-        } catch (error) {
-          // Ignore cleanup errors, similar to resetTestDatabase behavior
-        }
-      }
+      current?.clearForTesting();
       reset();
-      cachedFilename = null;
+      current = undefined;
     },
   };
 }

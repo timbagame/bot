@@ -1,5 +1,5 @@
-import { rmSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { clearDatabaseFileForTesting } from "../../src/utils/base-database";
 
 export function getTestDatabasePath(filename: string): string {
   if (!filename || filename === ":memory:" || filename.startsWith("file:")) {
@@ -16,14 +16,5 @@ export function getTestDatabasePath(filename: string): string {
 }
 
 export function resetTestDatabase(filename: string): void {
-  const fullPath = getTestDatabasePath(filename);
-  if (!fullPath || fullPath === ":memory:" || fullPath.startsWith("file:")) {
-    return;
-  }
-
-  try {
-    rmSync(fullPath, { force: true });
-  } catch {
-    // Ignore errors, matches previous behaviour of best-effort cleanup.
-  }
+  clearDatabaseFileForTesting(getTestDatabasePath(filename));
 }

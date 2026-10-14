@@ -11,7 +11,12 @@ import {
   useBotHarness,
 } from "./helpers/bot-harness";
 import { FaucetDatabase } from "../src/utils/faucet-database";
-import { FEE_SWEEP_INTERVAL_MS, EXPIRED_GAMES_CHECK_INTERVAL_MS } from "../src/utils/constants";
+import {
+  FEE_SWEEP_INTERVAL_MS,
+  EXPIRED_GAMES_CHECK_INTERVAL_MS,
+  GAME_EXPIRATION_BUFFER_TIME,
+  applyOracleBufferTime,
+} from "../src/utils/constants";
 
 useBotHarness();
 
@@ -379,16 +384,19 @@ describe("program setup", () => {
   let saved: {
     tokenManager: any;
     swaps: ReturnType<typeof botModule.__test_getSwapManagers>;
+    oracleBuffer: number;
   };
   beforeEach(() => {
     saved = {
       tokenManager: botModule.__test_getTokenManager(),
       swaps: botModule.__test_getSwapManagers(),
+      oracleBuffer: GAME_EXPIRATION_BUFFER_TIME,
     };
   });
   afterEach(() => {
     botModule.__test_setTokenManager(saved.tokenManager);
     botModule.__test_setSwapManagers(saved.swaps);
+    applyOracleBufferTime(saved.oracleBuffer);
   });
 
   const setup = async (options: {
