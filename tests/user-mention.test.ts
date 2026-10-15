@@ -140,6 +140,32 @@ describe("findNamedUser", () => {
     });
   });
 
+  test("picked names retain their span for arbitrary labels, whitespace and typed handles", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.stringMatching(/^[A-Za-z]{1,12}$/), { minLength: 1, maxLength: 4 }),
+        fc.constantFrom(" ", "  ", "\t", "\n"),
+        fc.stringMatching(/^[a-z][a-z0-9_]{4,15}$/),
+        (names, whitespace, handle) => {
+          const label = names.join(whitespace);
+          const text = ["/cf", label, "5", `@${handle}`, "SOL"].join(whitespace);
+          const user = { id: 5150, is_bot: false, first_name: names[0] };
+          const found = findNamedUser(command(text, [picked(text, label, user)]));
+          expect(found?.user).toEqual(user);
+          expect(found?.username).toBeNull();
+          expect(found?.args).toEqual(["/cf", "5", `@${handle}`, "SOL"]);
+          expect(found?.positions).toEqual([
+            0,
+            names.length + 1,
+            names.length + 2,
+            names.length + 3,
+          ]);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
   test("a picked user's text starting with @ is their @username", () => {
     const text = "/cf 5 @Zed";
     const user = { id: 1, is_bot: false, first_name: "Zed" };
