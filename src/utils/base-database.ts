@@ -1,6 +1,6 @@
 import type { Changes, SQLQueryBindings, Statement } from "bun:sqlite";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { createSingleton } from "./singleton";
@@ -43,23 +43,6 @@ export function clearDatabaseForTesting(db: Database): void {
       db.run("DELETE FROM sqlite_sequence");
     }
   })();
-}
-
-export function clearDatabaseFileForTesting(filename: string): void {
-  if (
-    !filename ||
-    filename === ":memory:" ||
-    filename.startsWith("file:") ||
-    !existsSync(filename)
-  ) {
-    return;
-  }
-  const db = new Database(filename);
-  try {
-    clearDatabaseForTesting(db);
-  } finally {
-    db.close();
-  }
 }
 
 export abstract class BaseDatabase {

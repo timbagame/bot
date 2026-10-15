@@ -64,8 +64,7 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     await deps.createGameViaCommand(ctx, named.args, telegramId, target.challenge);
     return;
   }
-  // A name sent as a reply to a bot, oneself, a channel or an anonymous admin
-  // asked for a challenge; refuse it instead of opening a game anyone could join.
+  // A reply that also names someone is ambiguous; refuse it instead of picking one.
   const replyRefusal = namedReplyRefusal(ctx.message, telegramId);
   if (replyRefusal) {
     await ctx.reply(replyRefusal);

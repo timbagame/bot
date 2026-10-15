@@ -286,16 +286,25 @@ describe("game handler: coinflip naming who to challenge", () => {
     expect(ctx.__calls).toEqual([]);
   });
 
-  test("a reply goes to whoever it answers and leaves the name in the command, as /tip does", async () => {
-    const ctx: any = telegramContext("/cf 100 @rival");
-    ctx.message.reply_to_message = { message_id: 9, from: RIVAL };
-    const { deps, created, lookups } = namingDeps();
+  test.each(["/cf 100 @rival", "/cf 100 SOL @rival"])(
+    "%s replying to someone else is refused instead of challenging either of them",
+    async (text) => {
+      const ctx: any = telegramContext(text);
+      ctx.message.reply_to_message = {
+        message_id: 9,
+        from: { id: 6160, is_bot: false, first_name: "Bo" },
+      };
+      const { deps, created, lookups } = namingDeps();
 
-    await handleCoinflipCommand(ctx, deps);
+      await handleCoinflipCommand(ctx, deps);
 
-    expect(lookups).toEqual([]);
-    expect(created).toEqual([[["/cf", "100", "@rival"], 1n]]);
-  });
+      expect(lookups).toEqual([]);
+      expect(created).toEqual([]);
+      expect(ctx.__calls).toEqual([
+        ["reply", "To challenge someone, reply to their message or name them without replying."],
+      ]);
+    },
+  );
 
   test("a name sent as a reply to a bot, oneself or a channel is refused instead of opening a game", async () => {
     for (const [replied, answer] of [

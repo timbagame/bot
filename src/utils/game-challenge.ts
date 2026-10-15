@@ -54,10 +54,8 @@ export const CHALLENGE_REPLY_OR_NAME_MESSAGE =
   "To challenge someone, reply to their message or name them without replying.";
 
 /**
- * Why a coinflip that names someone while replying to a bot, oneself, a channel
- * or an anonymous admin cannot open, or null. As /tip refuses a reply to a bot
- * or to oneself instead of reading the name, so does this; without a name such
- * a reply stays a regular coinflip.
+ * Why a coinflip that replies to someone and also names someone cannot open, or
+ * null. The reply would win and the name be dropped, challenging the wrong person.
  */
 export const namedReplyRefusal = (
   message: Pick<Message, "text" | "entities" | "reply_to_message"> | undefined,
@@ -68,7 +66,7 @@ export const namedReplyRefusal = (
   if (replied.sender_chat) return CHALLENGE_REPLY_OR_NAME_MESSAGE;
   if (replied.from.is_bot) return CHALLENGE_BOT_MESSAGE;
   if (BigInt(replied.from.id) === creatorTelegramId) return CHALLENGE_SELF_MESSAGE;
-  return null;
+  return CHALLENGE_REPLY_OR_NAME_MESSAGE;
 };
 
 /** Who a coinflip naming someone challenges, or the HTML reply refusing it. */

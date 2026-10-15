@@ -1,5 +1,7 @@
+import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { clearDatabaseFileForTesting } from "../../src/utils/base-database";
+import { clearDatabaseForTesting } from "../../src/utils/base-database";
 
 export function getTestDatabasePath(filename: string): string {
   if (!filename || filename === ":memory:" || filename.startsWith("file:")) {
@@ -16,5 +18,14 @@ export function getTestDatabasePath(filename: string): string {
 }
 
 export function resetTestDatabase(filename: string): void {
-  clearDatabaseFileForTesting(getTestDatabasePath(filename));
+  const path = getTestDatabasePath(filename);
+  if (!path || path === ":memory:" || path.startsWith("file:") || !existsSync(path)) {
+    return;
+  }
+  const db = new Database(path);
+  try {
+    clearDatabaseForTesting(db);
+  } finally {
+    db.close();
+  }
 }

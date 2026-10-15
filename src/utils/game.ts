@@ -1241,7 +1241,6 @@ export class GameManager {
     const fromDb = this.gameDb.findTelegramIdByUsername(username);
     if (fromDb) {
       this.setCachedTelegramIdForUsername(normalized, fromDb);
-      this.rememberTelegramUsername(fromDb, username);
       return fromDb;
     }
 

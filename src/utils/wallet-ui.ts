@@ -189,13 +189,13 @@ export type WalletCaptionOptions = {
   explorerUrl?: string | null;
   page?: number;
   pageSize?: number;
-  /** When the balances were fetched (ms epoch). Adds an "Updated …" footer. */
+  /** When the balances were fetched (ms epoch). Adds an "Updated …" footer once they age. */
   updatedAt?: number | null;
   /** Clock used for the footer; defaults to Date.now(). */
   now?: number;
 };
 
-/** Balances younger than this read as "just now" instead of a second count. */
+/** Balances younger than this are fresh and show no "Updated …" footer. */
 export const WALLET_UPDATED_JUST_NOW_MS = 5_000;
 
 /**
