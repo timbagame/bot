@@ -12,7 +12,7 @@ import {
   resolveNamedChallenge,
 } from "../utils/game-challenge";
 import type { GameChallenge } from "../utils/game-database";
-import type { UsernameDirectory } from "../utils/user-mention";
+import { findNamedUser, type UsernameDirectory } from "../utils/user-mention";
 
 export type GameTokenOverride = {
   tokenMint: string;
@@ -44,7 +44,6 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
   if (telegramId == null) {
     return;
   }
-  const args = ctx.message?.text?.trim().split(/\s+/) ?? [];
   // A coinflip that replies to no one and names someone challenges them.
   const named = findChallengeName(ctx.message);
   if (named) {
@@ -64,12 +63,13 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     await deps.createGameViaCommand(ctx, named.args, telegramId, target.challenge);
     return;
   }
-  // A reply that also names someone is ambiguous; refuse it instead of picking one.
+  // A reply may also name the replied user, but no one else.
   const replyRefusal = namedReplyRefusal(ctx.message, telegramId);
   if (replyRefusal) {
     await ctx.reply(replyRefusal);
     return;
   }
+  const args = findNamedUser(ctx.message)?.args ?? ctx.message?.text?.trim().split(/\s+/) ?? [];
   // Replies to another chat or forum topic name no one here, so they cannot be
   // challenges; refuse them instead of opening a game anyone could join.
   if (ctx.message?.external_reply) {

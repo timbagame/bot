@@ -45,7 +45,7 @@ The Telegram `/` menu lists only primary command names, in a fixed order. Aliase
 
 ### Games
 
-- `/coinflip <amount> [token] [players]` (`/cf`) - Create a coinflip game. In a group, naming someone (`/cf <amount> [token] @username`) or replying to their message challenges that person: a private 1v1 only they can accept
+- `/coinflip <amount> [token] [players]` (`/cf`) - Create a coinflip game. In a group, naming someone (`/cf <amount> [token] @username`) or replying to their message challenges that person (a reply can't name someone else): a private 1v1 only they can accept
 - `/giveaway <amount> [token] [players]` (`/ga`) - Create a giveaway game
 - `/faucet <amount> [token] [users]` (`/rain`) - First-come token drop
 - `/active`, `/public`, `/games` - Active, public, and recent games

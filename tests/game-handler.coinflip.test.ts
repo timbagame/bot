@@ -306,6 +306,18 @@ describe("game handler: coinflip naming who to challenge", () => {
     },
   );
 
+  test("a reply naming the replied user challenges them without the name as a token", async () => {
+    const ctx: any = telegramContext("/cf 100 SOL @Rival");
+    ctx.message.reply_to_message = { message_id: 9, from: { ...RIVAL, username: "rival" } };
+    const { deps, created, lookups } = namingDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(lookups).toEqual([]);
+    expect(created).toEqual([[["/cf", "100", "SOL"], 1n]]);
+    expect(ctx.__calls).toEqual([]);
+  });
+
   test("a name sent as a reply to a bot, oneself or a channel is refused instead of opening a game", async () => {
     for (const [replied, answer] of [
       [

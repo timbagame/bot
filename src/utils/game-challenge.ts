@@ -1,5 +1,5 @@
 import type { Context } from "grammy";
-import type { Message } from "grammy/types";
+import type { Message, User } from "grammy/types";
 import type { GameChallenge } from "./game-database";
 import { escapeHtml } from "./format-amount";
 import { getTelegramUserDisplayName } from "./telegram-display";
@@ -33,9 +33,8 @@ export const resolveChallengeTarget = (
 };
 
 /**
- * Who a coinflip names. As with /tip, a reply goes to whoever it answers, so
- * only a command that replies to no one is read for a name. The opening
- * message of a forum topic, which every message there answers, is no reply.
+ * Who a coinflip that replies to no one names. The opening message of a forum
+ * topic, which every message there answers, is no reply.
  */
 export const findChallengeName = (
   message: Pick<Message, "text" | "entities" | "reply_to_message"> | undefined,
@@ -53,20 +52,27 @@ const CHALLENGE_BOT_MESSAGE = "You can't challenge a bot.";
 export const CHALLENGE_REPLY_OR_NAME_MESSAGE =
   "To challenge someone, reply to their message or name them without replying.";
 
+const namesUser = (named: NamedUser, user: User): boolean =>
+  named.user
+    ? named.user.id === user.id
+    : !!user.username &&
+      named.username?.replace(/^@/, "").toLowerCase() === user.username.toLowerCase();
+
 /**
  * Why a coinflip that replies to someone and also names someone cannot open, or
- * null. The reply would win and the name be dropped, challenging the wrong person.
+ * null. Naming anyone but the replied user would otherwise be silently dropped.
  */
 export const namedReplyRefusal = (
   message: Pick<Message, "text" | "entities" | "reply_to_message"> | undefined,
   creatorTelegramId: bigint,
 ): string | null => {
   const replied = message?.reply_to_message;
-  if (!replied?.from || replied.forum_topic_created || !findNamedUser(message)) return null;
+  const named = findNamedUser(message);
+  if (!replied?.from || replied.forum_topic_created || !named) return null;
   if (replied.sender_chat) return CHALLENGE_REPLY_OR_NAME_MESSAGE;
   if (replied.from.is_bot) return CHALLENGE_BOT_MESSAGE;
   if (BigInt(replied.from.id) === creatorTelegramId) return CHALLENGE_SELF_MESSAGE;
-  return CHALLENGE_REPLY_OR_NAME_MESSAGE;
+  return namesUser(named, replied.from) ? null : CHALLENGE_REPLY_OR_NAME_MESSAGE;
 };
 
 /** Who a coinflip naming someone challenges, or the HTML reply refusing it. */

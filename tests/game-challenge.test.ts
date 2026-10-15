@@ -177,6 +177,32 @@ describe("namedReplyRefusal", () => {
     }
   });
 
+  test("a reply naming the replied user is not refused", () => {
+    const rival = { id: 5150, is_bot: false, first_name: "Ana", username: "Rival" };
+    expect(
+      namedReplyRefusal({ text: "/cf 5 SOL @rival", ...reply({ from: rival }) }, CREATOR),
+    ).toBeNull();
+    expect(
+      namedReplyRefusal(
+        {
+          text: "/cf 5 Ana",
+          entities: [
+            { type: "text_mention", offset: 6, length: 3, user: { ...rival, username: undefined } },
+          ],
+          ...reply({ from: rival }),
+        } as any,
+        CREATOR,
+      ),
+    ).toBeNull();
+    // Without a username on the replied user, a typed name cannot be matched.
+    expect(
+      namedReplyRefusal(
+        { text: "/cf 5 SOL @rival", ...reply({ from: { ...rival, username: undefined } }) },
+        CREATOR,
+      ),
+    ).toBe("To challenge someone, reply to their message or name them without replying.");
+  });
+
   test("a reply without a name is not refused", () => {
     expect(
       namedReplyRefusal(
