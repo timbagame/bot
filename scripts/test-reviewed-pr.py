@@ -1,4 +1,6 @@
 """Exercise the actual verifier with GitHub API/download failures and stale proof."""
+import itertools
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -71,6 +73,28 @@ class ReviewedTreeTest(unittest.TestCase):
         ):
             with self.subTest(scenario=scenario):
                 self.assertNotEqual(self.verify(scenario).returncode, 0)
+
+
+class RequiredCiTest(unittest.TestCase):
+    def test_only_successful_prerequisites_pass(self):
+        workflow = (Path(__file__).resolve().parent.parent / ".github/workflows/ci.yml").read_text()
+        required_job = workflow.split("  required-ci:\n", 1)[1]
+        expression = required_job.split("jq --exit-status '", 1)[1].split("'", 1)[0]
+        states = ("success", "failure", "cancelled", "skipped")
+        for results in itertools.product(states, repeat=3):
+            with self.subTest(results=results):
+                result = subprocess.run(
+                    ["jq", "--exit-status", expression], input=json.dumps(results),
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode == 0, all(state == "success" for state in results))
+        for results in ([], ["success"], ["success"] * 4):
+            with self.subTest(results=results):
+                result = subprocess.run(
+                    ["jq", "--exit-status", expression], input=json.dumps(results),
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

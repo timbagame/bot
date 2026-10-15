@@ -128,15 +128,15 @@ describe("findNamedUser", () => {
     );
   });
 
-  test("as in /tip, a picked user without an @username takes the first typed @word instead", () => {
+  test("a picked user keeps its argument span when another @word is present", () => {
     const text = "/cf 5 Ana @bob";
     const user = { id: 1, is_bot: false, first_name: "Ana" };
     expect(findNamedUser(command(text, [picked(text, "Ana", user)]))).toEqual({
       user,
-      username: "@bob",
+      username: null,
       label: "Ana",
-      args: ["/cf", "5", "Ana"],
-      positions: [0, 1, 2],
+      args: ["/cf", "5", "@bob"],
+      positions: [0, 1, 3],
     });
   });
 

@@ -122,7 +122,7 @@ export const findNamedUser = (
     }
   }
 
-  if (!username) {
+  if (!user && !username) {
     const index = words.findIndex(
       (word, position) => position > 0 && word.startsWith("@") && word.length > 1,
     );

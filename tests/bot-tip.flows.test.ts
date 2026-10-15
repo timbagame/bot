@@ -435,6 +435,7 @@ describe("/tip recipients and amounts", () => {
       ],
     });
 
+    expect(parseCalls[0]?.[0]).toEqual(["/tip", "2", "@bob"]);
     expect(primed).toEqual([]);
     expect(loosePrimed).toEqual([]);
   });
