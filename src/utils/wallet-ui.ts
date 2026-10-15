@@ -199,13 +199,16 @@ export type WalletCaptionOptions = {
 export const WALLET_UPDATED_JUST_NOW_MS = 5_000;
 
 /**
- * Human label for how old the wallet balances are, e.g. "Updated just now",
- * "Updated 12s ago", "Updated 3m ago".
+ * Human label for how old the wallet balances are, e.g. "Updated 12s ago" or
+ * "Updated 3m ago". Returns null while the balances are fresh, so no footer shows.
  */
-export function formatWalletUpdatedLabel(updatedAt: number, now: number = Date.now()): string {
+export function formatWalletUpdatedLabel(
+  updatedAt: number,
+  now: number = Date.now(),
+): string | null {
   const ageMs = Math.max(0, now - updatedAt);
   if (ageMs < WALLET_UPDATED_JUST_NOW_MS) {
-    return "Updated just now";
+    return null;
   }
   return `Updated ${formatDuration(Math.floor(ageMs / 1_000))} ago`;
 }
@@ -229,10 +232,11 @@ export function buildWalletCaption(
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
 
-  const footer =
+  const updatedLabel =
     typeof options.updatedAt === "number" && Number.isFinite(options.updatedAt)
-      ? ["", `<i>${escapeHtml(formatWalletUpdatedLabel(options.updatedAt, options.now))}</i>`]
-      : [];
+      ? formatWalletUpdatedLabel(options.updatedAt, options.now)
+      : null;
+  const footer = updatedLabel ? ["", `<i>${escapeHtml(updatedLabel)}</i>`] : [];
 
   const pageSize = Math.max(1, Math.trunc(options.pageSize ?? 8));
   const pageCount = Math.max(1, Math.ceil(tokenLines.length / pageSize));

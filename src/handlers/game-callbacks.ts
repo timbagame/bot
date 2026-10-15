@@ -115,6 +115,7 @@ export type GameCallbacksModule = {
 };
 
 export const JOIN_PENDING_TOAST = "⏳ Joining…";
+const ALREADY_JOINED_TOAST = "You already joined this game.";
 
 /**
  * After the "Joining…" toast, a join result can no longer be shown as a toast.
@@ -124,7 +125,8 @@ export const JOIN_PENDING_TOAST = "⏳ Joining…";
 const replyWithLateJoinFailure =
   (ctx: Context) =>
   async (text: string): Promise<void> => {
-    if (text.startsWith("✅")) return;
+    // Successes and duplicate taps already show on the game card, so they stay out of the chat.
+    if (text.startsWith("✅") || text === ALREADY_JOINED_TOAST) return;
     await replyToCallbackMessage(ctx, text);
   };
 
@@ -459,12 +461,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
               updateError,
             );
           }
-          await answerJoinCallbackOnce(
-            ctx,
-            game.game_address,
-            telegramIdStr,
-            "You already joined this game.",
-          );
+          await answerJoinCallbackOnce(ctx, game.game_address, telegramIdStr, ALREADY_JOINED_TOAST);
           return;
         }
 

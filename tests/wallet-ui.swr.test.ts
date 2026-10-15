@@ -103,13 +103,12 @@ const run = async (setup: Setup) => {
 
 describe("wallet updated label", () => {
   test("formats ages", () => {
-    expect(formatWalletUpdatedLabel(NOW, NOW)).toBe("Updated just now");
-    expect(formatWalletUpdatedLabel(NOW - WALLET_UPDATED_JUST_NOW_MS + 1, NOW)).toBe(
-      "Updated just now",
-    );
+    expect(formatWalletUpdatedLabel(NOW, NOW)).toBeNull();
+    expect(formatWalletUpdatedLabel(NOW - WALLET_UPDATED_JUST_NOW_MS + 1, NOW)).toBeNull();
+    expect(formatWalletUpdatedLabel(NOW - WALLET_UPDATED_JUST_NOW_MS, NOW)).toBe("Updated 5s ago");
     expect(formatWalletUpdatedLabel(NOW - 12_400, NOW)).toBe("Updated 12s ago");
     expect(formatWalletUpdatedLabel(NOW - 185_000, NOW)).toBe("Updated 3m ago");
-    expect(formatWalletUpdatedLabel(NOW + 5_000, NOW)).toBe("Updated just now");
+    expect(formatWalletUpdatedLabel(NOW + 5_000, NOW)).toBeNull();
   });
 
   test("caption shows the footer after the balances and keeps it within Telegram limits", () => {
@@ -129,19 +128,27 @@ describe("wallet updated label", () => {
 
     const empty = buildWalletCaption(ADDRESS, [], { explorerUrl: null, updatedAt: NOW, now: NOW });
     expect(empty).not.toContain("\n\n\n");
-    expect(empty.endsWith("\n\n<i>Updated just now</i>")).toBe(true);
+    expect(empty).not.toContain("Updated");
+
+    const staleEmpty = buildWalletCaption(ADDRESS, [], {
+      explorerUrl: null,
+      updatedAt: NOW - 12_000,
+      now: NOW,
+    });
+    expect(staleEmpty).not.toContain("\n\n\n");
+    expect(staleEmpty.endsWith("\n\n<i>Updated 12s ago</i>")).toBe(true);
 
     expect(buildWalletCaption(ADDRESS, [], { explorerUrl: null })).not.toContain("Updated");
   });
 });
 
 describe("showWalletUI stale-while-revalidate", () => {
-  test("without a cached page it fetches and shows Updated just now", async () => {
+  test("without a cached page it fetches and shows no updated label", async () => {
     const { captured, fetches, calls } = await run({});
     expect(fetches()).toBe(1);
     expect(captured).toHaveLength(1);
     expect(captured[0]).toContain("SOL: <code>2</code>");
-    expect(captured[0]).toContain("<i>Updated just now</i>");
+    expect(captured[0]).not.toContain("Updated");
     expect(calls.filter(([kind]) => kind.startsWith("api"))).toHaveLength(0);
   });
 
@@ -168,7 +175,7 @@ describe("showWalletUI stale-while-revalidate", () => {
     expect(edit[1]).toBe(99);
     expect(edit[2]).toBe(11);
     expect(edit[3]).toContain("SOL: <code>2</code>");
-    expect(edit[3]).toContain("<i>Updated just now</i>");
+    expect(edit[3]).not.toContain("Updated");
     expect(edit[4].reply_markup).toBeInstanceOf(InlineKeyboard);
   });
 
@@ -185,7 +192,8 @@ describe("showWalletUI stale-while-revalidate", () => {
       cached: { data: page(2e9), fetchedAt: NOW - WALLET_STALE_LABEL_REFRESH_MS },
     });
     const edit = calls.find(([kind]) => kind === "apiEditText");
-    expect(edit[3]).toContain("<i>Updated just now</i>");
+    expect(edit).toBeDefined();
+    expect(edit[3]).not.toContain("Updated");
   });
 
   test("background edits are skipped once the user moved on", async () => {

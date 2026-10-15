@@ -173,6 +173,17 @@ describe("join callback grace toast", () => {
     expect(replies).toEqual([]);
   });
 
+  test("slow duplicate joins stay in the toast and send no chat reply", async () => {
+    const module = makeModule(async () => {
+      await sleep(450);
+      return { success: false, error: "User already joined" };
+    });
+    const { ctx, answers, replies } = await makeCtx();
+    await module.__test_handleGenericGameCallback(ctx as Context, async () => {});
+    expect(answers).toEqual([JOIN_PENDING_TOAST]);
+    expect(replies).toEqual([]);
+  });
+
   test("slow failed joins explain the failure in a quiet reply", async () => {
     const module = makeModule(async () => {
       await sleep(450);
