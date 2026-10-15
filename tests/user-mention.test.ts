@@ -149,7 +149,7 @@ describe("findNamedUser", () => {
         (names, whitespace, handle) => {
           const label = names.join(whitespace);
           const text = ["/cf", label, "5", `@${handle}`, "SOL"].join(whitespace);
-          const user = { id: 5150, is_bot: false, first_name: names[0] };
+          const user = { id: 5150, is_bot: false, first_name: names[0]! };
           const found = findNamedUser(command(text, [picked(text, label, user)]));
           expect(found?.user).toEqual(user);
           expect(found?.username).toBeNull();
