@@ -478,8 +478,21 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
       }
 
       // joinGame hands back the post-join account; fetch only if it could not.
+      // Taking the last seat can let the Oracle settle and close the game before
+      // this read; the completion update then redraws the card.
       const updatedGameAccount =
-        result.gameAccount ?? (await deps.getProgram().account.game.fetch(gamePda));
+        result.gameAccount ??
+        (await deps
+          .getProgram()
+          .account.game.fetch(gamePda)
+          .catch((error: unknown) => {
+            if (isMissingAccountError(error)) return null;
+            throw error;
+          }));
+      if (!updatedGameAccount) {
+        await answerJoinCallbackOnce(ctx, game.game_address, telegramIdStr, "✅ Joined!");
+        return;
+      }
       const ticketCount = result.ticketsCount ?? Number(updatedGameAccount.ticketsCount ?? 0);
       const maxTickets = result.maxTickets ?? Number(updatedGameAccount.maxTickets ?? 0);
       // Answer the tap first: the toast should not wait for every chat's message edit.

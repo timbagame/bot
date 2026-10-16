@@ -152,6 +152,56 @@ describe("Game callback helpers", () => {
     expect(gameDb.savePlayerMapping).toHaveBeenCalledWith("player-123", "123", null);
   });
 
+  test("a join that took the last seat succeeds even after the game closed", async () => {
+    const { module, deps, gameManager } = makeDeps();
+    const ctx = makeCtx();
+    deps.getProgram = () =>
+      ({
+        account: {
+          game: {
+            fetch: async () => {
+              throw new Error("Account does not exist or has no data game1");
+            },
+          },
+        },
+      }) as any;
+
+    await module.__test_handleJoinGame(
+      ctx as unknown as Context,
+      new PublicKey((await Keypair.generate()).publicKey),
+      125n,
+      { game_address: "game1", status: "active" },
+    );
+
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", { text: "✅ Joined!" });
+    expect(gameManager.updateGameMessageFromData).not.toHaveBeenCalled();
+  });
+
+  test("a failed post-join read is not mistaken for a closed game", async () => {
+    const { module, deps } = makeDeps();
+    const ctx = makeCtx();
+    deps.getProgram = () =>
+      ({
+        account: {
+          game: {
+            fetch: async () => {
+              throw new Error("RPC unavailable");
+            },
+          },
+        },
+      }) as any;
+
+    await expect(
+      module.__test_handleJoinGame(
+        ctx as unknown as Context,
+        new PublicKey((await Keypair.generate()).publicKey),
+        126n,
+        { game_address: "game1", status: "active" },
+      ),
+    ).rejects.toThrow("RPC unavailable");
+    expect(ctx.api.answerCallbackQuery).not.toHaveBeenCalledWith("q", { text: "✅ Joined!" });
+  });
+
   test("trims first/last names before persisting display name", async () => {
     const { module, gameDb } = makeDeps();
     const ctx = makeCtx();

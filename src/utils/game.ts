@@ -1622,6 +1622,16 @@ export class GameManager {
     }
   }
 
+  private async isGameAccountClosed(gamePda: PublicKey): Promise<boolean> {
+    try {
+      const accountInterface = this.program.account.game as any;
+      if (typeof accountInterface?.fetchNullable !== "function") return false;
+      return (await accountInterface.fetchNullable(gamePda)) === null;
+    } catch {
+      return false;
+    }
+  }
+
   private async verifyParticipantJoin(
     gamePda: PublicKey,
     playerPubkey: PublicKey,
@@ -1640,7 +1650,9 @@ export class GameManager {
       }
 
       const isOnChain = await this.isPlayerInGame(gamePda, playerPubkey);
-      if (isOnChain) {
+      // A confirmed join that took the last seat lets the Oracle settle and close
+      // the game before this read, so a closed account means the join landed.
+      if (isOnChain || (options.joinSignature && (await this.isGameAccountClosed(gamePda)))) {
         this.gameDb.saveGameParticipant(gameAddress, telegramId, playerPubkeyStr, {
           status: "confirmed",
           joinSignature: options.joinSignature,

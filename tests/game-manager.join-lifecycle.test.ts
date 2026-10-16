@@ -347,6 +347,48 @@ describe("GameManager join lifecycle", () => {
     expect(participantCalls[0][3]?.joinSignature).toBe("SIG999");
   });
 
+  test("verifyParticipantJoin accepts a confirmed join whose game already closed", async () => {
+    const verify = async (game: Record<string, unknown>, joinSignature: string | null) => {
+      resetGM();
+      const participantCalls: any[] = [];
+      const gameDb = {
+        saveGameParticipant: (...args: any[]) => participantCalls.push(args),
+      } as any;
+      const gm = GameManager.getInstance({ account: { game } } as any, {} as any, gameDb);
+      (gm as any).isPlayerInGame = async () => false;
+      const success = await (gm as any).verifyParticipantJoin(
+        new PublicKey("BPFLoader3111111111111111111111111111111111"),
+        (await Keypair.generate()).publicKey,
+        "123",
+        { joinSignature, maxAttempts: 1 },
+      );
+      return { success, participantCalls };
+    };
+
+    // The last seat let the Oracle settle and close the game before the read.
+    const closed = await verify({ fetchNullable: async () => null }, "SIG-LAST");
+    expect(closed.success).toBe(true);
+    expect(closed.participantCalls[0][3]).toMatchObject({
+      status: "confirmed",
+      joinSignature: "SIG-LAST",
+    });
+
+    // Without a confirmed signature, or without proof the account is gone, keep waiting.
+    expect((await verify({ fetchNullable: async () => null }, null)).success).toBe(false);
+    expect((await verify({ fetchNullable: async () => ({}) }, "SIG")).success).toBe(false);
+    expect((await verify({ fetch: async () => ({}) }, "SIG")).success).toBe(false);
+    const rpcDown = await verify(
+      {
+        fetchNullable: async () => {
+          throw new Error("RPC unavailable");
+        },
+      },
+      "SIG",
+    );
+    expect(rpcDown.success).toBe(false);
+    expect(rpcDown.participantCalls).toEqual([]);
+  });
+
   test("reconcilePendingParticipants confirms successes and prunes stale entries", async () => {
     resetGM();
 
