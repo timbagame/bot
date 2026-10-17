@@ -14,7 +14,7 @@
         "@solana-program/token-2022": "0.20.0",
         "@solana/kit": "8.5.0",
         "@solana/web3.js": "3.1.0",
-        "@timbagame/protocol": "0.14.2",
+        "@timbagame/protocol": "0.15.0",
         "bip39": "^3.1.0",
         "bn.js": "^5.2.5",
         "bs58": "^6.0.0",
@@ -222,7 +222,7 @@
 
     "@solana/web3.js": ["@solana/web3.js@3.1.0", "", { "dependencies": { "@noble/curves": "^1.4.2", "@noble/hashes": "^1.4.0", "@solana-program/address-lookup-table": "^0.15.0", "@solana-program/compute-budget": "^0.19.0", "@solana-program/loader-v3": "^0.7.0", "@solana-program/stake": "0.9.0", "@solana-program/system": "^0.15.0", "@solana/assertions": "^8.5.0", "@solana/fast-stable-stringify": "^8.5.0", "@solana/kit": "^8.5.0", "@solana/rpc-spec-types": "^8.5.0", "@solana/signers": "^8.5.0" } }, "sha512-WdXc9Tua/1H09vwPDchjmqm6iGbB7DsWpSS7N0kWiTiBXmkUpTiu2Yv12ERm2VuCTa4/IxFyop29mVKIamvznQ=="],
 
-    "@timbagame/protocol": ["@timbagame/protocol@0.14.2", "https://npm.pkg.github.com/download/@timbagame/protocol/0.14.2/9c1adbeab469983d7d301be7b6851cb78d13e0e7", { "dependencies": { "@solana-program/system": "0.15.0", "@solana-program/token": "0.17.0", "@solana/kit": "8.5.0", "viem": "2.57.6", "zod": "4.6.7" } }, "sha512-rzKNeyCRaA/fp/gTzMd/DxgoVq4rETZ/XB933zNCVLjWPObnKJSLS8OFCm8NLMLDoprJzLRdWRI3M2mFjsU7XQ=="],
+    "@timbagame/protocol": ["@timbagame/protocol@0.15.0", "https://npm.pkg.github.com/download/@timbagame/protocol/0.15.0/514051a377612881e0e5e78f772f8090515b037b", { "dependencies": { "@solana-program/system": "0.16.0", "@solana-program/token": "0.18.0", "@solana/kit": "8.5.0", "viem": "2.57.7", "zod": "4.6.7" } }, "sha512-2zc7qjLHN0Y9pFOtE3OrX+EYLZtae2VBOynC00cKmDVE5vg6IigyO/h93FVVMAaRGtgJtxj6GZlGAK12KfoQmQ=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
@@ -536,12 +536,6 @@
 
     "@solana/web3.js/@solana-program/system": ["@solana-program/system@0.15.0", "", { "peerDependencies": { "@solana/kit": "^8.3.0" } }, "sha512-xE08wZCyNRhOaO/XNRd9A3kSLfUrTe/BnmAHhql8uqc2eriNy2ZmnvaGRrs0m+kOSihvUbANzHljmJsTzGL5kg=="],
 
-    "@timbagame/protocol/@solana-program/system": ["@solana-program/system@0.15.0", "", { "peerDependencies": { "@solana/kit": "^8.3.0" } }, "sha512-xE08wZCyNRhOaO/XNRd9A3kSLfUrTe/BnmAHhql8uqc2eriNy2ZmnvaGRrs0m+kOSihvUbANzHljmJsTzGL5kg=="],
-
-    "@timbagame/protocol/@solana-program/token": ["@solana-program/token@0.17.0", "", { "dependencies": { "@solana-program/system": "^0.15.0" }, "peerDependencies": { "@solana/kit": "^8.3.0" } }, "sha512-l7EhF3lCWXXdOllGI8qnbF4Pj7pCT/5zJTW2lPsNUQfa7G28pnFhSssHW2GCW7dzGttSHgPdJYdQRB5rvQoN9Q=="],
-
-    "@timbagame/protocol/viem": ["viem@2.57.6", "", { "dependencies": { "@noble/curves": "1.9.1", "@noble/hashes": "1.8.0", "@scure/bip32": "1.7.0", "@scure/bip39": "1.6.0", "abitype": "1.2.3", "isows": "1.0.7", "ox": "0.14.56", "ws": "8.21.0" }, "peerDependencies": { "typescript": ">=5.0.4" }, "optionalPeers": ["typescript"] }, "sha512-iMG18eUs4JwiVWvcPmJeQ3D13JpduuVohkXmiZVfPpfFiS1AMN1dko9z90vI0AULIruPoPjJ9IqVkaGL+J5EYQ=="],
-
     "@typescript-eslint/eslint-plugin/ignore": ["ignore@7.0.10", "", {}, "sha512-HpbUakT7xp5miBUywCHf36ZEuAJNklBJDDsGpUIjMzOSmM8ELSfA9Sa/QDPeNeqeoN31u+UTCkL4klCOVvRm4Q=="],
 
     "ox/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
@@ -553,8 +547,6 @@
     "viem/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
     "yargs/find-up": ["find-up@4.1.0", "", { "dependencies": { "locate-path": "^5.0.0", "path-exists": "^4.0.0" } }, "sha512-PpOwAdQ/YlXQ2vj8a3h8IipDuYRi3wceVQQGYWxNINccq40Anw7BlsEXCMbt1Zt+OLA6Fq9suIpIWD0OsnISlw=="],
-
-    "@timbagame/protocol/viem/@noble/curves": ["@noble/curves@1.9.1", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-k11yZxZg+t+gWvBbIswW0yoJlu8cHOC7dhunwOzoWH/mXGBiYyR4YY6hAEK/3EUs4UpB8la1RfdRpeGsFHkWsA=="],
 
     "yargs/find-up/locate-path": ["locate-path@5.0.0", "", { "dependencies": { "p-locate": "^4.1.0" } }, "sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g=="],
 
