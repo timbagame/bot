@@ -14,7 +14,7 @@
         "@solana-program/token-2022": "0.20.0",
         "@solana/kit": "8.5.0",
         "@solana/web3.js": "3.1.0",
-        "@timbagame/protocol": "0.15.0",
+        "@timbagame/protocol": "0.17.0",
         "bip39": "^3.1.0",
         "bn.js": "^5.2.5",
         "bs58": "^6.0.0",
@@ -222,7 +222,7 @@
 
     "@solana/web3.js": ["@solana/web3.js@3.1.0", "", { "dependencies": { "@noble/curves": "^1.4.2", "@noble/hashes": "^1.4.0", "@solana-program/address-lookup-table": "^0.15.0", "@solana-program/compute-budget": "^0.19.0", "@solana-program/loader-v3": "^0.7.0", "@solana-program/stake": "0.9.0", "@solana-program/system": "^0.15.0", "@solana/assertions": "^8.5.0", "@solana/fast-stable-stringify": "^8.5.0", "@solana/kit": "^8.5.0", "@solana/rpc-spec-types": "^8.5.0", "@solana/signers": "^8.5.0" } }, "sha512-WdXc9Tua/1H09vwPDchjmqm6iGbB7DsWpSS7N0kWiTiBXmkUpTiu2Yv12ERm2VuCTa4/IxFyop29mVKIamvznQ=="],
 
-    "@timbagame/protocol": ["@timbagame/protocol@0.15.0", "https://npm.pkg.github.com/download/@timbagame/protocol/0.15.0/514051a377612881e0e5e78f772f8090515b037b", { "dependencies": { "@solana-program/system": "0.16.0", "@solana-program/token": "0.18.0", "@solana/kit": "8.5.0", "viem": "2.57.7", "zod": "4.6.7" } }, "sha512-2zc7qjLHN0Y9pFOtE3OrX+EYLZtae2VBOynC00cKmDVE5vg6IigyO/h93FVVMAaRGtgJtxj6GZlGAK12KfoQmQ=="],
+    "@timbagame/protocol": ["@timbagame/protocol@0.17.0", "https://npm.pkg.github.com/download/@timbagame/protocol/0.17.0/850aedf6da7e3cb0a55576f862028fdbcdef8760", { "dependencies": { "@solana-program/system": "0.16.0", "@solana-program/token": "0.18.0", "@solana/kit": "8.5.0", "viem": "2.57.7", "zod": "4.6.7" } }, "sha512-jTk+Zc2YLPaRR53hUZuI4HJNZ2W1xBDQHGhltok7JPEGGunT6qlYrubQFcVmliW8CzkWAc4YyqNiybSM641+yQ=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
