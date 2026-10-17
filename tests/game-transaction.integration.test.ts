@@ -78,6 +78,8 @@ describe("Kit game transaction boundary", () => {
 
     expect(signature).toBe(expectedSignature);
     expect(submittedWire).toBe(expectedWire);
+    // Confirmation resends these exact bytes while the creation is pending.
+    expect((wallet as any).pendingSignatures.get(signature)?.wire).toBe(expectedWire);
   });
 
   test("rejects an Oracle response that changes the transaction message", async () => {

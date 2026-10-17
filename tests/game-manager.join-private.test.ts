@@ -147,9 +147,13 @@ describe("GameManager joinPrivateGame resilience", () => {
         joinGame: () => ({ accounts: () => ({ instruction: async () => joinIx }) }),
       },
     } as any;
+    const sendOptions: unknown[] = [];
     const wallet = {
       getKeyPair: () => playerKp,
-      sendTransaction: async () => "SIG_INITIAL",
+      sendTransaction: async (...args: unknown[]) => {
+        sendOptions.push(args[2]);
+        return "SIG_INITIAL";
+      },
     } as any;
     const gm = GameManager.getInstance(program, wallet, {
       getGame: () => ({ token_mint: "mint" }),
@@ -189,6 +193,7 @@ describe("GameManager joinPrivateGame resilience", () => {
     );
 
     expect(result).toEqual({ success: true, tx: "SIG_RESENT" });
+    expect(sendOptions).toEqual([{ priorityFee: true }]);
     // The joining player reaches the authorization, which enforces challenges.
     expect(authorizations).toEqual([
       [new PublicKey("BPFLoader1111111111111111111111111111111111"), 99, 31n],

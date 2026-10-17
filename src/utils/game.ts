@@ -2252,10 +2252,13 @@ export class GameManager {
       return await walletWithResubmits.call(this.wallet, instructions, signers, {
         operationLabel,
         skipConfirmation: options?.skipConfirmation,
+        priorityFee: true,
       });
     }
 
-    const signature = await this.wallet.sendTransaction(instructions, signers);
+    const signature = await this.wallet.sendTransaction(instructions, signers, {
+      priorityFee: true,
+    });
     if (!options?.skipConfirmation) {
       await this.wallet.confirmTransaction(signature);
     }
@@ -5610,7 +5613,9 @@ export class GameManager {
               .instruction();
             joinInstructions = [...setupInstructions, joinInstruction];
 
-            joinTx = await this.wallet.sendTransaction(joinInstructions, [playerKp]);
+            joinTx = await this.wallet.sendTransaction(joinInstructions, [playerKp], {
+              priorityFee: true,
+            });
             this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
               status: "pending",
               joinSignature: joinTx ?? null,
@@ -6139,7 +6144,9 @@ export class GameManager {
             .instruction();
           joinInstructions = [...setupInstructions, joinInstruction];
 
-          lastSignature = await this.wallet.sendTransaction(joinInstructions, [playerKp, adminKp]);
+          lastSignature = await this.wallet.sendTransaction(joinInstructions, [playerKp, adminKp], {
+            priorityFee: true,
+          });
 
           lastSignature = await this.confirmTransactionWithRecovery(
             lastSignature!,

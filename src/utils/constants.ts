@@ -63,6 +63,16 @@ export const SIGNATURE_HISTORY_SEARCH_DELAY_MS = 8000; // After 8s leverage tran
 export const BLOCK_HEIGHT_CHECK_INTERVAL_MS = 1000; // Check block height drift every 1s during confirmation
 export const BLOCK_HEIGHT_EXPIRATION_GRACE = 2; // Allow a couple of blocks past lastValidBlockHeight before treating as expired
 export const TRANSACTION_RESUBMIT_ATTEMPTS = 2; // Number of times to rebuild and resend transactions on expiry/timeout
+export const SIGNATURE_POLL_INTERVAL_MS = 400; // About one slot, so a landed transaction is seen right away
+export const REBROADCAST_INTERVAL_MS = 2000; // Resend a pending transaction this often until it lands or expires
+// Priority fees keep transactions from being dropped when the network is busy.
+export const PRIORITY_FEE_MIN_MICRO_LAMPORTS = 10_000;
+export const PRIORITY_FEE_MAX_MICRO_LAMPORTS = 500_000;
+export const PRIORITY_FEE_MAX_LAMPORTS = 10_000; // Cap per transaction, whatever the estimate
+export const PRIORITY_FEE_ESTIMATE_TIMEOUT_MS = 1500;
+export const COMPUTE_UNIT_MARGIN = 1.2; // Headroom over the simulated compute units
+export const COMPUTE_BUDGET_OVERHEAD_UNITS = 1000; // The two compute budget instructions themselves
+export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 
 // ================================
 // TELEGRAM MESSAGE RENDERING

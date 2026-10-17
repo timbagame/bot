@@ -24,6 +24,7 @@ import {
   type Transaction as KitTransaction,
 } from "@solana/kit";
 import {
+  ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
@@ -71,6 +72,15 @@ import {
   BLOCK_HEIGHT_CHECK_INTERVAL_MS,
   BLOCK_HEIGHT_EXPIRATION_GRACE,
   TRANSACTION_RESUBMIT_ATTEMPTS,
+  SIGNATURE_POLL_INTERVAL_MS,
+  REBROADCAST_INTERVAL_MS,
+  PRIORITY_FEE_MIN_MICRO_LAMPORTS,
+  PRIORITY_FEE_MAX_MICRO_LAMPORTS,
+  PRIORITY_FEE_MAX_LAMPORTS,
+  PRIORITY_FEE_ESTIMATE_TIMEOUT_MS,
+  COMPUTE_UNIT_MARGIN,
+  COMPUTE_BUDGET_OVERHEAD_UNITS,
+  MAX_COMPUTE_UNIT_LIMIT,
   TOKEN_DISCOVERY_COOLDOWN_MS,
   WALLET_RPC_CACHE_TTL_MS,
   TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS,
@@ -368,14 +378,22 @@ export class WalletManager {
   } | null = null;
   private pendingSignatures = new Map<
     string,
-    { blockhash: string; lastValidBlockHeight: number; recordedAt: number; gameCreation?: boolean }
+    {
+      blockhash: string;
+      lastValidBlockHeight: number;
+      recordedAt: number;
+      gameCreation?: boolean;
+      /** Signed bytes (base64), resent while the transaction is pending. */
+      wire?: string;
+    }
   >();
   private lastTokenDiscoveryByUser = new Map<string, number>();
   private postTimeoutProbeBackoffMs = 2000;
   private postTimeoutProbeRetryDelayMs = 250;
   private postTimeoutProbeMaxAttempts = 3;
   private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
-  private signaturePollIntervalMs = 1000;
+  private signaturePollIntervalMs = SIGNATURE_POLL_INTERVAL_MS;
+  private rebroadcastIntervalMs = REBROADCAST_INTERVAL_MS;
   private mintProgramCache = new Map<string, TokenProgramDetection | null>();
   private missingMintWarnings = new Map<string, number>();
   private nativeBalanceCache = createExpiringCache<number>(WALLET_RPC_CACHE_TTL_MS);
@@ -2306,6 +2324,15 @@ export class WalletManager {
 
     const trackedSignature = this.pendingSignatures.get(signature);
     let lastBlockHeightCheck = startTime;
+    let lastRebroadcast = startTime;
+
+    // A dropped transaction would otherwise wait for its blockhash to expire.
+    const rebroadcastIfDue = async (now: number) => {
+      const wire = trackedSignature?.wire;
+      if (!wire || now - lastRebroadcast < this.rebroadcastIntervalMs) return;
+      lastRebroadcast = now;
+      await this.rebroadcastTransaction(wire);
+    };
 
     const boundGetSignatureStatuses = (this.connection as any)?.getSignatureStatuses?.bind(
       this.connection,
@@ -2471,6 +2498,7 @@ export class WalletManager {
           }
 
           lastStatusLabel = null;
+          await rebroadcastIfDue(now);
         } else {
           if (lastStatusLabel !== "no-result" && pollCount % 5 === 0) {
             console.log(
@@ -2483,6 +2511,7 @@ export class WalletManager {
           if (expirationMessage) {
             throw new Error(expirationMessage);
           }
+          await rebroadcastIfDue(now);
         }
 
         await this.sleep(pollInterval);
@@ -2570,7 +2599,15 @@ export class WalletManager {
   public async sendTransaction(
     instructions: TransactionInstruction[],
     signers: Keypair[],
-    options: { onPrepared?: PreparedTransactionCallback } = {},
+    options: {
+      onPrepared?: PreparedTransactionCallback;
+      /**
+       * Adds a simulated compute unit limit and a priority fee, so the
+       * transaction lands when the network is busy. Flows that compute their
+       * fee exactly (full withdrawals, reimbursements) leave it off.
+       */
+      priorityFee?: boolean;
+    } = {},
   ): Promise<string> {
     const feePayer = signers[0];
     await this.throttle(feePayer ? this.walletThrottleKey(feePayer.publicKey) : "system");
@@ -2579,11 +2616,14 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.getLatestBlockhash();
+    const [latestBlockhash, computeBudget] = await Promise.all([
+      this.getLatestBlockhash(),
+      options.priorityFee ? this.buildComputeBudget(instructions, signers[0]!.publicKey) : [],
+    ]);
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: asBlockhash(latestBlockhash.blockhash),
-      instructions: instructions,
+      instructions: [...computeBudget, ...instructions],
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
@@ -2647,8 +2687,123 @@ export class WalletManager {
       blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
       recordedAt: now,
+      wire: Buffer.from(tx.serialize()).toString("base64"),
     });
     return signature;
+  }
+
+  /**
+   * Compute unit limit and priority fee for a transaction. The limit comes from
+   * a simulation, which keeps the fee small. Without a simulation, or for
+   * instructions that already set their own budget, nothing is added and the
+   * transaction is sent as before.
+   */
+  private async buildComputeBudget(
+    instructions: TransactionInstruction[],
+    payer: PublicKey,
+  ): Promise<TransactionInstruction[]> {
+    if (instructions.some((ix) => ix.programId.equals(ComputeBudgetProgram.programId))) return [];
+    const [units, estimate] = await Promise.all([
+      this.simulateComputeUnits(instructions, payer),
+      this.estimatePriorityFee(instructions),
+    ]);
+    if (units === null) return [];
+    const unitLimit = Math.min(
+      Math.ceil(units * COMPUTE_UNIT_MARGIN) + COMPUTE_BUDGET_OVERHEAD_UNITS,
+      MAX_COMPUTE_UNIT_LIMIT,
+    );
+    const microLamports = Math.min(
+      estimate,
+      Math.floor((PRIORITY_FEE_MAX_LAMPORTS * 1_000_000) / unitLimit),
+    );
+    return [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: unitLimit }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports }),
+    ];
+  }
+
+  /** Compute units the instructions use, or null when the simulation fails. */
+  private async simulateComputeUnits(
+    instructions: TransactionInstruction[],
+    payer: PublicKey,
+  ): Promise<number | null> {
+    try {
+      const message = new TransactionMessage({
+        payerKey: payer,
+        // The RPC replaces it, so any blockhash will do.
+        recentBlockhash: asBlockhash(
+          this.blockhashCache?.blockhash ?? PublicKey.default.toBase58(),
+        ),
+        instructions,
+      }).compileToV0Message();
+      const simulation = await this.connection.simulateTransaction(
+        new VersionedTransaction(message),
+        { sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" },
+      );
+      // A failing simulation is reported by the send's own preflight.
+      if (simulation.value.err) return null;
+      const units = Number(simulation.value.unitsConsumed);
+      return units > 0 ? units : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The RPC's "High" priority fee for the accounts the instructions write. */
+  private async estimatePriorityFee(instructions: TransactionInstruction[]): Promise<number> {
+    const accountKeys = [
+      ...new Set(
+        instructions.flatMap((ix) =>
+          ix.keys.filter((key) => key.isWritable).map((key) => key.pubkey.toBase58()),
+        ),
+      ),
+    ];
+    try {
+      const result: any = await this.recoveryRpc(
+        this.connection.rpcEndpoint,
+        AbortSignal.timeout(PRIORITY_FEE_ESTIMATE_TIMEOUT_MS),
+      )("getPriorityFeeEstimate", [{ accountKeys, options: { priorityLevel: "High" } }]);
+      const estimate = Number(result?.priorityFeeEstimate);
+      if (!Number.isFinite(estimate)) throw new Error("No priority fee estimate");
+      return Math.min(
+        Math.max(Math.ceil(estimate), PRIORITY_FEE_MIN_MICRO_LAMPORTS),
+        PRIORITY_FEE_MAX_MICRO_LAMPORTS,
+      );
+    } catch {
+      // RPCs without Helius' estimate still get a fee that clears a busy network.
+      return PRIORITY_FEE_MIN_MICRO_LAMPORTS;
+    }
+  }
+
+  /**
+   * Resends the same signed bytes to every configured RPC. Nodes drop pending
+   * transactions under load; a duplicate of one that landed is ignored.
+   */
+  private async rebroadcastTransaction(wire: string): Promise<void> {
+    const active = this.connection.rpcEndpoint;
+    const sends: Promise<unknown>[] = this.gameRecoveryEndpoints()
+      .filter((endpoint) => endpoint !== active)
+      .map((endpoint) =>
+        this.recoveryRpc(endpoint, AbortSignal.timeout(PRIORITY_FEE_ESTIMATE_TIMEOUT_MS))(
+          "sendTransaction",
+          [wire, { encoding: "base64", skipPreflight: true, maxRetries: 0 }],
+        ),
+      );
+    sends.push(
+      Promise.resolve().then(() =>
+        this.connection.sendRawTransaction(Buffer.from(wire, "base64"), {
+          skipPreflight: true,
+          maxRetries: 0n,
+        }),
+      ),
+    );
+    const failures = (await Promise.allSettled(sends)).filter(
+      (result) => result.status === "rejected",
+    ).length;
+    if (failures > 0) {
+      // Endpoint URLs can carry API keys, so only the count is logged.
+      console.warn(`⚠️ Rebroadcast failed on ${failures}/${sends.length} RPC endpoints`);
+    }
   }
 
   public async sendFullySignedGameTransaction(
@@ -2715,6 +2870,7 @@ export class WalletManager {
       ...blockhash,
       recordedAt: Date.now(),
       gameCreation: true,
+      wire,
     });
     return signature;
   }
@@ -2840,6 +2996,7 @@ export class WalletManager {
       initialSignature?: string;
       skipConfirmation?: boolean;
       onPrepared?: PreparedTransactionCallback;
+      priorityFee?: boolean;
     } = {},
   ): Promise<string> {
     if (instructions.length === 0) {
@@ -2856,12 +3013,13 @@ export class WalletManager {
       initialSignature,
       skipConfirmation = false,
       onPrepared,
+      priorityFee,
     } = options;
 
     const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
-        : await this.sendTransaction(instructions, signers, { onPrepared });
+        : await this.sendTransaction(instructions, signers, { onPrepared, priorityFee });
 
     if (skipConfirmation) {
       return startingSignature;
@@ -2905,7 +3063,7 @@ export class WalletManager {
           }`,
         );
 
-        currentSignature = await this.sendTransaction(instructions, signers);
+        currentSignature = await this.sendTransaction(instructions, signers, { priorityFee });
       }
     }
   }

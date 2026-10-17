@@ -48,8 +48,12 @@ describe("GameManager join lifecycle", () => {
       getTokenMetadata: async () => ({ decimals: 9 }),
       getTokenBalance: async () => 5_000_000_000,
       getBalance: async () => 5_000_000_000,
-      sendTransaction: async () => "SIG123",
+      sendTransaction: async (...args: any[]) => {
+        sendOptions.push(args[2]);
+        return "SIG123";
+      },
     } as any;
+    const sendOptions: any[] = [];
 
     const participantCalls: any[] = [];
     const removed: any[] = [];
@@ -92,6 +96,8 @@ describe("GameManager join lifecycle", () => {
     );
 
     expect(result.success).toBe(true);
+    // Joins bid a priority fee so they are not dropped when the network is busy.
+    expect(sendOptions).toEqual([{ priorityFee: true }]);
     expect(participantCalls.length).toBe(2);
     const [pendingCall, confirmedCall] = participantCalls;
     expect(pendingCall[3]?.status).toBe("pending");
@@ -628,5 +634,35 @@ describe("GameManager join lifecycle", () => {
     expect(confirmCalls).toBe(2);
     expect(participantCalls.length).toBe(2);
     expect(confirmedCalls).toEqual([{ telegramId: "7", joinSignature: "SIG2" }]);
+  });
+});
+
+describe("GameManager game transactions", () => {
+  test("bid a priority fee with or without wallet resubmits", async () => {
+    resetGM();
+    const calls: any[] = [];
+    const wallet: any = {
+      sendAndConfirmWithResubmits: async (...args: any[]) => {
+        calls.push(["resubmits", args[2]]);
+        return "SIG_A";
+      },
+    };
+    const gm = GameManager.getInstance({ programId: PublicKey.default } as any, wallet, {} as any);
+    const payer = await Keypair.generate();
+
+    expect(await (gm as any).sendInstructionsWithFallback([], [payer], "Game op")).toBe("SIG_A");
+
+    delete wallet.sendAndConfirmWithResubmits;
+    wallet.sendTransaction = async (...args: any[]) => {
+      calls.push(["send", args[2]]);
+      return "SIG_B";
+    };
+    wallet.confirmTransaction = async () => {};
+    expect(await (gm as any).sendInstructionsWithFallback([], [payer], "Game op")).toBe("SIG_B");
+
+    expect(calls).toEqual([
+      ["resubmits", { operationLabel: "Game op", skipConfirmation: undefined, priorityFee: true }],
+      ["send", { priorityFee: true }],
+    ]);
   });
 });
