@@ -222,7 +222,7 @@ describe("/coinflip naming who to challenge through the bot", () => {
     await sendText("/cf 5 BONK @rival @ghost", { userId: USER, chatId: GROUP });
 
     expect(lastText()).toBe(
-      "I don't know who <code>@ghost</code> is. Reply to one of their messages to challenge them.",
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
     );
     expect(manager.createGame).not.toHaveBeenCalled();
   });

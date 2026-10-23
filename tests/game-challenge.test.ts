@@ -459,6 +459,47 @@ describe("resolveNamedChallenge", () => {
     }
   });
 
+  test("a name among several that cannot be challenged is never told to reply", async () => {
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const several = (
+        ctx: any,
+        overrides: Record<string, unknown>,
+        found: string | null | Error,
+      ) => resolveNamedChallenge(ctx, named(overrides), CREATOR, users(found), true);
+
+      expect(await several(member(), { username: "@gh<o>st" }, null)).toEqual({
+        refusal:
+          "I don't know who <code>@gh&lt;o&gt;st</code> is yet. Ask them to use the bot here, then try again.",
+      });
+      expect(await several(member(), { username: "@a&b" }, new Error("synthetic-db-down"))).toEqual(
+        { refusal: "I couldn't look up <code>@a&amp;b</code>. Try again." },
+      );
+      expect(await several(member(), {}, "synthetic-id")).toEqual({
+        refusal:
+          "I couldn't tell who one of them is. Ask them to use the bot here, then try again.",
+      });
+      expect(
+        await several(telegramError(400, "Bad Request: user not found") as any, {}, "5150"),
+      ).toEqual({
+        refusal:
+          "I couldn't verify <code>@rival</code>. Ask them to use the bot here, then try again.",
+      });
+      // Refusals that have nothing to do with replying read the same.
+      expect(await several(member(), {}, String(CREATOR))).toEqual({
+        refusal: "You can't challenge yourself.",
+      });
+      expect(await several(member({ ...RIVAL, is_bot: true }), {}, "5150")).toEqual({
+        refusal: "You can't challenge a bot.",
+      });
+      expect(await several(member(), {}, "5150")).toEqual({
+        challenge: { telegramId: "5150", displayName: "@Rival" },
+      });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   test("the answers for naming someone in the wrong place", () => {
     expect(CHALLENGE_NAMED_NEEDS_AMOUNT_MESSAGE).toBe(
       "To challenge someone by name, use <code>/cf &lt;amount&gt; [TOKEN] @username</code>.",
@@ -519,7 +560,7 @@ describe("resolveNamedChallenges", () => {
       await resolveNamedChallenges(group(), names("/cf 5 @rival @ghost @bo"), CREATOR, users, 3),
     ).toEqual({
       refusal:
-        "I don't know who <code>@ghost</code> is. Reply to one of their messages to challenge them.",
+        "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
     });
     expect(users.lookups).toEqual(["@rival", "@ghost"]);
   });
@@ -546,6 +587,62 @@ describe("resolveNamedChallenges", () => {
 
     expect(await resolveNamedChallenges(group(), picked, CREATOR, directory(), 2)).toEqual({
       challenge: [{ telegramId: "5150", displayName: "@rival" }],
+    });
+  });
+
+  test("a single name that cannot be challenged is still told to reply", async () => {
+    expect(
+      await resolveNamedChallenges(group(), names("/cf 5 @ghost @Ghost"), CREATOR, directory(), 3),
+    ).toEqual({
+      refusal:
+        "I don't know who <code>@ghost</code> is. Reply to one of their messages to challenge them.",
+    });
+  });
+
+  test("someone picked and typed counts once against the seats, before any lookup", async () => {
+    const users = directory();
+    const picked = findNamedUsers({
+      text: "/cf 5 Ana @Rival @bo",
+      entities: [{ type: "text_mention", offset: 6, length: 3, user: PEOPLE[0] }],
+    } as any)!;
+
+    expect(await resolveNamedChallenges(group(), picked, CREATOR, users, 2)).toEqual({
+      challenge: [
+        { telegramId: "5150", displayName: "@rival" },
+        { telegramId: "6160", displayName: "@bo" },
+      ],
+    });
+    expect(users.lookups).toEqual(["@bo"]);
+  });
+
+  test("people picked without a username are told apart by their account", async () => {
+    const ana = { id: 8181, is_bot: false, first_name: "Ana" };
+    const bo = { id: 9191, is_bot: false, first_name: "Bo" };
+    const picked = findNamedUsers({
+      text: "/cf 5 Ana Bo",
+      entities: [
+        { type: "text_mention", offset: 6, length: 3, user: ana },
+        { type: "text_mention", offset: 10, length: 2, user: bo },
+      ],
+    } as any)!;
+    const ctx = {
+      chat: { id: -100 },
+      api: {
+        getChatMember: async (_chatId: number, userId: number) => ({
+          status: "member",
+          user: [ana, bo].find((person) => person.id === userId),
+        }),
+      },
+    } as any;
+
+    expect(await resolveNamedChallenges(ctx, picked, CREATOR, directory(), 2)).toEqual({
+      challenge: [
+        { telegramId: "8181", displayName: "Ana" },
+        { telegramId: "9191", displayName: "Bo" },
+      ],
+    });
+    expect(await resolveNamedChallenges(ctx, picked, CREATOR, directory(), 1)).toEqual({
+      refusal: "You can challenge up to 1 person at once.",
     });
   });
 

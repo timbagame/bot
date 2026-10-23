@@ -535,11 +535,11 @@ describe("game handler: coinflip naming several people to challenge", () => {
   test.each([
     [
       "/cf 100 @rival @ghost",
-      "I don't know who <code>@ghost</code> is. Reply to one of their messages to challenge them.",
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
     ],
     [
       "/cf 100 @ghost @rival",
-      "I don't know who <code>@ghost</code> is. Reply to one of their messages to challenge them.",
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
     ],
     [
       "/cf 100 @rival,usdc",

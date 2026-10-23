@@ -46,6 +46,11 @@ export const findChallengeNames = (
 const unknownNameMessage = (username: string): string =>
   `I don't know who <code>${escapeHtml(username)}</code> is. Reply to one of their messages to challenge them.`;
 
+// A reply challenges only the person it answers, so a challenge naming several
+// people cannot be fixed by replying: whoever the bot could not find has to
+// reach it once, which saves their username.
+const USE_THE_BOT_FIRST = "Ask them to use the bot here, then try again.";
+
 const CHALLENGE_SELF_MESSAGE = "You can't challenge yourself.";
 const CHALLENGE_BOT_MESSAGE = "You can't challenge a bot.";
 
@@ -86,13 +91,15 @@ export type NamedChallenge = { challenge: ChallengedPlayer } | { refusal: string
 /**
  * A coinflip that names someone challenges them, found as /tip finds them.
  * Unlike a reply, naming oneself or a bot is refused: the challenge was asked
- * for explicitly.
+ * for explicitly. With `several`, the challenge names other people too, so no
+ * refusal suggests replying.
  */
 export const resolveNamedChallenge = async (
   ctx: Context,
   named: Pick<NamedUser, "user" | "username">,
   creatorTelegramId: bigint,
   directory: UsernameDirectory,
+  several = false,
 ): Promise<NamedChallenge> => {
   const mentioned = await resolveNamedUser(ctx, named, creatorTelegramId, directory);
   switch (mentioned.kind) {
@@ -104,17 +111,29 @@ export const resolveNamedChallenge = async (
         },
       };
     case "unknown":
-      return { refusal: unknownNameMessage(mentioned.username) };
+      return {
+        refusal: several
+          ? `I don't know who <code>${escapeHtml(mentioned.username)}</code> is yet. ${USE_THE_BOT_FIRST}`
+          : unknownNameMessage(mentioned.username),
+      };
     case "verification_failed":
-      return { refusal: usernameVerificationFailedMessage(mentioned.username) };
+      return {
+        refusal: several
+          ? `I couldn't verify <code>${escapeHtml(mentioned.username)}</code>. ${USE_THE_BOT_FIRST}`
+          : usernameVerificationFailedMessage(mentioned.username),
+      };
     case "lookup_failed":
       console.error("Failed to look up the challenged user:", mentioned.error);
       return {
-        refusal: `I couldn't look up <code>${escapeHtml(mentioned.username)}</code>. Try again, or reply to one of their messages.`,
+        refusal: several
+          ? `I couldn't look up <code>${escapeHtml(mentioned.username)}</code>. Try again.`
+          : `I couldn't look up <code>${escapeHtml(mentioned.username)}</code>. Try again, or reply to one of their messages.`,
       };
     case "unusable_id":
       return {
-        refusal: "I couldn't tell who that is. Reply to one of their messages to challenge them.",
+        refusal: several
+          ? `I couldn't tell who one of them is. ${USE_THE_BOT_FIRST}`
+          : "I couldn't tell who that is. Reply to one of their messages to challenge them.",
       };
     case "self":
       return { refusal: CHALLENGE_SELF_MESSAGE };
@@ -132,8 +151,11 @@ export const CHALLENGE_MAX_PEOPLE = 5;
 const tooManyChallengedMessage = (maxChallenged: number): string =>
   `You can challenge up to ${maxChallenged} ${maxChallenged === 1 ? "person" : "people"} at once.`;
 
-const nameKey = (named: Pick<NamedUser, "user" | "username">): string =>
-  named.user ? `id ${named.user.id}` : `@${normalizeUsername(named.username ?? "")}`;
+// Someone picked from Telegram's list and the same username typed are one person.
+const nameKey = (named: Pick<NamedUser, "user" | "username">): string => {
+  const username = named.user ? named.user.username : named.username;
+  return username ? `@${normalizeUsername(username)}` : `id ${named.user?.id}`;
+};
 
 /**
  * A coinflip that names people challenges each of them, found one by one as
@@ -161,7 +183,13 @@ export const resolveNamedChallenges = async (
   }
   const challenge: ChallengedPlayer[] = [];
   for (const user of users) {
-    const target = await resolveNamedChallenge(ctx, user, creatorTelegramId, directory);
+    const target = await resolveNamedChallenge(
+      ctx,
+      user,
+      creatorTelegramId,
+      directory,
+      users.length > 1,
+    );
     if ("refusal" in target) return target;
     if (!challenge.some((player) => player.telegramId === target.challenge.telegramId)) {
       challenge.push(target.challenge);
