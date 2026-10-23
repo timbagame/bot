@@ -67,7 +67,7 @@ import { isMessageMissing } from "../utils/telegram-errors";
 import type { WalletManager } from "../utils/wallet";
 import type { GameManager } from "../utils/game";
 import type { GameDatabase } from "../utils/game-database";
-import { challengeForSomeoneElseMessage } from "../utils/game-challenge";
+import { challengeForSomeoneElseMessage, challengeKeepsOut } from "../utils/game-challenge";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
 import type { CreatorCallbackContext, GameSetupCopy, GameSetupModule } from "./game-setup";
 import type { TimbaProgram } from "../utils/timba-program";
@@ -949,7 +949,7 @@ export const createGameCallbacksModule = (deps: GameCallbacksModuleDeps): GameCa
         case "join": {
           // Answer here, before any work; authorizePlayer enforces the same rule on chain.
           const challenge = deps.gameDb.getGameChallenge(gameAddress);
-          if (challenge && challenge.telegramId !== telegramId.toString()) {
+          if (challengeKeepsOut(challenge, telegramId)) {
             await safeAnswerCallbackQuery(ctx, challengeForSomeoneElseMessage(challenge));
             break;
           }

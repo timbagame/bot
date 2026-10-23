@@ -3,16 +3,17 @@ import type { Context } from "grammy";
 import { getRequiredTelegramIdForContext, replyEphemeralToSender } from "../utils/context-helpers";
 import {
   CHALLENGE_IN_GROUPS_MESSAGE,
+  CHALLENGE_MAX_PEOPLE,
   CHALLENGE_NAMED_NEEDS_AMOUNT_MESSAGE,
   CHALLENGE_NEEDS_AMOUNT_MESSAGE,
   CHALLENGE_SAME_CHAT_MESSAGE,
-  findChallengeName,
+  findChallengeNames,
   namedReplyRefusal,
   resolveChallengeTarget,
-  resolveNamedChallenge,
+  resolveNamedChallenges,
 } from "../utils/game-challenge";
-import type { GameChallenge } from "../utils/game-database";
-import { findNamedUser, type UsernameDirectory } from "../utils/user-mention";
+import type { ChallengedPlayer } from "../utils/game-database";
+import { findNamedUsers, type UsernameDirectory } from "../utils/user-mention";
 
 export type GameTokenOverride = {
   tokenMint: string;
@@ -31,10 +32,12 @@ export type CoinflipDeps = {
     ctx: Context & { message?: any },
     args: string[],
     telegramId: bigint,
-    challenge?: GameChallenge,
+    challenge?: ChallengedPlayer[],
   ) => Promise<void>;
   resolveTokenOverride: (tokenInput: string, chatId?: number) => Promise<GameTokenOverride | null>;
   usernames: UsernameDirectory;
+  /** The most players a coinflip can have, its creator included. */
+  getMaxPlayers: () => number;
 };
 
 export async function handleCoinflipCommand(ctx: Context & { message?: any }, deps: CoinflipDeps) {
@@ -44,8 +47,8 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
   if (telegramId == null) {
     return;
   }
-  // A coinflip that replies to no one and names someone challenges them.
-  const named = findChallengeName(ctx.message);
+  // A coinflip that replies to no one and names people challenges them.
+  const named = findChallengeNames(ctx.message);
   if (named) {
     if (!deps.isGroupChat(ctx)) {
       await ctx.reply(CHALLENGE_IN_GROUPS_MESSAGE);
@@ -57,7 +60,13 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
       });
       return;
     }
-    const target = await resolveNamedChallenge(ctx, named, telegramId, deps.usernames);
+    const target = await resolveNamedChallenges(
+      ctx,
+      named,
+      telegramId,
+      deps.usernames,
+      Math.min(CHALLENGE_MAX_PEOPLE, deps.getMaxPlayers() - 1),
+    );
     if ("refusal" in target) {
       await replyEphemeralToSender(ctx, target.refusal, { parse_mode: "HTML" });
       return;
@@ -71,7 +80,7 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     await replyEphemeralToSender(ctx, replyRefusal);
     return;
   }
-  const args = findNamedUser(ctx.message)?.args ?? ctx.message?.text?.trim().split(/\s+/) ?? [];
+  const args = findNamedUsers(ctx.message)?.args ?? ctx.message?.text?.trim().split(/\s+/) ?? [];
   // Replies to another chat or forum topic name no one here, so they cannot be
   // challenges; refuse them instead of opening a game anyone could join.
   if (ctx.message?.external_reply) {

@@ -15,8 +15,8 @@ import type { ChatGameSettings, ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
 import type { GameSetupCopy } from "./game-setup";
 import { containsBalanceInfo, replyEphemeralToSender } from "../utils/context-helpers";
-import { CHALLENGE_PLAYERS, resolveChallengeTarget } from "../utils/game-challenge";
-import type { GameChallenge } from "../utils/game-database";
+import { resolveChallengeTarget } from "../utils/game-challenge";
+import type { ChallengedPlayer } from "../utils/game-database";
 import type { UsernameDirectory } from "../utils/user-mention";
 
 export type CreateGameViaCommandOptions = {
@@ -31,8 +31,12 @@ export type CreateGameViaCommandOptions = {
   logPrefix: string;
   errorMessage: string;
   /** Who a coinflip challenges when the command named them. */
-  challenge?: GameChallenge;
+  challenge?: ChallengedPlayer[];
 };
+
+const maxPlayersFor = (
+  options: Pick<CreateGameViaCommandOptions, "minPlayers" | "getMaxPlayers">,
+) => Math.max(options.minPlayers, options.getMaxPlayers());
 
 type CreateGameViaCommandDeps = {
   parseAmount: (
@@ -204,7 +208,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       const parsedAmount = parsed.data;
       const chatSettings = ctx.chat?.id ? (deps.getChatGameSettings?.(ctx.chat.id) ?? null) : null;
-      const maxPlayersLimit = Math.max(options.minPlayers, options.getMaxPlayers());
+      const maxPlayersLimit = maxPlayersFor(options);
       const defaultMaxPlayers = chatSettings
         ? resolveChatDefaultPlayers(
             chatSettings,
@@ -229,9 +233,14 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       const challenge =
         options.gameType === "coinflip"
-          ? (options.challenge ?? resolveChallengeTarget(ctx.message, telegramId))
-          : null;
-      const maxPlayers = challenge ? CHALLENGE_PLAYERS : inferred.value;
+          ? (options.challenge ??
+            [resolveChallengeTarget(ctx.message, telegramId)].filter((player) => player !== null))
+          : [];
+      // A challenge is for its creator and everyone it names, whatever player
+      // count the command asked for, and is drawn only once all of them joined.
+      const isChallenge = challenge.length > 0;
+      const maxPlayers = isChallenge ? challenge.length + 1 : inferred.value;
+      const minPlayers = isChallenge ? maxPlayers : options.minPlayers;
       const tokenMetadata = await createDeps.wallet.getTokenMetadata(parsedAmount.tokenMint);
       const { raw: minAmountRaw } = await createDeps.getTokenPolicyMinimumAmount(
         parsedAmount.tokenMint,
@@ -295,7 +304,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       // Force public visibility for DM-created games
       const isFromDM = ctx.chat?.type === "private";
-      const isPrivate = challenge
+      const isPrivate = isChallenge
         ? true
         : isFromDM
           ? false
@@ -320,14 +329,14 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           priceLookup: parsedAmount.priceLookup,
         },
         maxPlayers,
-        options.minPlayers,
+        minPlayers,
         gameTimeoutSeconds,
         telegramId,
         {
           isPrivate,
           replyToMessageId: ctx.message?.message_id,
           creationMessageId: creationMessageInfo?.messageId,
-          ...(challenge ? { challenge } : {}),
+          ...(isChallenge ? { challenge } : {}),
         },
         ctx.chat?.id || 0,
         messageTimestampMs,
@@ -441,6 +450,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     resolveTokenOverride: (tokenInput, chatId) =>
       deps.resolveCommandTokenOverride(tokenInput, chatId),
     usernames: deps.usernames,
+    getMaxPlayers: () => maxPlayersFor(COINFLIP_COMMAND_OPTIONS),
   });
 
   const handleGiveawayCommand = async (ctx: Context & { message?: any }) => {

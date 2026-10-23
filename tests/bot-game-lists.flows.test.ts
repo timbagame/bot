@@ -82,6 +82,14 @@ const sendAnonymous = (text: string) =>
   } as any);
 
 describe("/help", () => {
+  test("says a coinflip can challenge one or more people", async () => {
+    await sendText("/help", { userId: USER });
+
+    expect(lastCall("sendMessage")!.payload.text.split("\n")).toContain(
+      "/coinflip &lt;amount&gt; [token] [players]: Start a coinflip (or /cf); add one or more @users, or reply to someone, to challenge them",
+    );
+  });
+
   test("lists games, wallet and chat commands", async () => {
     const id = await sendText("/help", { userId: USER });
 

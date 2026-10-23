@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
 import { PublicKey } from "#solana";
 import { GameManager } from "../src/utils/game";
 import { DEFAULT_NULL_ADDRESS } from "../src/utils/constants";
@@ -270,26 +270,31 @@ describe("GameManager.formatGameMessage", () => {
 describe("GameManager.formatGameMessage for a challenge", () => {
   beforeEach(resetGameManager);
 
-  const CHALLENGE = { telegramId: "5150", displayName: "@rival" };
+  const CHALLENGE = [{ telegramId: "5150", displayName: "@rival" }];
   // Inserted after "@" so a name stays readable without pinging anyone.
   const WORD_JOINER = String.fromCharCode(0x2060);
   const render = async (options: {
     ticketsCount: number;
+    seats?: number;
+    /** The wallets on chain, each known as the Telegram id it maps to. */
+    onChainPlayers?: Record<string, string>;
     status?: string;
     winner?: string;
     participants?: string[];
     suppressMentions?: boolean;
     getGameChallenge?: (address: string) => unknown;
+    getPlayerTelegramId?: (publicKey: string) => string | null;
   }) => {
     const createdAt = 1_000_000;
     const program = makeProgramStub({
       ticketsCount: options.ticketsCount,
-      maxTickets: 2,
-      minTickets: 2,
+      maxTickets: options.seats ?? 2,
+      minTickets: options.seats ?? 2,
       totalAmount: 0,
       createdAt,
       timeout: 600,
       gameType: { coinflip: {} },
+      ...(options.onChainPlayers ? { participants: Object.keys(options.onChainPlayers) } : {}),
     });
     const wallet = makeWalletStub({
       blockTime: createdAt + 30,
@@ -299,8 +304,13 @@ describe("GameManager.formatGameMessage for a challenge", () => {
     const db = makeDbStub({
       participants: options.participants ?? ["4242", "5150"],
       gameOverride: { token_ticker: "WSOL" },
-      playerTelegramByPub: { WINNERPUB: "5150" },
-      extra: { getGameChallenge: options.getGameChallenge ?? (() => CHALLENGE) },
+      playerTelegramByPub: { WINNERPUB: "5150", ...options.onChainPlayers },
+      extra: {
+        getGameChallenge: options.getGameChallenge ?? (() => CHALLENGE),
+        ...(options.getPlayerTelegramId
+          ? { getPlayerTelegramId: options.getPlayerTelegramId }
+          : {}),
+      },
     });
     const gm = GameManager.getInstance(program, wallet, db);
     const gamePda = await randomGamePublicKey();
@@ -392,9 +402,10 @@ describe("GameManager.formatGameMessage for a challenge", () => {
   });
 
   test("a coinflip without a challenge keeps the regular card", async () => {
-    const res = await render({ ticketsCount: 1, getGameChallenge: () => null });
+    const res = await render({ ticketsCount: 1, getGameChallenge: () => [] });
 
     expect(res.messageText).toContain("Creator: @creator • 1/2 players");
+    expect(res.messageText).toContain("\nStatus: ▰▱ Needs 1 more player to start");
     expect(res.messageText).not.toContain("⚔️");
     expect(res.keyboard[0]?.[0]?.text).toBe("🎮 Join");
   });
@@ -412,7 +423,7 @@ describe("GameManager.formatGameMessage for a challenge", () => {
   });
 
   test("the challenged player's name is escaped in every place it renders", async () => {
-    const markup = { telegramId: "5150", displayName: "<b>Ana & Co</b>" };
+    const markup = [{ telegramId: "5150", displayName: "<b>Ana & Co</b>" }];
     const escaped = "&lt;b&gt;Ana &amp; Co&lt;/b&gt;";
 
     const open = await render({ ticketsCount: 1, getGameChallenge: () => markup });
@@ -427,5 +438,152 @@ describe("GameManager.formatGameMessage for a challenge", () => {
     });
     expect(copied.messageText).toContain(`challenged ${escaped}`);
     expect(copied.messageText).not.toContain("<b>Ana");
+  });
+
+  const THREE = [
+    { telegramId: "5150", displayName: "@rival" },
+    { telegramId: "6160", displayName: "@bo" },
+    { telegramId: "7171", displayName: "Cid" },
+  ];
+  const WALLET = {
+    creator: "So11111111111111111111111111111111111111112",
+    rival: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    bo: "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    cid: "SysvarRent111111111111111111111111111111111",
+  };
+  const RIVAL_LINK = '<a href="tg://user?id=5150">@rival</a>';
+  const BO_LINK = '<a href="tg://user?id=6160">@bo</a>';
+  const CID_LINK = '<a href="tg://user?id=7171">Cid</a>';
+
+  test("an open challenge to several people names them all and waits for whoever has not accepted", async () => {
+    const res = await render({
+      ticketsCount: 2,
+      seats: 4,
+      onChainPlayers: { [WALLET.creator]: "4242", [WALLET.bo]: "6160" },
+      getGameChallenge: () => THREE,
+    });
+
+    expect(res.messageText).toContain(
+      `\n@creator challenged ${RIVAL_LINK}, ${BO_LINK} and ${CID_LINK}\n`,
+    );
+    expect(res.messageText).toContain(
+      `\nStatus: Waiting for @${WORD_JOINER}rival and Cid to accept`,
+    );
+    expect(res.keyboard[0]?.[0]).toEqual({
+      text: "⚔️ Accept",
+      callback_data: `join_${res.gameAddress}`,
+    });
+  });
+
+  test("a wallet past the joined count is not taken for someone who accepted", async () => {
+    const res = await render({
+      ticketsCount: 2,
+      seats: 4,
+      onChainPlayers: { [WALLET.creator]: "4242", [WALLET.bo]: "6160", [WALLET.rival]: "5150" },
+      getGameChallenge: () => THREE,
+    });
+
+    expect(res.messageText).toContain(
+      `\nStatus: Waiting for @${WORD_JOINER}rival and Cid to accept`,
+    );
+  });
+
+  test("a challenge everyone accepted lines them all up and waits for the draw", async () => {
+    const res = await render({
+      ticketsCount: 4,
+      seats: 4,
+      onChainPlayers: {
+        [WALLET.creator]: "4242",
+        [WALLET.rival]: "5150",
+        [WALLET.bo]: "6160",
+        [WALLET.cid]: "7171",
+      },
+      getGameChallenge: () => THREE,
+    });
+
+    expect(res.messageText).toContain(`\n@creator vs ${RIVAL_LINK} vs ${BO_LINK} vs ${CID_LINK}\n`);
+    expect(res.messageText).toContain("\nStatus: Accepted, drawing soon");
+    expect(res.messageText).not.toContain("challenged");
+  });
+
+  test("with no challenged player left to name, the card counts the seats instead", async () => {
+    const res = await render({
+      ticketsCount: 3,
+      seats: 4,
+      onChainPlayers: { [WALLET.rival]: "5150", [WALLET.bo]: "6160", [WALLET.cid]: "7171" },
+      getGameChallenge: () => THREE,
+    });
+
+    expect(res.messageText).toContain(
+      `\n@creator challenged ${RIVAL_LINK}, ${BO_LINK} and ${CID_LINK}\n`,
+    );
+    expect(res.messageText).toContain("\nStatus: ▰▰▰▱ Needs 1 more player to start");
+  });
+
+  test("a lone challenged player is named as waiting without reading who joined, as before", async () => {
+    for (const onChainPlayers of [undefined, { [WALLET.creator]: "4242" }]) {
+      const getPlayerTelegramId = mock((_publicKey: string): string | null => null);
+
+      const res = await render({ ticketsCount: 1, onChainPlayers, getPlayerTelegramId });
+
+      expect(res.messageText).toContain(`\nStatus: Waiting for @${WORD_JOINER}rival to accept`);
+      expect(getPlayerTelegramId).not.toHaveBeenCalled();
+    }
+  });
+
+  test("right after it opens, a challenge to several names everyone without reading who joined", async () => {
+    const getPlayerTelegramId = mock((_publicKey: string): string | null => null);
+
+    const res = await render({
+      ticketsCount: 1,
+      seats: 4,
+      getGameChallenge: () => THREE,
+      getPlayerTelegramId,
+    });
+
+    expect(res.messageText).toContain(
+      `\nStatus: Waiting for @${WORD_JOINER}rival, @${WORD_JOINER}bo and Cid to accept`,
+    );
+    expect(getPlayerTelegramId).not.toHaveBeenCalled();
+  });
+
+  test("a player list behind the joined count never names someone who already accepted", async () => {
+    const res = await render({
+      ticketsCount: 3,
+      seats: 4,
+      onChainPlayers: { [WALLET.creator]: "4242", [WALLET.bo]: "6160" },
+      getGameChallenge: () => THREE,
+    });
+
+    expect(res.messageText).toContain("\nStatus: ▰▰▰▱ Needs 1 more player to start");
+    expect(res.messageText).not.toContain("Waiting for");
+  });
+
+  test("once someone accepted, without the joined wallets listed the card counts the seats instead", async () => {
+    const res = await render({ ticketsCount: 2, seats: 4, getGameChallenge: () => THREE });
+
+    expect(res.messageText).toContain("\nStatus: ▰▰▱▱ Needs 2 more players to start");
+    expect(res.messageText).not.toContain("Waiting for");
+  });
+
+  test("when who accepted cannot be read, the card counts the seats instead", async () => {
+    const failure = new Error("synthetic-read-failure");
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await render({
+        ticketsCount: 2,
+        seats: 4,
+        onChainPlayers: { [WALLET.creator]: "4242", [WALLET.bo]: "6160" },
+        getGameChallenge: () => THREE,
+        getPlayerTelegramId: () => {
+          throw failure;
+        },
+      });
+
+      expect(res.messageText).toContain("\nStatus: ▰▰▱▱ Needs 2 more players to start");
+      expect(warn).toHaveBeenCalledWith("Failed to read who accepted a challenge:", failure);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

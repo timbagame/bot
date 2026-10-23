@@ -254,7 +254,7 @@ describe("game handler: coinflip naming who to challenge", () => {
     };
     return ctx;
   };
-  const CHALLENGE = { telegramId: "5150", displayName: "@rival" };
+  const CHALLENGE = [{ telegramId: "5150", displayName: "@rival" }];
   const namingDeps = (found: string | null = "5150") => {
     const created: unknown[][] = [];
     const lookups: string[] = [];
@@ -273,6 +273,7 @@ describe("game handler: coinflip naming who to challenge", () => {
           return found;
         },
       },
+      getMaxPlayers: () => 100,
     };
     return { deps, created, lookups };
   };
@@ -464,5 +465,197 @@ describe("game handler: coinflip naming who to challenge", () => {
     expect(lookups).toEqual([]);
     expect(created).toEqual([]);
     expect(ctx.__calls).toEqual([["reply", "Challenges only work in groups."]]);
+  });
+});
+
+describe("game handler: coinflip naming several people to challenge", () => {
+  const PEOPLE = [
+    { id: 5150, is_bot: false, first_name: "Ana", username: "rival" },
+    { id: 6160, is_bot: false, first_name: "Bo", username: "bo" },
+    { id: 7171, is_bot: false, first_name: "Cid", username: "cid" },
+    { id: 8282, is_bot: true, first_name: "Helper", username: "helper_bot" },
+    { id: 9393, is_bot: false, first_name: "Dee", username: "dee" },
+    { id: 4545, is_bot: false, first_name: "Eve", username: "eve" },
+  ];
+  const RIVAL = { telegramId: "5150", displayName: "@rival" };
+  const BO = { telegramId: "6160", displayName: "@bo" };
+  // Telegram reports each of PEOPLE as a member of the group.
+  const groupContext = (text: string) => {
+    const ctx: any = createTelegramContext(text);
+    ctx.api = {
+      getChatMember: async (_chatId: number, userId: number) => ({
+        status: "member",
+        user: PEOPLE.find((person) => person.id === userId),
+      }),
+    };
+    return ctx;
+  };
+  const severalDeps = (maxPlayers = 100) => {
+    const created: unknown[][] = [];
+    const lookups: string[] = [];
+    const deps: any = {
+      isGroupChat: () => true,
+      showInteractiveSetup: async () => {
+        created.push(["menu"]);
+      },
+      createGameViaCommand: async (_ctx: any, ...args: unknown[]) => {
+        created.push(args);
+      },
+      resolveTokenOverride: async () => null,
+      usernames: {
+        findTelegramIdByUsername: (username: string) => {
+          lookups.push(username);
+          if (username.toLowerCase() === "@alice") return "1";
+          const found = PEOPLE.find((person) => `@${person.username}` === username.toLowerCase());
+          return found ? String(found.id) : null;
+        },
+      },
+      getMaxPlayers: () => maxPlayers,
+    };
+    return { deps, created, lookups };
+  };
+
+  test.each([
+    ["/cf 100 @rival @bo", ["/cf", "100"]],
+    ["/cf @rival 100 @bo", ["/cf", "100"]],
+    ["/cf 100 @rival TIMBA @bo", ["/cf", "100", "TIMBA"]],
+    ["/cf 1 USD @rival @bo", ["/cf", "1", "USD"]],
+    ["/cf 100 @rival,@bo", ["/cf", "100"]],
+  ])("%s challenges everyone named, in order, with the rest of the command", async (text, args) => {
+    const ctx = groupContext(text);
+    const { deps, created, lookups } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(lookups).toEqual(["@rival", "@bo"]);
+    expect(created).toEqual([[args, 1n, [RIVAL, BO]]]);
+    expect(ctx.__calls).toEqual([]);
+  });
+
+  test.each([
+    [
+      "/cf 100 @rival @ghost",
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
+    ],
+    [
+      "/cf 100 @ghost @rival",
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
+    ],
+    [
+      "/cf 100 @rival,usdc",
+      "I don't know who <code>@rival,usdc</code> is. Reply to one of their messages to challenge them.",
+    ],
+    ["/cf 100 @rival @alice", "You can't challenge yourself."],
+    ["/cf 100 @rival @helper_bot", "You can't challenge a bot."],
+  ])("%s is refused for everyone and opens no game", async (text, answer) => {
+    const ctx = groupContext(text);
+    const { deps, created } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(created).toEqual([]);
+    expect(ctx.__calls).toEqual([["reply", answer, { parse_mode: "HTML", ...ONLY_SENDER }]]);
+  });
+
+  test("someone named twice is challenged once", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo @Rival");
+    const { deps, created } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(created).toEqual([[["/cf", "100"], 1n, [RIVAL, BO]]]);
+  });
+
+  test("more people than a coinflip seats are refused before anyone is looked up", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo @cid");
+    const { deps, created, lookups } = severalDeps(3);
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(lookups).toEqual([]);
+    expect(created).toEqual([]);
+    expect(ctx.__calls).toEqual([
+      [
+        "reply",
+        "You can challenge up to 2 people at once.",
+        { parse_mode: "HTML", ...ONLY_SENDER },
+      ],
+    ]);
+  });
+
+  test("more than five people are refused to the sender alone, before anyone is looked up", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo @cid @dee @eve @ghost");
+    const { deps, created, lookups } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(lookups).toEqual([]);
+    expect(created).toEqual([]);
+    expect(ctx.__calls).toEqual([
+      [
+        "reply",
+        "You can challenge up to 5 people at once.",
+        { parse_mode: "HTML", ...ONLY_SENDER },
+      ],
+    ]);
+  });
+
+  test("five people are all challenged", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo @cid @dee @eve");
+    const { deps, created } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(created).toEqual([
+      [
+        ["/cf", "100"],
+        1n,
+        [
+          RIVAL,
+          BO,
+          { telegramId: "7171", displayName: "@cid" },
+          { telegramId: "9393", displayName: "@dee" },
+          { telegramId: "4545", displayName: "@eve" },
+        ],
+      ],
+    ]);
+  });
+
+  test("as many people as a coinflip seats besides its creator are all challenged", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo");
+    const { deps, created } = severalDeps(3);
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(created).toEqual([[["/cf", "100"], 1n, [RIVAL, BO]]]);
+  });
+
+  test("a reply naming the replied user and someone else is refused instead of challenging anyone", async () => {
+    const ctx = groupContext("/cf 100 @rival @bo");
+    ctx.message.reply_to_message = { message_id: 9, from: PEOPLE[0] };
+    const { deps, created, lookups } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(lookups).toEqual([]);
+    expect(created).toEqual([]);
+    expect(ctx.__calls).toEqual([
+      [
+        "reply",
+        "To challenge someone, reply to their message or name them without replying.",
+        ONLY_SENDER,
+      ],
+    ]);
+  });
+
+  test("a reply naming the replied user twice challenges them without either name as a token", async () => {
+    const ctx = groupContext("/cf 100 @rival SOL @Rival");
+    ctx.message.reply_to_message = { message_id: 9, from: PEOPLE[0] };
+    const { deps, created } = severalDeps();
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(created).toEqual([[["/cf", "100", "SOL"], 1n]]);
+    expect(ctx.__calls).toEqual([]);
   });
 });

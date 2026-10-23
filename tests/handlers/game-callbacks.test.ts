@@ -32,7 +32,7 @@ const makeDeps = () => {
     savePlayerMapping: vi.fn(),
     getGameLastSlotWithTimestamp: vi.fn(() => ({ lastSlot: "", timestamp: null })),
     getPlayerTelegramId: vi.fn(() => "player-telegram"),
-    getGameChallenge: () => null,
+    getGameChallenge: () => [],
   } as unknown as GameCallbacksModuleDeps["gameDb"];
 
   const gameManager = {

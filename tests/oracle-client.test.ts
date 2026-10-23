@@ -178,11 +178,12 @@ describe("OracleClient", () => {
       };
       return oc as OracleClient;
     };
-    const challengeGame = () => {
+    const challengeGame = (challenge = [{ telegramId: "5150", displayName: "@rival" }]) => {
       const db = GameDatabase.getInstance();
       const address = new PublicKey("SysvarC1ock11111111111111111111111111111111").toBase58();
-      db.saveGame(address, "41", 100, "coinflip", undefined, undefined, 2, 2, CHAT_ID);
-      db.saveGameChallenge(address, { telegramId: "5150", displayName: "@rival" });
+      const seats = challenge.length + 1;
+      db.saveGame(address, "41", 100, "coinflip", undefined, undefined, seats, seats, CHAT_ID);
+      db.saveGameChallenge(address, challenge);
       return new PublicKey(address);
     };
 
@@ -212,6 +213,26 @@ describe("OracleClient", () => {
         error: "This challenge is for @rival.",
       });
       expect(keyReads).toBe(0);
+    });
+
+    test("in a challenge to several people, signs for each of them and no one else", async () => {
+      const oc = client();
+      const gamePda = challengeGame([
+        { telegramId: "5150", displayName: "@rival" },
+        { telegramId: "6160", displayName: "@bo" },
+      ]);
+
+      for (const telegramId of [5150n, 6160n]) {
+        expect(await oc.authorizePlayer(gamePda, CHAT_ID, telegramId)).toEqual({
+          authorized: true,
+          operatorKeypair: operatorKeypair as any,
+        });
+      }
+      expect(await oc.authorizePlayer(gamePda, CHAT_ID, 7171n)).toEqual({
+        authorized: false,
+        error: "This challenge is for @rival and @bo.",
+      });
+      expect(keyReads).toBe(2);
     });
 
     test("refuses when the challenge cannot be read", async () => {

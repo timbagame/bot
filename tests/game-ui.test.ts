@@ -10,6 +10,7 @@ import {
   buildChallengeHeader,
   buildChallengeStatus,
   buildPlayerProfileLink,
+  formatNameList,
 } from "../src/utils/game-ui";
 
 test("buildGameStatus before minimum", () => {
@@ -134,7 +135,7 @@ test("buildChallengeHeader names both players while waiting for the answer", () 
       "10.000000",
       "TIMBA",
       "@creator",
-      '<a href="tg://user?id=5150">Ana</a>',
+      ['<a href="tg://user?id=5150">Ana</a>'],
       false,
       "$12.3",
       "https://solscan.io/account/AbCdEf",
@@ -151,7 +152,7 @@ test("buildChallengeHeader shows the match once accepted, with the creator's wal
       "10.000000",
       "TIMBA",
       "ignored",
-      "Ana",
+      ["Ana"],
       true,
       undefined,
       undefined,
@@ -164,12 +165,30 @@ test("buildChallengeHeader shows the match once accepted, with the creator's wal
 });
 
 test("buildChallengeHeader escapes the creator name", () => {
-  expect(buildChallengeHeader("1", "SOL", "<b>x</b>", "Ana", false)).toBe(
+  expect(buildChallengeHeader("1", "SOL", "<b>x</b>", ["Ana"], false)).toBe(
     "<b>⚔️ Challenge 🔎 • 1 SOL</b>\n&lt;b&gt;x&lt;/b&gt; challenged Ana",
   );
 });
 
-test("buildChallengeStatus waits for the challenged player, then for the draw", () => {
-  expect(buildChallengeStatus(false, "Ana")).toBe("Waiting for Ana to accept");
-  expect(buildChallengeStatus(true, "Ana")).toBe("Accepted, drawing soon");
+test("buildChallengeHeader names everyone challenged, then lines them all up once accepted", () => {
+  const challenged = ["Ana", "Bo", "Cid"];
+  expect(buildChallengeHeader("1", "SOL", "@creator", challenged, false)).toBe(
+    "<b>⚔️ Challenge 🔎 • 1 SOL</b>\n@creator challenged Ana, Bo and Cid",
+  );
+  expect(buildChallengeHeader("1", "SOL", "@creator", challenged, true)).toBe(
+    "<b>⚔️ Challenge 🔎 • 1 SOL</b>\n@creator vs Ana vs Bo vs Cid",
+  );
+});
+
+test("buildChallengeStatus waits for whoever has not accepted, then for the draw", () => {
+  expect(buildChallengeStatus(false, ["Ana"])).toBe("Waiting for Ana to accept");
+  expect(buildChallengeStatus(false, ["Bo", "Cid"])).toBe("Waiting for Bo and Cid to accept");
+  expect(buildChallengeStatus(true, [])).toBe("Accepted, drawing soon");
+});
+
+test("formatNameList joins names the way the cards say them", () => {
+  expect(formatNameList([])).toBe("");
+  expect(formatNameList(["Ana"])).toBe("Ana");
+  expect(formatNameList(["Ana", "Bo"])).toBe("Ana and Bo");
+  expect(formatNameList(["Ana", "Bo", "Cid", "Dee"])).toBe("Ana, Bo, Cid and Dee");
 });

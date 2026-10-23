@@ -106,14 +106,21 @@ export function buildUserMention(telegramId: string, displayName: string): strin
   return `<a href="tg://user?id=${telegramId}">${escapeHtml(displayName)}</a>`;
 }
 
+/** "Ana", "Ana and Bob", "Ana, Bob and Cid". */
+export function formatNameList(names: readonly string[]): string {
+  return names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : (names[0] ?? "");
+}
+
 /**
- * Header of a challenge coinflip. `challengedDisplay` is already HTML.
+ * Header of a challenge coinflip. `challengedDisplays` are already HTML.
  */
 export function buildChallengeHeader(
   amountFormatted: string,
   tokenTicker: string,
   creatorUsername: string,
-  challengedDisplay: string,
+  challengedDisplays: readonly string[],
   accepted: boolean,
   usdApproximation?: string | null,
   explorerUrl?: string | null,
@@ -123,16 +130,19 @@ export function buildChallengeHeader(
   return (
     `${buildGameTitle("⚔️ Challenge", amountFormatted, tokenTicker, usdApproximation, explorerUrl)}\n` +
     (accepted
-      ? `${creatorDisplay} vs ${challengedDisplay}`
-      : `${creatorDisplay} challenged ${challengedDisplay}`)
+      ? [creatorDisplay, ...challengedDisplays].join(" vs ")
+      : `${creatorDisplay} challenged ${formatNameList(challengedDisplays)}`)
   );
 }
 
 /**
- * Status of a challenge coinflip. `challengedName` is already HTML.
+ * Status of a challenge coinflip. `waitingNames`, the challenged players who
+ * have not accepted, are already HTML.
  */
-export function buildChallengeStatus(accepted: boolean, challengedName: string): string {
-  return accepted ? "Accepted, drawing soon" : `Waiting for ${challengedName} to accept`;
+export function buildChallengeStatus(accepted: boolean, waitingNames: readonly string[]): string {
+  return accepted
+    ? "Accepted, drawing soon"
+    : `Waiting for ${formatNameList(waitingNames)} to accept`;
 }
 
 /**

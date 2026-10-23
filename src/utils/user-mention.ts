@@ -16,6 +16,10 @@ export type NamedUser = {
   positions: number[];
 };
 
+/** A username as Telegram compares them: without the "@" and in lower case. */
+export const normalizeUsername = (username: string): string =>
+  username.trim().replace(/^@/, "").toLowerCase();
+
 /** Looks people up by the usernames the bot has seen. Reading may throw. */
 export type UsernameDirectory = {
   findTelegramIdByUsername: (username: string) => string | null | undefined;
@@ -76,6 +80,56 @@ const entityText = (entity: LooseEntity, text: string): string | null =>
     ? text.slice(entity.offset, entity.offset + entity.length)
     : null;
 
+/** Someone a command names, without the command's words. */
+type NamedPerson = Pick<NamedUser, "user" | "username" | "label">;
+
+/** Who a mention entity names, or null for any other entity. */
+const entityPerson = (entity: LooseEntity, text: string): NamedPerson | null => {
+  const slice = entityText(entity, text);
+  if (entity.type === "text_mention" && entity.user) {
+    return {
+      user: entity.user,
+      username: entity.user.username
+        ? `@${entity.user.username}`
+        : slice?.startsWith("@")
+          ? slice
+          : null,
+      label: slice && slice.trim().length > 0 ? slice : (entity.user.first_name ?? null),
+    };
+  }
+  return entity.type === "mention" && slice ? { user: null, username: slice, label: slice } : null;
+};
+
+const isTypedName = (word: string, position: number): boolean =>
+  position > 0 && word.startsWith("@") && word.length > 1;
+
+/** The command words a name covers. The command word itself is never removed. */
+const coveredPositions = ({
+  index,
+  length,
+}: {
+  index: number | null;
+  length: number | null;
+}): number[] => {
+  const start = index ?? 0;
+  const count = start >= 1 ? (length ?? 1) : 0;
+  return Array.from({ length: count }, (_value, offset) => start + offset);
+};
+
+const commandWords = (message: Pick<Message, "text" | "entities"> | undefined) => {
+  const text = message?.text ?? "";
+  const words = text.trim().length > 0 ? text.trim().split(/\s+/) : [];
+  const entities: LooseEntity[] = Array.isArray(message?.entities) ? message.entities : [];
+  return { text, words, entities };
+};
+
+const remainingWords = (words: string[], removed: ReadonlySet<number>) => {
+  const positions = words
+    .map((_word, position) => position)
+    .filter((position) => !removed.has(position));
+  return { args: positions.map((position) => words[position]!), positions };
+};
+
 /**
  * Finds who a command names: a user picked from Telegram's mention list, else
  * an @username mention. Without an @username from those, the first typed word
@@ -84,71 +138,122 @@ const entityText = (entity: LooseEntity, text: string): string | null =>
 export const findNamedUser = (
   message: Pick<Message, "text" | "entities"> | undefined,
 ): NamedUser | null => {
-  const text = message?.text ?? "";
-  const words = text.trim().length > 0 ? text.trim().split(/\s+/) : [];
-  const entities: LooseEntity[] = Array.isArray(message?.entities) ? message.entities : [];
+  const { text, words, entities } = commandWords(message);
 
-  let user: User | null = null;
-  let username: string | null = null;
-  let label: string | null = null;
+  let person: NamedPerson | null = null;
   let covered: { index: number | null; length: number | null } = { index: null, length: null };
 
   for (const entity of entities) {
     if (!entity || typeof entity.type !== "string") {
       continue;
     }
-
-    if (entity.type === "text_mention" && entity.user) {
-      user = entity.user;
-      const slice = entityText(entity, text);
-      if (entity.user.username) {
-        username = `@${entity.user.username}`;
-      } else if (slice?.startsWith("@")) {
-        username = slice;
-      }
-      label = slice && slice.trim().length > 0 ? slice : (entity.user.first_name ?? null);
+    person = entityPerson(entity, text);
+    if (person) {
       covered = entityWords(entity, text);
       break;
     }
-
-    if (entity.type === "mention") {
-      const slice = entityText(entity, text);
-      if (slice) {
-        username = slice;
-        label = slice;
-        covered = entityWords(entity, text);
-        break;
-      }
-    }
   }
 
-  if (!user && !username) {
-    const index = words.findIndex(
-      (word, position) => position > 0 && word.startsWith("@") && word.length > 1,
-    );
+  if (!person) {
+    const index = words.findIndex(isTypedName);
     if (index !== -1) {
-      username = words[index]!;
+      person = { user: null, username: words[index]!, label: null };
       covered = { index, length: 1 };
     }
   }
 
-  if (!user && !username) {
+  if (!person) {
     return null;
   }
 
-  // The command word itself is never removed.
-  const start = covered.index ?? 0;
-  const count = start >= 1 ? (covered.length ?? 1) : 0;
-  const positions = words
-    .map((_word, position) => position)
-    .filter((position) => position < start || position >= start + count);
+  return { ...person, ...remainingWords(words, new Set(coveredPositions(covered))) };
+};
+
+/** Everyone a command names, in the order they appear, and the words left. */
+export type NamedUsers = Pick<NamedUser, "args" | "positions"> & { users: NamedPerson[] };
+
+type Span = { start: number; end: number };
+
+/**
+ * The characters an entity covers, or null when it cannot be placed. Without a
+ * usable length it covers the word it starts in.
+ */
+const entityRange = (entity: LooseEntity, words: readonly Span[]): Span | null => {
+  if (typeof entity.offset !== "number" || entity.offset < 0) {
+    return null;
+  }
+  const start = entity.offset;
+  if (typeof entity.length === "number" && entity.length > 0) {
+    return { start, end: start + entity.length };
+  }
+  const word = words.find((span) => span.start <= start && start < span.end);
+  return word ? { start, end: word.end } : null;
+};
+
+/**
+ * Finds everyone a command names: users picked from Telegram's mention list,
+ * @username mentions and every other typed word starting with "@". A word may
+ * hold several names ("@ana,@bob"), so mentions are matched by the characters
+ * they cover, and the rest of a word that names someone must be typed names
+ * too: anything else ("@ana,usdc") makes the whole word a name no one has,
+ * never a word quietly dropped.
+ */
+export const findNamedUsers = (
+  message: Pick<Message, "text" | "entities"> | undefined,
+): NamedUsers | null => {
+  const { text, words, entities } = commandWords(message);
+  const spans = [...text.matchAll(/\S+/g)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  const found: { person: NamedPerson; position: number }[] = [];
+  const marked = new Set<number>();
+
+  for (const entity of entities) {
+    const person = entity && typeof entity.type === "string" ? entityPerson(entity, text) : null;
+    if (!person) {
+      continue;
+    }
+    const range = entityRange(entity, spans);
+    const first = range
+      ? spans.findIndex((span) => span.start < range.end && span.end > range.start)
+      : -1;
+    // Someone who cannot be placed goes last and keeps every word.
+    found.push({ person, position: first === -1 ? words.length : first });
+    if (range) {
+      for (let index = range.start; index < Math.min(range.end, text.length); index += 1) {
+        marked.add(index);
+      }
+    }
+  }
+
+  const removed = new Set<number>();
+  spans.forEach((span, position) => {
+    const word = words[position]!;
+    let unmarked = "";
+    for (let index = span.start; index < span.end; index += 1) {
+      unmarked += marked.has(index) ? " " : text.charAt(index);
+    }
+    const mentioned = unmarked !== word;
+    if (position === 0 || (!mentioned && !isTypedName(word, position))) {
+      return;
+    }
+    const rest = unmarked
+      .split(/[^\p{L}\p{N}_@]+/u)
+      .filter((piece) => piece !== "" && piece !== "@");
+    const typed = rest.every((piece) => piece.startsWith("@")) ? rest : [word];
+    for (const username of typed) {
+      found.push({ person: { user: null, username, label: null }, position });
+    }
+    removed.add(position);
+  });
+  if (found.length === 0) {
+    return null;
+  }
 
   return {
-    user,
-    username,
-    label,
-    args: positions.map((position) => words[position]!),
-    positions,
+    users: found.sort((left, right) => left.position - right.position).map(({ person }) => person),
+    ...remainingWords(words, removed),
   };
 };
 
@@ -158,7 +263,7 @@ export const findNamedUser = (
  */
 export const resolveNamedUser = async (
   ctx: Context,
-  named: NamedUser,
+  named: Pick<NamedUser, "user" | "username">,
   senderId: bigint,
   directory: UsernameDirectory,
 ): Promise<MentionedUser> => {
@@ -166,7 +271,7 @@ export const resolveNamedUser = async (
   if (named.user) {
     resolvedId = String(named.user.id);
   } else {
-    // findNamedUser always sets a username when there is no user.
+    // Whoever is named without a picked user always has a username.
     const username = named.username!;
     let found: string | null | undefined;
     try {
@@ -213,8 +318,7 @@ export const resolveNamedUser = async (
     if (!member || String(member.id) !== resolvedId) {
       return { kind: "verification_failed", username };
     }
-    const requested = username.trim().replace(/^@/, "").toLowerCase();
-    if (!member.username || member.username.toLowerCase() !== requested) {
+    if (!member.username || normalizeUsername(member.username) !== normalizeUsername(username)) {
       try {
         directory.invalidateUsernameMapping?.(username, resolvedId);
       } catch (error) {

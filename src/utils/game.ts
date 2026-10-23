@@ -18,11 +18,11 @@ import { Context } from "grammy";
 import { WalletManager } from "./wallet";
 import {
   GameDatabase,
-  type GameChallenge,
+  type ChallengedPlayer,
   type PendingGameCreationRecord,
   type PendingGameCreationState,
 } from "./game-database";
-import { CHALLENGE_JOIN_LABEL, CHALLENGE_PLAYERS } from "./game-challenge";
+import { CHALLENGE_JOIN_LABEL } from "./game-challenge";
 import { OracleClient, formatOraclePolicyError } from "./oracle";
 import { PDAManager } from "./pda";
 import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
@@ -3138,35 +3138,38 @@ export class GameManager {
         ? creatorPublicKey
         : null;
     const challenge = this.readGameChallenge(gameCacheKey);
-    // A drawn winner means both played, even if the local player list lags; a
-    // challenge that expired unanswered has neither, so it never reads as a match.
+    // A drawn winner means everyone played, even if the local player list lags;
+    // a challenge that expired short of them has neither, so it never reads as a match.
     const hasWinner =
       !!winnerAddress && winnerAddress !== "cancelled" && winnerAddress !== DEFAULT_NULL_ADDRESS;
-    const challengeAccepted = hasWinner || currentTickets >= CHALLENGE_PLAYERS;
-    const header = challenge
-      ? buildChallengeHeader(
-          formattedTicketAmount,
-          tokenTicker,
-          safeCreatorUsername,
-          suppressMentions
-            ? escapeHtml(sanitizeDisplay(challenge.displayName))
-            : buildUserMention(challenge.telegramId, sanitizeDisplay(challenge.displayName)),
-          challengeAccepted,
-          usdApproximation?.text,
-          explorerUrl,
-          creatorWalletAddress,
-        )
-      : buildGameHeader(
-          formatGameTypeWithEmoji(gameType),
-          formattedTicketAmount,
-          tokenTicker,
-          safeCreatorUsername,
-          currentTickets,
-          maxTickets,
-          usdApproximation?.text,
-          explorerUrl,
-          creatorWalletAddress,
-        );
+    const challengeAccepted = hasWinner || currentTickets >= challenge.length + 1;
+    const header =
+      challenge.length > 0
+        ? buildChallengeHeader(
+            formattedTicketAmount,
+            tokenTicker,
+            safeCreatorUsername,
+            challenge.map((player) =>
+              suppressMentions
+                ? escapeHtml(sanitizeDisplay(player.displayName))
+                : buildUserMention(player.telegramId, sanitizeDisplay(player.displayName)),
+            ),
+            challengeAccepted,
+            usdApproximation?.text,
+            explorerUrl,
+            creatorWalletAddress,
+          )
+        : buildGameHeader(
+            formatGameTypeWithEmoji(gameType),
+            formattedTicketAmount,
+            tokenTicker,
+            safeCreatorUsername,
+            currentTickets,
+            maxTickets,
+            usdApproximation?.text,
+            explorerUrl,
+            creatorWalletAddress,
+          );
     // Show current prize if different from base amount
     let prizeUsdApproximation: string | null = null;
     if (usdApproximation) {
@@ -3194,8 +3197,8 @@ export class GameManager {
 
     const participantDisplayNames: ParticipantDisplay[] = [];
     let totalParticipants = 0;
-    // A challenge header already names both players.
-    if (currentTickets > 0 && !challenge) {
+    // A challenge header already names every player.
+    if (currentTickets > 0 && challenge.length === 0) {
       try {
         totalParticipants = Math.max(0, Number(currentTickets) || 0);
         const previewLimit = Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
@@ -3243,12 +3246,15 @@ export class GameManager {
       }
     }
 
-    const statusText = challenge
-      ? buildChallengeStatus(
-          challengeAccepted,
-          escapeHtml(sanitizeTelegramDisplayNameWithoutMention(challenge.displayName)),
-        )
-      : buildGameStatus(currentTickets, minTickets, maxTickets);
+    const statusText =
+      (challenge.length > 0
+        ? this.challengeStatus(
+            challenge,
+            challengeAccepted,
+            currentTickets,
+            participantAddresses ?? [],
+          )
+        : null) ?? buildGameStatus(currentTickets, minTickets, maxTickets);
     const statusSection = !isCompleted ? `\nStatus: ${statusText}${expirationInfo}` : "";
 
     const composeMessage = (names: ParticipantDisplay[], omittedCount: number): string => {
@@ -3285,7 +3291,7 @@ export class GameManager {
       messageText = messageText.slice(0, TELEGRAM_MESSAGE_CHAR_LIMIT - 1) + "…";
     }
 
-    const keyboard = this.generateGameKeyboard(status, gamePda, challenge !== null);
+    const keyboard = this.generateGameKeyboard(status, gamePda, challenge.length > 0);
 
     return { messageText, keyboard };
   }
@@ -3294,13 +3300,52 @@ export class GameManager {
    * A card that cannot read its challenge renders as a regular coinflip; the
    * join authorization still reads the challenge and fails closed.
    */
-  private readGameChallenge(gameAddress: string): GameChallenge | null {
+  private readGameChallenge(gameAddress: string): ChallengedPlayer[] {
     try {
-      return (this.gameDb as any).getGameChallenge?.(gameAddress) ?? null;
+      return (this.gameDb as any).getGameChallenge?.(gameAddress) ?? [];
     } catch (error) {
       console.warn(`Failed to read challenge for ${gameAddress}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * The status of a challenge card, or null when who is still missing cannot be
+   * told and the count is what is still true. A coinflip's creator joins in the
+   * transaction that creates it, so until a second ticket every challenged player
+   * is missing. Past that, they are named only when the ones left add up to the
+   * seats left, so a player list that lags or a wallet the bot cannot place never
+   * names someone who already joined.
+   */
+  private challengeStatus(
+    challenge: ChallengedPlayer[],
+    accepted: boolean,
+    currentTickets: number,
+    participantAddresses: string[],
+  ): string | null {
+    const named = (players: ChallengedPlayer[]) =>
+      buildChallengeStatus(
+        accepted,
+        players.map((player) =>
+          escapeHtml(sanitizeTelegramDisplayNameWithoutMention(player.displayName)),
+        ),
+      );
+    if (accepted || currentTickets <= 1) {
+      return named(challenge);
+    }
+    let waiting: ChallengedPlayer[];
+    try {
+      const joined = new Set(
+        participantAddresses
+          .slice(0, currentTickets)
+          .map((address) => this.gameDb.getPlayerTelegramId(address)),
+      );
+      waiting = challenge.filter((player) => !joined.has(player.telegramId));
+    } catch (error) {
+      console.warn("Failed to read who accepted a challenge:", error);
       return null;
     }
+    return waiting.length === challenge.length + 1 - currentTickets ? named(waiting) : null;
   }
 
   private async buildGameMessagePayload(
@@ -4374,7 +4419,7 @@ export class GameManager {
       isPrivate?: boolean;
       replyToMessageId?: number;
       creationMessageId?: number;
-      challenge?: GameChallenge;
+      challenge?: ChallengedPlayer[];
     },
     chatId?: number,
     requestTimestampMs: number = Date.now(),
@@ -4396,8 +4441,8 @@ export class GameManager {
 
     const telegramIdStr = telegramId.toString();
     // Only private games need the operator's signature to join, which is what
-    // keeps everyone but the challenged player out of a challenge.
-    const isPrivate = options?.challenge ? true : (options?.isPrivate ?? true);
+    // keeps everyone but the challenged players out of a challenge.
+    const isPrivate = options?.challenge?.length ? true : (options?.isPrivate ?? true);
     const requestKey =
       chatId != null && options?.replyToMessageId != null
         ? `${telegramIdStr}:${chatId}:${options.replyToMessageId}`
@@ -4835,7 +4880,7 @@ export class GameManager {
       foregroundGameAddress = gamePda.toBase58();
       this.foregroundCreationGames.add(foregroundGameAddress);
       // Before the transaction exists, so the game never reaches the chain without it.
-      if (options?.challenge)
+      if (options?.challenge?.length)
         this.gameDb.saveGameChallenge(foregroundGameAddress, options.challenge);
       const tokenAccounts = await this.resolveGameVaultAccounts(tokenMintPubkey);
       const gameFundsContext = buildGameFundsContext(

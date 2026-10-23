@@ -3,6 +3,7 @@ import { Keypair } from "#solana";
 import {
   botModule,
   clearApiOverride,
+  lastCall,
   lastText,
   overrideApiMethod,
   resetCalls,
@@ -177,11 +178,72 @@ describe("/coinflip naming who to challenge through the bot", () => {
 
     expect(manager.findTelegramIdByUsername).toHaveBeenCalledWith("@rival");
     const call = manager.createGame!.mock.calls[0] as any[];
-    expect(call[2]).toBe(2);
+    expect(call.slice(2, 4)).toEqual([2, 2]);
     expect(call[6]).toMatchObject({
       isPrivate: true,
-      challenge: { telegramId: "5150", displayName: "@rival" },
+      challenge: [{ telegramId: "5150", displayName: "@rival" }],
     });
+  });
+
+  test("several known @usernames are all challenged in one private game that needs every one of them", async () => {
+    const ids: Record<string, string> = { "@rival": "5150", "@bo": "6160" };
+    manager.findTelegramIdByUsername = mock((username: string) => ids[username] ?? null);
+    overrideApiMethod("getChatMember", (payload) => ({
+      status: "member",
+      user: {
+        id: payload.user_id,
+        is_bot: false,
+        first_name: "Player",
+        username: payload.user_id === 5150 ? "rival" : "bo",
+      },
+    }));
+
+    await sendText("/cf 5 BONK @rival @bo", { userId: USER, chatId: GROUP });
+
+    expect(manager.findTelegramIdByUsername.mock.calls).toEqual([["@rival"], ["@bo"]]);
+    const call = manager.createGame!.mock.calls[0] as any[];
+    expect(call.slice(2, 4)).toEqual([3, 3]);
+    expect(call[6].isPrivate).toBe(true);
+    expect(call[6].challenge).toEqual([
+      { telegramId: "5150", displayName: "@rival" },
+      { telegramId: "6160", displayName: "@bo" },
+    ]);
+  });
+
+  test("one unknown @username among several opens nothing", async () => {
+    manager.findTelegramIdByUsername = mock((username: string) =>
+      username === "@rival" ? "5150" : null,
+    );
+    overrideApiMethod("getChatMember", (payload) => ({
+      status: "member",
+      user: { id: payload.user_id, is_bot: false, first_name: "Rival", username: "rival" },
+    }));
+
+    await sendText("/cf 5 BONK @rival @ghost", { userId: USER, chatId: GROUP });
+
+    expect(lastText()).toBe(
+      "I don't know who <code>@ghost</code> is yet. Ask them to use the bot here, then try again.",
+    );
+    expect(manager.createGame).not.toHaveBeenCalled();
+  });
+
+  test("naming more than five people is refused to the sender alone and opens nothing", async () => {
+    manager.findTelegramIdByUsername = mock(() => "5150");
+
+    const command = await sendText("/cf 5 BONK @p1 @p2 @p3 @p4 @p5 @p6", {
+      userId: USER,
+      chatId: GROUP,
+    });
+
+    expect(lastCall("sendMessage")?.payload).toEqual({
+      chat_id: GROUP,
+      text: `You can challenge up to ${Math.min(5, botModule.__test_getOracleMaxPlayers() - 1)} people at once.`,
+      parse_mode: "HTML",
+      reply_to_message_id: command,
+      ephemeral_message_parameters: { receiver_user_id: USER },
+    });
+    expect(manager.findTelegramIdByUsername).not.toHaveBeenCalled();
+    expect(manager.createGame).not.toHaveBeenCalled();
   });
 
   test("a failed read is answered as such and opens nothing", async () => {

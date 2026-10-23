@@ -1,4 +1,4 @@
-import { expect, test, beforeEach } from "bun:test";
+import { expect, test, beforeEach, spyOn } from "bun:test";
 import fc from "fast-check";
 import type { GameData } from "../src/types";
 import { GameDatabase } from "../src/utils/game-database";
@@ -1034,29 +1034,133 @@ test("replacement survives restart and fences stale workers and concurrent repla
   ).toBe(false);
 });
 
-test("a saved challenge reads back by game address and unknown games have none", () => {
+const RIVAL = { telegramId: "5150", displayName: "@rival" };
+const BO = { telegramId: "6160", displayName: "@bo" };
+const CID = { telegramId: "7171", displayName: "Cid" };
+const saveOldFormatChallenge = (gameAddress: string, createdAt: number) => {
+  (GameDatabase.getInstance() as any).db
+    .prepare(
+      `INSERT INTO game_challenges
+        (game_address, challenged_telegram_id, challenged_display_name, created_at)
+        VALUES (?, ?, ?, ?)`,
+    )
+    .run(gameAddress, RIVAL.telegramId, RIVAL.displayName, createdAt);
+};
+
+test("a saved challenge reads back in the order named and unknown games have none", () => {
   const db = GameDatabase.getInstance();
 
-  db.saveGameChallenge("challenge_game", { telegramId: "5150", displayName: "@rival" }, 1_700);
+  db.saveGameChallenge("challenge_game", [CID, RIVAL, BO], 1_700);
+  db.saveGameChallenge("one_on_one", [RIVAL], 1_700);
 
-  expect(db.getGameChallenge("challenge_game")).toEqual({
-    telegramId: "5150",
-    displayName: "@rival",
-  });
-  expect(db.getGameChallenge("open_game")).toBeNull();
+  expect(db.getGameChallenge("challenge_game")).toEqual([CID, RIVAL, BO]);
+  expect(db.getGameChallenge("one_on_one")).toEqual([RIVAL]);
+  expect(db.getGameChallenge("open_game")).toEqual([]);
 });
 
-test("a game's challenged player cannot be replaced", () => {
+test("a game's challenged players can be neither replaced nor added to", () => {
   const db = GameDatabase.getInstance();
-  db.saveGameChallenge("challenge_game", { telegramId: "5150", displayName: "@rival" });
+  db.saveGameChallenge("challenge_game", [RIVAL, BO]);
 
-  expect(() =>
-    db.saveGameChallenge("challenge_game", { telegramId: "6160", displayName: "@intruder" }),
-  ).toThrow();
-  expect(db.getGameChallenge("challenge_game")).toEqual({
-    telegramId: "5150",
-    displayName: "@rival",
+  for (const intruders of [[CID], [RIVAL, BO, CID]]) {
+    expect(() => db.saveGameChallenge("challenge_game", intruders)).toThrow();
+  }
+  expect(db.getGameChallenge("challenge_game")).toEqual([RIVAL, BO]);
+});
+
+test("a challenge naming someone twice saves no one", () => {
+  const db = GameDatabase.getInstance();
+
+  for (const [game, challenge] of [
+    ["first_twice", [RIVAL, BO, RIVAL]],
+    ["other_twice", [RIVAL, BO, BO]],
+  ] as const) {
+    expect(() => db.saveGameChallenge(game, challenge)).toThrow(
+      "A challenge names each player once",
+    );
+    expect(db.getGameChallenge(game)).toEqual([]);
+  }
+});
+
+test("a challenge naming no one saves nothing", () => {
+  const db = GameDatabase.getInstance();
+
+  expect(() => db.saveGameChallenge("open_game", [])).not.toThrow();
+
+  expect(db.getGameChallenge("open_game")).toEqual([]);
+});
+
+test("a challenge that fails partway saves no one", () => {
+  const db = GameDatabase.getInstance();
+  const instance = db as any;
+  const run = instance.run.bind(instance);
+  const failing = spyOn(instance, "run").mockImplementation((sql: any, ...rest: any[]) => {
+    if (String(sql).includes("game_challenge_extra_players")) {
+      throw new Error("synthetic-disk-full");
+    }
+    return run(sql, ...rest);
   });
+  try {
+    expect(() => db.saveGameChallenge("challenge_game", [RIVAL, BO])).toThrow(
+      "synthetic-disk-full",
+    );
+  } finally {
+    failing.mockRestore();
+  }
+
+  expect(db.getGameChallenge("challenge_game")).toEqual([]);
+});
+
+test("the players after the first are stored in order from position 1, after the first one", () => {
+  const db = GameDatabase.getInstance();
+  db.saveGameChallenge("challenge_game", [CID, RIVAL, BO], 1_700);
+
+  const extras = (db as any).db
+    .prepare(
+      `SELECT game_address, position, telegram_id, display_name, created_at
+        FROM game_challenge_extra_players ORDER BY position`,
+    )
+    .all();
+
+  expect(extras).toEqual([
+    {
+      game_address: "challenge_game",
+      position: 1,
+      telegram_id: RIVAL.telegramId,
+      display_name: RIVAL.displayName,
+      created_at: 1_700,
+    },
+    {
+      game_address: "challenge_game",
+      position: 2,
+      telegram_id: BO.telegramId,
+      display_name: BO.displayName,
+      created_at: 1_700,
+    },
+  ]);
+});
+
+test("a challenge saved before several players could be named still reads back", () => {
+  saveOldFormatChallenge("old_format_game", 1_700);
+
+  expect(GameDatabase.getInstance().getGameChallenge("old_format_game")).toEqual([RIVAL]);
+});
+
+test("a bot from before several players could be named reads only the first one", () => {
+  const db = GameDatabase.getInstance();
+  db.saveGameChallenge("challenge_game", [CID, RIVAL, BO], 1_700);
+
+  // The query that bot reads a challenge with.
+  const oldRead = (db as any).db
+    .prepare(
+      `SELECT challenged_telegram_id, challenged_display_name
+        FROM game_challenges WHERE game_address = ?`,
+    )
+    .all("challenge_game");
+
+  expect(oldRead).toEqual([
+    { challenged_telegram_id: CID.telegramId, challenged_display_name: CID.displayName },
+  ]);
 });
 
 test("cleanupOldGames drops the challenges of the games it deletes only", () => {
@@ -1065,38 +1169,38 @@ test("cleanupOldGames drops the challenges of the games it deletes only", () => 
   const thirtyOneDaysAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
 
   db.saveGame("old_challenge", "creator_old", 100, "coinflip");
-  db.saveGameChallenge("old_challenge", { telegramId: "5150", displayName: "@old" });
+  db.saveGameChallenge("old_challenge", [RIVAL, BO]);
   sqlite
     .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
     .run(thirtyOneDaysAgo, "old_challenge");
   db.saveGame("live_challenge", "creator_live", 100, "coinflip");
-  db.saveGameChallenge("live_challenge", { telegramId: "6160", displayName: "@live" });
+  db.saveGameChallenge("live_challenge", [CID]);
 
   db.cleanupOldGames(30);
 
-  expect(db.getGameChallenge("old_challenge")).toBeNull();
-  expect(db.getGameChallenge("live_challenge")).toEqual({
-    telegramId: "6160",
-    displayName: "@live",
-  });
+  expect(db.getGameChallenge("old_challenge")).toEqual([]);
+  expect(db.getGameChallenge("live_challenge")).toEqual([CID]);
 });
 
 test("cleanupOldGames drops old challenges whose game was never created", () => {
   const db = GameDatabase.getInstance();
   const thirtyOneDaysAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
 
-  db.saveGameChallenge(
-    "failed_creation",
-    { telegramId: "5150", displayName: "@old" },
-    thirtyOneDaysAgo,
-  );
-  db.saveGameChallenge("creating_now", { telegramId: "6160", displayName: "@new" });
+  db.saveGameChallenge("failed_creation", [RIVAL], thirtyOneDaysAgo);
+  db.saveGameChallenge("creating_now", [BO]);
 
   db.cleanupOldGames(30);
 
-  expect(db.getGameChallenge("failed_creation")).toBeNull();
-  expect(db.getGameChallenge("creating_now")).toEqual({
-    telegramId: "6160",
-    displayName: "@new",
-  });
+  expect(db.getGameChallenge("failed_creation")).toEqual([]);
+  expect(db.getGameChallenge("creating_now")).toEqual([BO]);
+});
+
+test("cleanupOldGames drops old challenges saved before several players could be named", () => {
+  const thirtyOneDaysAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
+  saveOldFormatChallenge("old_format_game", thirtyOneDaysAgo);
+  const db = GameDatabase.getInstance();
+
+  db.cleanupOldGames(30);
+
+  expect(db.getGameChallenge("old_format_game")).toEqual([]);
 });

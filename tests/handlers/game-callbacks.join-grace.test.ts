@@ -34,7 +34,7 @@ const makeModule = (
     gameDb: {
       getGame: () => ({ game_address: "unused", status: "active" }),
       savePlayerMapping: vi.fn(),
-      getGameChallenge: () => null,
+      getGameChallenge: () => [],
     } as any,
     wrapCallbackHandler: (handler) => async (ctx, next) => handler(ctx, next),
     withCreatorContext: passthrough,
@@ -96,7 +96,7 @@ describe("join callback grace toast", () => {
         isGameParticipant: () => false,
         savePlayerMapping: vi.fn(),
         saveUsernameMapping: vi.fn(),
-        getGameChallenge: () => null,
+        getGameChallenge: () => [],
       } as any;
       const program = makeProgramStub({
         ticketsCount: 0,

@@ -17,6 +17,7 @@ import {
 } from "../src/utils/constants";
 import { contractCapabilities } from "../src/utils/contract-idl";
 import { decodeGameTransaction } from "../src/utils/game-transaction";
+import type { ChallengedPlayer } from "../src/utils/game-database";
 
 const TEST_ORACLE = await Keypair.generate();
 
@@ -2274,10 +2275,12 @@ describe("GameManager.createGame", () => {
 });
 
 describe("GameManager.createGame for a challenge", () => {
-  const CHALLENGE = { telegramId: "5150", displayName: "@rival" };
+  const CHALLENGE = [{ telegramId: "5150", displayName: "@rival" }];
 
   const createChallenge = async (
     saveGameChallenge: (address: string, challenge: unknown) => void,
+    challenge: ChallengedPlayer[] = CHALLENGE,
+    seats = 2,
   ) => {
     resetGM();
     const events: string[] = [];
@@ -2339,11 +2342,11 @@ describe("GameManager.createGame for a challenge", () => {
           tokenTicker: "TIMBA",
           isSol: false,
         },
-        2,
-        2,
+        seats,
+        seats,
         60,
         1n,
-        { isPrivate: false, challenge: CHALLENGE },
+        { isPrivate: false, challenge },
         8200,
       );
       return { result, events, db, signGameTransaction, program };
@@ -2364,6 +2367,24 @@ describe("GameManager.createGame for a challenge", () => {
     );
     // The chain enforces the operator signature only for private games.
     expect((program as any).__captures.initializeGameConfig.isPrivate).toBe(true);
+  });
+
+  test("a challenge naming several people saves them all and asks the chain for all their seats", async () => {
+    const challenge = [...CHALLENGE, { telegramId: "6160", displayName: "@bo" }];
+    const { result, db, program } = await createChallenge(() => {}, challenge, 3);
+
+    expect(result.success).toBe(true);
+    expect(db.saveGameChallenge.mock.calls).toEqual([[result.gameAddress, challenge]]);
+    const config = (program as any).__captures.initializeGameConfig;
+    expect([config.maxTickets, config.minTickets, config.isPrivate]).toEqual([3, 3, true]);
+  });
+
+  test("an empty challenge is no challenge", async () => {
+    const { result, db, program } = await createChallenge(() => {}, []);
+
+    expect(result.success).toBe(true);
+    expect(db.saveGameChallenge).not.toHaveBeenCalled();
+    expect((program as any).__captures.initializeGameConfig.isPrivate).toBe(false);
   });
 
   test("creates nothing when the challenge cannot be saved", async () => {

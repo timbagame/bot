@@ -550,12 +550,12 @@ describe("createGameViaCommand as a reply", () => {
     );
 
     const call = gameManager.createGame.mock.calls[0] as any[];
-    expect(call[2]).toBe(2);
+    expect(call.slice(2, 4)).toEqual([2, 2]);
     expect(createGameOptions(gameManager)).toEqual({
       isPrivate: true,
       replyToMessageId: 10,
       creationMessageId: 501,
-      challenge: { telegramId: "5150", displayName: "@rival" },
+      challenge: [{ telegramId: "5150", displayName: "@rival" }],
     });
   });
 
@@ -573,7 +573,7 @@ describe("createGameViaCommand as a reply", () => {
       module.COINFLIP_COMMAND_OPTIONS,
     );
 
-    expect((gameManager.createGame.mock.calls[0] as any[])[2]).toBe(6);
+    expect((gameManager.createGame.mock.calls[0] as any[]).slice(2, 4)).toEqual([6, 2]);
     expect(createGameOptions(gameManager)).toEqual({
       isPrivate: false,
       replyToMessageId: 10,
@@ -598,7 +598,7 @@ describe("createGameViaCommand as a reply", () => {
 });
 
 describe("createGameViaCommand naming who to challenge", () => {
-  const CHALLENGE = { telegramId: "6160", displayName: "Ana Paz" };
+  const CHALLENGE = [{ telegramId: "6160", displayName: "Ana Paz" }];
 
   test("a coinflip given a challenge is private and one on one, over any reply", async () => {
     const { module, gameManager } = setup({
@@ -616,13 +616,50 @@ describe("createGameViaCommand naming who to challenge", () => {
     });
 
     const call = gameManager.createGame.mock.calls[0] as any[];
-    expect(call[2]).toBe(2);
+    expect(call.slice(2, 4)).toEqual([2, 2]);
     expect(call[6]).toEqual({
       isPrivate: true,
       replyToMessageId: 10,
       creationMessageId: 501,
       challenge: CHALLENGE,
     });
+  });
+
+  test("a coinflip challenging several people seats exactly them and its creator, all required", async () => {
+    const { module, gameManager } = setup({
+      deps: { getChatGameSettings: () => ({ coinflip_default_privacy: "public" }) },
+    });
+    const { ctx } = makeCtx("/cf 5 TKN 9");
+    const challenge = [
+      { telegramId: "6160", displayName: "Ana Paz" },
+      { telegramId: "7272", displayName: "@bo" },
+      { telegramId: "8383", displayName: "Cid" },
+    ];
+
+    await module.createGameViaCommand(ctx, ["/cf", "5", "TKN", "9"], 1n, {
+      ...module.COINFLIP_COMMAND_OPTIONS,
+      challenge,
+    });
+
+    const call = gameManager.createGame.mock.calls[0] as any[];
+    expect(call.slice(2, 4)).toEqual([4, 4]);
+    expect(call[6]).toEqual({
+      isPrivate: true,
+      replyToMessageId: 10,
+      creationMessageId: 501,
+      challenge,
+    });
+  });
+
+  test("the coinflip deps count the most players as a coinflip command does", () => {
+    for (const [oracleMax, maxPlayers] of [
+      [7, 7],
+      [1, 2],
+    ] as const) {
+      const { module } = setup({ deps: { getOracleMaxPlayers: () => oracleMax } });
+
+      expect(module.createCoinflipDeps().getMaxPlayers()).toBe(maxPlayers);
+    }
   });
 
   test("the coinflip deps pass the challenge and the username directory through", async () => {

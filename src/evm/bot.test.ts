@@ -310,6 +310,20 @@ describe("EVM token choice between networks", () => {
     }
   });
 
+  test("no one a coinflip names is its token, however many are named", async () => {
+    for (const [text, replayed] of [
+      ["/cf 1 @ana @bo usdc", "/cf 1 @ana @bo sol-usdc"],
+      ["/cf 1 @ana usdc @bo", "/cf 1 @ana sol-usdc @bo"],
+      ["/cf @ana @bo 1 usdc", "/cf @ana @bo 1 sol-usdc"],
+    ]) {
+      await h.text(text!);
+      const prompt = h.calls.filter((c) => c.method === "sendMessage").at(-1)!;
+      expect(prompt.payload.text).toBe("Choose the token for this game:");
+      await h.click(prompt.payload.reply_markup.inline_keyboard[0][0].callback_data);
+      expect(h.solanaDispatched.at(-1)).toBe(replayed);
+    }
+  });
+
   test("a giveaway still reads a name where its token goes", async () => {
     await h.text("/ga 1 @ana");
     expect(h.replies().at(-1)).toBe("Token unavailable. Check its symbol or address.");
@@ -519,7 +533,12 @@ describe("EVM game commands", () => {
 
   test("a coinflip naming someone is refused instead of opening an EVM game", async () => {
     useEvm(-100);
-    for (const text of ["/cf 1 TEST @ana", "/cf @ana 1 TEST", "/ecf 1 TEST @ana"]) {
+    for (const text of [
+      "/cf 1 TEST @ana",
+      "/cf @ana 1 TEST",
+      "/ecf 1 TEST @ana",
+      "/cf 1 TEST @ana @bo",
+    ]) {
       await h.text(text, { chat: "group" });
       expect(h.replies().at(-1)).toBe("Challenges only work with Solana tokens.");
     }

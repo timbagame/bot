@@ -1432,7 +1432,7 @@ const rewriteJoinButtons = (
         text: formatActiveJoinLabel(
           parseActiveGameHeader(game.messageText).amountPart,
           parseActiveGameHeader(game.messageText).ticker,
-          // Only the challenged player can accept, so keep saying so.
+          // Only the challenged players can accept, so keep saying so.
           button.text === CHALLENGE_JOIN_LABEL ? CHALLENGE_JOIN_LABEL : undefined,
         ),
       };
@@ -4112,7 +4112,7 @@ registerCaseInsensitiveCommand(
     "<b>🎲 How to use the bot</b>",
     "",
     "<b>🎮 Games</b>",
-    "/coinflip &lt;amount&gt; [token] [players]: Start a coinflip (or /cf); add @user or reply to someone to challenge them",
+    "/coinflip &lt;amount&gt; [token] [players]: Start a coinflip (or /cf); add one or more @users, or reply to someone, to challenge them",
     "/giveaway &lt;amount&gt; [token] [players]: Start a giveaway (or /ga)",
     "/faucet &lt;amount&gt; [token] [users]: First come, first served drop (or /rain)",
     "/active: Games in progress",

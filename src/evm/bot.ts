@@ -1,6 +1,6 @@
 import { parseGameCommandInput } from "../handlers/game-command-input";
 import {
-  findChallengeName,
+  findChallengeNames,
   namedReplyRefusal,
   resolveChallengeTarget,
 } from "../utils/game-challenge";
@@ -93,7 +93,7 @@ export function registerEvmBot(
       .run(chain, ctx.match[1]!);
     const original = saved.update.message!;
     // Find the token as when the command arrived, skipping whoever it names.
-    const named = findChallengeName(original);
+    const named = findChallengeNames(original);
     const parts =
       named?.args ?? ("text" in original ? (original.text ?? "") : "").trim().split(/\s+/);
     const index = parseGameCommandInput(parts.slice(1)).mode === "menu" ? 1 : 2;
@@ -121,7 +121,7 @@ export function registerEvmBot(
     if (!candidate) return next();
     if (candidate.command === "ecf" || candidate.command === "egiveaway") {
       // Whoever a coinflip names is not its token.
-      const named = candidate.command === "ecf" ? findChallengeName(ctx.message) : null;
+      const named = candidate.command === "ecf" ? findChallengeNames(ctx.message) : null;
       const args = named?.args.slice(1) ?? candidate.args.trim().split(/\s+/).filter(Boolean);
       const { token: tokenInput } = parseGameCommandInput(args);
       const preferred = store.network(String(ctx.chat.id));
@@ -408,7 +408,7 @@ export function registerEvmBot(
           gameType === 0 &&
           (ctx.message?.external_reply ||
             resolveChallengeTarget(ctx.message, BigInt(user(ctx))) ||
-            findChallengeName(ctx.message) ||
+            findChallengeNames(ctx.message) ||
             namedReplyRefusal(ctx.message, BigInt(user(ctx))))
         ) {
           await ctx.reply("Challenges only work with Solana tokens.");

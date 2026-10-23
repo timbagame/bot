@@ -26,7 +26,7 @@ function setup(overrides: { games?: Record<string, any>; deps?: Record<string, u
   const gameDb: any = {
     getGame: mock((address: string) => games.get(address) ?? null),
     savePlayerMapping: mock(() => {}),
-    getGameChallenge: mock((_address: string): any => null),
+    getGameChallenge: mock((_address: string): any => []),
   };
   const gameManager: any = {
     joinGame: mock(async (): Promise<any> => ({
@@ -700,7 +700,7 @@ describe("registered setup callbacks", () => {
 });
 
 describe("accepting a challenge", () => {
-  const challengeFor = (telegramId: string) => ({ telegramId, displayName: "Ana Paz" });
+  const challengeFor = (telegramId: string) => [{ telegramId, displayName: "Ana Paz" }];
 
   test("someone other than the challenged player is told who it is for and nothing runs", async () => {
     const h = setup();
@@ -713,6 +713,27 @@ describe("accepting a challenge", () => {
     expect(h.gameManager.joinGame).not.toHaveBeenCalled();
     expect(h.gameManager.createGameMessage).not.toHaveBeenCalled();
     expect(h.gameDb.savePlayerMapping).not.toHaveBeenCalled();
+  });
+
+  test("in a challenge to several people, only they are let in", async () => {
+    const challenge = [
+      { telegramId: "5150", displayName: "Ana Paz" },
+      { telegramId: "7", displayName: "@alice" },
+      { telegramId: "6160", displayName: "@bo" },
+    ];
+    const outsider = setup();
+    outsider.gameDb.getGameChallenge.mockImplementation(() =>
+      challenge.filter((player) => player.telegramId !== "7"),
+    );
+    const named = setup();
+    named.gameDb.getGameChallenge.mockImplementation(() => challenge);
+
+    expect((await run(outsider, `join_${GAME}`)).answers).toEqual([
+      "This challenge is for Ana Paz and @bo.",
+    ]);
+    expect(outsider.gameManager.joinGame).not.toHaveBeenCalled();
+    expect((await run(named, `join_${GAME}`)).answers).toEqual(["✅ Joined! (1/2)"]);
+    expect(named.gameManager.joinGame).toHaveBeenCalledWith(GAME, 7n, CHAT, "@alice");
   });
 
   test("the challenged player joins like any other player", async () => {

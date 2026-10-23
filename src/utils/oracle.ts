@@ -1,7 +1,7 @@
 import type { PublicKey } from "#solana";
 import type { AuthorizationResult, OracleStats } from "../types";
 import { GameDatabase } from "./game-database";
-import { challengeForSomeoneElseMessage } from "./game-challenge";
+import { challengeForSomeoneElseMessage, challengeKeepsOut } from "./game-challenge";
 import type { WalletManager } from "./wallet";
 import { loadOracleApiToken } from "./secrets";
 import { createRestClient, expectStatus, ProtocolHttpError } from "@timbagame/protocol/common";
@@ -322,9 +322,9 @@ export class OracleClient {
       }
 
       // The operator signature is the on-chain gate: withholding it keeps
-      // everyone but the challenged player out, whichever client they use.
+      // everyone but the challenged players out, whichever client they use.
       const challenge = this.gameDb.getGameChallenge(gamePda.toBase58());
-      if (challenge && challenge.telegramId !== telegramId.toString()) {
+      if (challengeKeepsOut(challenge, telegramId)) {
         return { authorized: false, error: challengeForSomeoneElseMessage(challenge) };
       }
 
