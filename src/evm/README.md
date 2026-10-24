@@ -8,7 +8,7 @@ configured network. Back up the mnemonic and the deployment-specific database.
 
 Commands:
 
-- `/balance` in private chat: EVM deposit address and configured token/ETH balances.
+- `/balance` or `/wallet` in private chat: EVM deposit address and configured token/ETH balances.
 - `/cf AMOUNT [TOKEN] [PLAYERS] [private]`: coinflip (2 to 100 players).
 - `/ga AMOUNT [TOKEN] [PLAYERS] [private]`: funded giveaway (1 to 100 players).
 - `/invite GAME_ID TELEGRAM_ID`: creator-approved five-minute private invitation.

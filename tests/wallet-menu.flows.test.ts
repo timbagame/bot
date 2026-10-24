@@ -69,7 +69,7 @@ afterEach(() => {
   restoreStubs();
 });
 
-describe("/start and /balance", () => {
+describe("/start, /balance and /wallet", () => {
   const walletCard = () =>
     calls.filter((call) => /^send(Photo|Video|Animation|Message)$/.test(call.method)).at(-1);
   const cardText = () => String(walletCard()?.payload.caption ?? walletCard()?.payload.text ?? "");
@@ -79,6 +79,21 @@ describe("/start and /balance", () => {
 
     expect(walletCard()?.payload.chat_id).toBe(USER);
     expect(cardText()).toContain("SOL: <code>2</code> SOL");
+  });
+
+  test("/wallet and /balance send the same wallet as /start", async () => {
+    const cards = [];
+    for (const text of ["/start", "/wallet", "/Wallet@test_bot", "/balance"]) {
+      calls.length = 0;
+      await sendText(text, { userId: USER });
+      // Each card replies to its own command; everything else must match.
+      const { reply_to_message_id: _, ...card } = walletCard()!.payload;
+      cards.push(card);
+    }
+
+    expect(cards[0]!.chat_id).toBe(USER);
+    expect(String(cards[0]!.caption ?? cards[0]!.text)).toContain("SOL: <code>2</code> SOL");
+    expect(cards.slice(1)).toEqual([cards[0], cards[0], cards[0]]);
   });
 
   const GROUP = -4_401;
