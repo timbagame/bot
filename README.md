@@ -33,11 +33,11 @@ src/
 
 ## 🔧 Commands
 
-The Telegram `/` menu lists only primary command names, in a fixed order. Aliases (`/balance`, `/cf`, `/ga`, `/rain`, `/wh`, `/lb`, `/gb`, `/default`, `/config`, `/configs`) still work but are hidden. Private chats omit `/leaderboard`; groups omit `/deposit`.
+The Telegram `/` menu lists only primary command names, in a fixed order. Aliases (`/start`, `/cf`, `/ga`, `/rain`, `/wh`, `/lb`, `/gb`, `/default`, `/config`, `/configs`) still work but are hidden. Private chats omit `/leaderboard`; groups omit `/deposit`.
 
 ### Wallet
 
-- `/start` (`/balance`) - Open your wallet
+- `/balance` or `/wallet` (`/start`) - Open your wallet
 - `/deposit` - Add funds (private chat only)
 - `/withdraw <address> <amount> [token]` (`/wh`) - Send tokens to another wallet
 - `/tip @username <amount> [token]` - Tip by tagging or replying to a user

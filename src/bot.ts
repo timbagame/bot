@@ -3593,7 +3593,8 @@ registerCaseInsensitiveCommand("deposit", "Add funds to your wallet")(lightningD
 
 /** Menu order, grouped wallet → games → info → settings. */
 const BOT_MENU_ORDER = [
-  "start",
+  "balance",
+  "wallet",
   "deposit",
   "withdraw",
   "tip",
@@ -3678,10 +3679,7 @@ const evmRuntime = createEvmRuntime(bot);
 
 bot.use(caseInsensitiveCommands);
 
-registerCaseInsensitiveCommand(
-  ["start", "balance"],
-  "Open your wallet",
-)(async (ctx: Context) => {
+const openWallet = async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
   }
@@ -3701,7 +3699,11 @@ registerCaseInsensitiveCommand(
   }
 
   await onBalance(ctx as any, createBalanceDeps());
-});
+};
+
+// /start stays for deep links and first contact, but other bots answer it too, so it's hidden.
+registerCaseInsensitiveCommand(["balance", "start"], "Check your balances")(openWallet);
+registerCaseInsensitiveCommand("wallet", "Open your wallet")(openWallet);
 
 registerCaseInsensitiveCommand(
   ["coinflip", "cf"],
@@ -4122,7 +4124,7 @@ registerCaseInsensitiveCommand(
     "/globalboard: Top players everywhere (or /gb)",
     "",
     "<b>💰 Wallet</b>",
-    "/start: Open your wallet (or /balance)",
+    "/balance: Open your wallet (or /wallet)",
     "/deposit: Add funds (private chat)",
     "/withdraw &lt;address&gt; &lt;amount&gt; [token]: Send to another wallet (or /wh)",
     "/tip @user &lt;amount&gt; [token]: Tip someone, or reply to their message",

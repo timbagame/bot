@@ -107,10 +107,10 @@ describe("Bot Main Entry Point Tests", () => {
 
     test("lists only primary command names in a stable order", () => {
       const names = botModule.__test_getRegisteredBotCommands().map(({ command }) => command);
-      for (const alias of ["balance", "cf", "ga", "rain", "wh", "lb", "gb", "default", "config"]) {
+      for (const alias of ["start", "cf", "ga", "rain", "wh", "lb", "gb", "default", "config"]) {
         expect(names).not.toContain(alias);
       }
-      expect(names[0]).toBe("start");
+      expect(names.slice(0, 2)).toEqual(["balance", "wallet"]);
       expect(names.at(-1)).toBe("help");
       expect(names.indexOf("deposit")).toBeLessThan(names.indexOf("coinflip"));
     });
