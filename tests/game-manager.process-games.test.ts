@@ -21,6 +21,34 @@ describe("GameManager processActiveGames/processRecentGames", () => {
     expect(out).toEqual(["OK"]);
   });
 
+  test("processActiveGames drops games whose getGameInfo rejects asynchronously", async () => {
+    resetGM();
+    const gm = GameManager.getInstance({} as any, {} as any, {} as any);
+    const goodAddress = new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58();
+    const badAddress = new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58();
+    (gm as any).getGameInfo = async (_ctx: any, pda: PublicKey) => {
+      await Promise.resolve();
+      if (pda.toBase58() === badAddress) throw new Error("rpc failure");
+      return "OK";
+    };
+    const ctx = { chat: { id: 1, type: "private" } } as any;
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const out = await (gm as any).processActiveGames(ctx, [
+        { game_address: badAddress },
+        { game_address: goodAddress },
+      ]);
+      expect(out).toEqual(["OK"]);
+    } finally {
+      console.error = originalError;
+    }
+    expect(logged.some((args) => String(args[0]).includes(badAddress))).toBe(true);
+  });
+
   test("processRecentGames filters out entries on formatter error", async () => {
     resetGM();
     const gm = GameManager.getInstance({} as any, {} as any, {} as any);

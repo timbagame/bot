@@ -8108,7 +8108,7 @@ export class GameManager {
             return null;
           }
 
-          return this.getGameInfo(ctx, gamePda);
+          return await this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error("Error fetching game " + gameData.game_address + ":", error);
           return null;
