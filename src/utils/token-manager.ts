@@ -37,20 +37,12 @@ export interface TokenRegistrationResult {
 }
 
 const looksLikeTokenTicker = (candidate: string): boolean => {
-  if (!candidate) {
-    return false;
-  }
-
   const trimmed = candidate.trim();
   if (trimmed.length < 2 || trimmed.length > 12) {
     return false;
   }
 
-  if (!/^[A-Za-z]+$/.test(trimmed)) {
-    return false;
-  }
-
-  return Number.isNaN(parseInt(trimmed, 10));
+  return /^[A-Za-z]+$/.test(trimmed);
 };
 
 type ResolvedTokenMetadata = {
@@ -249,11 +241,9 @@ export class TokenManager {
       {
         source,
         allowOverride = false,
-        requireEmpty = false,
       }: {
         source: "builtin" | "metadata";
         allowOverride?: boolean;
-        requireEmpty?: boolean;
       },
     ) => {
       if (!candidate) {
@@ -262,10 +252,6 @@ export class TokenManager {
 
       const trimmed = candidate.trim();
       if (!trimmed || trimmed === "UNKNOWN") {
-        return;
-      }
-
-      if (requireEmpty && resolvedTicker) {
         return;
       }
 
@@ -298,20 +284,13 @@ export class TokenManager {
       applyTicker(builtinMetadata.ticker, { source: "builtin" });
     }
 
-    let fetchedMetadata: { symbol?: string | null; decimals?: number | null } | null = null;
-    const ensureFullMetadata = async () => {
-      if (fetchedMetadata) {
-        return fetchedMetadata;
-      }
-
+    const fetchFullMetadata = async () => {
       try {
-        fetchedMetadata = await this.wallet.getFullTokenMetadata(mint);
+        return await this.wallet.getFullTokenMetadata(mint);
       } catch (error) {
         console.warn(`[TokenManager] Failed to fetch full metadata for ${mint}:`, error);
-        fetchedMetadata = null;
+        return null;
       }
-
-      return fetchedMetadata;
     };
 
     for (const resolver of metadataResolvers) {
@@ -347,7 +326,7 @@ export class TokenManager {
       resolvedTickerSource === undefined ||
       decimals === undefined
     ) {
-      const metadata = await ensureFullMetadata();
+      const metadata = await fetchFullMetadata();
       if (metadata) {
         if (allowMetadataTickerOverride) {
           applyTicker(metadata.symbol, {
@@ -375,16 +354,6 @@ export class TokenManager {
       return null;
     }
 
-    const sanitizedDecimals = this.normalizeDecimals(decimals);
-    if (sanitizedDecimals === null) {
-      const failure: MetadataFailure = { reason: "invalid_decimals", mint };
-      this.lastMetadataFailure = failure;
-      if (metadataFailureSink) {
-        metadataFailureSink.value = failure;
-      }
-      return null;
-    }
-
     if (!resolvedTicker) {
       resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
@@ -395,7 +364,7 @@ export class TokenManager {
     }
     return {
       ticker: resolvedTicker,
-      decimals: sanitizedDecimals,
+      decimals,
       isNativeSol,
     };
   }
@@ -1151,13 +1120,6 @@ export class TokenManager {
       const knownByMint = this.tokenDb.getKnownTokenByMint(candidate);
       if (knownByMint) {
         return knownByMint;
-      }
-      const builtinByMint = this.resolveBuiltinMintToken(
-        getBuiltinTokenMetadataByMint(candidate),
-        candidate,
-      );
-      if (builtinByMint) {
-        return builtinByMint;
       }
       return null;
     }

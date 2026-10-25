@@ -669,9 +669,6 @@ export class GameDatabase extends BaseDatabase {
     }
 
     const remainingLimit = limit - expiring.length;
-    if (remainingLimit <= 0) {
-      return expiring;
-    }
 
     const fallbackExcludeClause = excludeAddresses.length
       ? `AND game_address NOT IN (${excludeAddresses.map(() => "?").join(",")})`
@@ -2753,10 +2750,6 @@ export class GameDatabase extends BaseDatabase {
         .map((row: any) => String(row.telegram_id ?? "").trim())
         .filter((id: string) => id.length > 0);
 
-      if (telegramIds.length === 0) {
-        return [];
-      }
-
       // Step 3: Get per-token net amounts GLOBALLY for each player
       // Uses actual participant count instead of assuming 2 players for total_amount fallback
       const placeholders = telegramIds.map(() => "?").join(",");
@@ -2867,25 +2860,21 @@ export class GameDatabase extends BaseDatabase {
         netAmountMap.get(telegramId)![tokenMint] = netAmount;
       }
 
-      return aggregateRows
-        .map((row: any) => {
-          const telegramId = String(row.telegram_id ?? "").trim();
-          if (!telegramId) {
-            return null;
-          }
+      return aggregateRows.map((row: any) => {
+        // The query only returns rows for the non-empty member ids selected above.
+        const telegramId = String(row.telegram_id ?? "").trim();
 
-          return {
-            telegramId,
-            totalGames: Number(row.total_games ?? 0),
-            gamesWon: Number(row.games_won ?? 0),
-            gamesCreated: Number(row.games_created ?? 0),
-            gamesJoined: Number(row.games_joined ?? 0),
-            totalVolume: Number(row.total_volume ?? 0),
-            winRate: Number(row.win_rate ?? 0),
-            netAmountByToken: netAmountMap.get(telegramId) ?? {},
-          } satisfies LeaderboardStatsRecord;
-        })
-        .filter((row): row is LeaderboardStatsRecord => row !== null);
+        return {
+          telegramId,
+          totalGames: Number(row.total_games ?? 0),
+          gamesWon: Number(row.games_won ?? 0),
+          gamesCreated: Number(row.games_created ?? 0),
+          gamesJoined: Number(row.games_joined ?? 0),
+          totalVolume: Number(row.total_volume ?? 0),
+          winRate: Number(row.win_rate ?? 0),
+          netAmountByToken: netAmountMap.get(telegramId) ?? {},
+        } satisfies LeaderboardStatsRecord;
+      });
     } catch (error) {
       return this.handleError("getting leaderboard stats", error);
     }

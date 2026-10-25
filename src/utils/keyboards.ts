@@ -394,10 +394,6 @@ export const createPlayerSelectionKeyboard = (
   const layout = PLAYER_SELECTION_LAYOUTS[gameType] ?? [];
 
   for (const row of layout) {
-    if (!Array.isArray(row) || row.length === 0) {
-      continue;
-    }
-
     for (const count of row) {
       keyboard.text(
         `👥 ${count}`,

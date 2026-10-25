@@ -1132,12 +1132,13 @@ const prepareTokenTradeQuote = async ({
 
   const userKeypair = await wallet.getKeyPair(telegramId);
 
+  // Only SOL inputs ever request the fee buffer (see the input factories).
   let solFeeBufferLamports: number | undefined;
   if (shouldApplySolFeeBuffer) {
-    solFeeBufferLamports =
-      inputAsset.ticker === "SOL"
-        ? await resolveSolInputFeeBufferLamports(userKeypair.publicKey, snapshot.solBalance)
-        : Math.max(SOL_FEE_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+    solFeeBufferLamports = await resolveSolInputFeeBufferLamports(
+      userKeypair.publicKey,
+      snapshot.solBalance,
+    );
   }
 
   if (solFeeBufferLamports === undefined && referralConfig && inputAsset.ticker !== "SOL") {
@@ -5862,13 +5863,13 @@ const showSwapQuoteAndConfirmation = async (
   fromTokenIdentifier: string,
   toToken: string,
   amount: string,
-  telegramId?: bigint,
+  telegramId: bigint | undefined,
   overrides: {
     fromMint?: string;
     fromDecimals?: number;
     toMint?: string;
     toDecimals?: number;
-  } = {},
+  },
 ) => {
   const source = resolveCachedTokenIdentifier(fromTokenIdentifier);
   const fromToken = source.ticker;

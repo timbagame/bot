@@ -525,12 +525,6 @@ export class JupiterClient {
       }
       const data: JupiterOrderResponse = jupiterOrderResponseSchema.parse(payload);
 
-      if (data.error || data.errorMessage) {
-        const codeSuffix = typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
-        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
-        throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
-      }
-
       const requiredReferralFeeBps =
         params.referralAccount && params.referralFee !== undefined
           ? Math.max(MIN_JUPITER_SWAP_FEE_BPS, params.referralFee)
@@ -942,10 +936,8 @@ export async function fetchJupiterTokenMetadata(
         typeof item.symbol === "string" && item.symbol.trim().toLowerCase() === normalizedQuery,
     );
 
-    const candidate = exactId ?? exactSymbol ?? entries[0];
-    if (!candidate) {
-      return null;
-    }
+    // `entries` is non-empty: an empty result returned null above.
+    const candidate = exactId ?? exactSymbol ?? entries[0]!;
 
     return {
       id: candidate.id,

@@ -226,15 +226,13 @@ export class OracleClient {
         revision: policy.revision,
       });
     }
-    if (result.code === "amount_below_minimum") {
-      throw new OraclePolicyError("amount_below_minimum", "Amount is below the token minimum", {
-        mint: policy.mint,
-        minimumAmountRaw: policy.minimumAmountRaw,
-        acceptedMinimumAmountRaw: policy.acceptedMinimumAmountRaw,
-        revision: policy.revision,
-      });
-    }
-    return policy;
+    // evaluateTokenPolicy only rejects with the codes handled above and this one.
+    throw new OraclePolicyError("amount_below_minimum", "Amount is below the token minimum", {
+      mint: policy.mint,
+      minimumAmountRaw: policy.minimumAmountRaw,
+      acceptedMinimumAmountRaw: policy.acceptedMinimumAmountRaw,
+      revision: policy.revision,
+    });
   }
 
   /**

@@ -309,6 +309,8 @@ const formatRateLimitWindow = (windowMs: number): string => {
   return formatDuration(windowMs / 1000);
 };
 
+export const __test_formatRateLimitWindow = formatRateLimitWindow;
+
 // ================================
 // UTILITY FUNCTIONS
 // ================================
@@ -367,11 +369,7 @@ const coerceLamportValue = (value: unknown): bigint | null => {
     if (!INTEGER_PATTERN.test(trimmed)) {
       return null;
     }
-    try {
-      return BigInt(trimmed);
-    } catch {
-      return null;
-    }
+    return BigInt(trimmed);
   }
 
   if (typeof value === "object" && value !== null) {
@@ -382,11 +380,7 @@ const coerceLamportValue = (value: unknown): bigint | null => {
     if (typeof candidate.toString === "function") {
       const stringified = candidate.toString();
       if (INTEGER_PATTERN.test(stringified.trim())) {
-        try {
-          return BigInt(stringified.trim());
-        } catch {
-          // fall through
-        }
+        return BigInt(stringified.trim());
       }
     }
 
@@ -1907,10 +1901,6 @@ export class GameManager {
             return formatAmount(lamports, decimals, { trim: true });
           }
           return formatWithWallet(Number(lamports));
-        }
-
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return formatWithWallet(value);
         }
 
         if (typeof value === "string") {
@@ -4568,11 +4558,7 @@ export class GameManager {
       if (state === "prepared") return;
 
       const expectedStates: PendingGameCreationState[] =
-        state === "confirmed"
-          ? ["submitted", "unknown", "confirmed"]
-          : state === "delivered"
-            ? ["confirmed", "delivered"]
-            : ["submitted", "unknown"];
+        state === "confirmed" ? ["submitted", "unknown", "confirmed"] : ["submitted", "unknown"];
 
       if (typeof setStateIfCurrent === "function" && pendingCreationPersisted) {
         try {
@@ -5619,7 +5605,6 @@ export class GameManager {
       const playerPubkey = playerKp.publicKey.toBase58();
       let joinTx: string | undefined;
       let joinConfirmed = false;
-      let pendingRecorded = false;
 
       if (gameAccount.isPrivate) {
         const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0, telegramId);
@@ -5635,7 +5620,6 @@ export class GameManager {
           joinSignature: joinTx ?? null,
           lastVerifiedAt: null,
         });
-        pendingRecorded = true;
         joinConfirmed = true;
       } else {
         const maxAttempts = 2;
@@ -5666,7 +5650,6 @@ export class GameManager {
               joinSignature: joinTx ?? null,
               lastVerifiedAt: null,
             });
-            pendingRecorded = true;
 
             joinTx = await this.confirmTransactionWithRecovery(
               joinTx,
@@ -5733,16 +5716,6 @@ export class GameManager {
             throw joinError;
           }
         }
-      }
-
-      if (!joinConfirmed) {
-        if (pendingRecorded) {
-          this.gameDb.removeGameParticipant(gameAddress, telegramIdStr);
-        }
-        return {
-          success: false,
-          error: "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
-        };
       }
 
       // Update database
@@ -6160,7 +6133,8 @@ export class GameManager {
       const maxAttempts = 2;
       let lastSignature: string | undefined;
 
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // The last attempt always returns or throws, so the loop has no exit condition.
+      for (let attempt = 0; ; attempt++) {
         let setupInstructions: TransactionInstruction[] = [];
         let joinInstructions: TransactionInstruction[] = [];
         try {
@@ -6261,12 +6235,6 @@ export class GameManager {
           throw joinError;
         }
       }
-
-      return {
-        success: false,
-        error: "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
-        tx: lastSignature,
-      };
     } catch (error: any) {
       console.error("Error joining private game:", error);
       if (isMissingAccountError(error)) {
@@ -8140,7 +8108,7 @@ export class GameManager {
             return null;
           }
 
-          return this.getGameInfo(ctx, gamePda);
+          return await this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error("Error fetching game " + gameData.game_address + ":", error);
           return null;
