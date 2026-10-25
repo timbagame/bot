@@ -100,6 +100,13 @@ describe("withdrawal threshold", () => {
 });
 
 describe("SOL price validation before swaps", () => {
+  // The price cache is process-wide; other files may leave a SOL price in it,
+  // which would trip the drift check depending on the file order.
+  beforeEach(async () => {
+    const { __test_clearPriceServiceCache } = await import("../src/utils/price-service");
+    __test_clearPriceServiceCache();
+  });
+
   const run = async (solPrice: Record<string, unknown> | null) => {
     const admin = await Keypair.generate();
     const swaps: unknown[] = [];
