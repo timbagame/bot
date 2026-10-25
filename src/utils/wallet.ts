@@ -1782,36 +1782,28 @@ export class WalletManager {
       }
     }
 
-    if (decimals === null) {
-      const getAccountInfo = this.connection.getAccountInfo?.bind(this.connection);
-      if (typeof getAccountInfo !== "function") {
-        throw new Error("RPC connection does not support getAccountInfo for mint metadata");
-      }
-
-      const accountInfo = await getAccountInfo(mintPublicKey);
-      if (!accountInfo) {
-        throw new Error("Token mint account not found or has no data");
-      }
-
-      const detection = await detectTokenProgram(
-        this.connection,
-        mintPublicKey,
-        accountInfo as any,
-      );
-      if (!detection) {
-        this.logMissingMintWarning(tokenMint);
-        throw new Error("Token mint account not found or has no data");
-      }
-
-      const mint = unpackMint(mintPublicKey, accountInfo, detection.programId);
-      decimals = mint.decimals;
+    if (decimals !== null) {
+      return decimals;
     }
 
-    if (decimals === null) {
-      throw new Error("Unable to determine mint decimals");
+    const getAccountInfo = this.connection.getAccountInfo?.bind(this.connection);
+    if (typeof getAccountInfo !== "function") {
+      throw new Error("RPC connection does not support getAccountInfo for mint metadata");
     }
 
-    return decimals;
+    const accountInfo = await getAccountInfo(mintPublicKey);
+    if (!accountInfo) {
+      throw new Error("Token mint account not found or has no data");
+    }
+
+    const detection = await detectTokenProgram(this.connection, mintPublicKey, accountInfo as any);
+    if (!detection) {
+      this.logMissingMintWarning(tokenMint);
+      throw new Error("Token mint account not found or has no data");
+    }
+
+    const mint = unpackMint(mintPublicKey, accountInfo, detection.programId);
+    return mint.decimals;
   }
 
   // ================================

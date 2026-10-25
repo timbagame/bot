@@ -29,13 +29,9 @@ export interface SwapBackend {
 
 const safeBigIntToNumber = (value: bigint): number => {
   const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
-  const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
 
   if (value > maxSafe) {
     return Number.MAX_SAFE_INTEGER;
-  }
-  if (value < minSafe) {
-    return Number.MIN_SAFE_INTEGER;
   }
   return Number(value);
 };
@@ -167,10 +163,6 @@ export class SwapService {
       baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
       requiredStrategy: "max",
     });
-
-    if (requiredLamports <= 0) {
-      return 0n;
-    }
 
     const leftover = BigInt(userBalance) - amountLamports;
     const requiredLeftoverBig = BigInt(requiredLamports);

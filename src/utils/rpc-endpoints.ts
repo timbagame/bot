@@ -390,13 +390,11 @@ export function parseRpcEndpointList(
   let endpoints: string[];
   if (Array.isArray(parsed)) {
     endpoints = parsed.map((item) => String(item ?? ""));
-  } else if (typeof parsed === "undefined") {
+  } else {
     endpoints = trimmed
       .split(",")
       .map((segment) => segment.trim())
       .filter((segment) => segment.length > 0);
-  } else {
-    endpoints = [String(parsed)];
   }
 
   const unique: string[] = [];

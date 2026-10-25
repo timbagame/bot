@@ -405,7 +405,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
         const target = resolveWalletMessageTarget(ctx, sent);
         const isStillCurrent = target
           ? (deps.captureMessageView?.(target.chatId, target.messageId) ?? (() => true))
-          : () => false;
+          : undefined;
         const shownAgeMs = now() - cached.fetchedAt;
 
         (ctx as any).__walletBackgroundRefresh = (async () => {
@@ -417,7 +417,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
               return;
             }
             const freshCaption = await renderWalletCaption(fresh, fresh.fetchedAt ?? now());
-            if (!isStillCurrent()) {
+            if (!isStillCurrent?.()) {
               return;
             }
             await editWalletMessage(ctx, target, freshCaption, getWalletKeyboard());

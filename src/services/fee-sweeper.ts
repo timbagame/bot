@@ -131,7 +131,7 @@ const validateSolPriceData = (
     maxAgeMs?: number;
     previousPrice?: number;
     maxDriftRatio?: number;
-  } = {},
+  },
 ): { isValid: boolean; reason?: string } => {
   const solPrice = priceData?.price ?? 0;
   if (!Number.isFinite(solPrice) || solPrice <= 0) {

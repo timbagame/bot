@@ -303,10 +303,8 @@ export function createPoolTradePoller(options: PoolTradePollerOptions = {}): Poo
     pair: PairStats,
     firstPassCutoffMs: number | null,
   ): Promise<boolean> => {
-    const pairAddress = pair?.pairAddress?.trim();
-    if (!pairAddress) {
-      return false;
-    }
+    // Only targets with a non-empty pair address are queued (see the target filter).
+    const pairAddress = pair.pairAddress!.trim();
 
     let payload: unknown;
     try {

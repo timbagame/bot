@@ -128,10 +128,7 @@ export function resolveDefaultToken(options?: {
   }
 
   const network = options?.network ?? NetworkDetector.getCurrentNetwork();
-  const defaultTicker =
-    NETWORK_DEFAULT_TICKERS[network] ??
-    NETWORK_DEFAULT_TICKERS.mainnet ??
-    TIMBA_MAINNET_TOKEN.ticker;
+  const defaultTicker = NETWORK_DEFAULT_TICKERS[network] ?? TIMBA_MAINNET_TOKEN.ticker;
 
   return (
     REGISTERED_TOKENS.find(

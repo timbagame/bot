@@ -395,10 +395,8 @@ export class FeeBudgetManager implements FeeBudgetProvider {
         microLamports.length > 2 ? microLamports.length - 2 : microLamports.length - 1;
       const percentileIndex = Math.max(0, Math.min(highestAllowedIndex, desiredPercentileIndex));
 
-      const selectedMicroLamports = microLamports[percentileIndex];
-      if (selectedMicroLamports === undefined) {
-        return 0;
-      }
+      // percentileIndex is clamped into the non-empty array above.
+      const selectedMicroLamports = microLamports[percentileIndex]!;
 
       const lamports = Math.ceil(
         (selectedMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) * this.config.computeUnitLimit,
