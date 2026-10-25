@@ -158,6 +158,25 @@ describe("isMissingTokenAccountError", () => {
   });
 });
 
+describe("getBalance cache", () => {
+  test("serves a fresh cached balance without another RPC call", async () => {
+    let rpcCalls = 0;
+    const wallet = walletWith({
+      getBalance: async () => {
+        rpcCalls += 1;
+        return 123;
+      },
+    });
+
+    expect(await wallet.getBalance(TELEGRAM_ID)).toBe(123);
+    expect(await wallet.getBalance(TELEGRAM_ID)).toBe(123);
+    expect(rpcCalls).toBe(1);
+
+    expect(await wallet.getBalance(TELEGRAM_ID, { forceFresh: true })).toBe(123);
+    expect(rpcCalls).toBe(2);
+  });
+});
+
 describe("getBalance stale fallback", () => {
   test("serves the expired cached balance when allowStaleOnError is set", async () => {
     const wallet = walletWith({
