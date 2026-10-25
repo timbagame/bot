@@ -38,12 +38,12 @@ describe("RpcEndpointManager construction", () => {
   });
 
   test("builds real connections by default and exposes proxy metadata", () => {
-    const manager = new RpcEndpointManager(["http://127.0.0.1:1/coverage-d"], {
+    const manager = new RpcEndpointManager(["http://127.0.0.1:1/test"], {
       commitment: "finalized",
     });
     const connection = manager.getConnection();
 
-    expect(connection.rpcEndpoint).toBe("http://127.0.0.1:1/coverage-d");
+    expect(connection.rpcEndpoint).toBe("http://127.0.0.1:1/test");
     expect(connection.commitment).toBe("finalized");
     expect(Object.prototype.toString.call(connection)).toBe("[object Connection]");
   });

@@ -26,7 +26,7 @@ const makeManager = (
   return gm;
 };
 
-describe("GameManager coverage-a: ensureWrappedSolBalance", () => {
+describe("GameManager ensureWrappedSolBalance", () => {
   const REQUIRED = 1_000;
   let errorSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
@@ -162,7 +162,7 @@ describe("GameManager coverage-a: ensureWrappedSolBalance", () => {
   });
 });
 
-describe("GameManager coverage-a: ensureUnjoinFeePayerBalance", () => {
+describe("GameManager ensureUnjoinFeePayerBalance", () => {
   let errorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -273,7 +273,7 @@ describe("GameManager coverage-a: ensureUnjoinFeePayerBalance", () => {
   });
 });
 
-describe("GameManager coverage-a: rent exemption lookup", () => {
+describe("GameManager rent exemption lookup", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -315,7 +315,7 @@ describe("GameManager coverage-a: rent exemption lookup", () => {
   });
 });
 
-describe("GameManager coverage-a: confirmTransactionWithRecovery probes", () => {
+describe("GameManager confirmTransactionWithRecovery probes", () => {
   let warnSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
 
@@ -442,7 +442,7 @@ describe("GameManager coverage-a: confirmTransactionWithRecovery probes", () => 
   });
 });
 
-describe("GameManager coverage-a: resolveTokenFormattingInfo", () => {
+describe("GameManager resolveTokenFormattingInfo", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -551,7 +551,7 @@ describe("GameManager coverage-a: resolveTokenFormattingInfo", () => {
   });
 });
 
-describe("GameManager coverage-a: lamport coercion through USD formatting", () => {
+describe("GameManager lamport coercion through USD formatting", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -597,7 +597,7 @@ describe("GameManager coverage-a: lamport coercion through USD formatting", () =
   });
 });
 
-describe("GameManager coverage-a: getUsdApproximation outside the test environment", () => {
+describe("GameManager getUsdApproximation outside the test environment", () => {
   const MINT = "FakeMint1111111111111111111111111111111111";
   let previousEnv: string | undefined;
   let warnSpy: ReturnType<typeof spyOn>;

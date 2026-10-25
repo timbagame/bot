@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   __test_listGameSetupSessions,
   __test_listInputSessions,
@@ -7,6 +7,11 @@ import {
   setInputSession,
   upsertGameSetupSession,
 } from "../src/utils/user-state";
+
+beforeEach(() => {
+  clearAllGameSetupSessions();
+  clearAllInputSessions();
+});
 
 afterEach(() => {
   clearAllGameSetupSessions();

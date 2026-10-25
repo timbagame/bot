@@ -309,6 +309,8 @@ const formatRateLimitWindow = (windowMs: number): string => {
   return formatDuration(windowMs / 1000);
 };
 
+export const __test_formatRateLimitWindow = formatRateLimitWindow;
+
 // ================================
 // UTILITY FUNCTIONS
 // ================================

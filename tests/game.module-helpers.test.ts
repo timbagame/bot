@@ -32,7 +32,7 @@ const entry = (overrides: Partial<GameHistoryEntry> = {}): GameHistoryEntry => (
   ...overrides,
 });
 
-describe("GameManager coverage-a: compact amounts in the games history", () => {
+describe("GameManager compact amounts in the games history", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -57,7 +57,7 @@ describe("GameManager coverage-a: compact amounts in the games history", () => {
   });
 });
 
-describe("GameManager coverage-a: completed game categories and labels", () => {
+describe("GameManager completed game categories and labels", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -102,7 +102,7 @@ describe("GameManager coverage-a: completed game categories and labels", () => {
   });
 });
 
-describe("GameManager coverage-a: pending creation request bookkeeping", () => {
+describe("GameManager pending creation request bookkeeping", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -145,7 +145,7 @@ describe("GameManager coverage-a: pending creation request bookkeeping", () => {
   });
 });
 
-describe("GameManager coverage-a: expiration text without a wallet clock", () => {
+describe("GameManager expiration text without a wallet clock", () => {
   let nowSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -174,7 +174,7 @@ describe("GameManager coverage-a: expiration text without a wallet clock", () =>
   });
 });
 
-describe("GameManager coverage-a: debug logging", () => {
+describe("GameManager debug logging", () => {
   let previousDebug: string | undefined;
 
   beforeEach(() => {
@@ -204,7 +204,7 @@ describe("GameManager coverage-a: debug logging", () => {
     const debugSpy = spyOn(console, "debug").mockImplementation(() => undefined);
     try {
       process.env["TIMBA_DEBUG"] = "true";
-      const module = await import(`../src/utils/game?${"coverage-a-debug-on"}`);
+      const module = await import(`../src/utils/game?${"test-debug-on"}`);
 
       await lookup(module);
 
@@ -219,7 +219,7 @@ describe("GameManager coverage-a: debug logging", () => {
     const debugSpy = spyOn(console, "debug").mockImplementation(() => undefined);
     try {
       delete process.env["TIMBA_DEBUG"];
-      const module = await import(`../src/utils/game?${"coverage-a-debug-off"}`);
+      const module = await import(`../src/utils/game?${"test-debug-off"}`);
 
       await lookup(module);
 

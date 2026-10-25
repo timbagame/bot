@@ -7,7 +7,7 @@ const formatSol = (lamports: number) => `${lamports / 1e9}`;
 
 const makeWallet = (balance: number, fee: number | null = 5_000) => ({
   getConnection: () => ({
-    rpcEndpoint: "http://coverage-d-swap-service",
+    rpcEndpoint: "http://test-swap-service",
     getBalance: async () => balance,
     getAccountInfo: async () => null,
     getMinimumBalanceForRentExemption: async () => 2_039_280,
@@ -16,7 +16,7 @@ const makeWallet = (balance: number, fee: number | null = 5_000) => ({
   formatSolBalance: formatSol,
 });
 
-const makeBackend = (signature = "sig-coverage-d") => {
+const makeBackend = (signature = "sig-test") => {
   const executed: unknown[] = [];
   const backend: SwapBackend = {
     getQuote: async () => {
@@ -43,7 +43,7 @@ const adminQuote = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   }) as any;
 
-describe("SwapService coverage-d", () => {
+describe("SwapService", () => {
   let errorSpy: ReturnType<typeof spyOn>;
   let recordSpy: ReturnType<typeof spyOn>;
 

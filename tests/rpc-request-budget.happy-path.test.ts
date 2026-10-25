@@ -9,7 +9,7 @@ describe("backgroundRpc", () => {
   test("runs the request and returns its result when idle", async () => {
     let calls = 0;
     const result = await backgroundRpc(
-      "https://coverage-d-idle.test/key",
+      "https://test-idle.test/key",
       AbortSignal.timeout(2000),
       async () => {
         calls += 1;
@@ -21,7 +21,7 @@ describe("backgroundRpc", () => {
   });
 
   test("rejects immediately with a retry-later error while the host is cooling down", async () => {
-    const endpoint = "https://coverage-d-cooldown.test/key";
+    const endpoint = "https://test-cooldown.test/key";
     const future = noteRpcRateLimit(endpoint, "3600");
     expect(future).toBeGreaterThan(Date.now());
 

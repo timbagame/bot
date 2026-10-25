@@ -38,7 +38,7 @@ describe("persistInputPromptFromContext fallbacks", () => {
       text: "Prompt",
       keyboard: new InlineKeyboard(),
       session: { type: "send_custom_amount" } as any,
-      logLabel: "coverage-e-explicit-reply",
+      logLabel: "test-explicit-reply",
       target: { chatId: 11 },
       replyToMessageId: 99,
     });
@@ -56,7 +56,7 @@ describe("persistInputPromptFromContext fallbacks", () => {
       text: "Prompt",
       keyboard: new InlineKeyboard(),
       session: { type: "send_custom_amount" } as any,
-      logLabel: "coverage-e-no-targets",
+      logLabel: "test-no-targets",
     });
 
     expect(replies).toHaveLength(1);
@@ -75,7 +75,7 @@ describe("persistInputPromptFromContext fallbacks", () => {
       text: "Prompt",
       keyboard: new InlineKeyboard(),
       session: { type: "send_custom_amount" } as any,
-      logLabel: "coverage-e-ctx-chat",
+      logLabel: "test-ctx-chat",
     });
 
     expect(result.chatId).toBe(55);

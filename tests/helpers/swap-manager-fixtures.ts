@@ -26,7 +26,7 @@ export const createManager = (
   } = {},
 ) => {
   const connection: any = {
-    rpcEndpoint: "http://coverage-d-swap-manager",
+    rpcEndpoint: "http://test-swap-manager",
     getBalance: async () => options.balance ?? 0,
     ...options.connection,
   };

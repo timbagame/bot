@@ -4,14 +4,14 @@ import { FeeBudgetManager, loadFeeBudgetConfigFromEnv } from "../src/utils/fee-b
 
 const connectionWith = (overrides: Record<string, unknown> = {}): Connection =>
   ({
-    rpcEndpoint: "http://coverage-d-stub",
+    rpcEndpoint: "http://test-stub",
     getLatestBlockhash: async () => ({ blockhash: "hash", lastValidBlockHeight: 1 }),
     getFeeForMessage: async () => ({ context: { slot: 0 }, value: 5_000 }),
     getRecentPrioritizationFees: async () => [],
     ...overrides,
   }) as unknown as Connection;
 
-describe("fee budget coverage-d", () => {
+describe("fee budget", () => {
   const originalNodeEnv = process.env.NODE_ENV;
   let warnSpy: ReturnType<typeof spyOn>;
 

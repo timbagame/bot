@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Keypair } from "#solana";
 import * as priceService from "../src/utils/price-service";
 import { __test_resetReferralConfig, __test_setReferralConfig } from "../src/utils/token-registry";
-import { SOL, createManager, jupiterQuote } from "./helpers/swap-manager-coverage-d";
+import { SOL, createManager, jupiterQuote } from "./helpers/swap-manager-fixtures";
 
 const jitOptions = (user: Keypair, overrides: Record<string, unknown> = {}) => ({
   userKeypair: user,
@@ -11,11 +11,11 @@ const jitOptions = (user: Keypair, overrides: Record<string, unknown> = {}) => (
   availableTokenAmountRaw: 20_000_000,
   desiredLamports: 2_000_000,
   tokenTicker: "tkn",
-  logContext: "coverage-d",
+  logContext: "test",
   ...overrides,
 });
 
-describe("SwapManager just-in-time flow (coverage-d)", () => {
+describe("SwapManager just-in-time flow", () => {
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
 
@@ -293,7 +293,7 @@ describe("SwapManager just-in-time flow (coverage-d)", () => {
         currentLamports: 0,
         jitFeeBuffer: 500_000,
         userKeypair: user,
-        logContext: "coverage-d",
+        logContext: "test",
       });
 
       expect(result).toEqual({ status: "skipped" });
@@ -316,7 +316,7 @@ describe("SwapManager just-in-time flow (coverage-d)", () => {
         currentLamports: 900_000,
         jitFeeBuffer: 500_000,
         userKeypair: user,
-        logContext: "coverage-d",
+        logContext: "test",
       });
 
       expect(result.status).toBe("error");

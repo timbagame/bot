@@ -63,7 +63,7 @@ const makeClient = (respond: (call: FetchCall) => unknown) => {
 
 const quoteRequest: JupiterQuoteRequest = { inputMint: "MintA", outputMint: "MintB", amount: "10" };
 
-describe("JupiterClient coverage-d", () => {
+describe("JupiterClient", () => {
   let errorSpy: ReturnType<typeof spyOn>;
   const originalApiKey = process.env.JUPITER_API_KEY;
 
@@ -241,7 +241,7 @@ describe("JupiterClient coverage-d", () => {
   });
 });
 
-describe("fetchJupiterTokenMetadata coverage-d", () => {
+describe("fetchJupiterTokenMetadata", () => {
   let errorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {

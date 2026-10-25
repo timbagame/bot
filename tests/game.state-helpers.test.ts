@@ -27,7 +27,7 @@ const makeManager = (
   wallet: any = {},
 ) => GameManager.getInstance(program, wallet, gameDb) as any;
 
-describe("GameManager coverage-a: message update bookkeeping", () => {
+describe("GameManager message update bookkeeping", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -134,7 +134,7 @@ describe("GameManager coverage-a: message update bookkeeping", () => {
   });
 });
 
-describe("GameManager coverage-a: persistCompletionSignature", () => {
+describe("GameManager persistCompletionSignature", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -204,7 +204,7 @@ describe("GameManager coverage-a: persistCompletionSignature", () => {
   });
 });
 
-describe("GameManager coverage-a: getPersistedTerminalUpdate", () => {
+describe("GameManager getPersistedTerminalUpdate", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -222,7 +222,7 @@ describe("GameManager coverage-a: getPersistedTerminalUpdate", () => {
   });
 });
 
-describe("GameManager coverage-a: fetchGameAccountForRecovery", () => {
+describe("GameManager fetchGameAccountForRecovery", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -264,7 +264,7 @@ describe("GameManager coverage-a: fetchGameAccountForRecovery", () => {
   });
 });
 
-describe("GameManager coverage-a: unavailable state recovery timers", () => {
+describe("GameManager unavailable state recovery timers", () => {
   let timers: ReturnType<typeof captureTimers>;
   let warn: ReturnType<typeof spyOn>;
 
@@ -370,7 +370,7 @@ describe("GameManager coverage-a: unavailable state recovery timers", () => {
   });
 });
 
-describe("GameManager coverage-a: getConnection resolution", () => {
+describe("GameManager getConnection resolution", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -421,7 +421,7 @@ describe("GameManager coverage-a: getConnection resolution", () => {
   });
 });
 
-describe("GameManager coverage-a: dynamic fee budget priming", () => {
+describe("GameManager dynamic fee budget priming", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -431,7 +431,7 @@ describe("GameManager coverage-a: dynamic fee budget priming", () => {
 
   test("logs a warning when priming the dynamic fee budgets fails", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => undefined);
-    const connection = { rpcEndpoint: `http://coverage-a-state.invalid` } as any;
+    const connection = { rpcEndpoint: `http://test-state.invalid` } as any;
     const budget = FeeBudgetManager.getInstance(connection);
     const failure = new Error("fee estimate unavailable");
     const priming = spyOn(budget, "getSingleTransactionLamports").mockRejectedValue(failure);

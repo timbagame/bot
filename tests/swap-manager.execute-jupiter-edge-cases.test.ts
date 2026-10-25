@@ -2,7 +2,7 @@ import { Buffer } from "buffer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Keypair, TransactionMessage, VersionedTransaction } from "#solana";
 import { JupiterReferralUnavailableError } from "../src/utils/jupiter";
-import { SOL, createManager } from "./helpers/swap-manager-coverage-d";
+import { SOL, createManager } from "./helpers/swap-manager-fixtures";
 
 const serializeTx = (payer: Keypair): string => {
   const message = new TransactionMessage({
@@ -117,7 +117,7 @@ const setup = async (
   return { manager, user, admin, operator, quote, request, integrator, executeCalls, order };
 };
 
-describe("SwapManager.executeJupiterSwap admin payer flow (coverage-d)", () => {
+describe("SwapManager.executeJupiterSwap admin payer flow", () => {
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
 
@@ -365,7 +365,7 @@ describe("SwapManager.executeJupiterSwap admin payer flow (coverage-d)", () => {
   });
 });
 
-describe("SwapManager sponsor cost recovery validation (coverage-d)", () => {
+describe("SwapManager sponsor cost recovery validation", () => {
   const baseOrder = {
     mode: "ExactIn",
     inputMint: "TokenMint",
@@ -434,7 +434,7 @@ describe("SwapManager sponsor cost recovery validation (coverage-d)", () => {
   });
 });
 
-describe("SwapManager.executeJupiterTransaction guards (coverage-d)", () => {
+describe("SwapManager.executeJupiterTransaction guards", () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {

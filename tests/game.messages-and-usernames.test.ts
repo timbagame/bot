@@ -25,7 +25,7 @@ const makeManager = (overrides: { wallet?: any; gameDb?: any; program?: any } = 
     (overrides.gameDb ?? {}) as any,
   ) as any;
 
-describe("GameManager coverage-a: username normalisation and priming", () => {
+describe("GameManager username normalisation and priming", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -90,7 +90,7 @@ describe("GameManager coverage-a: username normalisation and priming", () => {
   });
 });
 
-describe("GameManager coverage-a: getUsernameFromTelegramId without a network lookup", () => {
+describe("GameManager getUsernameFromTelegramId without a network lookup", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -147,7 +147,7 @@ describe("GameManager coverage-a: getUsernameFromTelegramId without a network lo
   });
 });
 
-describe("GameManager coverage-a: creator and player display names", () => {
+describe("GameManager creator and player display names", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -186,7 +186,7 @@ describe("GameManager coverage-a: creator and player display names", () => {
   });
 });
 
-describe("GameManager coverage-a: token mint lookup", () => {
+describe("GameManager token mint lookup", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -204,7 +204,7 @@ describe("GameManager coverage-a: token mint lookup", () => {
   });
 });
 
-describe("GameManager coverage-a: recreateMissingGameMessage", () => {
+describe("GameManager recreateMissingGameMessage", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -314,7 +314,7 @@ describe("GameManager coverage-a: recreateMissingGameMessage", () => {
   }
 });
 
-describe("GameManager coverage-a: formatAndSendGameMessage", () => {
+describe("GameManager formatAndSendGameMessage", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -433,7 +433,7 @@ describe("GameManager coverage-a: formatAndSendGameMessage", () => {
   });
 });
 
-describe("GameManager coverage-a: game message payloads", () => {
+describe("GameManager game message payloads", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -480,7 +480,7 @@ describe("GameManager coverage-a: game message payloads", () => {
   });
 });
 
-describe("GameManager coverage-a: getPrizeDisplay", () => {
+describe("GameManager getPrizeDisplay", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -504,7 +504,7 @@ describe("GameManager coverage-a: getPrizeDisplay", () => {
   });
 });
 
-describe("GameManager coverage-a: createGameMessage delivery reservation", () => {
+describe("GameManager createGameMessage delivery reservation", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -558,7 +558,7 @@ describe("GameManager coverage-a: createGameMessage delivery reservation", () =>
   });
 });
 
-describe("GameManager coverage-a: formatGameMessage details", () => {
+describe("GameManager formatGameMessage details", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });
@@ -667,7 +667,7 @@ describe("GameManager coverage-a: formatGameMessage details", () => {
   });
 });
 
-describe("GameManager coverage-a: stored completed game totals", () => {
+describe("GameManager stored completed game totals", () => {
   beforeEach(() => {
     GameManager.resetForTest();
   });

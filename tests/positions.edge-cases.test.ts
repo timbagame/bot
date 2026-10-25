@@ -101,7 +101,7 @@ describe("loadTokenPositionsForWallet price requests", () => {
   test("ignores zero balances and quote mints when collecting prices", async () => {
     const requested: string[][] = [];
     const positions = await loadTokenPositionsForWallet({
-      walletAddress: "wallet-coverage-e-skip",
+      walletAddress: "wallet-test-skip",
       getHoldings: async () => [
         { mint: TIMBA, ticker: "TIMBA", balance: 100, decimals: 6, rawBalance: "100000000" },
         { mint: DUST, ticker: "DUST", balance: 0, decimals: 6, rawBalance: "0" },
@@ -110,7 +110,7 @@ describe("loadTokenPositionsForWallet price requests", () => {
       getSwaps: () => [
         {
           signature: "buy-1",
-          wallet: "wallet-coverage-e-skip",
+          wallet: "wallet-test-skip",
           input_mint: USDC_MINT,
           output_mint: TIMBA,
           input_ticker: "USDC",
@@ -121,7 +121,7 @@ describe("loadTokenPositionsForWallet price requests", () => {
         } as never,
         {
           signature: "buy-2",
-          wallet: "wallet-coverage-e-skip",
+          wallet: "wallet-test-skip",
           input_mint: USDC_MINT,
           output_mint: DUST,
           input_ticker: "USDC",

@@ -11,7 +11,7 @@ const makeManager = (program: any = { account: { game: {} } }, gameDb: any = {})
 
 const freshKey = async () => (await Keypair.generate()).publicKey;
 
-describe("GameManager coverage-a: isPlayerInGame", () => {
+describe("GameManager isPlayerInGame", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -104,7 +104,7 @@ describe("GameManager coverage-a: isPlayerInGame", () => {
   });
 });
 
-describe("GameManager coverage-a: verifyParticipantJoin retries", () => {
+describe("GameManager verifyParticipantJoin retries", () => {
   let warnSpy: ReturnType<typeof spyOn>;
   let timers: ReturnType<typeof stubInstantTimers>;
 
@@ -171,7 +171,7 @@ describe("GameManager coverage-a: verifyParticipantJoin retries", () => {
   });
 });
 
-describe("GameManager coverage-a: reconcilePendingParticipants", () => {
+describe("GameManager reconcilePendingParticipants", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -231,7 +231,7 @@ describe("GameManager coverage-a: reconcilePendingParticipants", () => {
   });
 });
 
-describe("GameManager coverage-a: recoverParticipantsFromChain", () => {
+describe("GameManager recoverParticipantsFromChain", () => {
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {

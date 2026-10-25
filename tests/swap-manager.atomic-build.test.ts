@@ -4,7 +4,7 @@ import { Keypair, PublicKey, SystemProgram, TransactionMessage } from "#solana";
 import { AccountLayout, AccountState, TOKEN_PROGRAM_ID } from "#token";
 import { JupiterReferralUnavailableError } from "../src/utils/jupiter";
 import { __test_resetReferralConfig, __test_setReferralConfig } from "../src/utils/token-registry";
-import { SOL, createManager, jupiterQuote } from "./helpers/swap-manager-coverage-d";
+import { SOL, createManager, jupiterQuote } from "./helpers/swap-manager-fixtures";
 
 const apiInstruction = (programId: PublicKey, account: PublicKey) => ({
   programId: programId.toBase58(),
@@ -67,7 +67,7 @@ afterEach(() => {
   __test_resetReferralConfig();
 });
 
-describe("SwapManager build fee account validation (coverage-d)", () => {
+describe("SwapManager build fee account validation", () => {
   test("rejects a missing account and caches nothing", async () => {
     const feeAccount = (await Keypair.generate()).publicKey;
     const referral = (await Keypair.generate()).publicKey;
@@ -137,7 +137,7 @@ describe("SwapManager build fee account validation (coverage-d)", () => {
   });
 });
 
-describe("SwapManager.prepareAtomicBuildFallback failures (coverage-d)", () => {
+describe("SwapManager.prepareAtomicBuildFallback failures", () => {
   const prepare = async (
     options: {
       operatorIsPayer?: boolean;
@@ -256,7 +256,7 @@ describe("SwapManager.prepareAtomicBuildFallback failures (coverage-d)", () => {
   });
 });
 
-describe("SwapManager.executeAtomicBuildFallback guards (coverage-d)", () => {
+describe("SwapManager.executeAtomicBuildFallback guards", () => {
   const prepared = (build: unknown) => ({
     build,
     computeUnitLimit: 200_000,
@@ -307,7 +307,7 @@ describe("SwapManager.executeAtomicBuildFallback guards (coverage-d)", () => {
   });
 });
 
-describe("SwapManager.ensureAdminCanCoverRoute (coverage-d)", () => {
+describe("SwapManager.ensureAdminCanCoverRoute", () => {
   test("does nothing for user-paid integrators or when there is no order", async () => {
     const { manager } = createManager({
       connection: {
@@ -327,7 +327,7 @@ describe("SwapManager.ensureAdminCanCoverRoute (coverage-d)", () => {
   });
 });
 
-describe("SwapManager quote routing (coverage-d)", () => {
+describe("SwapManager quote routing", () => {
   const request = async (overrides: Record<string, unknown> = {}) => ({
     inputMint: (await Keypair.generate()).publicKey.toBase58(),
     outputMint: SOL,
@@ -433,7 +433,7 @@ describe("SwapManager quote routing (coverage-d)", () => {
   });
 });
 
-describe("SwapManager.formatQuoteForDisplay (coverage-d)", () => {
+describe("SwapManager.formatQuoteForDisplay", () => {
   test("uses zero slippage when the quote slippage is not a finite number", () => {
     const { manager } = createManager();
     const captured: any[] = [];
