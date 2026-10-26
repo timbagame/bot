@@ -230,9 +230,9 @@ describe("Pending player events", async () => {
     const eventB = { ...makePlayerEvent(player, 6, 11), totalAmount: new BN(2000) };
     const eventC = { ...makePlayerEvent(player, 7, 12), totalAmount: new BN(3000) };
 
-    await isolatedModule.__test_processPlayerEvent(eventA as any, "PlayerUnjoined", [target]);
-    await isolatedModule.__test_processPlayerEvent(eventB as any, "PlayerUnjoined", [target]);
-    await isolatedModule.__test_processPlayerEvent(eventC as any, "PlayerUnjoined", [target]);
+    await isolatedModule.__test_processPlayerEvent(eventA as any, "PlayerRefunded", [target]);
+    await isolatedModule.__test_processPlayerEvent(eventB as any, "PlayerRefunded", [target]);
+    await isolatedModule.__test_processPlayerEvent(eventC as any, "PlayerRefunded", [target]);
 
     expect(updateCalls.length).toBe(0);
 
@@ -278,7 +278,7 @@ describe("Pending player events", async () => {
 
     await isolatedModule.__test_processPlayerEvent(
       { ...makePlayerEvent(player, 5, 10), totalAmount: new BN(1000) } as any,
-      "PlayerUnjoined",
+      "PlayerRefunded",
       [target],
     );
 

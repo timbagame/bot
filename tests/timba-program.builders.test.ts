@@ -8,6 +8,16 @@ import { TimbaAccountNotFoundError, createTimbaProgram } from "../src/utils/timb
 
 const version030 = contractVersion === "0.3.0";
 const kit: any = version030 ? v030 : v020;
+const createDataDecoder = () =>
+  version030
+    ? v030.getCreateGameInstructionDataDecoder()
+    : v020.getInitializeGameInstructionDataDecoder();
+const createDiscriminator = version030
+  ? v030.CREATE_GAME_DISCRIMINATOR
+  : v020.INITIALIZE_GAME_DISCRIMINATOR;
+const refundDiscriminator = version030
+  ? v030.REFUND_PLAYER_DISCRIMINATOR
+  : v020.UNJOIN_GAME_DISCRIMINATOR;
 const key = async () => (await Keypair.generate()).publicKey;
 
 const fundsContext = async () => {
@@ -39,7 +49,7 @@ const keyInfo = (instruction: { keys: { pubkey: PublicKey; isSigner: boolean }[]
 describe(`Timba ${contractVersion} instruction builders`, () => {
   const program = createTimbaProgram({} as Connection);
 
-  test("initializeGame encodes the configuration and signs as creator and oracle", async () => {
+  test("createGame encodes the configuration and signs as creator and oracle", async () => {
     const { accounts, context, versionKeys } = await fundsContext();
     const game = await key();
     const creator = await key();
@@ -49,7 +59,7 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
     const systemProgram = new PublicKey("11111111111111111111111111111111");
 
     const instruction = await program.methods
-      .initializeGame(
+      .createGame(
         {
           gameType: { giveaway: {} },
           amount: "5000",
@@ -72,8 +82,8 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
       .instruction();
 
     expect(instruction.programId.toBase58()).toBe(kit.TIMBA_PROGRAM_ADDRESS);
-    expect([...instruction.data.subarray(0, 8)]).toEqual([...kit.INITIALIZE_GAME_DISCRIMINATOR]);
-    const decoded = kit.getInitializeGameInstructionDataDecoder().decode(instruction.data);
+    expect([...instruction.data.subarray(0, 8)]).toEqual([...createDiscriminator]);
+    const decoded = createDataDecoder().decode(instruction.data);
     expect(decoded).toMatchObject({
       gameType: 1,
       amount: 5000n,
@@ -89,10 +99,10 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
     expect(signers.sort()).toEqual([creator.toBase58(), oracleOperator.toBase58()].sort());
   });
 
-  test("initializeGame encodes coinflips as game type 0 and missing amounts as zero", async () => {
+  test("createGame encodes coinflips as game type 0 and missing amounts as zero", async () => {
     const { accounts } = await fundsContext();
     const instruction = await program.methods
-      .initializeGame(
+      .createGame(
         { gameType: { coinflip: {} }, maxTickets: 2, minTickets: 2, timeout: 60n },
         new Array(32).fill(0),
       )
@@ -107,7 +117,7 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
       })
       .instruction();
 
-    const decoded = kit.getInitializeGameInstructionDataDecoder().decode(instruction.data);
+    const decoded = createDataDecoder().decode(instruction.data);
     expect(decoded).toMatchObject({ gameType: 0, amount: 0n, isPrivate: false });
   });
 
@@ -129,14 +139,14 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
     expect(keyInfo(instruction).signers).toEqual([player.toBase58()]);
   });
 
-  test("unjoinGame refunds the player and is signed by the authority", async () => {
+  test("refundPlayer refunds the player and is signed by the authority", async () => {
     const { accounts, versionKeys } = await fundsContext();
     const player = await key();
     const authority = await key();
     const playerTokenAccount = await key();
 
     const instruction = await program.methods
-      .unjoinGame()
+      .refundPlayer()
       .accounts({
         ...accounts,
         game: await key(),
@@ -147,7 +157,7 @@ describe(`Timba ${contractVersion} instruction builders`, () => {
       })
       .instruction();
 
-    expect([...instruction.data]).toEqual([...kit.UNJOIN_GAME_DISCRIMINATOR]);
+    expect([...instruction.data]).toEqual([...refundDiscriminator]);
     const { all, signers } = keyInfo(instruction);
     expect(all).toContain(player.toBase58());
     expect(all).toContain(playerTokenAccount.toBase58());

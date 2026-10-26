@@ -170,7 +170,7 @@ export interface GameCompletedEvent {
   timestamp: BN;
 }
 
-export interface GameInitializedEvent {
+export interface GameCreatedEvent {
   gameKey: PublicKey;
   creator: PublicKey;
   gameType: { coinflip?: object; giveaway?: object };
@@ -194,7 +194,7 @@ export interface PlayerJoinedEvent {
   timestamp: BN;
 }
 
-export interface PlayerUnjoinedEvent {
+export interface PlayerRefundedEvent {
   gameKey: PublicKey;
   player: PublicKey;
   totalAmount: BN;
@@ -247,7 +247,7 @@ export type GameType = "coinflip" | "giveaway";
 // ENHANCED TYPES FOR REFACTORING
 // ================================
 
-export type PlayerEvent = PlayerJoinedEvent | PlayerUnjoinedEvent;
+export type PlayerEvent = PlayerJoinedEvent | PlayerRefundedEvent;
 
 export interface CallbackError {
   message?: string;

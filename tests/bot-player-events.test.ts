@@ -90,7 +90,7 @@ describe("player program events", () => {
     const moved = (await Keypair.generate()).publicKey;
     const left = await event({ movedParticipant: moved });
 
-    await botModule.__test_handlePlayerUnjoinedProgramEvent(left as any);
+    await botModule.__test_handlePlayerRefundedProgramEvent(left as any);
 
     expect(gameDb.recordGameParticipantUnjoined).toHaveBeenCalledWith(
       left.gameKey.toString(),
@@ -128,8 +128,8 @@ describe("player program events", () => {
       throw new Error("db locked");
     });
 
-    await botModule.__test_handlePlayerUnjoinedProgramEvent((await event()) as any);
+    await botModule.__test_handlePlayerRefundedProgramEvent((await event()) as any);
 
-    expect(errorSpy.mock.calls[0]?.[0]).toBe("Error processing PlayerUnjoined event:");
+    expect(errorSpy.mock.calls[0]?.[0]).toBe("Error processing PlayerRefunded event:");
   });
 });

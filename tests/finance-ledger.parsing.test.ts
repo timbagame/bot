@@ -48,7 +48,7 @@ describe("program event identifiers", () => {
 
   test("accepts plain string and missing identifiers from decoded events", async () => {
     const parseSpy = spyOn(eventParser, "parseProgramEventsFromTransaction").mockReturnValue([
-      { name: "GameInitialized", data: { gameKey: "game-string", tokenMint: "mint-string" } },
+      { name: "GameCreated", data: { gameKey: "game-string", tokenMint: "mint-string" } },
       { name: "GameCompleted", data: { gameKey: "game-string", feeAmount: 9n, timestamp: 50n } },
       { name: "TokenFeeWithdrawn", data: { amount: 3n } },
     ]);

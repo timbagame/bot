@@ -4882,7 +4882,7 @@ export class GameManager {
       const oraclePda = await this.getOraclePda();
       const usesAtomicCreatorJoin = gameType === "coinflip";
       const gameInstruction = await this.program.methods
-        .initializeGame(gameConfig, Array.from(randomHashBuffer))
+        .createGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
           game: gamePda,
           creator: playerKp.publicKey,
@@ -6025,7 +6025,7 @@ export class GameManager {
       authorityKp.publicKey,
     );
     const unjoinInstruction = await this.program.methods
-      .unjoinGame()
+      .refundPlayer()
       .accounts(unjoinAccounts as any)
       .instruction();
 

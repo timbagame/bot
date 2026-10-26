@@ -3,11 +3,13 @@ import type { TimbaProgram } from "./timba-program";
 import {
   decodeProgramEvent,
   getTrustedProgramData,
-  EVENT_DISCRIMINATORS,
+  LEGACY_EVENT_DISCRIMINATORS,
   type ProgramEvent as SharedEvent,
 } from "@timbagame/protocol/contracts/events";
 
-export const PLAYER_UNJOINED_DISCRIMINATOR = Buffer.from(EVENT_DISCRIMINATORS.PlayerUnjoined);
+export const LEGACY_PLAYER_REFUNDED_DISCRIMINATOR = Buffer.from(
+  LEGACY_EVENT_DISCRIMINATORS.PlayerRefunded,
+);
 export type ProgramEvent = { name: string; data: Record<string, unknown> };
 function adapt(event: SharedEvent): ProgramEvent {
   const data: Record<string, unknown> = { ...event.data };
@@ -22,14 +24,14 @@ function adapt(event: SharedEvent): ProgramEvent {
   ]) {
     if (typeof data[field] === "string") data[field] = new PublicKey(data[field] as string);
   }
-  if (event.name === "GameInitialized") data["gameType"] = { [event.data["gameType"]]: {} };
+  if (event.name === "GameCreated") data["gameType"] = { [event.data["gameType"]]: {} };
   return { name: event.name, data };
 }
-export function decodeLegacyPlayerUnjoined(logBase64: string): ProgramEvent | null {
+export function decodeLegacyPlayerRefunded(logBase64: string): ProgramEvent | null {
   const bytes = Buffer.from(logBase64, "base64");
   if (bytes.length !== 104) return null;
   const event = decodeProgramEvent(bytes);
-  return event?.name === "PlayerUnjoined" ? adapt(event) : null;
+  return event?.name === "PlayerRefunded" ? adapt(event) : null;
 }
 export function decodeProgramEventLog(
   logBase64: string,

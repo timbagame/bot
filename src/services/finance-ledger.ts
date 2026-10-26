@@ -306,7 +306,7 @@ export class FinanceLedgerService {
     const gameMints = new Map<string, string>();
 
     for (const event of events) {
-      if (event.name.toLowerCase() !== "gameinitialized") continue;
+      if (event.name.toLowerCase() !== "gamecreated") continue;
       gameMints.set(asString(event.data["gameKey"]), asString(event.data["tokenMint"]));
     }
 

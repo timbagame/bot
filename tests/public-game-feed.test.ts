@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Keypair } from "#solana";
 import {
   __test_getGameManager,
-  __test_handleGameInitializedProgramEvent,
+  __test_handleGameCreatedProgramEvent,
   __test_resetChatDatabase,
   __test_resetGameDatabase,
   __test_resetSleepImplementation,
@@ -71,7 +71,7 @@ describe("global public game feed", async () => {
   });
 
   test("publishes a new public game only to subscribed chats without an existing message", async () => {
-    await __test_handleGameInitializedProgramEvent({
+    await __test_handleGameCreatedProgramEvent({
       gameKey: gameAddress,
       creator,
       isPrivate: false,
@@ -81,7 +81,7 @@ describe("global public game feed", async () => {
   });
 
   test("does not publish private games", async () => {
-    await __test_handleGameInitializedProgramEvent({
+    await __test_handleGameCreatedProgramEvent({
       gameKey: gameAddress,
       creator,
       isPrivate: true,
@@ -91,7 +91,7 @@ describe("global public game feed", async () => {
   });
 
   const publish = () =>
-    __test_handleGameInitializedProgramEvent({
+    __test_handleGameCreatedProgramEvent({
       gameKey: gameAddress,
       creator,
       isPrivate: false,

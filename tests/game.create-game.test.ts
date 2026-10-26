@@ -28,7 +28,7 @@ function makeProgram(connection: any, accountOverrides: Record<string, unknown> 
     provider: { connection },
     __captures: captures,
     methods: {
-      initializeGame: (cfg: any) => ({
+      createGame: (cfg: any) => ({
         accounts: (accs: any) => {
           captures.accounts = accs;
           captures.config = cfg;
