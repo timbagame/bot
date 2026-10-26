@@ -80,7 +80,7 @@ const settle = () => Bun.sleep(15);
 
 describe("debounced game message updates", () => {
   test("an active game refreshes with the latest pot", async () => {
-    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerUnjoined", [
+    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerRefunded", [
       target,
     ]);
     await settle();
@@ -97,7 +97,7 @@ describe("debounced game message updates", () => {
   test("a game completed meanwhile is rendered as completed with its winner", async () => {
     game = { status: "Completed", winner_address: "WinnerKey", total_amount: 9_000 };
 
-    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerUnjoined", [
+    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerRefunded", [
       target,
     ]);
     await settle();
@@ -116,7 +116,7 @@ describe("debounced game message updates", () => {
     game = { status: "active", winner_address: "WinnerKey", total_amount: 9_000 };
     await botModule.__test_processPlayerEvent(
       (await joinEvent(unknownPot)) as any,
-      "PlayerUnjoined",
+      "PlayerRefunded",
       [target],
     );
     await settle();
@@ -124,7 +124,7 @@ describe("debounced game message updates", () => {
     game = { status: "completed", amount: 3_000 };
     await botModule.__test_processPlayerEvent(
       (await joinEvent(unknownPot)) as any,
-      "PlayerUnjoined",
+      "PlayerRefunded",
       [target],
     );
     await settle();
@@ -137,7 +137,7 @@ describe("debounced game message updates", () => {
 
   test("nothing is rendered when the game manager goes away before the debounce fires", async () => {
     botModule.__test_setGameMessageUpdateDebounceMs(10);
-    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerUnjoined", [
+    await botModule.__test_processPlayerEvent((await joinEvent()) as any, "PlayerRefunded", [
       target,
     ]);
     botModule.__test_setGameManager(undefined as any);

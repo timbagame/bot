@@ -20,8 +20,8 @@ const event = (name: keyof typeof EVENT_DISCRIMINATORS, size: number) => {
   return bytes;
 };
 
-const gameInitialized = (game = GAME, mint = MINT) => {
-  const bytes = event("GameInitialized", 146);
+const gameCreated = (game = GAME, mint = MINT) => {
+  const bytes = event("GameCreated", 146);
   game.toBuffer().copy(bytes, 8);
   PLAYER.toBuffer().copy(bytes, 40);
   bytes.writeUInt8(0, 72);
@@ -186,7 +186,7 @@ afterEach(() => {
 describe("program finance events", () => {
   test("records a completed game's fee in the mint the game was created with", async () => {
     const history = createHistory(programSource);
-    const transaction = programTransaction([gameInitialized(), gameCompleted(7n, 1_700n)], {
+    const transaction = programTransaction([gameCreated(), gameCompleted(7n, 1_700n)], {
       fee: 5000,
     });
 

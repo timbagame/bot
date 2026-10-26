@@ -120,9 +120,9 @@ import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   PlayerData,
   GameCompletedEvent,
-  GameInitializedEvent,
+  GameCreatedEvent,
   PlayerJoinedEvent,
-  PlayerUnjoinedEvent,
+  PlayerRefundedEvent,
   PlayerEvent,
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
@@ -1658,9 +1658,9 @@ export const __test_setSwapManagers = (managers: {
   ({ swapManager, swapService } = managers);
 };
 let gameCompletedListenerId: number | null = null;
-let gameInitializedListenerId: number | null = null;
+let gameCreatedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
-let playerUnjoinedListenerId: number | null = null;
+let playerRefundedListenerId: number | null = null;
 let rpcEndpointListenerCleanup: (() => void) | null = null;
 let programEventListenersReady = false;
 
@@ -2462,7 +2462,7 @@ const handleGameCompletedProgramEvent = async (
   }
 };
 
-const handleGameInitializedProgramEvent = async (event: GameInitializedEvent): Promise<void> => {
+const handleGameCreatedProgramEvent = async (event: GameCreatedEvent): Promise<void> => {
   if (event.isPrivate) return;
 
   const gameAddress = event.gameKey.toString();
@@ -2517,20 +2517,20 @@ const handleGameInitializedProgramEvent = async (event: GameInitializedEvent): P
   }
 };
 
-export const __test_handleGameInitializedProgramEvent = handleGameInitializedProgramEvent;
+export const __test_handleGameCreatedProgramEvent = handleGameCreatedProgramEvent;
 
 const handlePlayerJoinedProgramEvent = async (event: PlayerJoinedEvent): Promise<void> => {
   await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
 };
 
-const handlePlayerUnjoinedProgramEvent = async (event: PlayerUnjoinedEvent): Promise<void> => {
-  await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
+const handlePlayerRefundedProgramEvent = async (event: PlayerRefundedEvent): Promise<void> => {
+  await handlePlayerEvent(event, "PlayerRefunded", "👤", "left");
 };
 
 export const __test_handlePlayerJoinedProgramEvent = handlePlayerJoinedProgramEvent;
-export const __test_handlePlayerUnjoinedProgramEvent = handlePlayerUnjoinedProgramEvent;
+export const __test_handlePlayerRefundedProgramEvent = handlePlayerRefundedProgramEvent;
 
-type ProgramEventName = "gameInitialized" | "gameCompleted" | "playerJoined" | "playerUnjoined";
+type ProgramEventName = "gameCreated" | "gameCompleted" | "playerJoined" | "playerRefunded";
 
 type ProgramEventDescriptor = {
   eventName: ProgramEventName;
@@ -2542,12 +2542,12 @@ type ProgramEventDescriptor = {
 
 const programEventDescriptors: ProgramEventDescriptor[] = [
   {
-    eventName: "gameInitialized",
-    handler: handleGameInitializedProgramEvent,
-    label: "GameInitialized",
-    getId: () => gameInitializedListenerId,
+    eventName: "gameCreated",
+    handler: handleGameCreatedProgramEvent,
+    label: "GameCreated",
+    getId: () => gameCreatedListenerId,
     setId: (value) => {
-      gameInitializedListenerId = value;
+      gameCreatedListenerId = value;
     },
   },
   {
@@ -2569,12 +2569,12 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
     },
   },
   {
-    eventName: "playerUnjoined",
-    handler: handlePlayerUnjoinedProgramEvent,
-    label: "PlayerUnjoined",
-    getId: () => playerUnjoinedListenerId,
+    eventName: "playerRefunded",
+    handler: handlePlayerRefundedProgramEvent,
+    label: "PlayerRefunded",
+    getId: () => playerRefundedListenerId,
     setId: (value) => {
-      playerUnjoinedListenerId = value;
+      playerRefundedListenerId = value;
     },
   },
 ];
@@ -2722,10 +2722,10 @@ export const __test_registerProgramEventListeners = registerProgramEventListener
 export const __test_unregisterProgramEventListeners = unregisterProgramEventListeners;
 export const __test_attachRpcEndpointFailoverHandler = attachRpcEndpointFailoverHandler;
 export const __test_getProgramEventListenerState = () => ({
-  gameInitializedListenerId,
+  gameCreatedListenerId,
   gameCompletedListenerId,
   playerJoinedListenerId,
-  playerUnjoinedListenerId,
+  playerRefundedListenerId,
   programEventListenersReady,
 });
 export const __test_resetProgramEventState = async (): Promise<void> => {
@@ -4931,8 +4931,8 @@ const handlePlayerEvent = async (
           event.ticketIndex,
           event.ticketsCount,
         );
-      } else if (eventName === "PlayerUnjoined") {
-        const unjoinedEvent = event as PlayerUnjoinedEvent;
+      } else if (eventName === "PlayerRefunded") {
+        const unjoinedEvent = event as PlayerRefundedEvent;
         gameDb.recordGameParticipantUnjoined(
           gameAddress,
           playerAddress,

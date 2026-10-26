@@ -4,8 +4,14 @@ import type { Address, Decoder, Instruction } from "@solana/kit";
 import {
   GAME_TOKEN_DISCRIMINATOR,
   getGameTokenDecoder,
+  getInitializeGameInstruction,
+  getUnjoinGameInstruction,
   getWithdrawTokenFeeInstruction,
 } from "@timbagame/protocol/contracts/v0.2.0/kit";
+import {
+  getCreateGameInstruction,
+  getRefundPlayerInstruction,
+} from "@timbagame/protocol/contracts/v0.3.0/kit";
 import {
   PublicKey,
   addressOnlySigner,
@@ -47,9 +53,9 @@ export interface TimbaProgram {
     readonly gameToken: TimbaAccountClient;
   };
   readonly methods: {
-    initializeGame(config: AccountRecord, randomHash: readonly number[]): InstructionBuilder;
+    createGame(config: AccountRecord, randomHash: readonly number[]): InstructionBuilder;
     joinGame(): InstructionBuilder;
-    unjoinGame(): InstructionBuilder;
+    refundPlayer(): InstructionBuilder;
     closeGame(): InstructionBuilder;
     withdrawTokenFee(): InstructionBuilder;
   };
@@ -184,15 +190,17 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
   const gameDiscriminator = client.GAME_DISCRIMINATOR;
   const oracleDiscriminator = client.ORACLE_DISCRIMINATOR;
 
+  // v0.3 dropped the game token and associated token program accounts.
   const tokenAccounts = (context: AccountRecord) =>
     version030
       ? { gameVaultTokenAccount: asAddress(context["gameVaultTokenAccount"]) }
       : {
           gameToken: asAddress(context["gameToken"]),
           gameTokenAccount: asAddress(context["gameTokenAccount"]),
+          associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
         };
 
-  const buildInitialize = (config: AccountRecord, randomHash: readonly number[]) =>
+  const buildCreate = (config: AccountRecord, randomHash: readonly number[]) =>
     instructionBuilder((accounts) => {
       const context = funds(accounts);
       const input: any = {
@@ -204,7 +212,6 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
         tokenMint: asAddress(context["tokenMint"]),
         gameVault: asAddress(context["gameVault"]),
         tokenProgram: asAddress(context["tokenProgram"]),
-        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
         creatorTokenAccount: asAddress(accounts["creatorTokenAccount"]),
         systemProgram: asAddress(accounts["systemProgram"]),
         gameType: "coinflip" in (config["gameType"] as AccountRecord) ? 0 : 1,
@@ -215,7 +222,9 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
         isPrivate: Boolean(config["isPrivate"]),
         randomHash: Uint8Array.from(randomHash),
       };
-      return client.getInitializeGameInstruction(input, { programAddress });
+      return version030
+        ? getCreateGameInstruction(input, { programAddress })
+        : getInitializeGameInstruction(input, { programAddress });
     });
 
   const buildJoin = () =>
@@ -228,7 +237,6 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
         tokenMint: asAddress(context["tokenMint"]),
         gameVault: asAddress(context["gameVault"]),
         tokenProgram: asAddress(context["tokenProgram"]),
-        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
         playerTokenAccount: asAddress(accounts["playerTokenAccount"]),
         oracle: asAddress(accounts["oracle"]),
       };
@@ -236,7 +244,7 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
       return client.getJoinGameInstruction(input, { programAddress });
     });
 
-  const buildUnjoin = () =>
+  const buildRefund = () =>
     instructionBuilder((accounts) => {
       const context = funds(accounts);
       const input: any = {
@@ -248,10 +256,11 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
         tokenMint: asAddress(context["tokenMint"]),
         gameVault: asAddress(context["gameVault"]),
         tokenProgram: asAddress(context["tokenProgram"]),
-        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
         playerTokenAccount: asAddress(accounts["playerTokenAccount"]),
       };
-      return client.getUnjoinGameInstruction(input, { programAddress });
+      return version030
+        ? getRefundPlayerInstruction(input, { programAddress })
+        : getUnjoinGameInstruction(input, { programAddress });
     });
 
   const buildClose = () =>
@@ -265,7 +274,6 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
         tokenMint: asAddress(context["tokenMint"]),
         gameVault: asAddress(context["gameVault"]),
         tokenProgram: asAddress(context["tokenProgram"]),
-        associatedTokenProgram: asAddress(context["associatedTokenProgram"]),
         creatorTokenAccount: asAddress(accounts["creatorTokenAccount"]),
       };
       return client.getCloseGameInstruction(input, { programAddress });
@@ -319,9 +327,9 @@ export function createTimbaProgram(connection: Connection): TimbaProgram {
       }),
     },
     methods: {
-      initializeGame: buildInitialize,
+      createGame: buildCreate,
       joinGame: buildJoin,
-      unjoinGame: buildUnjoin,
+      refundPlayer: buildRefund,
       closeGame: buildClose,
       withdrawTokenFee: buildWithdraw,
     },

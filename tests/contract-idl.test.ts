@@ -12,7 +12,7 @@ describe("contract ABI", () => {
       return instruction.accounts.map(({ name }: { name: string }) => name);
     };
 
-    expect(accounts("initialize_game")).toEqual([
+    expect(accounts("create_game")).toEqual([
       "game",
       "creator",
       "oracle",
@@ -29,7 +29,7 @@ describe("contract ABI", () => {
       "player_token_account",
       "oracle",
     ]);
-    expect(accounts("unjoin_game")).toEqual([
+    expect(accounts("refund_player")).toEqual([
       "game",
       "player",
       "authority",

@@ -107,7 +107,7 @@ describe("GameManager unjoin errors", () => {
     const program = {
       account: { game: { fetch: async () => ({ creator: creator.publicKey }) } },
       methods: {
-        unjoinGame: () => ({
+        refundPlayer: () => ({
           accounts: (accounts: any) => {
             accountsSeen.push(accounts);
             return { instruction: async () => unjoinIx };

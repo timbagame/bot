@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { PublicKey } from "#solana";
 import {
-  PLAYER_UNJOINED_DISCRIMINATOR,
-  decodeLegacyPlayerUnjoined,
+  LEGACY_PLAYER_REFUNDED_DISCRIMINATOR,
+  decodeLegacyPlayerRefunded,
   decodeProgramEventLog,
   parseProgramEventLogs,
 } from "../src/utils/program-event-parser";
@@ -10,8 +10,8 @@ import {
 const GAME = new PublicKey("11111111111111111111111111111112");
 const PLAYER = new PublicKey("So11111111111111111111111111111111111111112");
 
-/** Encode a pre-moved_participant PlayerUnjoined program-data payload. */
-function encodeLegacyPlayerUnjoined(fields: {
+/** Encode a pre-moved_participant v0.2 PlayerUnjoined program-data payload. */
+function encodeLegacyPlayerRefunded(fields: {
   gameKey: PublicKey;
   player: PublicKey;
   totalAmount: bigint;
@@ -35,7 +35,7 @@ function encodeLegacyPlayerUnjoined(fields: {
   body.writeBigUInt64LE(fields.lastSlot, o);
   o += 8;
   body.writeBigUInt64LE(fields.timestamp, o);
-  return Buffer.concat([PLAYER_UNJOINED_DISCRIMINATOR, body]).toString("base64");
+  return Buffer.concat([LEGACY_PLAYER_REFUNDED_DISCRIMINATOR, body]).toString("base64");
 }
 
 function encodeGameCompleted(feeAmount: bigint): string {
@@ -50,10 +50,10 @@ function encodeGameCompleted(feeAmount: bigint): string {
   return payload.toString("base64");
 }
 
-describe("legacy PlayerUnjoined layout", () => {
+describe("legacy PlayerRefunded layout", () => {
   test("decodes pre-moved_participant events with movedParticipant null", () => {
     // lastSlot LE first byte = 7 would be an invalid Option tag under the new layout.
-    const log = encodeLegacyPlayerUnjoined({
+    const log = encodeLegacyPlayerRefunded({
       gameKey: GAME,
       player: PLAYER,
       totalAmount: 1_000_000n,
@@ -63,9 +63,9 @@ describe("legacy PlayerUnjoined layout", () => {
       timestamp: 1_700_000_000n,
     });
 
-    const event = decodeLegacyPlayerUnjoined(log);
+    const event = decodeLegacyPlayerRefunded(log);
     expect(event).not.toBeNull();
-    expect(event!.name).toBe("PlayerUnjoined");
+    expect(event!.name).toBe("PlayerRefunded");
     expect((event!.data["gameKey"] as PublicKey).equals(GAME)).toBe(true);
     expect((event!.data["player"] as PublicKey).equals(PLAYER)).toBe(true);
     expect(event!.data["totalAmount"]).toBe(1_000_000n);
@@ -78,7 +78,7 @@ describe("legacy PlayerUnjoined layout", () => {
 
   test("rejects current-layout (longer) payloads so the IDL handles them", () => {
     const legacy = Buffer.from(
-      encodeLegacyPlayerUnjoined({
+      encodeLegacyPlayerRefunded({
         gameKey: GAME,
         player: PLAYER,
         totalAmount: 1n,
@@ -91,13 +91,13 @@ describe("legacy PlayerUnjoined layout", () => {
     );
     // Option::None + rest already in buffer would be wrong size; append one byte.
     const longer = Buffer.concat([legacy, Buffer.from([0])]).toString("base64");
-    expect(decodeLegacyPlayerUnjoined(longer)).toBeNull();
+    expect(decodeLegacyPlayerRefunded(longer)).toBeNull();
   });
 });
 
 describe("decodeProgramEventLog", () => {
   test("uses legacy layout before current IDL so last_slot is not misread as Option", () => {
-    const log = encodeLegacyPlayerUnjoined({
+    const log = encodeLegacyPlayerRefunded({
       gameKey: GAME,
       player: PLAYER,
       totalAmount: 5n,
@@ -160,7 +160,7 @@ describe("parseProgramEventLogs", () => {
 
   test("recovers a legacy unjoin without aborting the log stream", () => {
     const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
-    const legacyLog = encodeLegacyPlayerUnjoined({
+    const legacyLog = encodeLegacyPlayerRefunded({
       gameKey: GAME,
       player: PLAYER,
       totalAmount: 42n,
@@ -177,14 +177,14 @@ describe("parseProgramEventLogs", () => {
     ]);
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.name).toBe("PlayerUnjoined");
+    expect(events[0]!.name).toBe("PlayerRefunded");
     expect(events[0]!.data["movedParticipant"]).toBeNull();
     expect(events[0]!.data["totalAmount"]).toBe(42n);
   });
 
   test("still surfaces fee events when a prior log would have thrown under the current IDL", () => {
     const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
-    const legacyLog = encodeLegacyPlayerUnjoined({
+    const legacyLog = encodeLegacyPlayerRefunded({
       gameKey: GAME,
       player: PLAYER,
       totalAmount: 1n,
@@ -202,12 +202,12 @@ describe("parseProgramEventLogs", () => {
       `Program ${programId.toBase58()} success`,
     ]);
 
-    expect(events.map((e) => e.name)).toEqual(["PlayerUnjoined", "GameCompleted"]);
+    expect(events.map((e) => e.name)).toEqual(["PlayerRefunded", "GameCompleted"]);
     expect(events[1]!.data["feeAmount"]).toBe(7n);
   });
   test("skips malformed program data without dropping later events", () => {
     const programId = new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5");
-    const truncated = Buffer.concat([PLAYER_UNJOINED_DISCRIMINATOR, Buffer.alloc(10)]);
+    const truncated = Buffer.concat([LEGACY_PLAYER_REFUNDED_DISCRIMINATOR, Buffer.alloc(10)]);
 
     const events = parseProgramEventLogs(programId, [
       `Program ${programId.toBase58()} invoke [1]`,

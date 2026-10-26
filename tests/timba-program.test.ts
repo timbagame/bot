@@ -46,7 +46,6 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
                 gameVault,
                 gameVaultTokenAccount,
                 tokenProgram: TOKEN_PROGRAM_ID,
-                associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
               },
             }
           : {
@@ -78,7 +77,6 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
             gameVault,
             gameVaultTokenAccount,
             TOKEN_PROGRAM_ID,
-            ASSOCIATED_TOKEN_PROGRAM_ID,
             playerTokenAccount,
             oracle,
           ]
@@ -97,7 +95,8 @@ describe(`Timba ${contractVersion} generated client adapter`, () => {
           ]
       ).map((key) => key.toBase58()),
     );
-    expect(instruction.keys[1]).toMatchObject({ isSigner: true, isWritable: true });
+    // v0.3 only needs the player to sign.
+    expect(instruction.keys[1]).toMatchObject({ isSigner: true, isWritable: !version030 });
     expect(instruction.keys[2]).toMatchObject({ isSigner: true, isWritable: false });
   });
 

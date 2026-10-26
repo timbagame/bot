@@ -66,10 +66,10 @@ function makeProgram(connection = createConnectionStub()) {
     provider: { connection },
     __captures: captures,
     methods: {
-      initializeGame: (cfg: any, _hash: any) => ({
+      createGame: (cfg: any, _hash: any) => ({
         accounts: (accs: any) => {
-          captures["initializeGameAccounts"] = accs;
-          captures["initializeGameConfig"] = cfg;
+          captures["createGameAccounts"] = accs;
+          captures["createGameConfig"] = cfg;
           return {
             instruction: async () =>
               new TransactionInstruction({
@@ -112,8 +112,8 @@ function makeProgram(connection = createConnectionStub()) {
     account: {
       game: {
         fetch: async () => {
-          const accounts = captures["initializeGameAccounts"];
-          const config = captures["initializeGameConfig"];
+          const accounts = captures["createGameAccounts"];
+          const config = captures["createGameConfig"];
           const funds = accounts.gameVaultCtx ?? accounts.gameTokenCtx;
           return {
             creator: accounts.creator,
@@ -927,7 +927,7 @@ describe("GameManager.createGame", () => {
     expect(saved.length).toBe(1);
 
     const captures = (program as any).__captures;
-    const accounts = captures["initializeGameAccounts"];
+    const accounts = captures["createGameAccounts"];
     expect(captures["joinGameAccounts"].oracleOperator).toBeUndefined();
     expect((captures["joinGameInstruction"] as TransactionInstruction).keys[2]).toEqual({
       pubkey: program.programId,
@@ -1061,7 +1061,7 @@ describe("GameManager.createGame", () => {
         expect(result.success).toBe(false);
         expect(saveGame).not.toHaveBeenCalled();
         expect(saveGameParticipant).not.toHaveBeenCalled();
-        expect(result.gameAddress).toBe(program.__captures.initializeGameAccounts.game.toBase58());
+        expect(result.gameAddress).toBe(program.__captures.createGameAccounts.game.toBase58());
         expect(result.confirmedSignature).toBe("CONFIRMED_SIG");
         expect(savePendingGameCreation).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -2044,7 +2044,7 @@ describe("GameManager.createGame", () => {
         1n,
       );
 
-      const firstInitializeAccounts = (program as any).__captures["initializeGameAccounts"];
+      const firstInitializeAccounts = (program as any).__captures["createGameAccounts"];
       expect(firstInitializeAccounts.oracleOperator.toBase58()).not.toBe(
         firstInitializeAccounts.creator.toBase58(),
       );
@@ -2366,7 +2366,7 @@ describe("GameManager.createGame for a challenge", () => {
       expect.objectContaining({ state: "prepared", isPrivate: true }),
     );
     // The chain enforces the operator signature only for private games.
-    expect((program as any).__captures.initializeGameConfig.isPrivate).toBe(true);
+    expect((program as any).__captures.createGameConfig.isPrivate).toBe(true);
   });
 
   test("a challenge naming several people saves them all and asks the chain for all their seats", async () => {
@@ -2375,7 +2375,7 @@ describe("GameManager.createGame for a challenge", () => {
 
     expect(result.success).toBe(true);
     expect(db.saveGameChallenge.mock.calls).toEqual([[result.gameAddress, challenge]]);
-    const config = (program as any).__captures.initializeGameConfig;
+    const config = (program as any).__captures.createGameConfig;
     expect([config.maxTickets, config.minTickets, config.isPrivate]).toEqual([3, 3, true]);
   });
 
@@ -2384,7 +2384,7 @@ describe("GameManager.createGame for a challenge", () => {
 
     expect(result.success).toBe(true);
     expect(db.saveGameChallenge).not.toHaveBeenCalled();
-    expect((program as any).__captures.initializeGameConfig.isPrivate).toBe(false);
+    expect((program as any).__captures.createGameConfig.isPrivate).toBe(false);
   });
 
   test("creates nothing when the challenge cannot be saved", async () => {

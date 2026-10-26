@@ -46,7 +46,7 @@ describe("unjoinPlayerFromGame edge paths", () => {
         game: { fetch: options.fetch ?? (async () => ({ creator: creatorValue })) },
       },
       methods: {
-        unjoinGame: () => ({
+        refundPlayer: () => ({
           accounts: () => ({ instruction: async () => ({ ix: "unjoin" }) }),
         }),
       },

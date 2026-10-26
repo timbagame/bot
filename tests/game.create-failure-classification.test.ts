@@ -52,10 +52,10 @@ function makeProgram(connection = createConnectionStub()) {
     provider: { connection },
     __captures: captures,
     methods: {
-      initializeGame: (cfg: any, _hash: any) => ({
+      createGame: (cfg: any, _hash: any) => ({
         accounts: (accs: any) => {
-          captures["initializeGameAccounts"] = accs;
-          captures["initializeGameConfig"] = cfg;
+          captures["createGameAccounts"] = accs;
+          captures["createGameConfig"] = cfg;
           return {
             instruction: async () =>
               new TransactionInstruction({
@@ -98,8 +98,8 @@ function makeProgram(connection = createConnectionStub()) {
     account: {
       game: {
         fetch: async () => {
-          const accounts = captures["initializeGameAccounts"];
-          const config = captures["initializeGameConfig"];
+          const accounts = captures["createGameAccounts"];
+          const config = captures["createGameConfig"];
           const funds = accounts.gameVaultCtx ?? accounts.gameTokenCtx;
           return {
             creator: accounts.creator,
