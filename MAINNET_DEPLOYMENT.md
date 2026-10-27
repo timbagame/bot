@@ -1,4 +1,4 @@
-# Telegram Bot: Service Deployment
+# Bot service deployment
 
 This guide covers only the Bot service. Cross-project production operations and chain administration are documented in the private Operations repository.
 
@@ -53,10 +53,4 @@ Bot-specific database and wallet maintenance runs inside the container with `pod
 
 Keep `faucets.sqlite` alongside the other Bot databases on the host. It stores
 claim reservations and transaction signatures used to reconcile payments after
-an ambiguous RPC response. Before the first restart after installing this
-Quadlet, if the host file does not already exist, copy the existing in-container
-database out if it exists:
-
-```bash
-podman cp bot:/app/faucets.sqlite ~/timba/bot/faucets.sqlite
-```
+an ambiguous RPC response.
