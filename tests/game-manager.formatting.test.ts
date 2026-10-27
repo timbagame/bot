@@ -371,6 +371,13 @@ describe("GameManager.formatGameMessage for a challenge", () => {
     expect(res.keyboard).toEqual([]);
   });
 
+  test("a finished challenge leaves one blank line between the prize pool and the winner", async () => {
+    const res = await render({ ticketsCount: 2, status: "Completed", winner: "WINNERPUB" });
+
+    expect(res.messageText).toMatch(/\nPrize pool: [^\n]+\n\nWinner: /);
+    expect(res.messageText).not.toContain("\n\n\n");
+  });
+
   test.each(["cancelled", DEFAULT_NULL_ADDRESS])(
     "a challenge that expired unanswered never reads as a match (winner %s)",
     async (winner) => {
