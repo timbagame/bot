@@ -3250,7 +3250,9 @@ export class GameManager {
     const composeMessage = (names: ParticipantDisplay[], omittedCount: number): string => {
       const participantsSection = names.length > 0 ? buildParticipantsList(names) : "";
       let message = baseBeforeParticipants + participantsSection;
-      if (isCompleted && participantsSection.endsWith("\n")) {
+      // The prize line and the player list both end in a newline, and the
+      // winner line brings its own spacing.
+      if (isCompleted && message.endsWith("\n")) {
         message = message.slice(0, -1);
       }
       if (omittedCount > 0) {
