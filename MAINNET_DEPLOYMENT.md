@@ -49,7 +49,7 @@ Do not use `sudo` for rootless Podman. If the checkout path changes, update the 
 
 For coordinated deployment order, privileged chain commands, upgrades, and incident procedures, use `operations/DEPLOYMENT.md` and the relevant Operations runbook.
 
-Bot-specific database and wallet maintenance runs inside the container with `podman exec bot bun run service-admin <command>`. Contract configuration does not belong to the Bot service.
+Bot-specific database and wallet maintenance runs inside the container with `podman exec bot bun scripts/service-admin.ts <command>`. The image has no shell, so package scripts such as `bun run service-admin` don't work there. Contract configuration does not belong to the Bot service.
 
 Keep `faucets.sqlite` alongside the other Bot databases on the host. It stores
 claim reservations and transaction signatures used to reconcile payments after
