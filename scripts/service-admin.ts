@@ -15,7 +15,7 @@ export function isServiceAdminCommand(value: string): value is ServiceAdminComma
 
 export function usage(): string {
   return [
-    "Usage: bun run service-admin <command> [arguments]",
+    "Usage: bun scripts/service-admin.ts <command> [arguments]",
     "",
     "Commands:",
     "  close-orphaned-games",

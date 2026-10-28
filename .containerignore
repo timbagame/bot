@@ -9,3 +9,4 @@ coverage
 *.sqlite
 docs
 tmp
+scripts/smoke-image.sh

@@ -93,8 +93,8 @@ Game creation recovery is fail-closed. The exact signed transaction is saved as 
 For a legacy record without reusable signed bytes, an expired submitted/unknown intent, or another genuinely inconclusive case, an operator must resolve it explicitly after checking the exact signature and game address against trusted Solana evidence:
 
 ```bash
-bun run service-admin list-pending-game-creations [game_address]
-bun run service-admin resolve-pending-game-creation <game_address> \
+podman exec bot bun scripts/service-admin.ts list-pending-game-creations [game_address]
+podman exec bot bun scripts/service-admin.ts resolve-pending-game-creation <game_address> \
   --state <prepared|submitted|unknown|confirmed> --confirm \
   --reason "<evidence and decision>" --actor <operator>
 ```

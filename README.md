@@ -47,7 +47,7 @@ The Telegram `/` menu lists only the main command names. Aliases (`/start`, `/cf
 ### Operator
 
 - `/finance`: private revenue, expense and profit report, only for the finance admin in a private chat
-- `bun run service-admin <command>`: database and wallet maintenance
+- `bun scripts/service-admin.ts <command>`: database and wallet maintenance (in production, `podman exec bot bun scripts/service-admin.ts <command>`)
 
 ## How a game works
 

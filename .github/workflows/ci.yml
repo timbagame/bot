@@ -122,6 +122,13 @@ jobs:
           [[ "$status_v03" == 0 && "$status_v02" == 0 ]]
       - name: Enforce 100% line coverage
         run: bun run scripts/check-coverage.ts coverage-scope.json coverage/v03/lcov.info coverage/v02/lcov.info
+      - name: Build and smoke-test the OCI image
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          command -v podman >/dev/null || { sudo apt-get update && sudo apt-get install --yes podman; }
+          podman build --secret=id=npm_token,env=NODE_AUTH_TOKEN --format oci --file Containerfile --tag bot:ci .
+          scripts/smoke-image.sh bot:ci
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
