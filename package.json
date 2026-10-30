@@ -14,6 +14,7 @@
     "format:check": "prettier . --check",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
+    "test": "bun test --isolate",
     "typecheck": "bun x tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

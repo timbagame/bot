@@ -289,6 +289,16 @@ describe("GameManager unavailable state recovery timers", () => {
     expect(gm.unavailableStateRecoveryTimers.size).toBe(1);
   });
 
+  test("stops quietly when the game database cannot look games up", async () => {
+    const gm = makeManager({});
+    const update = spyOn(gm, "updateGameMessageFromData").mockResolvedValue(undefined);
+    gm.scheduleUnavailableStateRecovery(ctx, GAME, "coinflip");
+    await timers.calls[0]!.callback();
+    expect(update).not.toHaveBeenCalled();
+    expect(timers.calls).toHaveLength(1);
+    expect(gm.unavailableStateRecoveryTimers.size).toBe(0);
+  });
+
   test("stops quietly when the game lookup throws", async () => {
     const gm = makeManager({
       getGame: () => {

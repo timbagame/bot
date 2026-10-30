@@ -41,6 +41,11 @@ describe("TokenManager initialization", () => {
       "requires wallet and default token info",
     );
   });
+  test("later getInstance calls return the first instance without needing its arguments", () => {
+    const first = TokenManager.getInstance(createWalletStub(), "DEFMINT", "DEF");
+    expect(TokenManager.getInstance()).toBe(first);
+    expect(TokenManager.getInstance(createWalletStub(), "OTHER", "OTH")).toBe(first);
+  });
 });
 
 describe("addToken decimals validation", () => {

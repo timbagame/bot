@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "#solana";
 import BN from "bn.js";
 import { ChatDatabase } from "../src/utils/chat-database";
+import { stubInstantTimers } from "./helpers/timers";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
 process.env.MNEMONIC =
@@ -420,6 +421,49 @@ describe("Pending player events", async () => {
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("Boundary");
+    expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
+  });
+
+  test("pending events retry on their own once the target becomes available", async () => {
+    const gameAddress = "RETRY_TIMER_GAME";
+    const player = (await Keypair.generate()).publicKey;
+    enableJoinAnnouncementsForTest(89);
+    let targetReady = false;
+    const target = { chatId: 89, messageId: 410 };
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "Retried",
+      getActiveGameMessages: () => (targetReady ? new Map([[target.chatId, target]]) : null),
+    } as any);
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getGame: () =>
+        targetReady ? { chat_id: target.chatId, message_id: target.messageId } : null,
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGameMessages: () => [],
+    } as any);
+
+    const timers = stubInstantTimers();
+    try {
+      botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
+        event: makePlayerEvent(player, 8, 31),
+        eventName: "PlayerJoined",
+        receivedAt: Date.now(),
+      });
+      await botModule.__test_flushPendingPlayerEvents(gameAddress, "notify");
+      expect(botModule.__test_getPendingPlayerEventsState(gameAddress)?.timer).toBeDefined();
+
+      // No one flushes again by hand: the scheduled retry delivers the event.
+      targetReady = true;
+      for (let i = 0; i < 20 && sendCalls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    } finally {
+      timers.restore();
+    }
+
+    expect(sendCalls.map((call) => call.text).join(" ")).toContain("Retried");
     expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
   });
 

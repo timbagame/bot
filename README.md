@@ -112,8 +112,10 @@ Run the same checks as CI:
 bun run format:check
 bun run lint
 bun run typecheck
-bun test --coverage
+bun run test --coverage
 ```
+
+`bun run test` runs each test file in isolation (`bun test --isolate`), so a stub one file leaves behind cannot change another. Plain `bun test` shares modules across files, and file order differs between machines.
 
 CI runs the tests once per contract version (`CONTRACT_VERSION=0.2.0` and `0.3.0`) and requires full line coverage of the files in `coverage-scope.json`.
 

@@ -101,14 +101,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
         run: bun install --frozen-lockfile
-      # Both contract versions run at once: each bun test process is mostly
+      # Both contract versions run at once: each test process is mostly
       # single-threaded and uses its own temp BOT_DB_DIR (tests/setup-env.ts).
       # scripts/check-coverage.test.ts is part of these runs.
       - name: Tests (contract v0.3.0 and v0.2.0)
         shell: bash
         run: |
           run_tests() {
-            CONTRACT_VERSION="$1" bun test --coverage --coverage-reporter=lcov \
+            CONTRACT_VERSION="$1" bun run test --coverage --coverage-reporter=lcov \
               --coverage-dir="coverage/$2" > "test-$2.log" 2>&1
           }
           run_tests 0.3.0 v03 & pid_v03=$!
