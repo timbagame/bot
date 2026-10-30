@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Keypair, PublicKey, TransactionInstruction } from "#solana";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -116,6 +116,57 @@ describe("GameManager join initializes missing ATAs", () => {
     expect(ataInstruction?.data).toEqual(expectedAtaInstruction.data);
     const joinInstruction = recordedInstructions?.[1];
     expect(joinInstruction).toBeDefined();
+  });
+
+  test("joining still creates the account when the existence check fails", async () => {
+    GameManager.resetForTest();
+    const player = (await Keypair.generate()).publicKey;
+    const tokenMint = (await Keypair.generate()).publicKey;
+    const playerTokenAccount = (await Keypair.generate()).publicKey;
+    const wallet = {
+      getConnection: () => ({
+        getAccountInfo: async () => {
+          throw new Error("rpc timeout");
+        },
+      }),
+    } as any;
+    const program = {
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
+      account: { game: {} },
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, {} as any) as any;
+    gm.resolveGameVaultAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameVault: (await Keypair.generate()).publicKey,
+      gameVaultTokenAccount: (await Keypair.generate()).publicKey,
+    });
+    gm.deriveAta = async () => playerTokenAccount;
+    const warn = spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { setupInstructions } = await gm.buildJoinAccounts(
+        new PublicKey("BPFLoader2111111111111111111111111111111111"),
+        { tokenMint },
+        player,
+      );
+      expect(setupInstructions).toHaveLength(1);
+      expect(setupInstructions[0].programId.toBase58()).toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+      );
+      expect(setupInstructions[0].data).toEqual(
+        createAssociatedTokenAccountIdempotentInstruction(
+          player,
+          playerTokenAccount,
+          player,
+          tokenMint,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        ).data,
+      );
+      expect(String(warn.mock.calls[0]?.[0])).toContain("Failed to check player ATA existence");
+    } finally {
+      warn.mockRestore();
+      GameManager.resetForTest();
+    }
   });
 
   test("joinGame resubmits with idempotent ATA creation", async () => {
