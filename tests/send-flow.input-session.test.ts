@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
@@ -7,6 +7,7 @@ process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 
 let bot: any;
 let wallet: any;
+let walletOriginals: Record<string, unknown>;
 let __test_setWalletCache: any;
 let setInputSession: any;
 let getInputSession: any;
@@ -56,6 +57,9 @@ const simulateUserReply = async (
 };
 
 describe("message input sessions", () => {
+  // The wallet is shared with other test files, so put back what this file replaces.
+  afterAll(() => Object.assign(wallet, walletOriginals));
+
   beforeAll(async () => {
     ({ bot, wallet, __test_setWalletCache } = await import("../src/bot"));
 
@@ -72,9 +76,14 @@ describe("message input sessions", () => {
       supports_inline_queries: false,
     };
 
-    (wallet as any).getTokenMetadata = async () => ({ decimals: 9 });
-    (wallet as any).getBalance = async () => 5_000_000_000;
-    (wallet as any).getAllWalletTokenBalances = async () => [];
+    walletOriginals = {
+      getTokenMetadata: wallet.getTokenMetadata,
+      getBalance: wallet.getBalance,
+      getAllWalletTokenBalances: wallet.getAllWalletTokenBalances,
+    };
+    wallet.getTokenMetadata = async () => ({ decimals: 9 });
+    wallet.getBalance = async () => 5_000_000_000;
+    wallet.getAllWalletTokenBalances = async () => [];
 
     (bot as any).api.config.use(async (_prev: any, method: string, payload: any) => {
       if (method === "editMessageCaption") {
