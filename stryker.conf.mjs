@@ -6,7 +6,9 @@ export default {
   appendPlugins: ["@hughescr/stryker-bun-runner"],
   testRunner: "bun",
   // The same isolation `bun run test` uses.
-  bun: { bunArgs: ["--isolate"] },
+  // timeout bounds only the dry run, the whole suite once with coverage (about a minute in CI).
+  // Mutant runs use Stryker's own per-mutant timeout.
+  bun: { bunArgs: ["--isolate"], timeout: 600000 },
   coverageAnalysis: "perTest",
   reporters: ["clear-text", "progress", "json"],
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
