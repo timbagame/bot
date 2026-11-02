@@ -43,3 +43,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 admin-keypair.json
 
 /coverage/
+
+# mutation testing (scripts/mutants.ts)
+.stryker-tmp/
+reports/
+build/

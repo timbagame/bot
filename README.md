@@ -119,6 +119,15 @@ bun run test --coverage
 
 CI runs the tests once per contract version (`CONTRACT_VERSION=0.2.0` and `0.3.0`) and requires full line coverage of the files in `coverage-scope.json`.
 
+Mutation testing checks that the tests notice when that code changes. Stryker changes a line a little, one change at a time, and runs the tests that reach it:
+
+```bash
+bun run scripts/mutants.ts diff origin/main   # the lines this branch changed
+bun run scripts/mutants.ts part 3 64          # the 4th of 64 equal parts of all source lines
+```
+
+It never blocks a merge. On a pull request, one comment lists the changes no test noticed. Every Saturday a quarter of the 64 parts runs, and what lived goes in the open "Missed mutants" issue.
+
 ```
 src/
 ├── bot.ts      # entry point: commands, callbacks and startup
