@@ -626,3 +626,49 @@ describe("createGame confirmed-account verification", () => {
     });
   });
 });
+
+describe("createGame creator join", () => {
+  const watchJoin = (gm: any) => {
+    const joinGame = vi.spyOn(gm.program.methods, "joinGame");
+    const buildJoinAccounts = vi.spyOn(gm, "buildJoinAccounts");
+    return { joinGame, buildJoinAccounts };
+  };
+
+  test.each([
+    ["public", false],
+    ["private", true],
+  ])("a %s giveaway does not join its creator", async (_label, isPrivate) => {
+    const { gm, db } = await setup();
+    const { joinGame, buildJoinAccounts } = watchJoin(gm);
+
+    const result = await create(gm, { gameType: "giveaway", options: { isPrivate } });
+
+    expect(result.success).toBe(true);
+    expect(joinGame).not.toHaveBeenCalled();
+    expect(buildJoinAccounts).not.toHaveBeenCalled();
+    expect(db.saveGameParticipant).not.toHaveBeenCalled();
+    expect(result.autoJoinResult).toBeUndefined();
+  });
+
+  test.each([
+    ["public", false],
+    ["private", true],
+  ])("a %s coinflip joins its creator in the same transaction", async (_label, isPrivate) => {
+    const { gm, db } = await setup();
+    const { joinGame, buildJoinAccounts } = watchJoin(gm);
+
+    const result = await create(gm, { gameType: "coinflip", options: { isPrivate } });
+
+    expect(result.success).toBe(true);
+    expect(joinGame).toHaveBeenCalledTimes(1);
+    expect(buildJoinAccounts).toHaveBeenCalledTimes(1);
+    expect(db.saveGameParticipant).toHaveBeenCalledTimes(1);
+    expect(db.saveGameParticipant).toHaveBeenCalledWith(
+      FIXED_PDA.toBase58(),
+      "1",
+      expect.any(String),
+      expect.objectContaining({ status: "confirmed", joinSignature: "CONFIRMED_SIG" }),
+    );
+    expect(result.autoJoinResult).toEqual({ success: true });
+  });
+});
