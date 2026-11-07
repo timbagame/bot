@@ -584,6 +584,11 @@ export class GameManager {
   >();
   private readonly gamePriceCache =
     createExpiringCache<CachedPriceLookup>(TOKEN_PRICE_CACHE_TTL_MS);
+  /**
+   * Looks up a token's USD price. Tests replace it, so the USD code needs neither the
+   * network nor a `NODE_ENV` switch (the old guard in `getUsdApproximation`).
+   */
+  private usdPriceLookup: typeof getUsdPrice = getUsdPrice;
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private publicGamesCache: { entries: PublicGameEntry[]; expiresAt: number } | null = null;
   private publicGamesInFlight: Promise<PublicGameEntry[]> | null = null;
@@ -1994,12 +1999,11 @@ export class GameManager {
     const lamports = coerceLamportValue(amount);
     if (lamports === null || lamports <= 0n) return null;
     if (lamports > MAX_SAFE_LAMPORTS) return null;
-    if (process.env.NODE_ENV === "test") return null;
 
     try {
       const hintToUse =
         priceHint ?? (priceCacheKey ? (this.gamePriceCache.get(priceCacheKey) ?? null) : null);
-      const lookup = await getUsdPrice({
+      const lookup = await this.usdPriceLookup({
         tokenMint: reference,
         hint: hintToUse,
       });

@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, vi } from "bun:test";
 import { PublicKey } from "#solana";
+import { WSOL_MINT } from "../src/utils/constants";
 import { GameManager } from "../src/utils/game";
 import { __test_clearPriceServiceCache } from "../src/utils/price-service";
 import { __test_resetPriceCache } from "../src/utils/prices";
@@ -661,19 +662,15 @@ describe("GameManager lamport coercion through USD formatting", () => {
   });
 });
 
-describe("GameManager getUsdApproximation outside the test environment", () => {
+describe("GameManager getUsdApproximation", () => {
   const MINT = "FakeMint1111111111111111111111111111111111";
-  let previousEnv: string | undefined;
   let warnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     GameManager.resetForTest();
-    previousEnv = process.env.NODE_ENV;
     warnSpy = spyOn(console, "warn").mockImplementation(() => undefined);
-    process.env.NODE_ENV = "production";
   });
   afterEach(() => {
-    process.env.NODE_ENV = previousEnv;
     warnSpy.mockRestore();
     GameManager.resetForTest();
   });
@@ -683,6 +680,107 @@ describe("GameManager getUsdApproximation outside the test environment", () => {
     identifier: MINT,
     tokenMint: MINT,
     resolvedAt: Date.now(),
+  });
+
+  describe("through the injected price lookup", () => {
+    const priced = (price: number, tokenMint = MINT) => ({
+      price,
+      identifier: tokenMint,
+      tokenMint,
+      resolvedAt: Date.now(),
+    });
+
+    const withLookup = (result: ReturnType<typeof priced> | null) => {
+      const gm = makeManager();
+      const lookup = vi.fn(async (_request: unknown) => result);
+      gm.usdPriceLookup = lookup;
+      return { gm, lookup };
+    };
+
+    test("reaches the lookup in the test environment and formats what it returns", async () => {
+      expect(process.env.NODE_ENV).toBe("test");
+      const { gm, lookup } = withLookup(priced(2.5));
+
+      const result = await gm.getUsdApproximation(2_000_000_000, 9, MINT, false, null, "k-1");
+
+      expect(result).toEqual({ text: "$5", price: 2.5 });
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect(lookup).toHaveBeenCalledWith({ tokenMint: MINT, hint: null });
+      expect(gm.gamePriceCache.get("k-1")?.price).toBe(2.5);
+    });
+
+    test("prices native SOL as WSOL, whatever mint was passed", async () => {
+      const { gm, lookup } = withLookup(priced(100, WSOL_MINT));
+
+      const result = await gm.getUsdApproximation(500_000_000, 9, MINT, true);
+
+      expect(result).toEqual({ text: "$50", price: 100 });
+      expect(lookup).toHaveBeenCalledWith({ tokenMint: WSOL_MINT, hint: null });
+    });
+
+    test("hands the lookup the hint it was given, and else the one cached for the game", async () => {
+      const { gm, lookup } = withLookup(priced(1));
+      const given = priced(3);
+      const cached = priced(4);
+      gm.gamePriceCache.setWithTTL("k-cached", cached);
+
+      // The cache already holds `cached`; the lookup's own answer would replace it afterwards.
+      await gm.getUsdApproximation(1_000_000_000, 9, MINT, false, null, "k-cached");
+      await gm.getUsdApproximation(1_000_000_000, 9, MINT, false, given, "k-other");
+
+      expect(lookup.mock.calls[0]![0]).toEqual({ tokenMint: MINT, hint: cached });
+      expect(lookup.mock.calls[1]![0]).toEqual({ tokenMint: MINT, hint: given });
+    });
+
+    test("returns null, and caches nothing, when the lookup finds no price", async () => {
+      const { gm, lookup } = withLookup(null);
+
+      expect(await gm.getUsdApproximation(1_000_000_000, 9, MINT, false, null, "k-3")).toBeNull();
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect(gm.gamePriceCache.get("k-3")).toBeUndefined();
+      // "No price" is a normal answer, not a failure to warn about.
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    test("does not cache anything without a cache key", async () => {
+      const { gm } = withLookup(priced(2));
+      const remember = spyOn(gm.gamePriceCache, "setWithTTL");
+
+      const result = await gm.getUsdApproximation(1_000_000_000, 9, MINT, false);
+
+      expect(result).toEqual({ text: "$2", price: 2 });
+      expect(remember).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      ["no mint and not SOL", undefined, 1_000_000_000],
+      ["a zero amount", MINT, 0],
+      ["a negative amount", MINT, -5],
+      ["a zero bigint", MINT, 0n],
+      ["a non-numeric amount", MINT, "abc"],
+      ["an amount past the safe limit", MINT, 2n ** 70n],
+    ] as const)("skips the lookup for %s", async (_label, mint, amount) => {
+      const { gm, lookup } = withLookup(priced(2));
+
+      expect(await gm.getUsdApproximation(amount, 9, mint, false)).toBeNull();
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    test("still prices the largest safe amount, but not one lamport more", async () => {
+      const { gm, lookup } = withLookup(priced(1));
+      const largest = BigInt(Number.MAX_SAFE_INTEGER);
+
+      expect(await gm.getUsdApproximation(largest, 9, MINT, false)).not.toBeNull();
+      expect(await gm.getUsdApproximation(largest + 1n, 9, MINT, false)).toBeNull();
+      expect(lookup).toHaveBeenCalledTimes(1);
+    });
+
+    test("a bigint and a numeric string amount price like the number", async () => {
+      const { gm } = withLookup(priced(2));
+
+      expect((await gm.getUsdApproximation(1_000_000_000n, 9, MINT, false))?.text).toBe("$2");
+      expect((await gm.getUsdApproximation("1000000000", 9, MINT, false))?.text).toBe("$2");
+    });
   });
 
   test("returns the formatted USD value from a fresh price hint and remembers it", async () => {
