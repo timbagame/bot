@@ -65,7 +65,8 @@ export const clampMinPlayers = (
 /**
  * Resolves the privacy setting for a game based on chat settings.
  * Returns true if the game should be private, false if public.
- * Defaults to private if no explicit public setting is found.
+ * The chat's setting for this game type wins. With none, coinflips are public
+ * and giveaways are private. Any stored value other than "public" is private.
  */
 export const resolveGamePrivacy = (
   gameType: GameType,
