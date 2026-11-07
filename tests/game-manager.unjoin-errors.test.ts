@@ -254,3 +254,47 @@ describe("GameManager unjoin errors", () => {
     });
   });
 });
+
+describe("GameManager join confirmation when the chain read fails", () => {
+  test("a join still falls back to the signature status when the RPC errors on the membership probe", async () => {
+    resetGM();
+    const player = await Keypair.generate();
+    const gamePda = new PublicKey("BPFLoader8111111111111111111111111111111111");
+    const warn = spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const program = {
+        account: {
+          game: {
+            fetchNullable: async () => {
+              throw new Error("rpc down");
+            },
+          },
+        },
+      } as any;
+      const wallet = {
+        confirmTransaction: async () => {
+          throw new Error("transaction confirmation timeout");
+        },
+        getConnection: () => ({
+          getSignatureStatuses: async () => ({
+            value: [{ confirmationStatus: "confirmed", err: null }],
+          }),
+        }),
+      } as any;
+      const gm = GameManager.getInstance(program, wallet, baseDb()) as any;
+
+      const signature = await gm.confirmTransactionWithRecovery(
+        "SIG_JOIN",
+        gamePda,
+        "Player join",
+        player.publicKey,
+      );
+
+      expect(signature).toBe("SIG_JOIN");
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+});

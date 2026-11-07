@@ -1615,10 +1615,10 @@ export class GameManager {
           return false;
         }
       });
-    } catch (error: any) {
+    } catch (error) {
       if (options?.throwOnChainReadError) {
         // A closed account is a definite answer; anything else is an RPC failure.
-        if (error?.message?.toLowerCase?.().includes("account does not exist")) return false;
+        if (error instanceof Error && /account does not exist/i.test(error.message)) return false;
         throw error;
       }
       console.warn(`⚠️ Failed to verify on-chain participants for ${gameAddress}:`, error);
