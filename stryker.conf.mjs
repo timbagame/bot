@@ -8,7 +8,11 @@ export default {
   // The same isolation `bun run test` uses.
   // timeout bounds only the dry run, the whole suite once with coverage (about a minute in CI).
   // Mutant runs use Stryker's own per-mutant timeout.
-  bun: { bunArgs: ["--isolate"], timeout: 600000 },
+  bun: {
+    // Instrumentation slows individual tests; the runner still stops hanging mutants.
+    bunArgs: ["--isolate", "--timeout", "60000"],
+    timeout: 600000,
+  },
   coverageAnalysis: "perTest",
   reporters: ["clear-text", "progress", "json"],
   jsonReporter: { fileName: "reports/mutation/mutation.json" },
