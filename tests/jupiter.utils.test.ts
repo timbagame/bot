@@ -302,6 +302,92 @@ describe("JupiterClient referral URL params", () => {
       }),
     ).rejects.toThrow(/below the required 100 bps/);
   });
+
+  test("holds Jupiter to a fee above the 100 bps floor", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({ feeBps: 100, platformFee: { feeBps: 100, amount: "0" } }),
+      ),
+    );
+
+    // 255 bps of surcharge asked for, only 100 applied: the admin would not be repaid.
+    await expect(
+      client.getQuote({ inputMint, outputMint, amount, referralAccount, referralFee: 255, payer }),
+    ).rejects.toThrow(/applied 100 bps, below the required 255 bps/);
+  });
+
+  test("accepts exactly the fee above the floor that was asked for", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub(capture, async () =>
+        makeSuccessResponse({ feeBps: 255, platformFee: { feeBps: 255, amount: "0" } }),
+      ),
+    );
+
+    const quote = await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFee: 255,
+      payer,
+    });
+
+    expect(capture.url).toContain("referralFee=255");
+    expect(quote.feeBps).toBe(255);
+  });
+
+  test("asks for no referral fee, and requires none, when none was requested", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub(capture, async () =>
+        makeSuccessResponse({
+          feeBps: 50,
+          platformFee: { feeBps: 50, amount: "0" },
+          referralApplied: false,
+        }),
+      ),
+    );
+
+    const quote = await client.getQuote({ inputMint, outputMint, amount, referralAccount, payer });
+
+    expect(capture.url).not.toContain("referralFee");
+    expect(quote.referralApplied).toBe(false);
+  });
+
+  test("requires no referral fee when there is no referral account to pay it to", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({
+          feeBps: 50,
+          platformFee: { feeBps: 50, amount: "0" },
+          referralApplied: false,
+        }),
+      ),
+    );
+
+    const quote = await client.getQuote({ inputMint, outputMint, amount, referralFee: 255, payer });
+
+    expect(quote.referralApplied).toBe(false);
+  });
+
+  test("raises a fee below the floor to 100 bps before checking the order", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      createJupiterFetchStub({}, async () =>
+        makeSuccessResponse({ feeBps: 90, platformFee: { feeBps: 90, amount: "0" } }),
+      ),
+    );
+
+    // 85 bps asked for, so 100 are required: 90 applied is not enough.
+    await expect(
+      client.getQuote({ inputMint, outputMint, amount, referralAccount, referralFee: 85, payer }),
+    ).rejects.toThrow(/applied 90 bps, below the required 100 bps/);
+  });
 });
 
 describe("resolveAppliedFeeBps", () => {

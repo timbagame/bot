@@ -166,8 +166,31 @@ describe("JupiterClient", () => {
         maxAccounts: "32",
         feeAccount: "FeeAccountKey",
       });
-      expect(Number(url.searchParams.get("platformFeeBps"))).toBeGreaterThanOrEqual(1);
+      // 1 bps asked for, 100 bps is the least Jupiter is ever asked to charge.
+      expect(url.searchParams.get("platformFeeBps")).toBe("100");
       expect((calls[0]!.init?.headers as Record<string, string>)["x-api-key"]).toBe("test-key");
+    });
+
+    test("sends no platform fee when none was requested", async () => {
+      const { client, calls } = makeClient(() => okResponse(buildBody()));
+      const { platformFeeBps: _unused, ...withoutFee } = { ...quoteRequest, platformFeeBps: 0 };
+
+      await client.getBuildInstructions(withoutFee);
+
+      expect(new URL(calls[0]!.url).searchParams.has("platformFeeBps")).toBe(false);
+    });
+
+    test.each([
+      [255, "255"],
+      [100, "100"],
+      [85, "100"],
+      [0, "100"],
+    ])("asks Jupiter for a platform fee of %d bps as %s", async (asked, sent) => {
+      const { client, calls } = makeClient(() => okResponse(buildBody()));
+
+      await client.getBuildInstructions({ ...quoteRequest, platformFeeBps: asked });
+
+      expect(new URL(calls[0]!.url).searchParams.get("platformFeeBps")).toBe(sent);
     });
 
     test("wraps HTTP failures with the extracted Jupiter message", async () => {

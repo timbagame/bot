@@ -62,6 +62,70 @@ describe("GameManager ensureWrappedSolBalance", () => {
     expect(result).toEqual({ success: true, tokenBalance: 1_500, solBalance: 777 });
   });
 
+  describe("when the WSOL balance covers only part of the stake", () => {
+    const CURRENT = 400;
+    const DEFICIT = REQUIRED - CURRENT;
+    // The wrap fee buffer (10) and the SOL reserve (100) come from `setup`.
+    const EXACT_SOL = DEFICIT + 10 + 100;
+
+    const wrapping = (wrapped: number[]) => ({
+      wrapSol: async (_telegramId: bigint, lamports: number) => {
+        wrapped.push(lamports);
+        return "wrap-sig";
+      },
+      getTokenBalance: async () => REQUIRED,
+      getBalance: async () => 777,
+    });
+
+    test("wraps only what is missing", async () => {
+      const wrapped: number[] = [];
+      const gm = setup(wrapping(wrapped));
+
+      const result = await gm.ensureWrappedSolBalance(1n, REQUIRED, CURRENT, 2_000, "create");
+
+      expect(wrapped).toEqual([DEFICIT]);
+      expect(result).toEqual({ success: true, tokenBalance: REQUIRED, solBalance: 777 });
+    });
+
+    test("wraps when the SOL left over is exactly the fee buffer plus the reserve", async () => {
+      const wrapped: number[] = [];
+      const gm = setup(wrapping(wrapped));
+
+      const result = await gm.ensureWrappedSolBalance(1n, REQUIRED, CURRENT, EXACT_SOL, "create");
+
+      expect(result.success).toBe(true);
+      expect(wrapped).toEqual([DEFICIT]);
+    });
+
+    test("tells the user how much SOL they are short, reserve included", async () => {
+      // Needs 1_000_000 (wrap) + 50_000 (fee buffer) + 200_000 (reserve) = 1_250_000
+      // and has 1_000_000, so it is short by 250_000.
+      const gm = setup(wrapping([]), { wrap: 50_000, min: 200_000 });
+
+      const result = await gm.ensureWrappedSolBalance(1n, 1_000_000, 0, 1_000_000, "create");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("about 250000 SOL more");
+    });
+
+    test("refuses one lamport below that without wrapping", async () => {
+      const wrapped: number[] = [];
+      const gm = setup(wrapping(wrapped));
+
+      const result = await gm.ensureWrappedSolBalance(
+        1n,
+        REQUIRED,
+        CURRENT,
+        EXACT_SOL - 1,
+        "create",
+      );
+
+      expect(wrapped).toEqual([]);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("too little SOL");
+    });
+  });
+
   test("refuses to wrap when it would leave too little SOL for a create", async () => {
     let wrapped = false;
     const gm = setup({

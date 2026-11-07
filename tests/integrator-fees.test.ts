@@ -150,6 +150,61 @@ describe("Integrator fee calculations", () => {
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
   });
 
+  describe("when the user has some SOL, but less than the buffer", () => {
+    const SOL_PRICE = 200;
+    const PARTIAL_SOL = JUPITER_MIN_SOL_BALANCE_LAMPORTS / 2;
+    // Only what is missing, the buffer minus what the user has, is paid back.
+    const shortfallUsd = ((JUPITER_MIN_SOL_BALANCE_LAMPORTS - PARTIAL_SOL) / 1e9) * SOL_PRICE;
+
+    beforeEach(() => {
+      __test_setReferralConfig({
+        referralAccount: REFERRAL_ACCOUNT,
+        adminPayer: "AdminPayer11111111111111111111111111111",
+        adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
+        baseFeeBps: 100,
+      });
+      vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) =>
+        opts?.tokenMint === WSOL_MINT
+          ? (priceLookup(SOL_PRICE, "SOL") as any)
+          : (priceLookup(1, "TKN") as any),
+      );
+    });
+
+    test("charges for the missing SOL only, on a token swap", async () => {
+      const tradeUsd = 1_000;
+      const result = await resolveIntegratorSwapParams({
+        inputMint: ADMIN_REF_MINT1,
+        outputMint: CLAMP_REF_MINT,
+        inputTicker: "TKN",
+        inputDecimals: 6,
+        inputAmountRaw: tradeUsd * 1e6,
+        userPublicKey: "PartialSolUser",
+        availableSolLamports: PARTIAL_SOL,
+      });
+
+      expect(result?.payerKind).toBe("admin");
+      expect(result?.referralFee).toBe(100 + Math.ceil((shortfallUsd / tradeUsd) * 10_000));
+      expect(result?.referralFee).toBe(110);
+    });
+
+    test("charges for the missing SOL only, on an unwrap", async () => {
+      const tradeUsd = SOL_PRICE;
+      const result = await resolveIntegratorSwapParams({
+        inputMint: WSOL_MINT,
+        outputMint: "SOL",
+        inputTicker: "SOL",
+        inputDecimals: 9,
+        inputAmountRaw: 1e9,
+        userPublicKey: "PartialSolUnwrapper",
+        availableSolLamports: PARTIAL_SOL,
+      });
+
+      expect(result?.payerKind).toBe("admin");
+      expect(result?.referralFee).toBe(100 + Math.ceil((shortfallUsd / tradeUsd) * 10_000));
+      expect(result?.referralFee).toBe(150);
+    });
+  });
+
   test("treats unwrap as user-funded when SOL buffer is already present", async () => {
     __test_setReferralConfig({
       referralAccount: REFERRAL_ACCOUNT,
@@ -445,6 +500,62 @@ describe("calculateDynamicReferralFee", () => {
         throwOnPriceFailure: true,
       }),
     ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
+  });
+
+  describe("when the input token has no price but SOL does", () => {
+    beforeEach(() => {
+      vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) =>
+        opts?.tokenMint === WSOL_MINT ? (priceLookup(200, "SOL") as any) : null,
+      );
+    });
+
+    const unpriced = {
+      inputMint: "UnpricedMint1111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 10_000_000,
+      shortfallLamports: 5_000_000,
+      baseFeeBps: 85,
+    };
+
+    test("charges the base fee instead of the largest surcharge", async () => {
+      const result = await calculateDynamicReferralFee({ ...unpriced, maxExtraBps: 170 });
+
+      expect(result).toBe(85);
+    });
+
+    test("throws when asked to, rather than guessing", async () => {
+      await expect(
+        calculateDynamicReferralFee({ ...unpriced, throwOnPriceFailure: true }),
+      ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
+    });
+  });
+
+  describe("when the input token has a price but SOL does not", () => {
+    beforeEach(() => {
+      vi.spyOn(priceService, "getUsdPrice").mockImplementation(async (opts: any) =>
+        opts?.tokenMint === WSOL_MINT ? null : (priceLookup(1, "TKN") as any),
+      );
+    });
+
+    const priced = {
+      inputMint: "PricedMint11111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 10_000_000,
+      shortfallLamports: 5_000_000,
+      baseFeeBps: 85,
+    };
+
+    test("charges the base fee", async () => {
+      expect(await calculateDynamicReferralFee(priced)).toBe(85);
+    });
+
+    test("throws when asked to, rather than guessing", async () => {
+      await expect(
+        calculateDynamicReferralFee({ ...priced, throwOnPriceFailure: true }),
+      ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
+    });
   });
 
   test("uses default baseFeeBps of 100 when not specified", async () => {
