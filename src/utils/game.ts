@@ -1555,11 +1555,16 @@ export class GameManager {
   /**
    * Check if a player is in a game via database records, then the on-chain
    * participant list. Pass an already-fetched game account to skip the lookup.
+   *
+   * A failed on-chain read answers `false` ("can't tell"), unless `throwOnChainReadError` is set:
+   * then it throws. Use that when `false` would be read as "the player is gone", so an RPC outage
+   * isn't taken for a confirmed unjoin.
    */
   private async isPlayerInGame(
     gamePda: PublicKey,
     playerPubkey: PublicKey,
     knownGameAccount?: any,
+    options?: { throwOnChainReadError?: boolean },
   ): Promise<boolean> {
     const gameAddress = gamePda.toBase58();
     const playerPubkeyStr = playerPubkey.toBase58();
@@ -1610,7 +1615,12 @@ export class GameManager {
           return false;
         }
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (options?.throwOnChainReadError) {
+        // A closed account is a definite answer; anything else is an RPC failure.
+        if (error?.message?.toLowerCase?.().includes("account does not exist")) return false;
+        throw error;
+      }
       console.warn(`⚠️ Failed to verify on-chain participants for ${gameAddress}:`, error);
       return false;
     }
@@ -2176,7 +2186,11 @@ export class GameManager {
             ? "Player is recorded in game"
             : "Player removed from game",
         check: async () => {
-          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+          // An unjoin counts as done when the player is gone, so a failed read must not look like
+          // "gone": let it throw and the caller keeps the player's record.
+          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey, undefined, {
+            throwOnChainReadError: operationType === "Player unjoin",
+          });
           return operationType === "Player join" ? isInGame : !isInGame;
         },
       });
