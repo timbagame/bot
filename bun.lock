@@ -11,7 +11,7 @@
         "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
         "@solana-program/system": "0.16.0",
         "@solana-program/token": "0.18.0",
-        "@solana-program/token-2022": "0.20.0",
+        "@solana-program/token-2022": "0.20.1",
         "@solana/kit": "8.6.0",
         "@solana/web3.js": "3.1.1",
         "@timbagame/protocol": "0.18.2",
@@ -258,7 +258,7 @@
 
     "@solana-program/token": ["@solana-program/token@0.18.0", "", { "dependencies": { "@solana-program/system": "^0.16.0" }, "peerDependencies": { "@solana/kit": "^8.5.0" } }, "sha512-YNN13I4BxBnGPGk0NzP/LLQMCmJVdunbtgqjl7/Gfp1fDXQrKXh9df8xu+2ayNdvjGJYC4c9D5vZpVetHdyJaQ=="],
 
-    "@solana-program/token-2022": ["@solana-program/token-2022@0.20.0", "", { "dependencies": { "@solana-program/record": "^0.6.0", "@solana-program/system": "^0.16.0", "@solana-program/zk-elgamal-proof": "^0.5.0" }, "peerDependencies": { "@solana/kit": "^8.5.0", "@solana/sysvars": "^8.0.0", "@solana/zk-sdk": "^0.5.4" }, "optionalPeers": ["@solana/zk-sdk"] }, "sha512-MMi+1szfgSHUdtk1drBbQsMVdTOOdGjzgH9i3IN42EZC07x5ZrXcgraZanrFSoS+DnSlTF+vFVOvmFE38rQBXA=="],
+    "@solana-program/token-2022": ["@solana-program/token-2022@0.20.1", "", { "dependencies": { "@solana-program/record": "^0.6.0", "@solana-program/system": "^0.16.0", "@solana-program/zk-elgamal-proof": "^0.5.0" }, "peerDependencies": { "@solana/kit": "^8.5.0", "@solana/sysvars": "^8.0.0", "@solana/zk-sdk": "^0.5.4" }, "optionalPeers": ["@solana/zk-sdk"] }, "sha512-HTQ5vLr/WmKMYJHDfUlZYD7qwJUebso6B7fI0JmdPZTP2Ol+NfgZ/2KTWQNvpjLsBHvn7ex1T9bjyzsqJSlCgA=="],
 
     "@solana-program/zk-elgamal-proof": ["@solana-program/zk-elgamal-proof@0.5.0", "", { "dependencies": { "@solana-program/system": "^0.16.0" }, "peerDependencies": { "@solana/kit": "^8.5.0" } }, "sha512-2shlu/0a/WFjERyFyhZevXG7WXRUz0kmy5DPEse3TOjH0s4fTU+Uk9kE5ijPhF85Fh662m4xT1ZZm+KBGq5y1g=="],
 
