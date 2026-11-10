@@ -26,7 +26,7 @@
     "@solana-program/token": "0.18.0",
     "@solana-program/token-2022": "0.20.1",
     "@solana/kit": "8.6.0",
-    "@solana/web3.js": "3.1.1",
+    "@solana/web3.js": "3.2.0",
     "@timbagame/protocol": "0.18.2",
     "bip39": "^3.1.2",
     "bn.js": "^5.2.5",
