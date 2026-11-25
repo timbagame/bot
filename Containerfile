@@ -1,4 +1,4 @@
-FROM docker.io/oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS build
+FROM docker.io/oven/bun:1.4.5@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS build
 
 WORKDIR /app
 
@@ -25,7 +25,7 @@ COPY scripts ./scripts
 # Distroless: Bun and glibc only. No shell or package manager, so an exploit gets no tools,
 # health checks must use the exec form, and package scripts (`bun run <name>`) can't run:
 # run files instead, such as `bun scripts/service-admin.ts`.
-FROM docker.io/oven/bun:1.4.4-distroless@sha256:153a951ae40106e125898103e6e990ee0f38e6aee7f561029e26cf9fbed23470
+FROM docker.io/oven/bun:1.4.5-distroless@sha256:3a210956422ad81cf7532e1fc1f2eb9275d6ef4c2337a9d25d530f798e80726a
 
 WORKDIR /app
 
