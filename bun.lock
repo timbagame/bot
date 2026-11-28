@@ -20,7 +20,7 @@
         "bs58": "^6.0.0",
         "grammy": "^1.46.0",
         "qrcode": "^1.5.4",
-        "viem": "2.58.4",
+        "viem": "2.58.6",
         "zod": "4.6.7",
       },
       "devDependencies": {
@@ -806,7 +806,7 @@
 
     "verkit": ["verkit@0.5.0", "", {}, "sha512-u4J1hr6Y+C/hit34GwL3eIcUf3wngT8TlYUjK7tk0jxydKLAq3sYvifjdTDA6U3KCKRcQCQDGf/srjxfZF3l7g=="],
 
-    "viem": ["viem@2.58.4", "", { "dependencies": { "@noble/curves": "1.9.1", "@noble/hashes": "1.8.0", "@scure/bip32": "1.7.0", "@scure/bip39": "1.6.0", "abitype": "1.2.3", "isows": "1.0.7", "ox": "0.14.67", "ws": "8.21.0" }, "peerDependencies": { "mppx": ">=0.17.0", "typescript": ">=5.0.4" }, "optionalPeers": ["mppx", "typescript"] }, "sha512-zeYi2PliKbmJVbIvudHZrYJLh1XMXci6GBJznQLjhhGPGl9L7Hp/LmelpXhOM9VvlXwnvfW7/2PCgpjnc2j8MQ=="],
+    "viem": ["viem@2.58.6", "", { "dependencies": { "@noble/curves": "1.9.1", "@noble/hashes": "1.8.0", "@scure/bip32": "1.7.0", "@scure/bip39": "1.6.0", "abitype": "1.2.3", "isows": "1.0.7", "ox": "0.14.67", "ws": "8.21.0" }, "peerDependencies": { "mppx": ">=0.17.0", "typescript": ">=5.0.4" }, "optionalPeers": ["mppx", "typescript"] }, "sha512-dBxl7nsHrENzD3HR/wOeeH2NcfXSwoEibTSZKJR7kcQOyqIDa50O27H2JU2ZMAQqS1QrEojaYCy6dLWIsdb9cA=="],
 
     "weapon-regex": ["weapon-regex@2.0.6", "", {}, "sha512-iJC2vqYp+bh3r4X6zjuP0h65XqXjgUX3nJgmhj0PQMrdhAbUwCfN76CSTEEQqV3G7468kjOJ69PmytTG8l/8Gg=="],
 
